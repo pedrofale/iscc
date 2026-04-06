@@ -20,22 +20,26 @@ from collections import Counter
 class Tumor(object):
     def __init__(self, config=None, genome_params=dict(), cancer_cell_params=dict(), epithelial_cell_params=dict(), stromal_cell_params=dict(), immune_cell_params=dict(), deme_params=dict(), selection_params=dict(), seed=42):
         self.config = None
+        self.genome_params = genome_params
         if config is not None:
             with open(config) as f:
-                self.config = yaml.safe_load(f)  
+                self.config = yaml.safe_load(f)
 
             selection_params = self.config['selection_params']
             deme_params = self.config['deme_params']
             self.genome_params = self.config['genome_params']
             self.cell_params = self.config['cell_params']
-            
+
             cancer_cell_params = self.cell_params['cancer']
             epithelial_cell_params = self.cell_params['epithelial']
             stromal_cell_params = self.cell_params['stromal']
             immune_cell_params = self.cell_params['immune']
 
-        self.selection = Selection(n_segments=self.genome_params['n_segments'],
-                                   **selection_params)
+        self.selection = Selection(
+            n_segments=self.genome_params['n_segments'],
+            segment_size=self.genome_params.get('segment_size', 1000),
+            **selection_params,
+        )
         self.n_genes = self.selection.n_genes
 
         self.cancer_cell = CancerCell(
@@ -130,9 +134,14 @@ class Tumor(object):
         for deme in self.deme_list:
             self.genotypes_counts = self.genotypes_counts + deme.genotypes_counts
 
+    def is_extinct(self):
+        return self.deme_rates.sum() == 0
+
     def update(self, treat=False, treatment=None, rng=None, batch_size=1):
+        if self.is_extinct():
+            return
         # Choose a few demes to update, proportionally to their rates
-        demes = rng.choice(self.deme_list, p=self.deme_rates/self.deme_rates.sum(), size=min(batch_size, len(self.deme_list)), replace=False) # don't replace to avoid updating empty demes that have just become empty 
+        demes = rng.choice(self.deme_list, p=self.deme_rates/self.deme_rates.sum(), size=min(batch_size, len(self.deme_list)), replace=False) # don't replace to avoid updating empty demes that have just become empty
         # deme_list = [deme for deme in self.deme_list if deme.types_counts['cancer'] > 0]
         for deme in demes:
             rng = rng.spawn(1)[0]

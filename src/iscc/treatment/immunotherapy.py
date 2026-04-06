@@ -3,7 +3,7 @@ import numpy as np
 
 class Immunotherapy(Treatment):
     def __init__(self, immune_checkpoints, **kwargs):
-        super(Treatment, self).__init__(**kwargs)
+        super(Immunotherapy, self).__init__(**kwargs)
         self.targets = list(immune_checkpoints)
 
     def _apply(self, cell):

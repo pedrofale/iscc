@@ -3,7 +3,7 @@ import numpy as np
 
 class Chemotherapy(Treatment):
     def __init__(self, **kwargs):
-        super(Treatment, self).__init__(**kwargs)
+        super(Chemotherapy, self).__init__(**kwargs)
 
     def _apply(self, cell): # if not resistant to treatment, 
         cell.evolutionary_parameters['death_rate'] = min(1., cell.evolutionary_parameters['death_rate'] * (self.rate_multiplier ** (1.-cell.evolutionary_parameters['treatment_resistance']))) # increase death rate inversely proportionally to treatment resistance

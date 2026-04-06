@@ -262,13 +262,14 @@ class CancerCell(Cell):
             hap = rng.choice(['p', 'm'], p=np.array([n_p, n_m])/(n_p + n_m))
             # Sample allele
             all = rng.choice(range(len(self.genome[seg][hap])))
-            # Sample number of mutations
-            n_mutations = np.min([rng.poisson(n_events)+1, self.segment_size])
-            # choose mutations and reject the ones which are already in the allele (force ISA)
-            while True:
-                muts = set(rng.choice(self.segment_size, size=n_mutations, replace=False))
-                if len(muts.intersection(self.genome[seg][hap][all])) != len(muts):
-                    break
+            # Sample only from positions not yet mutated in this allele (ISA)
+            available = np.array(
+                list(set(range(self.segment_size)) - self.genome[seg][hap][all])
+            )
+            if len(available) == 0:
+                return  # allele fully saturated; skip this mutation event
+            n_mutations = min(rng.poisson(n_events) + 1, len(available))
+            muts = set(rng.choice(available, size=n_mutations, replace=False))
             self.genome[seg][hap][all].update(muts) # for actual genotype and expression tracking
             self.update_genome_summary_mutation(selection, muts, seg) # for evolutionary parameters
         elif event == 'cnv':

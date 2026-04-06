@@ -11,7 +11,7 @@ packages = [{include = "iscc", from = "src"}]
 [tool.poetry.dependencies]
 python = ">=3.10,<3.14"
 pandas = "^2.2.3"
-numpy = "^1.24.4"
+numpy = ">=1.25,<2.0"
 pymuller = "^0.1.2"
 click = "^8.0.1"
 packcircles = "^0.14"

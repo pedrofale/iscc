@@ -1,14 +1,16 @@
 import numpy as np
 
 class Treatment(object):
-    def __init__(self, adaptive=True, dosage_decay=0.5, rounds=4):
-        self.rate_multiplier = 2. # e.g. doubles death rate, halves immune resistance
-        self.toxicity = 0.1
-        self.effectiveness = 0.9
+    def __init__(self, adaptive=True, dosage_decay=0.5, rounds=4,
+                 rate_multiplier=2., toxicity=0.1, effectiveness=0.9,
+                 max_tumor_size=100_000):
+        self.rate_multiplier = rate_multiplier
+        self.toxicity = toxicity
+        self.effectiveness = effectiveness
         self.adaptive = adaptive
         self.dosage_decay = dosage_decay
         self.rounds = rounds
-        self.max_tumor_size = 100_000 # cells; need to motivate this number evolutionarily
+        self.max_tumor_size = max_tumor_size
 
     def _apply(self, cell):
         pass
