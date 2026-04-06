@@ -1,0 +1,32 @@
+mode: 'mixed'
+
+deme_params:
+  carrying_capacity: 1
+  initial_death_rate: 0.1
+  maximum_death_rate: 0.5  
+
+cell_params:
+  genome_params:
+    n_segments: 10
+    segment_size: 1000
+  cancer_params:
+    max_birth_rate: 0.8
+    division_rate: 0.2
+    death_rate: 0.098
+    mutation_rate: 0.01
+    dispersal_rate: 0.1
+  stromal_params:
+    max_birth_rate: 0.8
+    death_rate: 0.01
+    division_rate: 0.1
+  immune_params:
+    max_birth_rate: 0.8
+    death_rate: 0.1
+    division_rate: 0.1
+    prob_kill: 0.1
+
+selection_params:
+  prop_driver: 0.1
+  prop_resistance: 0.1
+  driver_effects: 1.1
+  resistant_effects: 0.1

@@ -1,6 +1,9 @@
 __pycache__/
 dist/
+build/
 out/
+*.egg-info/
 poetry.lock
 notebooks/.ipynb_checkpoints
+notebooks/notebook_example/
 .DS_Store

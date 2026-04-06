@@ -1,0 +1,5 @@
+treatment_iteration: 5000
+treatment_duration: 100
+adaptive:
+  dosage_decay: 0.
+  rounds: 4

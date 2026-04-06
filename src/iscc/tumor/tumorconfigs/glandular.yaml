@@ -1,0 +1,48 @@
+mode: 'glandular'
+
+spatial_params:
+  grid_size: 50
+  n_structures: 1
+  structure_radius: 5
+  
+deme_params:
+  carrying_capacity: 1
+  initial_death_rate: 0.1
+  maximum_death_rate: 0.5  
+
+genome_params:
+  n_segments: 10
+  segment_size: 1000
+
+selection_params:
+  prop_driver: 0.1
+  prop_dispersal: 0.1
+  prop_immune_resistance: 0.1
+  prop_treatment_resistance: 0.1
+  driver_effects: 1.1
+  dispersal_effects: 1.1
+  immune_resistant_effects: 1.1  
+  treatment_resistant_effects: 1.1
+
+
+cell_params:  
+  cancer:
+    max_birth_rate: 0.8
+    division_rate: 0.2
+    death_rate: 0.0
+    mutation_rate: 0.01
+    dispersal_rate: 0.1
+  epithelial:
+    max_birth_rate: 0.8
+    death_rate: 0.0
+    division_rate: 0.0
+  stromal:
+    max_birth_rate: 0.8
+    death_rate: 0.0
+    division_rate: 0.0
+  immune:
+    max_birth_rate: 0.8
+    death_rate: 0.0
+    division_rate: 0.0
+    prob_kill: 0.1
+
