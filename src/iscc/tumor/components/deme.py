@@ -44,7 +44,7 @@ class Deme(object):
             else:
                 cell.genotype_id = cell.type    
         else:
-            cell.genotype_id = genotype_id
+            cell.genotype_id = str(genotype_id)
         self.cells.add(cell)
         if cell.genotype_id in self.genotypes_counts:
             self.genotypes_counts[cell.genotype_id] += 1
@@ -158,7 +158,7 @@ class Deme(object):
 
         for cell in cells:
             if treat:
-                treatment.apply(cell, self.tumor.selection.seg_mut_effects)
+                treatment.apply(cell, mut_effects=self.tumor.selection.mut_effects)
             
             event = self.sample_event(cell, immune_cell_fraction=immune_cell_fraction, rng=rng)
             self.apply_event(event, cell, rng=rng)

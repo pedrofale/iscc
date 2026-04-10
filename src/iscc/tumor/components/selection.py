@@ -91,11 +91,11 @@ class Selection(object):
     def make_expmap(self):
         # Effect of snv on exp: up or down depending on wether tsg or og, and also if immune resistance-inducing, overexpress
         self.mut_effects = []
-        for _ in range(self.n_segments):
+        for seg in range(self.n_segments):
             mut_effects = np.ones((self.segment_size,)) # in general, mutation has no effect
-            mut_effects[np.where(self.driver_types == 1)] = 2. # if mutated og, increase exp
-            mut_effects[np.where(self.driver_types == -1)] = 0.5 # if mutated tsg, decrease exp
-            mut_effects[np.where(self.immune_resistance_types == 1)] = 2. # if mutated immune resistance, increase exp
+            mut_effects[np.where(self.driver_types[seg] == 1)] = 2. # if mutated og, increase exp
+            mut_effects[np.where(self.driver_types[seg] == -1)] = 0.5 # if mutated tsg, decrease exp
+            mut_effects[np.where(self.immune_resistance_types[seg] == 1)] = 2. # if mutated immune resistance, increase exp
             self.mut_effects.append(mut_effects)
 
     def get_tsgs(self):

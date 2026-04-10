@@ -1,10 +1,12 @@
 from ..tumor import Tumor
 from ..components.deme import Deme
 from ..components.cell import EpithelialCell, StromalCell
+from ...constants import normal_names
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 
 import os
 from collections import Counter
@@ -215,39 +217,46 @@ class GlandularTumor(Tumor):
                 # Make colormap according to muller plot
                 type_cmap = self.get_cell_type_colors()
                 cell_data = self.cell_data["cell_deme"].join(self.cell_data["cell_crd"])
-                cell_data['val'] = self.cell_data[color_key]
-                deme_data = cell_data.groupby(["deme_id"]).agg(pd.Series.mode)
+                cell_data['val'] = self.cell_data['cell_type']['cell_id'].values
+                # Take first mode to handle ties
+                deme_data = cell_data.groupby(["deme_id"]).agg(lambda x: x.mode().iloc[0])
                 grid = np.zeros((self.grid_size, self.grid_size, 4)) + 1.
                 grid[:,:,-1] = 1.
-                for genotype in type_cmap.keys():
-                    idx = np.where(deme_data["val"] == genotype)
-                    row, col = deme_data.iloc[idx][["row", "col"]]
-                    grid[row,col] = type_cmap[genotype]
+                legend_patches = []
+                for genotype, color in type_cmap.items():
+                    mask = deme_data["val"] == genotype
+                    rows = deme_data.loc[mask, "row"].astype(int).values
+                    cols = deme_data.loc[mask, "col"].astype(int).values
+                    if len(rows) > 0:
+                        grid[rows, cols] = color
+                        label = genotype if genotype in normal_names else f'cancer ({genotype[:6]}…)'
+                        legend_patches.append(mpatches.Patch(color=color, label=label))
                 ax.imshow(grid)
+                ax.legend(handles=legend_patches, loc='upper right', fontsize=7, framealpha=0.8)
             else:
+                base = self.cell_data["cell_deme"].join(self.cell_data["cell_crd"])
                 if "snv_" in color_key:
-                    gene = color_key.split("_")[1]
-                    cell_data = self.cell_data["cell_deme"].join(self.cell_data["cell_crd"])
-                    cell_data['val'] = self.cell_data["cell_snv"][gene]
-                    deme_data = cell_data.groupby(["deme_id"]).mean()
+                    gene = color_key.split("_", 1)[1]
+                    base['val'] = self.cell_data["cell_snv"][gene]
                 elif "cnv_" in color_key:
-                    gene = color_key.split("_")[1]
-                    cell_data = self.cell_data["cell_deme"].join(self.cell_data["cell_crd"])
-                    cell_data['val'] = self.cell_data["cell_cnv"][gene]
-                    deme_data = cell_data.groupby(["deme_id"]).mean()
+                    gene = color_key.split("_", 1)[1]
+                    base['val'] = self.cell_data["cell_cnv"][gene]
                 elif "exp_" in color_key:
-                    gene = color_key.split("_")[1]
-                    cell_data = self.cell_data["cell_deme"].join(self.cell_data["cell_crd"])
-                    cell_data['val'] = self.cell_data["cell_exp"][gene]
-                    deme_data = cell_data.groupby(["deme_id"]).mean()
-                for name in self.cell_data.keys():
-                    if color_key in self.cell_data.columns:
-                        cell_data = self.cell_data[name][color_key]
-                        deme_data = cell_data.groupby(["deme_id"]).mean()
-                        break
+                    gene = color_key.split("_", 1)[1]
+                    base['val'] = self.cell_data["cell_exp"][gene]
+                elif color_key in self.cell_data["cell_evo"].columns:
+                    base['val'] = self.cell_data["cell_evo"][color_key].values
+                elif color_key in self.cell_data["cell_exp"].columns:
+                    base['val'] = self.cell_data["cell_exp"][color_key].values
+                elif color_key in self.cell_data["cell_snv"].columns:
+                    base['val'] = self.cell_data["cell_snv"][color_key].values
+                else:
+                    continue
+                deme_data = base.groupby(["deme_id"]).mean(numeric_only=True)
                 grid = np.zeros((self.grid_size, self.grid_size), dtype=float)
-                grid[deme_data["row"], deme_data["col"]] = deme_data["val"]
-                ax.imshow(grid, cmap=cmap)
+                grid[deme_data["row"].astype(int), deme_data["col"].astype(int)] = deme_data["val"]
+                im = ax.imshow(grid, cmap=cmap)
+                plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
             ax.set_title(color_key)
 

@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from copy import copy
+from copy import copy, deepcopy
 
 
 class Cell(object):
@@ -126,11 +126,13 @@ class Cell(object):
         # TODO: maybe reduce the number of unique drivers...
 
     def set_genotype_id(self):
-        self.genotype_id = id(self)#"".join(self.snv.astype(int).astype(str))
+        self.genotype_id = str(id(self))
 
     def divide(self, new_cell_id=0):
         new_cell = copy(self)
         new_cell.parent = self
+        new_cell.genome = deepcopy(self.genome)
+        new_cell.genome_summary = deepcopy(self.genome_summary)
         return new_cell
     
     def get_genome_df(self):

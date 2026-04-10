@@ -36,13 +36,16 @@ cell_params:
     max_birth_rate: 0.8
     death_rate: 0.0
     division_rate: 0.0
+    dispersal_rate: 0.0
   stromal:
     max_birth_rate: 0.8
     death_rate: 0.0
     division_rate: 0.0
+    dispersal_rate: 0.0
   immune:
     max_birth_rate: 0.8
     death_rate: 0.0
     division_rate: 0.0
+    dispersal_rate: 0.0
     prob_kill: 0.1
 

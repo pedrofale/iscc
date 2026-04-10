@@ -66,6 +66,9 @@ class Tumor(object):
 
         self.genotypes_parents = dict()
         self.genotypes_counts = Counter()
+        self.cell_data = None
+        self.traces = []
+        self.step = 0
 
 
     @classmethod
@@ -151,28 +154,27 @@ class Tumor(object):
         self.update_genotype_counts()
 
     def grow(self, n_steps=10, seed=42, treatment=None, batch_size=1, **kwargs):
-        traces = []
-        traces.append(dict(genotypes_counts=deepcopy(self.genotypes_counts)))
+        new_traces = [dict(genotypes_counts=deepcopy(self.genotypes_counts))]
 
-        # Simulate tumor growth
-        for step in tqdm(range(n_steps - 1)):
-            rng = np.random.default_rng(seed + step)
-            # Try to apply events
+        for local_step in tqdm(range(n_steps - 1)):
+            rng = np.random.default_rng(seed + self.step + local_step)
             run_treatment = False
             if treatment is not None:
-                if treatment.get_dosage(self.tumor.get_tumor_size()) > 0:
+                if treatment.get_dosage(self.step + local_step, self.get_tumor_size()) > 0:
                     run_treatment = True
             self.update(treat=run_treatment, treatment=treatment, rng=rng, batch_size=batch_size)
-            traces.append(dict(genotypes_counts=deepcopy(self.genotypes_counts)))
+            new_traces.append(dict(genotypes_counts=deepcopy(self.genotypes_counts)))
 
-        # Update cell data
+        self.step += n_steps
+        self.traces.extend(new_traces)
         self.make_cell_data()
+        return new_traces
 
-        # Return traces
-        return traces
+    def copy(self):
+        return deepcopy(self)
 
     def get_tumor_size(self):
-        return sum(self.genotypes_counts)
+        return sum(self.genotypes_counts.values())
 
     def set_cell_exps(self):
         for deme in self.deme_list:
@@ -215,11 +217,24 @@ class Tumor(object):
                 i += 1
 
         gene_names = self.selection.get_gene_names(**kwargs)
+        snv_df = pd.DataFrame(cell_snv.astype(float), index=cell_names, columns=gene_names)
+
+        cell_evo_df = pd.DataFrame(cell_evo, index=cell_names)
+        for col, idx in [
+            ('n_mut_onc',  self.selection.get_oncogenes()),
+            ('n_mut_tsg',  self.selection.get_tsgs()),
+            ('n_mut_disp', self.selection.get_dispersal_genes()),
+            ('n_mut_ir',   self.selection.get_immune_resistant()),
+            ('n_mut_tr',   self.selection.get_treatment_resistant()),
+        ]:
+            cat_genes = [gene_names[i] for i in idx]
+            cell_evo_df[col] = (snv_df[cat_genes] > 0).sum(axis=1).values
+
         self.cell_data = dict(
-            cell_evo=pd.DataFrame(cell_evo, index=cell_names),
-            cell_exp=pd.DataFrame(cell_exp.astype(float), index=cell_names, columns=gene_names), 
-            cell_snv=pd.DataFrame(cell_snv.astype(float), index=cell_names, columns=gene_names), 
-            cell_cnv=pd.DataFrame(cell_cnv.astype(float), index=cell_names, columns=gene_names), 
+            cell_evo=cell_evo_df,
+            cell_exp=pd.DataFrame(cell_exp.astype(float), index=cell_names, columns=gene_names),
+            cell_snv=snv_df,
+            cell_cnv=pd.DataFrame(cell_cnv.astype(float), index=cell_names, columns=gene_names),
             cell_crd=pd.DataFrame(cell_crd.astype(int), index=cell_names, columns=['row', 'col']),
             cell_type=pd.DataFrame(cell_type, index=cell_names, columns=['cell_id']),
             cell_deme=pd.DataFrame(cell_deme, index=cell_names, columns=['deme_id'])
@@ -294,10 +309,10 @@ class Tumor(object):
         # color_map[0] = color_map[-1] = [1, 1, 1, 1]
         return color_list, final_order
 
-    def plot_muller(self, ax=None, colormap='gnuplot', normalize=True, smoothing_std=0.1):
+    def plot_muller(self, ax=None, colormap='gnuplot', normalize=True, smoothing_std=0.1, show_axes=True):
         # Prepare plot data
         # Keep only cancer cell statistics
-        genotype_counts = pd.DataFrame(self.genotypes_counts, index=[0])
+        genotype_counts = pd.DataFrame([t["genotypes_counts"] for t in self.traces]).fillna(0)
         genotype_counts.columns = genotype_counts.columns.astype(str)
         genotype_parents = pd.DataFrame(self.genotypes_parents, index=[0])
         genotype_counts = genotype_counts.drop(columns=list(set(normal_names).intersection(set(genotype_counts.columns))))
@@ -320,7 +335,11 @@ class Tumor(object):
             background_strain=False,
             smoothing_std=smoothing_std,
         )
-        plt.axis("off")
+        if show_axes:
+            ax.set_xlabel('Step')
+            ax.set_ylabel('Cells' if not normalize else 'Frequency')
+        else:
+            ax.axis('off')
 
     def get_cell_type_colors(self, colormap="gnuplot"):
         # Keep only cancer cell statistics
