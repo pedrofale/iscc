@@ -1,182 +1,70 @@
 """
-Simulate tumor growth under different spatial models. Inspired by Noble et al, 2019.
-"""
-from .components.cell import CancerCell
-from .components.selection import Selection
-from .tumor import Tumor
+`isccsim` — simulate spatial tumor growth under a configurable evolutionary model.
 
-import numpy as np
-import pandas as pd
+Stage 1 of the iscc pipeline: grow a tumor and write its ground-truth state
+(per-cell genotypes/CNVs/expression, clone trace, spatial grid). Downstream:
+`isccsample` (biopsy/dissociation) → `isccdata` (sequencing/spatial assay).
+
+Inspired by Noble et al, 2019; selection follows a CINner-style copy-number model.
+"""
+from .models.glandular import GlandularTumor
+from .models.mixed import MixedTumor
+from .models.count import GenotypeTumor
 
 import click
-import os
-from pathlib import Path
 import logging
 import yaml
 
-MODE_LIST = [
-    simulate_nonspatial,
-    simulate_invasion,
-    simulate_fission,
-    simulate_boundary,
-]
+# Map the `mode` field in the sim-config to a tumor model.
+TUMOR_MODELS = {
+    "glandular": GlandularTumor,      # cell-level agent-based engine
+    "mixed": MixedTumor,
+    "genotype": GenotypeTumor,        # fast genotype-level (count-based) engine
+}
 
 
-@click.command(help="Simulate tumor evolution under different spatial constraints.")
-@click.option("--sim-config", type=click.Path(exists=True, dir_okay=False), help="Config file with simulation parameters")
+@click.command(help="Simulate spatial tumor growth (stage 1 of the iscc pipeline).")
 @click.option(
-    "-s",
-    "--steps",
-    default=1000,
-    help="Number of steps in simulation.",
+    "--sim-config",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="YAML config with mode/spatial/genome/selection/cell/deme params.",
 )
+@click.option("-s", "--steps", default=1000, help="Number of simulation steps.")
+@click.option("-r", "--random-seed", default=42, help="Random seed.")
+@click.option("--batch-size", default=1, help="Number of demes updated per step.")
 @click.option(
-    "-r",
-    "--random_seed",
-    default=42,
-    help="Random seed for the pseudo random number generator.",
+    "--log", default=0, help="Logging level. 0 = critical, 1 = info, 2 = debug."
 )
-@click.option(
-    "--record-after-steps", default=0, help="Record the simulation state every S steps."
-)
-@click.option(
-    "--log", default=0, help="Logging level. 0 for no logging, 1 for info, 2 for debug."
-)
-@click.option("-o", "--output-path", default="./sim_out", help="Output directory")
-def main(
-    sim_config,
-    steps,
-    random_seed,
-    log,
-    record_after_steps,
-    output_path,
-):
-    if log == 0:
-        log = logging.CRITICAL
-    elif log == 1:
-        log = logging.INFO
-    elif log == 2:
-        log == logging.DEBUG
-    logging.basicConfig(level=log)
+@click.option("-o", "--output-path", default="./sim_out", help="Output directory.")
+def main(sim_config, steps, random_seed, batch_size, log, output_path):
+    logging.basicConfig(
+        level={0: logging.CRITICAL, 1: logging.INFO, 2: logging.DEBUG}.get(log, logging.CRITICAL)
+    )
 
     with open(sim_config) as f:
-        config = yaml.safe_load(f)  
+        config = yaml.safe_load(f)
 
-    cancer_cell = CancerCell(
-        n_segments=config['cell_params']['n_segments'],
-        seed=random_seed,
-        **config['cell_params']['cancer_params'],
-    )
-
-    selection = Selection(
-        n_segments=cancer_cell.n_segments,
-        **config['selection_params'],
-    )
-
-    tumor = Tumor(cancer_cell, selection,
-                  epithelial_cell_params=config['cell_params']['epithelial_params'],
-                    stromal_cell_params=config['cell_params']['stromal_params'],
-                    immune_cell_params=config['cell_params']['immune_params'],
-                    deme_params=config['deme_params'],
-                    **config['spatial_params'])
-
-    if record_after_steps > 0:
-        records = int(steps/record_after_steps)
-    else:
-        records = 1
-        record_after_steps = steps
-    envs = []
-    env, traces, treatment_target, cells_killed = MODE_LIST[config['mode']](
-        record_after_steps,
-        tumor,
-        seed=random_seed,
-        **config['treatment_params'],
-    )
-    genotypes, _ = env.get_genotype_frequencies()
-    parents = env.genotypes_parents
-
-    # Make output directory
-    Path(output_path).mkdir(parents=True, exist_ok=True)
-
-    pd.DataFrame([t["genotypes_counts"] for t in traces]).fillna(0).to_csv(
-        os.path.join(output_path, "trace_counts_0.csv")
-    )
-    pd.DataFrame([parents]).to_csv(os.path.join(output_path, "parents_0.csv"))
-    pd.DataFrame(genotypes).to_csv(os.path.join(output_path, "genotypes_0.csv"))
-
-    # Make gene data
-    gene_data = env.get_gene_data()
-    Path(os.path.join(output_path, 'gene_data')).mkdir(parents=True, exist_ok=True)
-    for mat in gene_data:
-        pd.DataFrame(gene_data[mat]).to_csv(os.path.join(output_path, 'gene_data', f'{mat}.csv'))
-
-    if config['mode'] > 0:
-        genotype_matrix = env.get_genotype_matrix()
-        pd.DataFrame(genotype_matrix).to_csv(os.path.join(output_path, "grid_0.csv"))
-
-        # Save genotype counts per deme in this step
-        coords = []
-        gcounts = []
-        for deme in env.deme_list:
-            coords.append(f'{deme.row},{deme.col}')
-            gcounts.append(deme.genotypes_counts)
-        df = pd.DataFrame(gcounts).fillna(0)
-        df.index = coords
-        df.to_csv(os.path.join(output_path, f"genotype_counts_demes_0.csv"))
-
-    for i in range(1, records):
-        env, traces, treatment_target, cells_killed = MODE_LIST[config['mode']](
-            record_after_steps,
-            env,
-            traces=traces,
-            treatment_target=treatment_target,
-            cells_killed=cells_killed,
-            seed=random_seed + i,
-            **config['treatment_params'],         
+    # Default to the fast genotype-level engine; 'glandular' is the cell-level engine.
+    mode = config.get("mode", "genotype")
+    if mode not in TUMOR_MODELS:
+        raise click.ClickException(
+            f"Unknown mode '{mode}'. Choose one of: {sorted(TUMOR_MODELS)}."
         )
-        genotypes, _ = env.get_genotype_frequencies()
-        parents = env.genotypes_parents
-
-
-        Path(output_path).mkdir(parents=True, exist_ok=True)
-        pd.DataFrame([t["genotypes_counts"] for t in traces]).fillna(0).to_csv(
-            os.path.join(output_path, f"trace_counts_{i}.csv")
+    if mode == "mixed":
+        raise click.ClickException(
+            "The 'mixed' (non-spatial) model is not yet implemented; use 'genotype' or 'glandular'."
         )
-        pd.DataFrame([parents]).to_csv(os.path.join(output_path, f"parents_{i}.csv"))
-        pd.DataFrame(genotypes).to_csv(os.path.join(output_path, f"genotypes_{i}.csv"))
 
-        # Make cells by genotypes matrix
-        cell_data = env.get_cell_data()
-        Path(os.path.join(output_path, f'cell_data_{i}')).mkdir(parents=True, exist_ok=True)
-        for mat in cell_data:
-            os.mkdir(exists_ok=True)
-            pd.DataFrame(cell_data[mat]).to_csv(os.path.join(output_path, f'cell_data_{i}', f'{mat}.csv'))
+    logging.info("Building %s tumor from %s", mode, sim_config)
+    tumor = TUMOR_MODELS[mode](config=sim_config, seed=random_seed)
 
-        if config['mode'] > 0:
-            genotype_matrix = env.get_genotype_matrix()
-            pd.DataFrame(genotype_matrix).to_csv(os.path.join(output_path, f"grid_{i}.csv"))
+    logging.info("Growing for %d steps (seed=%d)", steps, random_seed)
+    tumor.grow(n_steps=steps, seed=random_seed, batch_size=batch_size)
 
-            # Save genotype counts per deme in this step
-            coords = []
-            gcounts = []
-            for deme in env.deme_list:
-                coords.append(f'{deme.row},{deme.col}')
-                gcounts.append(deme.genotypes_counts)
-            df = pd.DataFrame(gcounts).fillna(0)
-            df.index = coords
-            df.to_csv(os.path.join(output_path, f"genotype_counts_demes_{i}.csv"))
-                
-    # Make cells by genes matrices
-    env.set_cell_exps()
-    cell_data = env.get_cell_data()
-    Path(os.path.join(output_path, f'cell_data_{records-1}')).mkdir(parents=True, exist_ok=True)
-    for mat in cell_data:
-        pd.DataFrame(cell_data[mat]).to_csv(os.path.join(output_path, f'cell_data_{records-1}', f'{mat}.csv'))
-
-
-    print(f"Simulation in mode {config['mode']} finished.")
-
-    print(f"Saved results to {output_path}.")
+    tumor.write(output_path)
+    logging.info("Saved tumor (size=%d) to %s", tumor.get_tumor_size(), output_path)
+    print(f"Simulation ({mode}) finished: {tumor.get_tumor_size()} cells -> {output_path}")
 
 
 if __name__ == "__main__":

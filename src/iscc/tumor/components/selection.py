@@ -2,10 +2,12 @@ import numpy as np
 import pandas as pd
 
 class Selection(object):
-    def __init__(self, n_segments=10, segment_size=1000, 
+    def __init__(self, n_segments=10, segment_size=1000,
                  prop_driver=0.1, prop_dispersal=0.1, prop_treatment_resistance=0.1, prop_immune_resistance=0.1,
                  driver_effects=1.1, dispersal_effects=1.1, treatment_resistant_effects=1.1, immune_resistant_effects=1.1,
-                 max_ploidy=6, max_cn=12, max_nullisomy=2, max_mut_drivers=1000, ):
+                 max_ploidy=6, max_cn=12, max_nullisomy=2, max_mut_drivers=1000, rng=None, ):
+        # Seeded generator so the driver/resistance layout is reproducible.
+        self.rng = rng if rng is not None else np.random.default_rng()
         # Fixed about the genome
         self.n_segments = n_segments
         self.segment_size = segment_size
@@ -41,7 +43,7 @@ class Selection(object):
                             'dispersal_rate': self.update_dispersal_rate,
                             'immune_resistance': self.update_immune_resistance,
                             'treatment_resistance': self.update_treatment_resistance,
-                            'death_rate': self.update_division_rate,}
+                            'death_rate': self.update_death_rate,}
         
         self.gene_names = self.get_gene_names()
 
@@ -56,7 +58,7 @@ class Selection(object):
         self.onc = []
         self.tsg = []
         for _ in range(self.n_segments):
-            driver_types = np.random.choice([-1,0,1], p=[self.prop_driver/2, 1.-self.prop_driver, self.prop_driver/2], 
+            driver_types = self.rng.choice([-1,0,1], p=[self.prop_driver/2, 1.-self.prop_driver, self.prop_driver/2],
                                                 size=self.segment_size)
             self.drivers.append(np.where(driver_types!=0)[0])
             self.passengers.append(np.where(driver_types==0)[0])
@@ -68,7 +70,7 @@ class Selection(object):
         self.dispersal_types = []
         self.dispersal = []
         for _ in range(self.n_segments):
-            confers_dispersal = np.random.binomial(1, self.prop_dispersal, size=self.segment_size)
+            confers_dispersal = self.rng.binomial(1, self.prop_dispersal, size=self.segment_size)
             self.dispersal_types.append(confers_dispersal)
             self.dispersal.append(np.where(confers_dispersal==1)[0])
 
@@ -76,7 +78,7 @@ class Selection(object):
         self.treatment_resistance_types = []
         self.treatment_resistance = []
         for _ in range(self.n_segments):
-            confers_resistance = np.random.binomial(1, self.prop_treatment_resistance, size=self.segment_size)
+            confers_resistance = self.rng.binomial(1, self.prop_treatment_resistance, size=self.segment_size)
             self.treatment_resistance_types.append(confers_resistance)
             self.treatment_resistance.append(np.where(confers_resistance==1)[0])
 
@@ -84,7 +86,7 @@ class Selection(object):
         self.immune_resistance_types = []
         self.immune_resistance = []
         for _ in range(self.n_segments):
-            confers_resistance = np.random.binomial(1, self.prop_immune_resistance, size=self.segment_size)
+            confers_resistance = self.rng.binomial(1, self.prop_immune_resistance, size=self.segment_size)
             self.immune_resistance_types.append(confers_resistance) 
             self.immune_resistance.append(np.where(confers_resistance==1)[0])           
 
@@ -274,8 +276,9 @@ class Selection(object):
         return gene_names
 
     def gene_to_pos(self, gene_name):
-        prefix, seg, pos = gene_name.split('-')
-        return seg, pos
+        # Gene names are built by get_gene_names as f'{prefix}_{segment}_{pos}'.
+        prefix, seg, pos = gene_name.split('_')
+        return int(seg), int(pos)
 
     def get_gene_data(self, **kwargs):
         gene_names = self.get_gene_names(**kwargs)

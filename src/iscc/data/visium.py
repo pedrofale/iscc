@@ -5,12 +5,12 @@ import pandas as pd
 import os
 
 class Visium(Assay):
-    def __init__(self, n_reads=1000, spot_radius=2.5, n_spots_row=25, n_spots_col=25, **assay_kwargs):
+    def __init__(self, n_reads=1000, spot_radius=2.5, n_spots_x=25, n_spots_y=25, **assay_kwargs):
         super(Visium, self).__init__(**assay_kwargs)
         self.n_reads = n_reads # total reads per spot
         self.spot_radius = spot_radius
-        self.n_spots_row = n_spots_row
-        self.n_spots_col = n_spots_col
+        self.n_spots_row = n_spots_y  # rows (y) and columns (x) of the spot grid
+        self.n_spots_col = n_spots_x
         
     def run(self, cell_data, grid_side: int):
         cell_states = cell_data['cell_exp']

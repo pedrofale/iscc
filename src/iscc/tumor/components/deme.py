@@ -30,7 +30,10 @@ class Deme(object):
         self.types_counts = Counter()
         self.genotypes_counts = Counter()
         self.genotypes_parents = dict()
-        self.cells = set()
+        # Insertion-ordered set of cells: a plain set iterates in object-id order,
+        # which varies across processes and breaks reproducibility (the seeded RNG
+        # would sample cells in a different order). A dict preserves insertion order.
+        self.cells = dict()
         self.deme_rate = 0.0
 
         if cell is not None:
@@ -45,16 +48,18 @@ class Deme(object):
                 cell.genotype_id = cell.type    
         else:
             cell.genotype_id = str(genotype_id)
-        self.cells.add(cell)
+        self.cells[cell] = None
         if cell.genotype_id in self.genotypes_counts:
             self.genotypes_counts[cell.genotype_id] += 1
         else:
             self.genotypes_counts[cell.genotype_id] = 1
-        
+
         if cell.type in self.types_counts:
             self.types_counts[cell.type] += 1
         else:
-            self.types_counts[cell.type] = 1            
+            self.types_counts[cell.type] = 1
+        if self.tumor is not None:
+            self.tumor.register_birth(cell.genotype_id)
 
     def sample_event(self, cell, immune_cell_fraction=0., rng=None):
         if cell.evolutionary_parameters['viability'] == 0:
@@ -81,13 +86,10 @@ class Deme(object):
     def apply_event(self, event, cell, rng=None):
         if event == "death":
             pre_death_count = self.genotypes_counts[cell.genotype_id]
-            self.cells.remove(cell)
+            del self.cells[cell]
             self.genotypes_counts[cell.genotype_id] -= 1
             self.types_counts[cell.type] -= 1
-            
-            if self.genotypes_counts[cell.genotype_id] < 0:
-                print(cell.genotype_id)
-                print(cell.type)
+            self.tumor.register_death(cell.genotype_id)
 
             self.deme_rate -= cell.evolutionary_parameters['division_rate'] + cell.evolutionary_parameters['death_rate']
             if cell.type == 'immune':
@@ -120,6 +122,7 @@ class Deme(object):
                         raise Exception(
                             f"Oh no! genotype is its own parent?!: {new_cell.genotype_id}"
                         )
+                    self.tumor.register_parent(new_cell.genotype_id, new_cell.parent.genotype_id)
                     self.add_cell(new_cell, genotype_id=new_cell.genotype_id)
                     self.deme_rate += new_cell.evolutionary_parameters['division_rate'] + new_cell.evolutionary_parameters['death_rate']
                     self.tumor.deme_rates[self.id] = self.deme_rate
@@ -131,9 +134,22 @@ class Deme(object):
                     self.tumor.deme_rates[target_deme.id] = target_deme.deme_rate
         elif event == 'dispersal':
             possible_demes = self.tumor.get_neighboring_demes(self)
-            target_deme = rng.choice(possible_demes)                                    
+            if len(possible_demes) == 0:
+                return
+            target_deme = rng.choice(possible_demes)
+            # The cell migrates: remove it from this deme and add it to the target.
+            moved_rate = (cell.evolutionary_parameters['division_rate']
+                          + cell.evolutionary_parameters['dispersal_rate']
+                          + cell.evolutionary_parameters['death_rate'])
+            del self.cells[cell]
+            self.genotypes_counts[cell.genotype_id] -= 1
+            self.types_counts[cell.type] -= 1
+            self.tumor.register_death(cell.genotype_id)  # target_deme.add_cell re-registers the birth
+            self.deme_rate = max(0, self.deme_rate - moved_rate)
+            self.tumor.deme_rates[self.id] = self.deme_rate
+
             target_deme.add_cell(cell, genotype_id=cell.genotype_id)
-            target_deme.deme_rate += new_cell.evolutionary_parameters['divison_rate'] + new_cell.evolutionary_parameters['dispersal_rate'] + new_cell.evolutionary_parameters['death_rate']
+            target_deme.deme_rate += moved_rate
             self.tumor.deme_rates[target_deme.id] = target_deme.deme_rate
 
     def get_immune_cell_fraction(self):
@@ -143,10 +159,11 @@ class Deme(object):
         # Choose subset of cells randomly in this deme
         # Get immune cell fraction in deme
         immune_cell_fraction = self.get_immune_cell_fraction()
-        # l.sort(key=lambda x: x.genotype_id)
-        cells = rng.choice(
-            list(self.cells), size=min(subset_size, len(self.cells)), replace=False
-        )
+        # Sample cell *indices* (not the Cell objects) to avoid rebuilding an object
+        # ndarray on every rng.choice; the random draws are identical either way.
+        cell_list = list(self.cells)
+        sub_idx = rng.choice(len(cell_list), size=min(subset_size, len(cell_list)), replace=False)
+        cells = [cell_list[i] for i in sub_idx]
         cell_rates = []
         for cell in cells:
             cell_rate = cell.evolutionary_parameters['death_rate'] + cell.evolutionary_parameters['division_rate']
@@ -154,7 +171,8 @@ class Deme(object):
                 cell_rate += cell.evolutionary_parameters['dispersal_rate']
             cell_rates.append(cell_rate)
         cell_rates = np.array(cell_rates)
-        cells = rng.choice(cells, p=cell_rates/cell_rates.sum(), size=min(batch_size, len(cells)), replace=False)
+        batch_idx = rng.choice(len(cells), p=cell_rates/cell_rates.sum(), size=min(batch_size, len(cells)), replace=False)
+        cells = [cells[i] for i in batch_idx]
 
         for cell in cells:
             if treat:
@@ -181,12 +199,12 @@ class Deme(object):
             return min(cell_death_rate * (immune_cell_fraction ** immune_resistance) * self.carrying_capacity, self.maximum_death_rate)        
 
     def get_genotype_frequencies(self, normalize=True):
-        # Get unique genotypes and their frequencies
-        genotypes = np.vstack([cell.snv for cell in self.cells])
-        unique, counts = np.unique(genotypes, return_counts=True, axis=0)
-        freqs = np.array(counts)
-        if normalize:
-            freqs = freqs / np.sum(freqs)
+        # Get the genotype ids present in this deme and their frequencies.
+        genotypes = list(self.genotypes_counts.keys())
+        counts = np.array([self.genotypes_counts[g] for g in genotypes], dtype=float)
+        freqs = counts
+        if normalize and counts.sum() > 0:
+            freqs = counts / counts.sum()
         return genotypes, freqs
 
     def get_most_frequent_genotype(self):

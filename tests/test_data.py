@@ -127,13 +127,15 @@ class TestScRNA:
         assert (vals >= 0).all()
         assert np.issubdtype(vals.dtype, np.integer)
 
-    def test_umi_counts_per_cell_sum_to_n_reads(self, synthetic_cell_data):
+    def test_library_size_varies_and_centered_on_n_reads(self, synthetic_cell_data):
+        """Realistic scRNA: per-cell library size varies (not fixed) and averages ~ n_reads."""
         from iscc.data.rna import scRNA
-        n_reads = 200
-        assay = scRNA(n_reads=n_reads, n_cells=10)
+        n_reads = 2000
+        assay = scRNA(n_reads=n_reads, n_cells=20, lib_size_sigma=0.35)
         assay.run(synthetic_cell_data)
-        row_sums = assay.observed_counts.sum(axis=1)
-        assert (row_sums == n_reads).all()
+        row_sums = assay.observed_counts.sum(axis=1).values
+        assert row_sums.std() > 0                      # not a fixed depth
+        assert 0.5 * n_reads < row_sums.mean() < 2.0 * n_reads
 
     def test_n_cells_capped_at_available(self, synthetic_cell_data):
         from iscc.data.rna import scRNA

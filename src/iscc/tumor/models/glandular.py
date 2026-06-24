@@ -117,9 +117,10 @@ class GlandularTumor(Tumor):
                 i = 0
                 while i < self.grid[row][col].carrying_capacity:
                     epithelial_cell = EpithelialCell(n_segments=self.genome_params['n_segments'],
+                                                     segment_size=self.genome_params.get('segment_size', 1000),
                                                      **self.epithelial_cell_params)
                     self.grid[row][col].add_cell(epithelial_cell)
-                    self.grid[row][col].deme_rate = epithelial_cell.evolutionary_parameters['death_rate']
+                    self.grid[row][col].deme_rate += epithelial_cell.evolutionary_parameters['death_rate']
                     i += 1
 
             # Get inside
@@ -129,25 +130,33 @@ class GlandularTumor(Tumor):
             in_border = bresenham_circumference(center, center, self.structure_radius-1)                        
             structure_in_borders.append(in_border)
             if s_idx == 0:
-                # add a cancer cell inside the border 
-                pos = np.random.choice(len(in_border))
+                # add a cancer cell inside the border
+                pos = self.rng.choice(len(in_border))
                 self.grid[in_border[pos][0]][in_border[pos][1]].add_cell(self.cancer_cell)
                 self.grid[in_border[pos][0]][in_border[pos][1]].deme_rate = self.cancer_cell.evolutionary_parameters['death_rate'] + self.cancer_cell.evolutionary_parameters['division_rate']
 
-        # add healthy stromal cells outside of border
+        # add healthy stromal cells outside of border.
+        # structure_borders / structure_circles are lists of per-structure point lists;
+        # flatten them into a single set of occupied (row, col) coordinates.
+        occupied = set()
+        for border in structure_borders:
+            occupied.update(border)
+        for circle in structure_circles:
+            occupied.update(circle)
         for row in range(self.grid_size):
             for col in range(self.grid_size):
-                if (row,col) not in structure_circles and (row,col) not in structure_borders:
+                if (row, col) not in occupied:
                     # Fill them up to carrying capacity
                     i = 0
                     if len(self.grid[row][col].cells) > 0:
                         continue
                     while i < self.grid[row][col].carrying_capacity:
                         stromal_cell = StromalCell(n_segments=self.genome_params['n_segments'],
+                                                   segment_size=self.genome_params.get('segment_size', 1000),
                                                    **self.stromal_cell_params)
                         self.grid[row][col].add_cell(stromal_cell)
-                        self.grid[row][col].deme_rate = stromal_cell.evolutionary_parameters['death_rate']
-                        i += 1    
+                        self.grid[row][col].deme_rate += stromal_cell.evolutionary_parameters['death_rate']
+                        i += 1
 
     def get_neighboring_demes(self, deme):
         grid_row = deme.row
@@ -157,8 +166,8 @@ class GlandularTumor(Tumor):
         pos = []
         # Von Neumann neighborhood
         for tup in [(grid_row - 1, grid_col), (grid_row, grid_col + 1), (grid_row + 1, grid_col), (grid_row, grid_col - 1)]:
-            if tup[0] > 0 and tup[0] < self.grid_size:
-                if tup[1] > 0 and tup[1] < self.grid_size:
+            if 0 <= tup[0] < self.grid_size:
+                if 0 <= tup[1] < self.grid_size:
                     pos.append(tup)
                     possible_demes.append(self.grid[tup[0]][tup[1]])
 

@@ -1,84 +1,92 @@
 """
-Simulate molecular data from a tumor.
+`isccsample` — sample cells from a simulated tumor (the lab/medical stage).
+
+Stage 2 of the iscc pipeline. Reads the ground-truth `cell_data/` written by
+`isccsim` and produces a *sample*: a subset of cells (with their per-cell
+ground truth preserved) plus a `sample_meta.yaml` describing how it was taken.
+The resulting `cell_data/` is the input to `isccdata`.
+
+NOTE: this is the minimal contract-establishing implementation. Realistic
+biopsy (spatial region selection), physical slicing, and dissociation-induced
+dropout/doublets are tracked for the sampling-layer milestone; for now every
+method captures a random subset of the requested size and records its intent.
 """
-from .biopsy import *
-from .dissociation import *
-from .slice import *
+import click
+import logging
+import os
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
-
-import click
-import os
-from pathlib import Path
-import logging
 import yaml
 
-@click.command(help="Simulate molecular data from a tumor.")
-@click.argument(
-    "cell-data-path",
-    type=click.Path(exists=True, dir_okay=True),
-)
-@click.option("-a", "--assay", default="bdna", help="Type of molecular data to obtain.")
-@click.option("--assay-config", default='assayconfig/bdna.yaml', type=click.Path(exists=True, dir_okay=False), help="Config file for assay type")
-@click.option("-s", "--spatial", default=True, help="Wether to consider the spatial structure in the assay.")
-@click.option("--biopsy-config", default='biopsyconfigs/biopsy.yaml', type=click.Path(exists=True, dir_okay=False), help="Config file for spatial-aware sample")
-@click.option("--grid-file", default="", help="Path to grid file (optional). Assumes each pixel is a cell.")
+# The full per-cell ground-truth schema written by Tumor.make_cell_data / write.
+CELL_DATA_KEYS = [
+    "cell_evo", "cell_exp", "cell_snv", "cell_cnv", "cell_crd", "cell_type", "cell_deme",
+]
+
+
+def load_cell_data(tumor_path):
+    base = tumor_path
+    nested = os.path.join(tumor_path, "cell_data")
+    if os.path.isdir(nested):
+        base = nested
+    data = {}
+    for key in CELL_DATA_KEYS:
+        f = os.path.join(base, f"{key}.csv")
+        if os.path.exists(f):
+            data[key] = pd.read_csv(f, index_col=0)
+    if not data:
+        raise click.ClickException(
+            f"No cell_data CSVs found under {tumor_path!r}. Run `isccsim` first."
+        )
+    return data
+
+
+@click.command(help="Sample cells from a simulated tumor (stage 2 of the pipeline).")
+@click.argument("tumor-path", type=click.Path(exists=True, file_okay=False))
 @click.option(
-    "--log", default=0, help="Logging level. 0 for no logging, 1 for info, 2 for debug."
+    "--method", default="dissociation",
+    type=click.Choice(["dissociation", "biopsy"]),
+    help="Sampling method (recorded in sample_meta.yaml).",
 )
-@click.option("-o", "--output-path", default="./sample_out", help="Output directory")
-def main(
-    cell_data_path,
-    assay,
-    assay_config,
-    spatial,
-    biopsy_config,
-    grid_file,
-    log,
-    output_path,
-):
-    if log == 0:
-        log = logging.CRITICAL
-    elif log == 1:
-        log = logging.INFO
-    elif log == 2:
-        log == logging.DEBUG
-    logging.basicConfig(level=log)
-
-    # Make output directory
-    Path(output_path).mkdir(parents=True, exist_ok=True)
-
-    # Read configs
-    with open(biopsy_config) as f:
-        biopsy_config = yaml.safe_load(f)
-    with open(assay_config) as f:
-        assay_config = yaml.safe_load(f)        
-
-    # Read cell data
-    cell_data = dict(cell_snv=pd.read_csv(os.path.join(cell_data_path, 'cell_snv.csv'), index_col=0),
-                     cell_exp=pd.read_csv(os.path.join(cell_data_path, 'cell_exp.csv'), index_col=0),
-                     cell_crd=pd.read_csv(os.path.join(cell_data_path, 'cell_crd.csv'), index_col=0),
+@click.option("--fraction", default=1.0, type=float, help="Fraction of cells to capture (0-1].")
+@click.option("-r", "--random-seed", default=42, help="Random seed.")
+@click.option("--log", default=0, help="Logging level. 0 = critical, 1 = info, 2 = debug.")
+@click.option("-o", "--output-path", default="./sample_out", help="Output directory.")
+def main(tumor_path, method, fraction, random_seed, log, output_path):
+    logging.basicConfig(
+        level={0: logging.CRITICAL, 1: logging.INFO, 2: logging.DEBUG}.get(log, logging.CRITICAL)
     )
-    cell_ids = cell_data['cell_snv'].index
-    grid_side = None
+    if not 0 < fraction <= 1:
+        raise click.ClickException("--fraction must be in (0, 1].")
 
-    if not spatial:
-        sampled_cell_ids = sample(cell_ids, **biopsy_config) # subset of cells
-        # Subsample cells
-        for key in cell_data:
-            cell_data[key] = cell_data[key].loc[sampled_cell_ids]
-    else:
-        grid = pd.read_csv(grid_file, index_col=0, dtype=str)
-        grid_side = grid.shape[0]
-        # Select regions in space
-        # cell_data = sample_regions(cell_data, grid, **biopsy_config) # subsections of the grid
+    rng = np.random.default_rng(random_seed)
+    data = load_cell_data(tumor_path)
 
-    logging.info(f"Performing {ASSAY_NAMES[assay]}.")
-    assay = ASSAYS[assay](**assay_config)
-    assay.run(cell_data, grid_side=grid_side)
-    assay.write(output_path)
-    logging.info(f"Saved results to {output_path}.")
+    ids = next(iter(data.values())).index
+    n = len(ids)
+    k = max(1, int(round(fraction * n)))
+    chosen = rng.choice(np.asarray(ids), size=min(k, n), replace=False)
+
+    out_dir = Path(output_path) / "cell_data"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for key, df in data.items():
+        df.loc[chosen].to_csv(out_dir / f"{key}.csv")
+
+    meta = dict(
+        method=method,
+        fraction=float(fraction),
+        n_input=int(n),
+        n_sampled=int(len(chosen)),
+        seed=int(random_seed),
+        source=os.path.abspath(tumor_path),
+    )
+    with open(Path(output_path) / "sample_meta.yaml", "w") as f:
+        yaml.safe_dump(meta, f)
+
+    logging.info("Sampled %d/%d cells via %s -> %s", len(chosen), n, method, output_path)
+    print(f"Sampled {len(chosen)}/{n} cells via {method} -> {output_path}")
 
 
 if __name__ == "__main__":

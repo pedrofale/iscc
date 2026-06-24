@@ -32,8 +32,8 @@ squidpy = "^1.6.1"
 scanpy = "^1.10.4"
 
 [tool.poetry.scripts]
-isccsim = "iscc.tumor:main"
-isccsample = "iscc.sample:main"
-isccdata = "iscc.data:main"
+isccsim = "iscc.tumor.main:main"
+isccsample = "iscc.sample.main:main"
+isccdata = "iscc.data.main:main"
 isccfig = "iscc.visualization.draw:main"
 isccgif = "iscc.visualization.animate:main"

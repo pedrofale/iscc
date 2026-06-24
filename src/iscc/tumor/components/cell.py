@@ -29,7 +29,12 @@ class Cell(object):
         self.type = "healthy"
         self.parent = parent
         if parent is None:
-            self.genome = [{'p':[set()], 'm':[set()]}] * n_segments # copy number = 2
+            # Compact genome: each allele copy is a boolean bitset of length
+            # segment_size (bit i == position i is mutated, infinite-sites). A fresh
+            # dict/bitset per segment avoids aliasing across segments.
+            self.genome = [{'p': [np.zeros(segment_size, dtype=bool)],
+                            'm': [np.zeros(segment_size, dtype=bool)]}
+                           for _ in range(n_segments)] # copy number = 2
             self.set_genotype_id()
             self.genome_summary = {'n_wt_onc': n_onc * 2,
                                 'n_mut_onc': 0,
@@ -68,52 +73,58 @@ class Cell(object):
         for evo_param in self.evolutionary_parameters:
             self.evolutionary_parameters[evo_param] = update_dict[evo_param](self.genome_summary, param=self.evolutionary_parameters[evo_param])
 
-    def update_genome_summary_mutation(self, selection, muts, seg):
-        n_new_onc = sum(muts.intersection(selection.onc[seg]))
+    def update_genome_summary_mutation(self, selection, mut_bits, seg):
+        # `mut_bits` is a boolean mask over the segment marking newly mutated positions;
+        # count how many fall in each driver category by indexing the mask.
+        n_new_onc = int(mut_bits[selection.onc[seg]].sum())
         self.genome_summary['n_mut_onc'] += n_new_onc
         self.genome_summary['n_wt_onc'] -= n_new_onc
 
-        n_new_tsg = sum(muts.intersection(selection.tsg[seg]))
+        n_new_tsg = int(mut_bits[selection.tsg[seg]].sum())
         self.genome_summary['n_mut_tsg'] += n_new_tsg
         self.genome_summary['n_wt_tsg'] -= n_new_tsg
 
-        n_new_disp = sum(muts.intersection(selection.dispersal[seg]))
+        n_new_disp = int(mut_bits[selection.dispersal[seg]].sum())
         self.genome_summary['n_mut_disp'] += n_new_disp
         self.genome_summary['n_wt_disp'] -= n_new_disp
 
-        n_new_ir = sum(muts.intersection(selection.immune_resistance[seg]))
+        n_new_ir = int(mut_bits[selection.immune_resistance[seg]].sum())
         self.genome_summary['n_mut_ir'] += n_new_ir
         self.genome_summary['n_wt_ir'] -= n_new_ir
 
-        n_new_tr = sum(muts.intersection(selection.treatment_resistance[seg]))
+        n_new_tr = int(mut_bits[selection.treatment_resistance[seg]].sum())
         self.genome_summary['n_mut_tr'] += n_new_tr
         self.genome_summary['n_wt_tr'] -= n_new_tr
 
         # TODO: Maybe increase number of mutated drivers
 
-    def update_genome_summary_cnv(self, selection, muts, seg, sign):
-        n_mut_onc = sum(muts.intersection(selection.onc[seg]))
-        n_wt_onc = self.segment_size - n_mut_onc
+    def update_genome_summary_cnv(self, selection, allele_bits, seg, sign):
+        # A CNV adds/removes one allele copy of segment `seg`. `allele_bits` is that
+        # allele's bitset; every driver position on it changes copy number by `sign`.
+        # Wild-type copies that change = category positions in the segment minus the
+        # mutated ones on this allele.
+        n_mut_onc = int(allele_bits[selection.onc[seg]].sum())
+        n_wt_onc = len(selection.onc[seg]) - n_mut_onc
         self.genome_summary['n_mut_onc'] += sign*n_mut_onc
         self.genome_summary['n_wt_onc'] += sign*n_wt_onc
 
-        n_mut_tsg = sum(muts.intersection(selection.tsg[seg]))
-        n_wt_tsg = self.segment_size - n_mut_tsg
+        n_mut_tsg = int(allele_bits[selection.tsg[seg]].sum())
+        n_wt_tsg = len(selection.tsg[seg]) - n_mut_tsg
         self.genome_summary['n_mut_tsg'] += sign*n_mut_tsg
         self.genome_summary['n_wt_tsg'] += sign*n_wt_tsg
 
-        n_mut_disp = sum(muts.intersection(selection.dispersal[seg]))
-        n_wt_disp = self.segment_size - n_mut_disp
+        n_mut_disp = int(allele_bits[selection.dispersal[seg]].sum())
+        n_wt_disp = len(selection.dispersal[seg]) - n_mut_disp
         self.genome_summary['n_mut_disp'] += sign*n_mut_disp
         self.genome_summary['n_wt_disp'] += sign*n_wt_disp
 
-        n_mut_ir = sum(muts.intersection(selection.immune_resistance[seg]))
-        n_wt_ir = self.segment_size - n_mut_ir
+        n_mut_ir = int(allele_bits[selection.immune_resistance[seg]].sum())
+        n_wt_ir = len(selection.immune_resistance[seg]) - n_mut_ir
         self.genome_summary['n_mut_ir'] += sign*n_mut_ir
         self.genome_summary['n_wt_ir'] += sign*n_wt_ir
 
-        n_mut_tr = sum(muts.intersection(selection.treatment_resistance[seg]))
-        n_wt_tr = self.segment_size - n_mut_tr
+        n_mut_tr = int(allele_bits[selection.treatment_resistance[seg]].sum())
+        n_wt_tr = len(selection.treatment_resistance[seg]) - n_mut_tr
         self.genome_summary['n_mut_tr'] += sign*n_mut_tr
         self.genome_summary['n_wt_tr'] += sign*n_wt_tr
 
@@ -121,7 +132,8 @@ class Cell(object):
         seg_cns = self.genome_summary['seg_cns']
         self.genome_summary['ploidy'] = np.mean(seg_cns)
         self.genome_summary['highest_cn'] = np.max(seg_cns)
-        self.genome_summary['nullisomy_count'] = np.max(seg_cns)
+        # nullisomy = number of segments with zero copies, not the largest copy number.
+        self.genome_summary['nullisomy_count'] = int(np.sum(np.asarray(seg_cns) == 0))
 
         # TODO: maybe reduce the number of unique drivers...
 
@@ -131,8 +143,12 @@ class Cell(object):
     def divide(self, new_cell_id=0):
         new_cell = copy(self)
         new_cell.parent = self
-        new_cell.genome = deepcopy(self.genome)
-        new_cell.genome_summary = deepcopy(self.genome_summary)
+        # Copy-on-write: the daughter SHARES the parent's genome and genome_summary
+        # (the shallow copy() above aliases them). These are only ever modified in
+        # mutate(), which copies-first, so clonal cells can safely share one genome
+        # until one of them diverges. evolutionary_parameters stays per-cell because
+        # treatment mutates it per cell.
+        new_cell.evolutionary_parameters = dict(self.evolutionary_parameters)
         return new_cell
     
     def get_genome_df(self):
@@ -145,10 +161,8 @@ class Cell(object):
             seg_vec = seg * np.ones((self.segment_size))
             for hap in self.genome[seg]:
                 hap_vec = np.array([hap] * self.segment_size)
-                for all in self.genome[seg][hap]: # self.genome[seg][hap] is a list of sets [set(), set(), set()], so all is a set
-                    mut_vec = np.zeros((self.segment_size,)).astype(int)
-                    if len(all) > 0:
-                        mut_vec[np.array(list(all))] = 1
+                for all in self.genome[seg][hap]: # each allele copy is a boolean bitset
+                    mut_vec = all.astype(int)
                     segs.extend(seg_vec)
                     haps.extend(hap_vec)
                     poss.extend(pos_vec)
@@ -162,11 +176,11 @@ class Cell(object):
     def get_snvs(self):
         vafs = np.zeros((self.n_segments * self.segment_size,))
         for seg in range(self.n_segments):
-            for hap in self.genome[seg]: 
-                for all in self.genome[seg][hap]:
-                    for mut in all:
-                        vafs[mut + seg*self.segment_size] += 1
-            vafs[seg*self.segment_size:(seg+1)*self.segment_size] /= self.genome_summary['seg_cns'][seg]
+            copies = self.genome[seg]['p'] + self.genome[seg]['m']
+            cn = self.genome_summary['seg_cns'][seg]
+            if copies and cn > 0:
+                counts = np.sum(copies, axis=0)  # mutated-copy count per position
+                vafs[seg*self.segment_size:(seg+1)*self.segment_size] = counts / cn
         return vafs
 
     def get_cnvs(self):
@@ -184,17 +198,13 @@ class Cell(object):
         for seg in range(self.n_segments):
             seg_baseline = self.baseline_exp[seg*self.segment_size:(seg+1)*self.segment_size]
             seg_exp = np.array(seg_baseline)
-            if len(self.genome[seg]['p']) + len(self.genome[seg]['m']) == 0:
-                seg_exp *= 0.
+            copies = self.genome[seg]['p'] + self.genome[seg]['m']
+            if len(copies) == 0:
+                seg_exp = seg_exp * 0.
             else:
-                for hap in self.genome[seg]:
-                    for all in range(len(self.genome[seg][hap])):
-                        seg_mut_status = np.zeros((self.segment_size,))
-                        muts = self.genome[seg][hap][all]
-                        if len(muts) > 0:
-                            seg_mut_status[np.array(list(muts))] = 1.
-                        allele_contrib = seg_baseline * seg_mut_effects[seg]**seg_mut_status
-                        seg_exp += allele_contrib
+                for bits in copies:
+                    allele_contrib = seg_baseline * seg_mut_effects[seg] ** bits.astype(float)
+                    seg_exp = seg_exp + allele_contrib
             exp[seg*self.segment_size:(seg+1)*self.segment_size] = seg_exp
         return exp
 
@@ -203,19 +213,21 @@ class Cell(object):
         seg, pos = coordinates # unpack
         if len(self.genome[seg]['p']) + len(self.genome[seg]['m']) == 0:
             return False
-        
-        # Go to the genomic location, and compute its expression directly without having to cycle through the whole genome to compute total expression profile
-        gene_exp = self.baseline_exp[seg+pos]
+
+        if not hasattr(self, 'baseline_exp'):
+            self.set_baseline_exp()
+
+        # Compute this single gene's expression directly (mirrors get_exp), without
+        # building the whole genome's expression profile. baseline_exp is a flat
+        # vector over the genome, and seg_mut_effects is indexed [segment][position].
+        gene_base = self.baseline_exp[seg * self.segment_size + pos]
+        gene_exp = gene_base
         for hap in self.genome[seg]:
-            for all in range(len(self.genome[seg][hap])):
-                mut = self.genome[seg][hap][all][pos]
-                allele_contrib = gene_exp * seg_mut_effects[seg+pos]**mut
-                gene_exp += allele_contrib
-        
-        if gene_exp > thres:
-            return True
-        else:
-            return False
+            for allele in self.genome[seg][hap]:
+                mut = 1. if allele[pos] else 0.
+                gene_exp += gene_base * seg_mut_effects[seg][pos] ** mut
+
+        return gene_exp > thres
         
 
 class EpithelialCell(Cell):
@@ -253,6 +265,11 @@ class CancerCell(Cell):
             self.genotype_id = self.parent.genotype_id
             
     def mutate(self, rng, selection, n_events=5, mut_prob=.1, cnv_prob=.1):
+        # Copy-on-write: this cell is diverging into a new genotype, so take a private
+        # copy of the (until now possibly shared) genome/summary before modifying them.
+        # This is the only place the genome is mutated, so sharing elsewhere is safe.
+        self.genome = deepcopy(self.genome)
+        self.genome_summary = deepcopy(self.genome_summary)
         event = rng.choice(['cnv', 'mut'], p=np.array([mut_prob, cnv_prob])/sum([mut_prob, cnv_prob])) # add WGDs too...
         if event == 'mut':
             # Sample segment
@@ -264,16 +281,17 @@ class CancerCell(Cell):
             hap = rng.choice(['p', 'm'], p=np.array([n_p, n_m])/(n_p + n_m))
             # Sample allele
             all = rng.choice(range(len(self.genome[seg][hap])))
+            allele = self.genome[seg][hap][all]
             # Sample only from positions not yet mutated in this allele (ISA)
-            available = np.array(
-                list(set(range(self.segment_size)) - self.genome[seg][hap][all])
-            )
+            available = np.where(~allele)[0]
             if len(available) == 0:
                 return  # allele fully saturated; skip this mutation event
             n_mutations = min(rng.poisson(n_events) + 1, len(available))
-            muts = set(rng.choice(available, size=n_mutations, replace=False))
-            self.genome[seg][hap][all].update(muts) # for actual genotype and expression tracking
-            self.update_genome_summary_mutation(selection, muts, seg) # for evolutionary parameters
+            muts = rng.choice(available, size=n_mutations, replace=False)
+            allele[muts] = True  # set mutated bits
+            mut_bits = np.zeros(self.segment_size, dtype=bool)
+            mut_bits[muts] = True
+            self.update_genome_summary_mutation(selection, mut_bits, seg) # for evolutionary parameters
         elif event == 'cnv':
             # Sample segment
             segment_probs = np.array([len(self.genome[seg]['p'] + self.genome[seg]['m']) for seg in range(self.n_segments)]) # can't select empty segment
@@ -288,16 +306,16 @@ class CancerCell(Cell):
             evt = rng.choice(['del', 'amp'])
             if evt == 'amp':
                 sign = 1
-                self.genome[seg][hap].append(self.genome[seg][hap][all]) # add a copy
-                muts = self.genome[seg][hap][all]
+                self.genome[seg][hap].append(self.genome[seg][hap][all].copy()) # independent copy (no aliasing)
+                allele_bits = self.genome[seg][hap][all]
             elif evt == 'del':
                 sign = -1
-                muts = self.genome[seg][hap][all]
+                allele_bits = self.genome[seg][hap][all].copy()  # capture before removing
                 if len(self.genome[seg][hap]) == 1:
-                    self.genome[seg][hap][all] = set()
+                    self.genome[seg][hap][all] = np.zeros(self.segment_size, dtype=bool)
                 else:
                     del self.genome[seg][hap][all] # remove
-            self.update_genome_summary_cnv(selection, muts, seg, sign) # for evolutionary parameters
+            self.update_genome_summary_cnv(selection, allele_bits, seg, sign) # for evolutionary parameters
 
         self.update_evolutionary_parameters(selection.update_dict)
         self.set_genotype_id()

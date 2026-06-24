@@ -20,6 +20,10 @@ from collections import Counter
 class Tumor(object):
     def __init__(self, config=None, genome_params=dict(), cancer_cell_params=dict(), epithelial_cell_params=dict(), stromal_cell_params=dict(), immune_cell_params=dict(), deme_params=dict(), selection_params=dict(), seed=42):
         self.config = None
+        # Seeded generator for everything set up at construction time (driver layout,
+        # baseline expression, spatial seeding) so that config + seed -> identical tumor.
+        self.seed = seed
+        self.rng = np.random.default_rng(seed)
         self.genome_params = genome_params
         if config is not None:
             with open(config) as f:
@@ -38,6 +42,7 @@ class Tumor(object):
         self.selection = Selection(
             n_segments=self.genome_params['n_segments'],
             segment_size=self.genome_params.get('segment_size', 1000),
+            rng=self.rng,
             **selection_params,
         )
         self.n_genes = self.selection.n_genes
@@ -80,9 +85,11 @@ class Tumor(object):
     def make_celltype_exps(self):
         self.celltype_exps = dict()
         for celltype in self.celltypes:
-            exp = np.random.beta(.1, 1., size=self.n_genes)
-            exp[np.where(self.selection.get_tsgs())] = 0.8
-            exp[np.where(self.selection.get_oncogenes())] = 0.01 
+            exp = self.rng.beta(.1, 1., size=self.n_genes)
+            # get_tsgs()/get_oncogenes() already return the gene indices; index with
+            # them directly (np.where(idx_array) would return 0..k-1, the wrong genes).
+            exp[self.selection.get_tsgs()] = 0.8
+            exp[self.selection.get_oncogenes()] = 0.01
             self.celltype_exps[celltype] = exp
 
     def get_genotype_frequencies(self, normalize=True):
@@ -128,14 +135,30 @@ class Tumor(object):
         return grid
 
     def update_genotype_parents(self):
+        # Full resync from demes. Not needed during normal growth (kept incrementally
+        # via register_parent); retained as a utility / consistency check.
         self.genotypes_parents = dict()
         for deme in self.deme_list:
             self.genotypes_parents.update(deme.genotypes_parents)
 
     def update_genotype_counts(self):
+        # Full O(demes x genotypes) resync. Not called per step anymore; the tumor-level
+        # counts are maintained incrementally by register_birth/register_death.
         self.genotypes_counts = Counter()
         for deme in self.deme_list:
             self.genotypes_counts = self.genotypes_counts + deme.genotypes_counts
+
+    # --- incremental tumor-level bookkeeping (called from Deme on each event) -------
+    def register_birth(self, genotype_id):
+        self.genotypes_counts[genotype_id] += 1
+
+    def register_death(self, genotype_id):
+        self.genotypes_counts[genotype_id] -= 1
+        if self.genotypes_counts[genotype_id] <= 0:
+            del self.genotypes_counts[genotype_id]
+
+    def register_parent(self, child_id, parent_id):
+        self.genotypes_parents[child_id] = parent_id
 
     def is_extinct(self):
         return self.deme_rates.sum() == 0
@@ -143,15 +166,18 @@ class Tumor(object):
     def update(self, treat=False, treatment=None, rng=None, batch_size=1):
         if self.is_extinct():
             return
-        # Choose a few demes to update, proportionally to their rates
-        demes = rng.choice(self.deme_list, p=self.deme_rates/self.deme_rates.sum(), size=min(batch_size, len(self.deme_list)), replace=False) # don't replace to avoid updating empty demes that have just become empty
-        # deme_list = [deme for deme in self.deme_list if deme.types_counts['cancer'] > 0]
+        # Choose a few demes to update, proportionally to their rates. Sample indices
+        # rather than the Deme objects directly: rng.choice over a list of objects
+        # rebuilds an object ndarray every call (the dominant cost at scale); sampling
+        # an int index draws the identical random numbers ~60x faster.
+        p = self.deme_rates / self.deme_rates.sum()
+        idx = rng.choice(len(self.deme_list), p=p, size=min(batch_size, len(self.deme_list)), replace=False)
+        demes = [self.deme_list[i] for i in idx]
         for deme in demes:
             rng = rng.spawn(1)[0]
             deme.update(treat=treat, treatment=treatment, rng=rng, batch_size=batch_size)
-
-        self.update_genotype_parents()
-        self.update_genotype_counts()
+        # Tumor-level counts/parents are kept up to date incrementally by the demes
+        # (register_birth/death/parent), so no full rebuild is needed here.
 
     def grow(self, n_steps=10, seed=42, treatment=None, batch_size=1, **kwargs):
         new_traces = [dict(genotypes_counts=deepcopy(self.genotypes_counts))]
@@ -267,8 +293,9 @@ class Tumor(object):
             pd.DataFrame(gene_data[mat]).to_csv(os.path.join(output_path, 'gene_data', f'{mat}.csv'))
 
         # Make cells by genes matrices
-        self.set_cell_exps()
-        cell_data = self.get_cell_data()
+        if self.cell_data is None:
+            self.make_cell_data()
+        cell_data = self.cell_data
         Path(os.path.join(output_path, f'cell_data')).mkdir(parents=True, exist_ok=True)
         for mat in cell_data:
             pd.DataFrame(cell_data[mat]).to_csv(os.path.join(output_path, f'cell_data', f'{mat}.csv'))
