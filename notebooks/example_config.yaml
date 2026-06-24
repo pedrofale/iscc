@@ -1,0 +1,51 @@
+# Small tumor used by the example notebooks (fast to simulate).
+# Uses the genotype-level (count-based) engine by default.
+mode: 'genotype'
+
+spatial_params:
+  grid_size: 25
+  n_structures: 1
+  structure_radius: 4
+
+deme_params:
+  carrying_capacity: 1
+  initial_death_rate: 0.1
+  maximum_death_rate: 0.5
+
+genome_params:
+  n_segments: 5
+  segment_size: 40   # 200 genes total
+
+selection_params:
+  prop_driver: 0.1
+  prop_dispersal: 0.1
+  prop_immune_resistance: 0.1
+  prop_treatment_resistance: 0.1
+  driver_effects: 1.1
+  dispersal_effects: 1.1
+  immune_resistant_effects: 1.1
+  treatment_resistant_effects: 1.1
+
+cell_params:
+  cancer:
+    max_birth_rate: 0.8
+    division_rate: 0.3
+    death_rate: 0.02   # low turnover so the founder rarely dies out stochastically
+    mutation_rate: 0.1
+    dispersal_rate: 0.1
+  epithelial:
+    max_birth_rate: 0.8
+    death_rate: 0.0
+    division_rate: 0.0
+    dispersal_rate: 0.0
+  stromal:
+    max_birth_rate: 0.8
+    death_rate: 0.0
+    division_rate: 0.0
+    dispersal_rate: 0.0
+  immune:
+    max_birth_rate: 0.8
+    death_rate: 0.0
+    division_rate: 0.0
+    dispersal_rate: 0.0
+    prob_kill: 0.1
