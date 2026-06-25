@@ -2,6 +2,10 @@
 
 Status: design / scoping (2026-06-25). No inference code exists yet.
 
+Companion: `DESIGN_features.md` (feature generation: sampling, reads, assay **batch-effect**
+model). The assay `estimate()` here (§B/§C) fits that doc's batch model from real data — they
+share the same technical parameters.
+
 ## Progress (one milestone ≈ one Claude session; cold-start by reading this doc)
 - [x] **M0** — Noble `(n, D)` indices + recast `validate_evolution` (§D.1)
 - [x] **M0b** — `J₁` tree-balance index + unit tests on small trees (§D.1)
@@ -53,7 +57,7 @@ by module, against each module's leading competitor.
 |---|---|---|---|
 | Tumor + CNA | CINner / CNAsim: ABC-infer selection + CNA rates from PCAWG; fit real gain/loss; recover on synthetic | no inference, no fit-to-real | ABC engine + CNA/SNV summary stats; recovery → fit-to-real |
 | Tumor evolution mode | Noble 2022: characterize tumours by `(n, D, J₁)` indices; overlay real tumour phylogenies in index space | qualitative dispersal→mode with non-Noble metrics | Noble indices (§D.1) + real-tumour overlay (§D.2), single structure |
-| scRNA | Splatter `splatEstimate`, scDesign2/3: estimate NB mean/dispersion/dropout/library-size from real data | params hardcoded | `rna.estimate(real_adata)` → fitted PBMC3k comparison |
+| scRNA | Splatter `splatEstimate`, scDesign2/3: estimate NB mean/dispersion/dropout/library-size (+ batch) from real data | params hardcoded | `rna.estimate(real_adata)` → fitted PBMC3k; also fit batch model (DESIGN_features §B) |
 | DNA assay | CellCoal / CNAsim: realistic coverage, error, allelic dropout | counts-only, fixed fpr/fnr | estimate coverage+error from real bulk/sc DNA |
 | Spatial (Visium) | SRTsim / scDesign3: estimate spot params from real Visium; validate spatial autocorrelation | basic aggregation | estimate spots/capture; validate Moran's I |
 
@@ -106,23 +110,33 @@ need this; fit-to-real does. Scope this as its own milestone.
 
 ## B. scRNA estimation (Splatter-style)
 
+`estimate()` fits the parameters of the `DESIGN_features.md` §B assay/batch model from a real
+dataset, so realistic technical magnitudes are *learned, not guessed*. **Depends on the batch
+model existing (DESIGN_features F3); make `estimate()` protocol-aware (10x vs Smart-seq3) since
+the active noise components differ.**
+
 `src/iscc/data/estimate.py` (or `RNA.estimate`):
 - **Library size:** fit lognormal to per-cell totals → (μ, σ) → feeds `lib_size_sigma`, depth.
 - **Mean expression:** fit gamma/empirical to per-gene means.
 - **Dispersion:** fit the mean–variance trend (NB: var = μ + μ²/size) → per-gene or global
   `dispersion`.
 - **Dropout:** optional logistic dropout-vs-mean (Splatter) if NB zeros are insufficient.
+- **Batch hyper-parameters** (needs ≥2 real batches): per-gene batch-factor scale `σ_batch`,
+  per-batch depth/dispersion shifts, ambient and doublet rates — the technical parameters of the
+  §B batch model in `DESIGN_features.md`.
 Then:
 - Upgrade `validation/validate_scrna.py` to a **fitted** comparison: estimate on PBMC3k → simulate
   → overlay (vs the current default-params overlay).
-- **Estimation-recovery test:** simulate with known params → estimate → recover.
+- **Estimation-recovery test:** simulate with known params → estimate → recover (incl. batch params).
 
 ## C. DNA & Visium estimation (later)
-- **DNA:** estimate coverage (mean + overdispersion) and error/ADO rates from a real bulk/sc DNA
-  dataset; validate VAF accuracy and coverage distribution. (Couples to the deferred read-level
-  emission.)
-- **Visium:** estimate spots-per-tissue, counts-per-spot, capture efficiency from a real Visium
-  dataset; validate spatial autocorrelation (Moran's I) and spot count distribution.
+Fit the per-modality technical parameters defined in `DESIGN_features.md` §D.
+- **DNA:** estimate coverage (mean + overdispersion), GC-bias curve, error/ADO rates from a real
+  bulk/sc DNA dataset; validate VAF accuracy and coverage distribution. (Couples to read-level
+  emission, DESIGN_features C/F4–F5.)
+- **Visium:** estimate spots-per-tissue, counts-per-spot, and the (spatially autocorrelated)
+  capture-efficiency field from a real Visium dataset; validate spatial autocorrelation (Moran's
+  I) and spot count distribution.
 
 ## D. Tumour-evolution-mode validation (Noble-style indices + real-data overlay)
 
@@ -197,7 +211,9 @@ validation/
 - **M1 — ABC engine + tumor parameter recovery** (no external data). Expose CNA/SNV rates
   (A.0), build `abc.py` + `summaries.py`, deliver the recovery figure (A.4.1). *Highest value,
   lowest risk; demonstrable end-to-end without any download.*
-- **M2 — scRNA `estimate()`** + fitted PBMC3k comparison + recovery test (B). Small, self-contained.
+- **M2 — scRNA `estimate()`** + fitted PBMC3k comparison + recovery test (B). Fits the
+  DESIGN_features §B batch model, so it **depends on that batch model (DESIGN_features F3)**;
+  schedule M2 after F3 (or scope M2's first cut to the non-batch params only).
 - **M3a — real-tumour evolution overlay** (#3, §D.2). Overlay Noble's published `(n, D, J₁)`
   for 35 real tumours on the iscc sweep; needs only a small CSV, not a genome-mapping layer.
 - **M3b — real-genome mode + fit-to-real PCAWG/TCGA + Charm correlation** (A.5, A.4.2–3).
