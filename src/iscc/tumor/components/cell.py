@@ -277,24 +277,40 @@ class ImmuneCell(Cell):
         self.genotype_id = self.type
 
 class CancerCell(Cell):
-    def __init__(self, mutation_rate=0.1, snv_prob=0.1, genotype_id=None, seed=42, **cell_kwargs):
+    def __init__(self, mutation_rate=0.1, snv_prob=0.5, cnv_prob=0.5,
+                 n_events=5, amp_prob=0.5, genotype_id=None, seed=42, **cell_kwargs):
         super(CancerCell, self).__init__(**cell_kwargs)
         self.type = "cancer"
+        # mutation_rate is the per-division probability of *any* genome change relative to
+        # dispersal (read in the engine). Once a change happens, snv_prob / cnv_prob are the
+        # relative weights of the two event kinds; n_events is the Poisson mean number of SNV
+        # positions hit per SNV event (event length); amp_prob is P(amplification | CNA event).
+        # Exposed as configurable parameters so inference can estimate them (DESIGN_inference A.0).
         self.mutation_rate = mutation_rate
+        self.snv_prob = snv_prob
+        self.cnv_prob = cnv_prob
+        self.n_events = n_events
+        self.amp_prob = amp_prob
         self.seed  = seed
         self.set_params()
 
     def set_params(self):
         if self.parent is not None:
             self.genotype_id = self.parent.genotype_id
-            
-    def mutate(self, rng, selection, n_events=5, mut_prob=.1, cnv_prob=.1):
+
+    def mutate(self, rng, selection, n_events=None, snv_prob=None, cnv_prob=None, amp_prob=None):
+        # SNV/CNA split, event length and amp/del split default to this genotype's configured
+        # rates (set in __init__, inherited through divide()), but stay overridable per call.
+        n_events = self.n_events if n_events is None else n_events
+        snv_prob = self.snv_prob if snv_prob is None else snv_prob
+        cnv_prob = self.cnv_prob if cnv_prob is None else cnv_prob
+        amp_prob = self.amp_prob if amp_prob is None else amp_prob
         # Copy-on-write: this cell is diverging into a new genotype, so take a private
         # copy of the (until now possibly shared) genome/summary before modifying them.
         # This is the only place the genome is mutated, so sharing elsewhere is safe.
         self.genome = deepcopy(self.genome)
         self.genome_summary = deepcopy(self.genome_summary)
-        event = rng.choice(['cnv', 'mut'], p=np.array([mut_prob, cnv_prob])/sum([mut_prob, cnv_prob])) # add WGDs too...
+        event = rng.choice(['cnv', 'mut'], p=np.array([cnv_prob, snv_prob])/(cnv_prob + snv_prob)) # add WGDs too...
         if event == 'mut':
             # Sample segment
             segment_probs = np.array([len(self.genome[seg]['p'] + self.genome[seg]['m']) for seg in range(self.n_segments)]) # can't select empty segment
@@ -327,7 +343,7 @@ class CancerCell(Cell):
             # Sample allele
             all = rng.choice(range(len(self.genome[seg][hap])))
             # Decide wether to delete or copy
-            evt = rng.choice(['del', 'amp'])
+            evt = rng.choice(['del', 'amp'], p=[1.0 - amp_prob, amp_prob])
             if evt == 'amp':
                 sign = 1
                 self.genome[seg][hap].append(self.genome[seg][hap][all].copy()) # independent copy (no aliasing)

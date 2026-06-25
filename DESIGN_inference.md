@@ -9,7 +9,7 @@ share the same technical parameters.
 ## Progress (one milestone ≈ one Claude session; cold-start by reading this doc)
 - [x] **M0** — Noble `(n, D)` indices + recast `validate_evolution` (§D.1)
 - [x] **M0b** — `J₁` tree-balance index + unit tests on small trees (§D.1)
-- [ ] **M1** — expose CNA/SNV rates (§A.0) + ABC engine (§A.1–2) + parameter recovery (§A.4.1)
+- [x] **M1** — expose CNA/SNV rates (§A.0) + ABC engine (§A.1–2) + parameter recovery (§A.4.1)
 - [ ] **M2** — scRNA `estimate()` + fitted PBMC3k comparison (§B)
 - [ ] **M3a** — real-tumour `(n, D, J₁)` overlay from Noble's published CSV (§D.2)
 - [ ] **M3b** — real-genome mode + fit-to-real PCAWG + Charm correlation (§A.5, A.4.2–3)

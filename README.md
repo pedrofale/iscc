@@ -68,6 +68,7 @@ against established results:
 - `validate_cna.py` — copy number tracks oncogenic content under selection (Beroukhim 2010; Davoli 2013)
 - `validate_treatment.py` — therapy response and adaptive dosing
 - `validate_scrna.py` — scRNA count realism vs a real 10x dataset (PBMC3k)
+- `validate_inference_recovery.py` — ABC recovers known CNA/SNV rates from synthetic tumours (parameter recovery)
 
 Run the test suite with `python -m pytest`.
 

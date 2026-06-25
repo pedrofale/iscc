@@ -32,6 +32,10 @@ cell_params:
     death_rate: 0.0
     mutation_rate: 0.01
     dispersal_rate: 0.1
+    snv_prob: 0.5      # relative weight of an SNV event (vs a CNA event)
+    cnv_prob: 0.5      # relative weight of a CNA event
+    n_events: 5        # Poisson mean number of SNV positions hit per SNV event
+    amp_prob: 0.5      # P(amplification | CNA event); 1 - amp_prob = deletion
   epithelial:
     max_birth_rate: 0.8
     death_rate: 0.0
