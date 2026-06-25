@@ -1,90 +1,84 @@
-# tumorevo
+# iscc — in silico cancer center
 
-[![PyPI](https://img.shields.io/pypi/v/tumorevo.svg?style=flat)](https://pypi.python.org/pypi/tumorevo)
-[![Tests](https://github.com/pedrofale/tumorevo/actions/workflows/main.yaml/badge.svg)](https://github.com/pedrofale/tumorevo/actions/workflows/main.yaml)
+Simulate tumor growth, treatment, and multi-modal molecular data generation under different
+evolutionary models. `iscc` aims to be a standard data simulator for computational
+tumor-evolution methods: grow a spatially structured tumor under a CINner-style
+copy-number/driver selection model, optionally treat it, sample it (biopsy/dissociation), and
+generate single-cell and bulk DNA/RNA and spatial (Visium-like) data — all with shared
+ground truth.
 
-Simulate tumor evolution under different spatial constraints. This package aims to be as awesome as [demon](https://github.com/robjohnnoble/demon_model).
-`tumorevo` simulates tumor growth and and produces a Muller plot, a 2D slice of the tumor, and a clone tree.
+`iscc` is the rename and expansion of the earlier `tumorevo` package.
 
 ## Installation
 
 ```bash
-$ pip install tumorevo
+$ pip install iscc        # or: poetry install
 ```
 
-## Usage
+## Pipeline
 
-`tumorevo` contains two command line utilities: `tumorsim` and `tumorfig`.
+`iscc` is a four-stage pipeline, each stage a command-line tool:
 
-### Simulating tumor evolution
-`tumorsim` can be used to simulate the evolution of a tumor according to a specified spatial structure.
+| Stage | CLI | Does |
+|---|---|---|
+| 1. Grow | `isccsim` | grow a tumor; write ground-truth genotypes/CNVs/expression/spatial state |
+| 2. Sample | `isccsample` | biopsy / dissociate the tumor into a sample of cells |
+| 3. Assay | `isccdata` | generate single-cell & bulk DNA/RNA and spatial-transcriptomics data |
+| viz | `isccfig`, `isccgif` | Muller plot, 2D slice, clone tree, and growth animations |
+
+### 1. Simulate tumor growth
+
+The default engine is the fast genotype-level (count-based) `genotype` model; a cell-level
+`glandular` engine is also available. Parameters come from a YAML config:
+
 ```bash
-$ tumorsim --mode 1 --steps 2000 --genes 20 --carrying-capacity 5 --grid-size 20 --division-rate 0.2 --dispersal-rate 0.1
-100%|████████████████████| 1999/1999 [00:07<00:00, 251.69it/s]
+$ isccsim --sim-config config.yaml --steps 2000 --random-seed 0 -o sim_out
 ```
 
-This will create a folder containing:
-* `parents.csv`: file indicating each clones's parent;
-* `trace_counts.csv`: file indicating the number of cells of each clone at each time step;
-* `genotypes.csv`: file containing the genotypes of each clone;
-* `grid.csv`: file containing the regular grid of genotypes if `mode` > 0.
+This writes (see `SCHEMA.md` for the full layout): `cell_data/` (per-cell ground truth),
+`trace_counts.csv`, `parents.csv`, `genotypes.csv`, `gene_data/`, and `grid.csv` (spatial modes).
 
-Full overview:
-```
-$ tumorsim --help
-Usage: tumorsim [OPTIONS]
+### Applying treatment
 
-  Simulate tumor evolution under different spatial constraints.
+Chemotherapy, targeted therapy and immunotherapy can be applied during growth, optionally as an
+adaptive regimen that doses only above a tumor-burden threshold:
 
-Options:
-  -m, --mode INTEGER              Spatial structure.
-  -k, --carrying-capacity INTEGER
-                                  Deme carrying capacity.
-  -g, --genes INTEGER             Number of genes.
-  -s, --steps INTEGER             Number of steps in simulation.
-  --grid-size INTEGER             Grid size.
-  --division-rate FLOAT           Divison rate.
-  --mutation-rate FLOAT           Mutation rate.
-  --dispersal-rate FLOAT          Dispersal rate.
-  -r, --random_seed INTEGER       Random seed for the pseudo random number
-                                  generator.
-  --log INTEGER                   Logging level. 0 for no logging, 1 for info,
-                                  2 for debug.
-  -o, --output-path TEXT          Output directory
-  --help                          Show this message and exit.
-```
-
-### Plotting tumor evolution
-`tumorfig` can be used to create a Muller plot of the tumor's evolution, the 2D spatial organization of the tumor cells, and a clone tree.
 ```bash
-$ tumorfig out/trace_counts.csv out/parents.csv --plot --grid-file out/grid.csv --normalize --remove
+$ isccsim --sim-config config.yaml --treatment chemo --steps 4000 -o sim_out
+$ isccsim --sim-config config.yaml --treatment chemo --adaptive --max-tumor-size 5000 -o sim_out
 ```
 
-This will open a figure like this:
-<div align="center">
-  <img src="https://github.com/pedrofale/tumorevo/raw/main/figures/example.png", width="700px">
-</div>
+(Immunotherapy requires immune cells in the microenvironment: set `spatial_params.immune_density`
+in the config.)
 
-Full overview:
+### 2. Sample, then 3. generate data
+
+```bash
+$ isccsample sim_out --method biopsy --fraction 0.2 -o sample_out
+$ isccdata   sample_out -o data_out
 ```
-$ tumorfig --help
-Usage: tumorfig [OPTIONS] GENOTYPE_COUNTS GENOTYPE_PARENTS
 
-  Plot the evolution of a tumor.
+## Validation
 
-Options:
-  -c, --cells INTEGER           Number of cells in slice plot.
-  -r, --average-radius INTEGER  Average radius of circles in slice plot.
-  --grid-file TEXT              Path to grid file.
-  --colormap TEXT               Colormap for genotypes.
-  --dpi INTEGER                 DPI for figures.
-  --plot                        Plot all the figures.
-  --do-muller                   Make a Muller plot.
-  --do-slice                    Make a slice plot.
-  --do-tree                     Make a clone tree plot.
-  --normalize                   Normalize the abundances in the Muller plot.
-  --labels                      Annotate the clone tree plot.
-  --remove                      Remove empty clones in the clone tree plot.
-  -o, --output-path TEXT        Directory to write figures into.
-  --help                        Show this message and exit.
-```
+`iscc` ships reproducible validation scripts under `validation/` that benchmark each module
+against established results:
+
+- `validate_evolution.py` — dispersal governs the mode of evolution (Noble et al. 2022)
+- `validate_snv.py` — neutral SNV site-frequency spectrum follows the 1/f law (Williams et al. 2016)
+- `validate_cna.py` — copy number tracks oncogenic content under selection (Beroukhim 2010; Davoli 2013)
+- `validate_treatment.py` — therapy response and adaptive dosing
+- `validate_scrna.py` — scRNA count realism vs a real 10x dataset (PBMC3k)
+
+Run the test suite with `python -m pytest`.
+
+## Status & roadmap
+
+Working: spatial growth (glandular), CINner-style selection, treatment, multi-cell observation,
+single-cell/bulk DNA & RNA and Visium-like data, and the validation suite above. In progress
+(see `DESIGN_inference.md`): a parameter-estimation/inference layer (ABC for the tumor module;
+Splatter-style `estimate()` for the assays). Not yet implemented: read-level (FASTQ/BAM) output,
+non-spatial/boundary spatial modes, and realistic biopsy/dissociation noise (see `AUDIT.md`).
+
+## License
+
+MIT.
