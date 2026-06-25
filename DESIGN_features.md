@@ -90,11 +90,20 @@ Gate C2/C3 behind C1 being validated; this is the heaviest feature.
 |---|---|---|---|
 | **scRNA 10x** | reaction / lane | ambient RNA, doublets, depth, per-gene batch factor, capture efficiency | §B.2 |
 | **scRNA Smart-seq3** | plate (+ well) | plate + well effects; 5′ UMIs (low amplification noise) + full-length coverage; higher sensitivity / lower dropout than 10x | §B.2 + plate/well nesting |
-| **bulk DNA (WGS/WES)** | library / run (+ capture kit for WES) | coverage depth, **GC-bias curve**, mappability, PCR duplication, sequencing error, FFPE C>T deamination, (WES) per-target capture variability | per-batch GC→coverage curve + depth + error; per-bin CNA log-ratio noise |
-| **scDNA (DLP / 10x-CNV)** | chip / run (+ per-cell amplification) | very low coverage, **allelic dropout (ADO)**, MDA/MALBAC uneven amplification (per-cell), GC bias, doublets | per-cell amplification profile nested in run-batch; ADO rate |
+| **bulk DNA** (WGS / WES / panel) | library / run (+ capture kit) | coverage depth, **GC-bias curve**, mappability, PCR duplication, sequencing error, FFPE C>T deamination; breadth-dependent capture bias (see below) | per-batch GC→coverage curve + depth + error; per-bin CNA log-ratio noise |
+| **single-cell DNA** (WGS / WES / panel; DLP, 10x-CNV, Tapestri…) | chip / run (+ per-cell amplification) | very low coverage, **allelic dropout (ADO)**, MDA/MALBAC uneven amplification (per-cell), GC bias, doublets; same breadth axis | per-cell amplification profile nested in run-batch; ADO rate |
 | **spatial (Visium)** | slide / section | per-spot capture efficiency (**spatially autocorrelated**, edge effects), spot library size, lateral mRNA diffusion/bleed, spot→cell aggregation (~1–10 cells / 55µm), ambient, per-gene batch factor, **section plane** | spatially-correlated capture field + spot aggregation + diffusion kernel + §B.2 per-gene factor |
 
 Key modality-specific notes:
+- **Capture breadth (WGS / WES / targeted panel) is orthogonal to bulk-vs-single-cell** — both
+  bulk and single-cell DNA can be any of the three. Breadth sets three things: (i) the **observed
+  locus set** — WGS = all genome positions; WES = an exon/gene subset; panel = a small designated
+  set (e.g. the driver genes); (ii) the **depth regime** — WGS low, WES moderate on-target, panel
+  very high; (iii) the **dominant capture bias** — WGS GC bias, WES per-target/probe capture
+  variability, panel per-amplicon bias. In iscc this is a `breadth` + `target_genes` parameter on
+  the DNA assay (reusing `dna.py`'s existing `target_genes`), applied identically to bulk and sc.
+  Downstream implication: panel → deep VAF on few drivers but poor genome-wide CNA; WGS → good CNA,
+  shallow VAF; WES → coding SNVs + coarse CNA.
 - **Bulk/sc DNA**: the batch effect that matters for *CNA calling* is the GC/coverage bias and the
   per-bin log-ratio noise level (what panel-of-normals normalization targets); for *VAF* it is
   depth-driven binomial noise + error rate. Model batch = GC-curve + depth + error (+ ADO for sc).
@@ -111,7 +120,7 @@ src/iscc/data/
   assay.py        # Assay base: protocol + batch hyper-params + seed -> Batch realization
   batch.py        # Batch: per-gene factor draw, depth, dispersion, ambient, doublets (per modality)
   rna.py          # scRNA: protocol presets 10x / smart-seq3, applies Batch
-  dna.py          # bulk + sc DNA: GC/coverage/ADO, applies Batch
+  dna.py          # bulk + single-cell DNA × {WGS, WES, panel} breadth; GC/coverage/ADO, applies Batch
   visium.py       # spatial: capture field + aggregation, applies Batch
   reads.py        # C1 counts -> (C2 FASTQ -> C3 BAM)
 ```
@@ -124,8 +133,9 @@ data — so realistic defaults can be *learned*, not guessed.
 - **F2** — dissociation biases (composition bias, doublets) + liquid biopsy.
 - **F3** — **scRNA batch model + 10x / Smart-seq3 presets** (the user's headline ask); multi-batch
   output with ground-truth labels.
-- **F4** — bulk DNA technical (depth, GC bias, error, VAF/coverage tables) = read-counts C1.
-- **F5** — scDNA (ADO + per-cell amplification, nested in run-batch).
+- **F4** — bulk DNA technical (depth, GC bias, error, VAF/coverage tables) across **WGS/WES/panel**
+  breadth = read-counts C1.
+- **F5** — single-cell DNA (ADO + per-cell amplification, nested in run-batch), same WGS/WES/panel breadth.
 - **F6** — spatial batch (spatially-correlated capture field, diffusion, section plane).
 - **F7** — read emission C2 (FASTQ) → C3 (BAM).
 
