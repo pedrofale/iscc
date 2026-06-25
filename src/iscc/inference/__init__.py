@@ -4,6 +4,9 @@ from .indices import (
     driver_combination_counts,
     clonal_diversity,
     mean_drivers_per_cell,
+    tree_balance_j1,
+    clone_tree,
+    tree_balance,
     mode_indices,
 )
 
@@ -12,5 +15,8 @@ __all__ = [
     "driver_combination_counts",
     "clonal_diversity",
     "mean_drivers_per_cell",
+    "tree_balance_j1",
+    "clone_tree",
+    "tree_balance",
     "mode_indices",
 ]

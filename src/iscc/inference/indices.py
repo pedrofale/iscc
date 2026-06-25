@@ -2,16 +2,21 @@
 
 Noble characterise a tumour's *mode of evolution* by a handful of indices read off its clone
 phylogeny: the mean number of driver mutations per cell (``n``), the clonal diversity (``D``,
-inverse-Simpson over driver-mutation combinations), and the tree-balance index ``J1``. This
-module implements ``n`` and ``D``; the more involved ``J1`` tree-balance metric lands in a
-later milestone (M0b).
+inverse-Simpson over driver-mutation combinations), and the tree-balance index ``J1``.
 
 A *clone* here is a **driver-mutation combination**: the set of mutated driver positions
 (oncogene / TSG indices) a genotype carries. Genotypes that differ only in passenger SNVs or
 copy number but share the same set of mutated drivers are the same clone, matching Noble's
 definition. Driver positions are read from the same oncogene/TSG indices and per-genotype
 ``get_snvs`` already used by ``GenotypeTumor.make_cell_data``.
+
+``J1`` is the Lemant et al. (2022) "robust, universal" tree-balance index in ``[0, 1]`` (the
+metric Noble 2022 uses): a clone-size-weighted average of per-node normalised Shannon entropy
+over the *clone* phylogeny. We obtain that phylogeny by contracting the genotype genealogy
+(``genotypes_parents``) onto driver-mutation combinations, with node sizes = clone cell counts.
 """
+import math
+
 import numpy as np
 
 
@@ -30,6 +35,19 @@ def inverse_simpson(counts):
     return float(1.0 / np.square(p).sum())
 
 
+def _driver_indices(tumor):
+    """Flat genome indices of the driver positions (oncogenes + TSGs)."""
+    onc = tumor.selection.get_oncogenes()
+    tsg = tumor.selection.get_tsgs()
+    return np.concatenate([onc, tsg]).astype(int)
+
+
+def _driver_combo(tumor, gid, driver_idx):
+    """``frozenset`` of mutated driver positions (VAF > 0) carried by genotype ``gid``."""
+    snv = tumor.genotypes[gid].get_snvs()
+    return frozenset(driver_idx[snv[driver_idx] > 0].tolist())
+
+
 def driver_combination_counts(tumor):
     """Map each cancer driver-mutation combination -> total cell count.
 
@@ -37,15 +55,12 @@ def driver_combination_counts(tumor):
     indices with VAF > 0) carried by a genotype. Cancer genotypes are pooled by combination and
     weighted by their cell counts; normal cells are excluded.
     """
-    onc = tumor.selection.get_oncogenes()
-    tsg = tumor.selection.get_tsgs()
-    driver_idx = np.concatenate([onc, tsg]).astype(int)
+    driver_idx = _driver_indices(tumor)
     combos = {}
     for gid, cnt in tumor.genotypes_counts.items():
         if not tumor._is_cancer(gid):
             continue
-        snv = tumor.genotypes[gid].get_snvs()
-        mutated = frozenset(driver_idx[snv[driver_idx] > 0].tolist())
+        mutated = _driver_combo(tumor, gid, driver_idx)
         combos[mutated] = combos.get(mutated, 0) + cnt
     return combos
 
@@ -68,15 +83,146 @@ def mean_drivers_per_cell(tumor):
     return float(sum(len(combo) * cnt for combo, cnt in combos.items()) / total)
 
 
-def mode_indices(tumor):
-    """Noble ``(n, D)`` evolutionary-mode indices, plus the clone count, in one pass.
+def tree_balance_j1(parents, sizes):
+    """Lemant et al. (2022) ``J1`` tree-balance index of a rooted tree, in ``[0, 1]``.
 
-    Returns ``dict(n=..., D=..., n_clones=...)`` over the tumour's *cancer* population. With no
-    cancer cells, ``n`` and ``D`` are ``nan`` and ``n_clones`` is ``0``. ``J1`` is added in M0b.
+    ``J1`` is the size-weighted mean, over internal nodes, of each node's normalised Shannon
+    entropy of its child-subtree magnitudes. ``1`` = every internal split perfectly balanced;
+    ``0`` = a fully imbalanced caterpillar. It is robust to (and sensitive to) internal node
+    sizes, which is why it suits clone phylogenies whose ancestral clones still carry cells.
+
+    Definitions (Lemant et al. 2022):
+      * subtree magnitude ``S_i`` = node ``i``'s own size **plus** all descendant sizes;
+      * ``S*_i = Σ_{j∈children(i)} S_j`` — descendant magnitude, **excluding** ``i``'s own size;
+      * node balance ``W_i = -Σ_j (S_j/S*_i)·log_{d}(S_j/S*_i)`` over the ``d = outdegree(i)``
+        children (``W_i = 0`` for ``d < 2``). The node's *own* size never enters its own entropy
+        — only its children's subtree magnitudes do — but it does enter ``S_i`` seen by the parent;
+      * ``J1 = Σ_i S*_i·W_i / Σ_i S*_i`` over internal nodes with ``S*_i > 0``.
+
+    Args:
+        parents: ``dict`` child -> parent; roots are nodes that never appear as a key.
+        sizes: ``dict`` node -> non-negative size. Nodes absent here are zero-size (structural).
+    Returns:
+        ``J1`` as a float, or ``nan`` for a tree with no branching mass (e.g. a single node).
+    """
+    nodes = set(sizes) | set(parents) | set(parents.values())
+    children = {u: [] for u in nodes}
+    for child, parent in parents.items():
+        children[parent].append(child)
+    roots = [u for u in nodes if u not in parents]
+
+    # Subtree magnitudes S_i (own size + descendants), iterative post-order so deep
+    # (caterpillar) clone trees don't overflow the recursion limit.
+    S = {}
+    for root in roots:
+        stack = [(root, False)]
+        while stack:
+            u, expanded = stack.pop()
+            if expanded:
+                S[u] = float(sizes.get(u, 0.0)) + sum(S[c] for c in children[u])
+            else:
+                stack.append((u, True))
+                for c in children[u]:
+                    stack.append((c, False))
+
+    num = den = 0.0
+    for i in nodes:
+        kids = children[i]
+        star = sum(S[c] for c in kids)          # S*_i, excludes node i's own size
+        if star <= 0:                           # leaf, or whole subtree is zero-size
+            continue
+        den += star                             # single-child nodes weigh in but add 0 balance
+        if len(kids) < 2:
+            continue
+        entropy = 0.0
+        for c in kids:
+            p = S[c] / star
+            if p > 0:
+                entropy -= p * math.log(p)
+        num += star * (entropy / math.log(len(kids)))
+    return num / den if den > 0 else float("nan")
+
+
+def clone_tree(tumor):
+    """Contract the genotype genealogy onto the driver-mutation *clone* phylogeny.
+
+    Each clone node is a maximal connected block of genotypes sharing one driver combination
+    (so a convergent combination arising in two lineages stays two nodes, as the tree demands).
+    The node is keyed by the block's root genotype id; its size is the summed cell count of the
+    block's *extant* genotypes; its parent is the clone node of the block-root's parent genotype.
+    Ancestral blocks that are extinct but bridge extant clones are kept (as branch points) with
+    whatever extant mass flows through them.
+
+    Returns ``(parents, sizes)`` ready for :func:`tree_balance_j1`.
+    """
+    driver_idx = _driver_indices(tumor)
+    combo_cache = {}
+
+    def combo(gid):
+        if gid not in combo_cache:
+            combo_cache[gid] = _driver_combo(tumor, gid, driver_idx)
+        return combo_cache[gid]
+
+    root_cache = {}
+
+    def clone_root(gid):
+        """Topmost genotype of ``gid``'s same-combination block (its clone's identity)."""
+        if gid in root_cache:
+            return root_cache[gid]
+        p = tumor.genotypes_parents.get(gid)
+        if p is not None and tumor._is_cancer(p) and combo(p) == combo(gid):
+            r = clone_root(p)
+        else:
+            r = gid
+        root_cache[gid] = r
+        return r
+
+    sizes = {}
+    for gid, cnt in tumor.genotypes_counts.items():
+        if not tumor._is_cancer(gid):
+            continue
+        r = clone_root(gid)
+        sizes[r] = sizes.get(r, 0) + cnt
+
+    # Walk clone-node parents up to the founder, materialising any extinct bridging blocks.
+    parents = {}
+    seen = set(sizes)
+    stack = list(sizes)
+    while stack:
+        r = stack.pop()
+        p = tumor.genotypes_parents.get(r)
+        if p is None or not tumor._is_cancer(p):
+            continue                            # founder block / non-cancer ancestor -> a root
+        pr = clone_root(p)
+        parents[r] = pr
+        if pr not in seen:
+            seen.add(pr)
+            sizes.setdefault(pr, 0)
+            stack.append(pr)
+    return parents, sizes
+
+
+def tree_balance(tumor):
+    """Noble/Lemant ``J1`` tree-balance index of the tumour's driver-clone phylogeny."""
+    parents, sizes = clone_tree(tumor)
+    return tree_balance_j1(parents, sizes)
+
+
+def mode_indices(tumor):
+    """Noble ``(n, D, J1)`` evolutionary-mode indices, plus the clone count, in one pass.
+
+    Returns ``dict(n=..., D=..., J1=..., n_clones=...)`` over the tumour's *cancer* population.
+    With no cancer cells everything is ``nan`` (``n_clones`` ``0``); ``J1`` is also ``nan`` when
+    the clone phylogeny has no branching (a single clone), where tree balance is undefined.
     """
     combos = driver_combination_counts(tumor)
     total = sum(combos.values())
     if total == 0:
-        return dict(n=float("nan"), D=float("nan"), n_clones=0)
+        return dict(n=float("nan"), D=float("nan"), J1=float("nan"), n_clones=0)
     n = sum(len(combo) * cnt for combo, cnt in combos.items()) / total
-    return dict(n=float(n), D=inverse_simpson(combos.values()), n_clones=len(combos))
+    return dict(
+        n=float(n),
+        D=inverse_simpson(combos.values()),
+        J1=tree_balance(tumor),
+        n_clones=len(combos),
+    )
