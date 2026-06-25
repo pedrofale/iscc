@@ -171,11 +171,6 @@ class GlandularTumor(Tumor):
                     pos.append(tup)
                     possible_demes.append(self.grid[tup[0]][tup[1]])
 
-        # Other structure
-        # for in_border in self.structure_in_borders:
-        #     for tup in in_border:
-        #         possible_demes.append(self.grid[tup[0]][tup[1]])
-
         return possible_demes
 
 

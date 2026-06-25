@@ -82,16 +82,6 @@ def main(
         camera.snap()
     animation = camera.animate()
     animation.save(os.path.join(output_path, f'slice{suffix}.gif'))
-    #
-    #
-    # def animate(i):
-    #     return plot_grid(grids[i], cmap, genotypes, ax=ax)
-    # writer = animation.PillowWriter(fps=fps,
-    #                                 metadata=dict(artist='Me'),
-    #                                 bitrate=bitrate)
-    # ani = animation.FuncAnimation(fig, animate, repeat=True,
-    #                                 frames=len(grids), interval=interval)
-    # ani.save(os.path.join(output_path, f'slice{suffix}.gif'), writer=writer)
 
 if __name__ == "__main__":
     main()

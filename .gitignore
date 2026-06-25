@@ -7,4 +7,5 @@ poetry.lock
 notebooks/.ipynb_checkpoints
 notebooks/notebook_example/
 notebooks/example_out/
-.DS_Storedata/
+.DS_Store
+data/
