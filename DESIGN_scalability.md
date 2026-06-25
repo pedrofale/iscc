@@ -167,3 +167,41 @@ Keep the public surface (`GlandularTumor`, `grow`, `write`, `cell_data`, `isccsi
   map cleanly onto the new model.
 - **Per-cell stochasticity** (expression noise, sequencing dropout) moves to the
   materialization/assay stage, consistent with the pipeline's biology → lab → assay split.
+
+## 7. Tumor-size realism & computational cost — REQUIRED ASSESSMENT (future session)
+
+We have not yet established how large — and therefore how *realistic* — a tumor iscc can grow,
+nor the wall-time cost of reaching realistic sizes. This is a prerequisite for credible "realistic
+data" claims and it gates the ABC inference (DESIGN_inference §A: ~10^4 sims, each needing a
+plausibly-sized tumor, is infeasible if a single sim is slow).
+
+**Reference population sizes to compare against:**
+- Real tumour at diagnosis: ~10⁹–10¹⁰ cells (~1 cm³).
+- **Noble et al. 2022**: simulate to **~10⁶ cells**, with demes/glands holding **512–8,192 cells**
+  each (within-deme Moran process; between-deme fission/migration).
+- **Jeffrey West / HAL** 2D agent-based models: typically **~10⁴–10⁶ agents** (on-lattice; HAL is
+  built for efficiency + real-time viz). See HAL (Bravo et al. 2020) and the "seven-step guide to
+  spatial ABM of tumour evolution" (arXiv:2311.03569).
+
+**Two distinct bottlenecks (keep separate):**
+1. **Size ← Θ(N) sequential events.** Even with O(log n) event *sampling* (§3), the engine does
+   **one birth/death per `update()`**, so reaching N cells needs ~N events (more with turnover).
+   This — not per-event cost — is what caps achievable size. **Fix: tau-leaping** (as in CINner):
+   per time-step τ, draw `Poisson(rate · count · τ)` births/deaths per (deme, genotype) and apply
+   in batch, so wall-time scales with #clones × #timesteps rather than #cells. This is the main
+   lever for realistic size; needs care at carrying capacity and to preserve reproducibility.
+2. **Per-event cost ← #demes / #genotypes** (the §3 Fenwick/alias item). Independent of (1);
+   matters once grids get large.
+
+**Deme abstraction lever.** Setting `carrying_capacity` to gland scale (Noble's 512–8,192) lets
+each deme/agent represent thousands of biological cells, so #agents ≪ #cells. But *growing into*
+those cells still costs events unless (1) is addressed — the abstraction reduces agent count, not
+the number of birth events.
+
+**Deliverable for the assessment session:**
+- Benchmark the genotype engine: cells/s and events/s, **max feasible tumor size**, and whether
+  throughput degrades as #demes/#genotypes grow (isolating bottleneck 2).
+- Project wall-time to 10⁶ (Noble parity) and 10⁹ (diagnosis) cells, with and without tau-leaping.
+- Decide: implement tau-leaping (and/or alias sampling) and re-benchmark; document the realistic
+  size/time envelope vs Noble & West.
+- (A benchmark script was drafted in this session but deliberately not run; start there.)
