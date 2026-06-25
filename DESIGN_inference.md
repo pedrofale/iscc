@@ -58,7 +58,7 @@ by module, against each module's leading competitor.
 | Tumor + CNA | CINner / CNAsim: ABC-infer selection + CNA rates from PCAWG; fit real gain/loss; recover on synthetic | no inference, no fit-to-real | ABC engine + CNA/SNV summary stats; recovery → fit-to-real |
 | Tumor evolution mode | Noble 2022: characterize tumours by `(n, D, J₁)` indices; overlay real tumour phylogenies in index space | qualitative dispersal→mode with non-Noble metrics | Noble indices (§D.1) + real-tumour overlay (§D.2), single structure |
 | scRNA | Splatter `splatEstimate`, scDesign2/3: estimate NB mean/dispersion/dropout/library-size (+ batch) from real data | params hardcoded | `rna.estimate(real_adata)` → fitted PBMC3k; also fit batch model (DESIGN_features §B) |
-| DNA assay | CellCoal / CNAsim: realistic coverage, error, allelic dropout | counts-only, fixed fpr/fnr | estimate coverage+error from real bulk/sc DNA |
+| DNA assay | CellCoal / CNAsim: realistic coverage, error, allelic dropout | counts-only, fixed fpr/fnr | breadth-aware (WGS/WES/panel × bulk/sc) estimate of coverage/GC/ADO or panel VAF |
 | Spatial (Visium) | SRTsim / scDesign3: estimate spot params from real Visium; validate spatial autocorrelation | basic aggregation | estimate spots/capture; validate Moran's I |
 
 ## A. Tumor / CNA inference (flagship — CINner-equivalent)
@@ -131,8 +131,11 @@ Then:
 
 ## C. DNA & Visium estimation (later)
 Fit the per-modality technical parameters defined in `DESIGN_features.md` §D.
-- **DNA:** estimate coverage (mean + overdispersion), GC-bias curve, error/ADO rates from a real
-  bulk/sc DNA dataset; validate VAF accuracy and coverage distribution. (Couples to read-level
+- **DNA:** **breadth-aware** (WGS / WES / panel — the orthogonal axis in `DESIGN_features.md` §D,
+  applies to both bulk and single-cell). Estimate and validate the statistics that a given breadth
+  actually exposes: WGS/WES → coverage depth + GC-bias curve + (sc) ADO, validated on coverage and
+  CNA log-ratio distributions; targeted panel → deep on-target depth + per-amplicon bias, validated
+  on VAF accuracy (no genome-wide CNA). `estimate(real, breadth=…)`. (Couples to read-level
   emission, DESIGN_features C/F4–F5.)
 - **Visium:** estimate spots-per-tissue, counts-per-spot, and the (spatially autocorrelated)
   capture-efficiency field from a real Visium dataset; validate spatial autocorrelation (Moran's
@@ -218,7 +221,9 @@ validation/
   for 35 real tumours on the iscc sweep; needs only a small CSV, not a genome-mapping layer.
 - **M3b — real-genome mode + fit-to-real PCAWG/TCGA + Charm correlation** (A.5, A.4.2–3).
   The CINner-parity CNA result; needs external data + a genome-mapping layer.
-- **M4 — DNA/Visium estimation** (C). Couples to read-level emission and a real Visium dataset.
+- **M4 — DNA/Visium estimation** (C). DNA is **breadth-aware** (WGS/WES/panel × bulk/sc), so M4
+  covers a small matrix of breadth-specific estimate/validate cases. Couples to read-level emission
+  and a real Visium dataset.
 
 ## Risks
 - **Compute:** ABC needs thousands of sims. The genotype engine is fast (~seconds for a small
