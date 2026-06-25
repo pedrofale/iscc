@@ -144,4 +144,27 @@ data — so realistic defaults can be *learned*, not guessed.
   biology but differ technically (e.g. kBET / iLISI-style mixing only after correction).
 - Benchmark utility: integrate two batches, measure recovery of the *known* clone/type labels.
 - DNA/spatial: validate coverage/GC and spatial-autocorrelation distributions vs real references.
-```
+
+## G. Deliverables — per-module demo notebooks (required for every feature)
+
+Every feature module ships, alongside its **code + tests**, a **dedicated demo notebook** under
+`notebooks/` that (a) shows how to use the module and (b) demonstrates the **impact of its key
+parameters**, starting from a *realistic upstream input*. These complement the end-to-end pipeline
+notebooks (`01_pipeline_walkthrough`, `02_tumor_growth`, `03_data_overview`), which show the whole
+chain; these are single-module deep-dives. (They also become the reference for "what each knob does"
+in the eventual web platform — see `DESIGN_platform.md`.)
+
+Each notebook should: take a realistic input from the previous stage (e.g. the scRNA notebook starts
+from a tumour **dissociation/sample**, not a raw tumour); **sweep the module's key parameters** and
+visualize their effect on the output; and surface the ground truth (clone / type / coords) so the
+parameter effect is interpretable.
+
+| Notebook | Module (milestone) | Sweeps / shows |
+|---|---|---|
+| `sampling_biopsy.ipynb` | biopsy/sampling (F1) | region geometry (needle/punch/multi-region) → observed clonal heterogeneity |
+| `dissociation.ipynb` | dissociation (F2) | composition bias, doublet rate → cell-type proportions vs ground truth |
+| `assay_scrna.ipynb` | scRNA assay (F3) | **given a dissociation:** depth, dispersion, dropout, **batch strength / #batches**, protocol (10x vs Smart-seq3) → counts, UMAP, library-size dist, batch mixing |
+| `assay_dna.ipynb` | bulk + sc DNA (F4/F5) | **breadth (WGS/WES/panel)**, depth, GC bias, ADO → coverage / VAF / CNA profiles |
+| `assay_spatial.ipynb` | Visium (F6) | capture field, diffusion, spot size, section → spot counts + spatial autocorrelation |
+| `treatment.ipynb` | treatment (shipped) | chemo/targeted/immuno, dose schedule, adaptive vs continuous → burden over time (backfill) |
+| `reads.ipynb` | read emission (F7) | coverage, error → FASTQ / VAF tables |
