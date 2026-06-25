@@ -12,10 +12,11 @@ draws "how many of the count" rather than "which cell"), but each event is O(1) 
 arithmetic on counts. A genotype is carried by a representative cell (reusing its genome /
 mutate / get_snvs / get_cnvs / get_exp and CINner fitness).
 
-Normal cells (epithelial/stromal) are seeded as **static** genotype counts (they don't divide
-or mutate in the configs we ship); they provide tissue structure, cell-type labels, and the
-local immune density that the cancer death rate reads. Immune dynamics and genotype-level
-treatment are minimal here (see the immune-formula note in AUDIT.md).
+Normal cells (epithelial/stromal/immune) are seeded as **static** genotype counts (they don't
+divide or mutate); they provide tissue structure, cell-type labels, and the local immune density
+that the cancer death rate reads. Treatment runs on this engine (see grow/_apply_treatment) and
+immune killing is additive contact pressure (see _death_rate); the immune compartment itself is
+static (recruitment/migration are future work).
 """
 import os
 from collections import Counter
@@ -82,6 +83,13 @@ class GenotypeTumor:
         self.genotypes_counts = Counter()
         self._next_ord = 0
 
+        # per-immune-cell contact kill hazard, and per-step treatment overrides
+        # (gid -> extra death hazard / overridden immune resistance), refreshed each
+        # treated step by _apply_treatment so they never corrupt the shared genotype.
+        self._immune_prob_kill = (immune_cell_params or {}).get("prob_kill", 0.01)
+        self._tx_death_add = {}
+        self._tx_immune_resist = {}
+
         # founder cancer genotype
         founder = CancerCell(
             n_segments=self.n_segments, segment_size=self.segment_size, seed=seed,
@@ -109,6 +117,19 @@ class GenotypeTumor:
         else:
             center = (self.grid_size // 2) * self.grid_size + (self.grid_size // 2)
             self._add(center, self.founder_id, 1)
+
+        # Optional immune microenvironment: seed immune cells in every deme so that
+        # cancer growing into them experiences local immune pressure (and so that
+        # immunotherapy has a substrate to act on). The count scales with carrying
+        # capacity (immune_density = immune cells per capacity unit) so the immune
+        # fraction is not washed out once a deme fills with cancer. Static for now
+        # (no division/migration yet).
+        self.immune_density = spatial_params.get("immune_density", 0.0)
+        n_immune = int(round(self.immune_density * max(self.carrying_capacity, 1)))
+        if n_immune > 0:
+            imm = self._normal_genotype("immune")
+            for i in range(n_demes):
+                self._add(i, imm, n_immune)
 
         self.deme_rates = np.array([self._deme_rate(i) for i in range(n_demes)], dtype=float)
         self.traces = []
@@ -190,17 +211,25 @@ class GenotypeTumor:
         return immune / total
 
     def _death_rate(self, gid, deme_idx):
+        """Cancer death rate = crowding-modulated baseline + local immune killing + treatment.
+
+        Mirrors the corrected Deme.get_cancer_death_rate: immune killing is additive contact
+        pressure (more local immune cells -> higher death, attenuated by immune resistance),
+        and active therapy adds a death hazard (chemo/targeted) or strips immune resistance
+        (immunotherapy, via the per-step _tx_* overrides).
+        """
         rep = self.genotypes[gid]
         deme = self.demes[deme_idx]
-        base = rep.evolutionary_parameters["death_rate"]
-        ir = rep.evolutionary_parameters["immune_resistance"]
-        frac = self._immune_fraction(deme)
         total = sum(deme.values())
-        # faithful to Deme.get_cancer_death_rate (incl. the flagged immune-formula quirk)
-        factor = frac ** ir
-        if total > self.carrying_capacity:
-            factor *= self.carrying_capacity
-        return min(base * factor, self.maximum_death_rate)
+        crowd = self.carrying_capacity if total > self.carrying_capacity else 1.0
+        death = min(rep.evolutionary_parameters["death_rate"] * crowd, self.maximum_death_rate)
+
+        ir = self._tx_immune_resist.get(gid, rep.evolutionary_parameters["immune_resistance"])
+        ir = min(max(ir, 0.0), 1.0)
+        death += self._immune_prob_kill * self._immune_fraction(deme) * (1.0 - ir)
+
+        death += self._tx_death_add.get(gid, 0.0)
+        return death
 
     def _cancer_gids(self, deme):
         return [gid for gid in deme if self._is_cancer(gid)]
@@ -253,10 +282,13 @@ class GenotypeTumor:
             mut_prob = rep.mutation_rate / (rep.mutation_rate + disp)
             if rng.random() < mut_prob:
                 child = rep.divide()
-                child.mutate(rng, self.selection)
-                self._register(child)
-                self.genotypes_parents[child.genotype_id] = rep.genotype_id
-                self._add(di, child.genotype_id, 1)
+                if child.mutate(rng, self.selection):
+                    self._register(child)
+                    self.genotypes_parents[child.genotype_id] = rep.genotype_id
+                    self._add(di, child.genotype_id, 1)
+                else:
+                    # no-op mutation (saturated allele): same genotype, grows in place
+                    self._add(di, rep.genotype_id, 1)
             else:
                 nbrs = self._neighbors(di)
                 tgt = nbrs[int(rng.choice(len(nbrs)))] if nbrs else di
@@ -266,12 +298,70 @@ class GenotypeTumor:
         for idx in affected:
             self._refresh_rate(idx)
 
-    def grow(self, n_steps=1000, seed=None, **kwargs):
+    # --- treatment (genotype-level) -----------------------------------------
+    def _is_treatment_target(self, treatment, rep):
+        """Is this cancer genotype sensitive to the therapy?
+
+        Broad therapies (chemo, or gene-targeted therapy with no checkpoints) hit every
+        cancer cell; gene-specific therapies delegate to the treatment's expression-based
+        `is_target`. The representative's baseline expression is set so `expresses` is
+        deterministic.
+        """
+        if rep.type != "cancer":
+            return False
+        targets = getattr(treatment, "targets", None)
+        if not targets:
+            return True
+        rep.baseline_exp = self.celltype_exps["cancer"]
+        return bool(treatment.is_target(rep, mut_effects=self.selection.mut_effects))
+
+    def _apply_treatment(self, treatment, dosage):
+        """Recompute per-genotype treatment effects for the current dosage.
+
+        Treatment is a transient, dose-dependent modifier, not a genotype property, so the
+        effect lives in self._tx_* (refreshed every treated step) rather than mutating the
+        shared genotype. The per-cell stochastic effectiveness/toxicity of the cell engine
+        becomes an expected, dose-scaled intensity over the exchangeable count.
+        """
+        self._tx_death_add = {}
+        self._tx_immune_resist = {}
+        if treatment is None or dosage <= 0:
+            return
+        affects = getattr(treatment, "affects", "death_rate")
+        kill_rate = getattr(treatment, "kill_rate", 0.8)
+        for gid in list(self.genotypes_counts):
+            if not self._is_cancer(gid):
+                continue
+            rep = self.genotypes[gid]
+            target = self._is_treatment_target(treatment, rep)
+            tr = rep.evolutionary_parameters["treatment_resistance"]
+            p = treatment.effectiveness if target else treatment.toxicity
+            intensity = dosage * p * (1.0 - min(max(tr, 0.0), 1.0))  # in [0, 1]
+            if intensity <= 0:
+                continue
+            if affects == "immune_resistance":
+                ir = rep.evolutionary_parameters["immune_resistance"]
+                self._tx_immune_resist[gid] = ir * (1.0 - intensity)
+            else:
+                base = rep.evolutionary_parameters["death_rate"]
+                self._tx_death_add[gid] = intensity * max(kill_rate - base, 0.0)
+
+    def grow(self, n_steps=1000, seed=None, treatment=None, **kwargs):
         if seed is None:
             seed = self.seed
         self.traces.append(dict(genotypes_counts=dict(self.genotypes_counts)))
+        prev_dose = 0.0
         for local_step in range(n_steps - 1):
             rng = np.random.default_rng(seed + self.step + local_step)
+            if treatment is not None:
+                dose = treatment.get_dosage(self.step + local_step, self.get_tumor_size())
+                self._apply_treatment(treatment, dose)
+                # death rates changed for every genotype while a dose is on (or just turned
+                # off); refresh the whole rate vector so event sampling stays correct.
+                if dose > 0 or prev_dose > 0:
+                    self.deme_rates = np.array(
+                        [self._deme_rate(i) for i in range(len(self.demes))], dtype=float)
+                prev_dose = dose
             self.update(rng)
             self.traces.append(dict(genotypes_counts=dict(self.genotypes_counts)))
         self.step += n_steps

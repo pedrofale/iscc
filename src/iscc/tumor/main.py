@@ -10,6 +10,9 @@ Inspired by Noble et al, 2019; selection follows a CINner-style copy-number mode
 from .models.glandular import GlandularTumor
 from .models.mixed import MixedTumor
 from .models.count import GenotypeTumor
+from ..treatment.chemotherapy import Chemotherapy
+from ..treatment.targeted import TargetedTherapy
+from ..treatment.immunotherapy import Immunotherapy
 
 import click
 import logging
@@ -23,6 +26,33 @@ TUMOR_MODELS = {
 }
 
 
+def _gene_coords(flat_indices, segment_size):
+    """Convert flat gene indices into (segment, position) coordinates."""
+    return [(int(i) // segment_size, int(i) % segment_size) for i in flat_indices]
+
+
+def build_treatment(kind, tumor, adaptive, start, duration, max_tumor_size):
+    """Construct a treatment of the requested kind, targeting the tumor's drivers.
+
+    chemo   -> kills all cancer cells (death-rate therapy)
+    targeted-> kills cancer cells expressing oncogenes (death-rate therapy)
+    immuno  -> strips immune resistance so the local immune cells kill more (needs
+               immune cells present: set spatial_params.immune_density in the config)
+    """
+    if kind in (None, "none"):
+        return None
+    kw = dict(adaptive=adaptive, start=start, duration=duration, max_tumor_size=max_tumor_size)
+    seg = tumor.selection.segment_size
+    if kind == "chemo":
+        return Chemotherapy(**kw)
+    if kind == "targeted":
+        targets = _gene_coords(tumor.selection.get_oncogenes(), seg)
+        return TargetedTherapy(targets=targets, **kw)
+    if kind == "immuno":
+        return Immunotherapy(immune_checkpoints=[], **kw)  # broad: all cancer
+    raise click.ClickException(f"Unknown treatment '{kind}'.")
+
+
 @click.command(help="Simulate spatial tumor growth (stage 1 of the iscc pipeline).")
 @click.option(
     "--sim-config",
@@ -34,10 +64,20 @@ TUMOR_MODELS = {
 @click.option("-r", "--random-seed", default=42, help="Random seed.")
 @click.option("--batch-size", default=1, help="Number of demes updated per step.")
 @click.option(
+    "--treatment", "treatment_kind", default="none",
+    type=click.Choice(["none", "chemo", "targeted", "immuno"]),
+    help="Apply a therapy during growth (immuno needs spatial_params.immune_density>0).",
+)
+@click.option("--adaptive", is_flag=True, help="Adaptive dosing (dose only above --max-tumor-size).")
+@click.option("--treatment-start", default=0, help="Step at which treatment begins.")
+@click.option("--treatment-duration", default=None, type=int, help="Treatment duration in steps (default: until the end).")
+@click.option("--max-tumor-size", default=100_000, help="Adaptive-dosing tumor-size threshold.")
+@click.option(
     "--log", default=0, help="Logging level. 0 = critical, 1 = info, 2 = debug."
 )
 @click.option("-o", "--output-path", default="./sim_out", help="Output directory.")
-def main(sim_config, steps, random_seed, batch_size, log, output_path):
+def main(sim_config, steps, random_seed, batch_size, treatment_kind, adaptive,
+         treatment_start, treatment_duration, max_tumor_size, log, output_path):
     logging.basicConfig(
         level={0: logging.CRITICAL, 1: logging.INFO, 2: logging.DEBUG}.get(log, logging.CRITICAL)
     )
@@ -59,12 +99,21 @@ def main(sim_config, steps, random_seed, batch_size, log, output_path):
     logging.info("Building %s tumor from %s", mode, sim_config)
     tumor = TUMOR_MODELS[mode](config=sim_config, seed=random_seed)
 
+    treatment = build_treatment(treatment_kind, tumor, adaptive, treatment_start,
+                                treatment_duration, max_tumor_size)
+    if treatment is not None:
+        logging.info("Applying %s therapy (adaptive=%s, start=%d)",
+                     treatment_kind, adaptive, treatment_start)
+
     logging.info("Growing for %d steps (seed=%d)", steps, random_seed)
-    tumor.grow(n_steps=steps, seed=random_seed, batch_size=batch_size)
+    tumor.grow(n_steps=steps, seed=random_seed, batch_size=batch_size, treatment=treatment)
 
     tumor.write(output_path)
     logging.info("Saved tumor (size=%d) to %s", tumor.get_tumor_size(), output_path)
-    print(f"Simulation ({mode}) finished: {tumor.get_tumor_size()} cells -> {output_path}")
+    msg = f"Simulation ({mode}) finished: {tumor.get_tumor_size()} cells -> {output_path}"
+    if treatment is not None:
+        msg += f" [treatment: {treatment_kind}]"
+    print(msg)
 
 
 if __name__ == "__main__":

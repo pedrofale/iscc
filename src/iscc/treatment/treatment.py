@@ -1,16 +1,25 @@
 import numpy as np
 
 class Treatment(object):
+    # Which evolutionary parameter the therapy modifies. Death-rate therapies
+    # (chemo, targeted) kill sensitive cells; immunotherapy instead strips immune
+    # resistance so the local immune microenvironment can kill the cell.
+    affects = "death_rate"
+
     def __init__(self, adaptive=False, start=0, duration=None,
                  dosage_decay=0.5, rounds=4,
                  rate_multiplier=2., toxicity=0.1, effectiveness=0.9,
-                 max_tumor_size=100_000):
+                 kill_rate=1.5, max_tumor_size=100_000):
         self.adaptive = adaptive
         self.start = start
         self.duration = duration
         self.rate_multiplier = rate_multiplier
         self.toxicity = toxicity
         self.effectiveness = effectiveness
+        # Death hazard imposed on a fully sensitive cell under full dose (genotype
+        # engine). Set above the max_birth_rate cap so even high-fitness (driver-amplified)
+        # sensitive clones regress, while resistant clones (treatment_resistance -> 1) escape.
+        self.kill_rate = kill_rate
         self.dosage_decay = dosage_decay
         self.rounds = rounds
         self.max_tumor_size = max_tumor_size

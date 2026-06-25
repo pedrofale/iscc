@@ -1,7 +1,6 @@
 import numpy as np
 
 from collections import Counter
-import logging
 
 
 class Deme(object):
@@ -85,7 +84,6 @@ class Deme(object):
 
     def apply_event(self, event, cell, rng=None):
         if event == "death":
-            pre_death_count = self.genotypes_counts[cell.genotype_id]
             del self.cells[cell]
             self.genotypes_counts[cell.genotype_id] -= 1
             self.types_counts[cell.type] -= 1
@@ -108,21 +106,12 @@ class Deme(object):
                     mutate = rng.binomial(1, mutation_prob)
 
                 if mutate:
-                    new_cell.mutate(rng, self.tumor.selection)
-                    # new_cell.genotype_id = f"{i:03}" + str(
-                    #     new_cell.genotype_id
-                    # )  # TODO: Maybe not a great idea to depend on number of cells
-                    self.genotypes_parents[
-                        new_cell.genotype_id
-                    ] = new_cell.parent.genotype_id
-                    if (
-                        self.genotypes_parents[new_cell.genotype_id]
-                        == new_cell.genotype_id
-                    ):
-                        raise Exception(
-                            f"Oh no! genotype is its own parent?!: {new_cell.genotype_id}"
-                        )
-                    self.tumor.register_parent(new_cell.genotype_id, new_cell.parent.genotype_id)
+                    # mutate() returns True only if it actually created a new genotype; a
+                    # saturated allele (infinite-sites exhausted) is a no-op, in which case
+                    # the daughter keeps the parent's genotype.
+                    if new_cell.mutate(rng, self.tumor.selection):
+                        self.genotypes_parents[new_cell.genotype_id] = new_cell.parent.genotype_id
+                        self.tumor.register_parent(new_cell.genotype_id, new_cell.parent.genotype_id)
                     self.add_cell(new_cell, genotype_id=new_cell.genotype_id)
                     self.deme_rate += new_cell.evolutionary_parameters['division_rate'] + new_cell.evolutionary_parameters['death_rate']
                     self.tumor.deme_rates[self.id] = self.deme_rate
@@ -191,12 +180,21 @@ class Deme(object):
             return min(cell_death_rate * self.carrying_capacity, self.maximum_death_rate)
         
     def get_cancer_death_rate(self, cell_death_rate, immune_cell_fraction, immune_resistance):
-        """Update prob of each cell dieing based on its own 
-        rate, the deme's carrying capacity and the fraction of immune cells"""
-        if len(self.cells) <= self.carrying_capacity:
-            return min(cell_death_rate * (immune_cell_fraction ** immune_resistance), self.maximum_death_rate)
-        else:
-            return min(cell_death_rate * (immune_cell_fraction ** immune_resistance) * self.carrying_capacity, self.maximum_death_rate)        
+        """Cancer death rate = crowding-modulated baseline death PLUS local immune killing.
+
+        Immune killing is *additive* contact pressure: more local immune cells raise the
+        death rate, attenuated by the cell's immune resistance. (The previous formula
+        `death * immune_fraction ** immune_resistance` was degenerate: it could only ever
+        lower the death rate, and an immune-free deme gave 0**r = 0, i.e. immortal cancer.)
+        """
+        crowd = self.carrying_capacity if len(self.cells) > self.carrying_capacity else 1.0
+        death = min(cell_death_rate * crowd, self.maximum_death_rate)
+        if immune_cell_fraction > 0:
+            kills = [c.prob_kill for c in self.cells if c.type == 'immune']
+            prob_kill = float(np.mean(kills)) if kills else 0.0
+            ir = min(max(immune_resistance, 0.0), 1.0)
+            death += prob_kill * immune_cell_fraction * (1.0 - ir)
+        return death
 
     def get_genotype_frequencies(self, normalize=True):
         # Get the genotype ids present in this deme and their frequencies.

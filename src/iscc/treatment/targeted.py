@@ -1,9 +1,10 @@
 from .treatment import Treatment
-import numpy as np
 
 class TargetedTherapy(Treatment):
     def __init__(self, targets, **kwargs):
-        super(Treatment, self).__init__(**kwargs)
+        # NB: must be super(TargetedTherapy, self); super(Treatment, self) would skip
+        # Treatment.__init__ entirely and leave the dosing attributes unset.
+        super(TargetedTherapy, self).__init__(**kwargs)
         self.targets = list(targets) # actual coordinates
     
     def _apply(self, cell):
