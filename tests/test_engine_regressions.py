@@ -98,12 +98,13 @@ def test_make_celltype_exps_sets_driver_genes(glandular_tumor):
 
 
 # --- A5: death_rate is not overwritten by the division-rate fitness ----------
-def test_death_rate_uses_update_death_rate():
+def test_death_rate_not_changed_by_genome_selection():
     selection = _make_selection()
     cell = _make_cancer_cell(selection)
     death_before = cell.evolutionary_parameters['death_rate']
-    cell.update_evolutionary_parameters(selection.update_dict)
-    # update_death_rate returns the param unchanged; the division fitness would change it.
+    cell.update_evolutionary_parameters(selection)
+    # death rate stays at the configured baseline; genome-driven selection acts on
+    # division/dispersal/resistance, not death (treatment changes death separately).
     assert cell.evolutionary_parameters['death_rate'] == death_before
 
 

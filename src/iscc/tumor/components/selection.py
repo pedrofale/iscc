@@ -38,6 +38,15 @@ class Selection(object):
         self.make_treatment_resistant()
         self.make_immune_resistant()
         self.make_expmap()
+
+        # Total number of genes in each category, used to make fitness *relative* to the
+        # all-wild-type diploid baseline (so the baseline is neutral and only deviations
+        # -- mutations and copy-number changes -- shift the rate; see update_* below).
+        self.N_onc = sum(len(x) for x in self.onc)
+        self.N_tsg = sum(len(x) for x in self.tsg)
+        self.N_disp = sum(len(x) for x in self.dispersal)
+        self.N_ir = sum(len(x) for x in self.immune_resistance)
+        self.N_tr = sum(len(x) for x in self.treatment_resistance)
         self.update_dict = {'viability': self.update_viability,
                             'division_rate': self.update_division_rate,
                             'dispersal_rate': self.update_dispersal_rate,
@@ -140,32 +149,6 @@ class Selection(object):
         tsgs = np.concatenate(tsgs)
         return tsgs        
 
-    # def update_viability(self, genome):
-    #     seg_cns = []
-    #     n_mutated_drivers = 0
-    #     for seg in range(len(genome)):
-    #         cn = 0
-    #         for hap in genome[seg]:
-    #             cn += len(genome[seg][hap]) # number of alleles
-    #             mutated_drivers = set()
-    #             for all in genome[seg][hap]:
-    #                 mutated_drivers.update(all.intersection(self.drivers[seg])) # number of mutated drivers -- use set to ignore copies
-    #             n_mutated_drivers += len(mutated_drivers)
-    #         seg_cns.append(cn)
-                    
-    #     ploidy = np.mean(seg_cns) # average copy number across segments
-    #     if ploidy > self.max_ploidy:
-    #         return 0
-    #     highest_cn = np.max(seg_cns) # maximum copy number of any segment
-    #     if highest_cn > self.max_cn:
-    #         return 0 
-    #     nullisomy_count = np.sum(seg_cns == 0) # number of segments with zero copies
-    #     if nullisomy_count > self.max_nullisomy:
-    #         return 0
-    #     if n_mutated_drivers > self.max_mut_drivers:
-    #         return 0
-    #     return 1
-    
     def update_viability(self, genome_summary, **kwargs):
         if genome_summary['ploidy'] > self.max_ploidy:
             return 0
@@ -180,94 +163,45 @@ class Selection(object):
     def update_death_rate(self, genome_summary, param, **kwargs):
         return param
 
+    def _rel_fitness(self, n_wt, n_mut, ploidy, n_total, wt_effect, mut_effect):
+        """CINner-style multiplicative fitness for one gene category, expressed RELATIVE to
+        the all-wild-type diploid baseline (n_wt = 2*n_total, n_mut = 0, ploidy = 2).
+
+        Returns exp(logF(genome) - logF(baseline)) so that the baseline genome maps to 1 and
+        only deviations (mutations, copy-number gains/losses) move it. Computed in log space
+        to avoid the overflow of the absolute form (e.g. 1.1**200)."""
+        if ploidy <= 0 or n_total == 0:
+            return 1.0
+        log_wt, log_mut = np.log(wt_effect), np.log(mut_effect)
+        log_f = (2 * n_wt / ploidy) * log_wt + (2 * n_mut / ploidy) * log_mut
+        log_base = 2 * n_total * log_wt          # baseline: 2*n_total wild-type copies, no mutations
+        return float(np.exp(log_f - log_base))
+
     def update_division_rate(self, genome_summary, **kwargs):
-        n_wt_tsg = genome_summary['n_wt_tsg']
-        n_mut_tsg = genome_summary['n_mut_tsg']
-        n_wt_onc = genome_summary['n_wt_onc']
-        n_mut_onc = genome_summary['n_mut_onc']
-        ploidy = genome_summary['ploidy']
-        # Following CINer
-        tsg_wt_effect = 1./self.driver_effects
-        tsg_mut_effect = 1.
-        og_wt_effect = self.driver_effects
-        og_mut_effect = self.driver_effects**2
-        tsg = tsg_wt_effect**(2*n_wt_tsg/ploidy) * tsg_mut_effect**(2*n_mut_tsg/ploidy)
-        og = og_wt_effect**(2*n_wt_onc/ploidy) * og_mut_effect**(2*n_mut_onc/ploidy)
-        return tsg * og
+        # Following CINner: oncogenes (effect>1) and tumour suppressors (effect<1) act in
+        # opposite directions; mutating an oncogene or a TSG copy increases division fitness.
+        de = self.driver_effects
+        og = self._rel_fitness(genome_summary['n_wt_onc'], genome_summary['n_mut_onc'],
+                               genome_summary['ploidy'], self.N_onc, de, de**2)
+        tsg = self._rel_fitness(genome_summary['n_wt_tsg'], genome_summary['n_mut_tsg'],
+                                genome_summary['ploidy'], self.N_tsg, 1. / de, 1.)
+        return og * tsg
 
     def update_dispersal_rate(self, genome_summary, **kwargs):
-        n_wt_disp = genome_summary['n_wt_disp']
-        n_mut_disp = genome_summary['n_mut_disp']
-        ploidy = genome_summary['ploidy']        
-        wt_effect = self.dispersal_effects
-        mut_effect = self.dispersal_effects**2
-        return wt_effect**(2*n_wt_disp/ploidy) * mut_effect**(2*n_mut_disp/ploidy)
+        e = self.dispersal_effects
+        return self._rel_fitness(genome_summary['n_wt_disp'], genome_summary['n_mut_disp'],
+                                 genome_summary['ploidy'], self.N_disp, e, e**2)
 
     def update_immune_resistance(self, genome_summary, **kwargs):
-        n_wt_ir = genome_summary['n_wt_ir']
-        n_mut_ir = genome_summary['n_mut_ir']
-        ploidy = genome_summary['ploidy']                
-        wt_effect = self.immune_resistant_effects
-        mut_effect = self.immune_resistant_effects**2
-        return wt_effect**(2*n_wt_ir/ploidy) * mut_effect**(2*n_mut_ir/ploidy)
+        e = self.immune_resistant_effects
+        return self._rel_fitness(genome_summary['n_wt_ir'], genome_summary['n_mut_ir'],
+                                 genome_summary['ploidy'], self.N_ir, e, e**2)
 
     def update_treatment_resistance(self, genome_summary, **kwargs):
-        n_wt_tr = genome_summary['n_wt_tr']
-        n_mut_tr = genome_summary['n_mut_tr']
-        ploidy = genome_summary['ploidy']        
-        wt_effect = self.treatment_resistant_effects
-        mut_effect = self.treatment_resistant_effects**2
-        return wt_effect**(2*n_wt_tr/ploidy) * mut_effect**(2*n_mut_tr/ploidy)
+        e = self.treatment_resistant_effects
+        return self._rel_fitness(genome_summary['n_wt_tr'], genome_summary['n_mut_tr'],
+                                 genome_summary['ploidy'], self.N_tr, e, e**2)
 
-    # def _update_division_rate(self, baseline_fitness, genome):
-    #     # Make it sensible to copy number
-    #     fitness = baseline_fitness
-    #     for seg in range(len(genome)):
-    #         for hap in genome[seg]:
-    #             for all in genome[seg][hap]:
-    #                 fitness += self.driver_effects * len(all.intersection(self.drivers[seg])) # more mutated copies of a gene shouldn't make a big difference though
-    #     fitness = np.min([1., fitness])                    
-    #     return fitness
-
-    # def update_dispersal_rate(self, baseline_fitness, genome):
-    #     # Make it sensible to copy number
-    #     fitness = baseline_fitness
-    #     for seg in range(len(genome)):
-    #         for hap in genome[seg]:
-    #             for all in genome[seg][hap]:
-    #                 fitness += self.driver_effects * len(all.intersection(self.drivers[seg])) # more mutated copies of a gene shouldn't make a big difference though
-    #     fitness = np.min([1., fitness])
-    #     return fitness
-    
-    # def update_immune_resistance(self, genome):
-    #     # Make it sensible to copy number
-    #     for seg in range(len(genome)):
-    #         for hap in genome[seg]:
-    #             for all in genome[seg][hap]:
-    #                 fitness += self.driver_effects * len(all.intersection(self.drivers[seg])) # more mutated copies of a gene shouldn't make a big difference though
-    #     fitness = np.min([1., fitness])                    
-    #     return fitness
-
-    # def update_treatment_resistance(self, baseline_fitness, genome):
-    #     # Make it sensible to copy number
-    #     fitness = baseline_fitness
-    #     for seg in range(len(genome)):
-    #         for hap in genome[seg]:
-    #             for all in genome[seg][hap]:
-    #                 fitness += self.driver_effects * len(all.intersection(self.drivers[seg])) # more mutated copies of a gene shouldn't make a big difference though
-    #     fitness = np.min([1., fitness])                    
-    #     return fitness
-
-    # def update_evolutionary_parameters(self, param_dict, genome):
-    #     # Make it sensible to copy number
-    #     for seg in range(len(genome)):
-    #         for hap in genome[seg]:
-    #             for all in genome[seg][hap]:
-    #                 for param in param_dict:
-    #                     param_dict[param] = self.driver_effects * len(all.intersection(self.drivers[seg])) # more mutated copies of a gene shouldn't make a big difference though
-    #                     param_dict[param] = min(1., param_dict[param])
-    #     return param_dict
-        
     def get_gene_names(self, gene_prefix='G'):
         gene_names = []
         for segment in range(self.n_segments):

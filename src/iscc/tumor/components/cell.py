@@ -4,6 +4,11 @@ from copy import copy, deepcopy
 
 
 class Cell(object):
+    # Process-wide monotonic counter for unique genotype ids. Using str(id(self)) is unsafe:
+    # CPython recycles object ids after a cell is garbage-collected, so a new clone could
+    # collide with a still-living genotype (seen as "genotype is its own parent").
+    _genotype_counter = 0
+
     def __init__(
         self,
         n_segments=10,
@@ -56,22 +61,43 @@ class Cell(object):
             self.genotype_id = self.parent.genotype_id
             self.genome_summary = dict(parent.genome_summary)
       
-        # self.exp = np.random.beta(.1, 1, size=self.n_genes)  # Gene activity probability (each gene ranges from 0 to 1 indicating its prob of expression. transcripts will be sampled binomially)
 
         self.max_birth_rate = max_birth_rate
-        self.baseline_treatment_resistance = 1.-death_rate
+        # Configured baseline rates. Genome-driven selection is applied as a bounded,
+        # baseline-relative multiplier on top of these (see update_evolutionary_parameters),
+        # so the all-wild-type genome keeps these configured rates.
+        self.baseline_rates = {'division_rate': division_rate,
+                               'death_rate': death_rate,
+                               'dispersal_rate': dispersal_rate}
 
         self.evolutionary_parameters = dict()
         self.evolutionary_parameters['division_rate'] = division_rate
         self.evolutionary_parameters['death_rate'] = death_rate
         self.evolutionary_parameters['dispersal_rate'] = dispersal_rate
-        self.evolutionary_parameters['treatment_resistance'] = self.baseline_treatment_resistance
-        self.evolutionary_parameters['immune_resistance'] = 0.
-        self.evolutionary_parameters['viability'] = 1.      
+        self.evolutionary_parameters['treatment_resistance'] = 0.  # wild-type: fully treatment-sensitive
+        self.evolutionary_parameters['immune_resistance'] = 0.     # wild-type: no immune escape
+        self.evolutionary_parameters['viability'] = 1.
 
-    def update_evolutionary_parameters(self, update_dict):
-        for evo_param in self.evolutionary_parameters:
-            self.evolutionary_parameters[evo_param] = update_dict[evo_param](self.genome_summary, param=self.evolutionary_parameters[evo_param])
+    def update_evolutionary_parameters(self, selection):
+        """Apply the CINner-style selection model as a bounded, baseline-relative modifier.
+
+        division/dispersal = configured baseline x relative fitness (>=0), clamped to a valid
+        rate range; resistances map a relative fitness >=1 into [0,1) (wild-type -> 0). This
+        keeps the all-wild-type genome at its configured rates and prevents the unbounded
+        blow-up of the raw multiplicative form for many-gene genomes.
+        """
+        gs = self.genome_summary
+        self.evolutionary_parameters['viability'] = selection.update_viability(gs)
+        self.evolutionary_parameters['division_rate'] = min(
+            self.baseline_rates['division_rate'] * selection.update_division_rate(gs),
+            self.max_birth_rate)
+        self.evolutionary_parameters['death_rate'] = self.baseline_rates['death_rate']
+        self.evolutionary_parameters['dispersal_rate'] = min(
+            self.baseline_rates['dispersal_rate'] * selection.update_dispersal_rate(gs), 1.0)
+        self.evolutionary_parameters['immune_resistance'] = max(
+            0.0, 1.0 - 1.0 / selection.update_immune_resistance(gs))
+        self.evolutionary_parameters['treatment_resistance'] = max(
+            0.0, 1.0 - 1.0 / selection.update_treatment_resistance(gs))
 
     def update_genome_summary_mutation(self, selection, mut_bits, seg):
         # `mut_bits` is a boolean mask over the segment marking newly mutated positions;
@@ -138,7 +164,8 @@ class Cell(object):
         # TODO: maybe reduce the number of unique drivers...
 
     def set_genotype_id(self):
-        self.genotype_id = str(id(self))
+        Cell._genotype_counter += 1
+        self.genotype_id = str(Cell._genotype_counter)
 
     def divide(self, new_cell_id=0):
         new_cell = copy(self)
@@ -235,14 +262,12 @@ class EpithelialCell(Cell):
         super(EpithelialCell, self).__init__(**cell_kwargs)
         self.type = "epithelial"
         self.genotype_id = self.type
-        # self.exp = np.random.beta(.1, 1, size=self.n_genes)  # Gene activity probability (each gene ranges from 0 to 1 indicating its prob of expression. transcripts will be sampled binomially)
 
 class StromalCell(Cell):
     def __init__(self, **cell_kwargs):
         super(StromalCell, self).__init__(**cell_kwargs)
         self.type = "stromal"        
         self.genotype_id = self.type
-        # self.exp = np.random.beta(.1, 1, size=self.n_genes)  # Gene activity probability (each gene ranges from 0 to 1 indicating its prob of expression. transcripts will be sampled binomially)
 
 class ImmuneCell(Cell):
     def __init__(self, prob_kill=.01, **cell_kwargs):
@@ -250,7 +275,6 @@ class ImmuneCell(Cell):
         self.prob_kill = prob_kill # probability of killing a neighboring cancer cell
         self.type = "immune"
         self.genotype_id = self.type
-        # self.exp = np.random.beta(.1, 1, size=self.n_genes)  # Gene activity probability (each gene ranges from 0 to 1 indicating its prob of expression. transcripts will be sampled binomially)
 
 class CancerCell(Cell):
     def __init__(self, mutation_rate=0.1, snv_prob=0.1, genotype_id=None, seed=42, **cell_kwargs):
@@ -285,7 +309,7 @@ class CancerCell(Cell):
             # Sample only from positions not yet mutated in this allele (ISA)
             available = np.where(~allele)[0]
             if len(available) == 0:
-                return  # allele fully saturated; skip this mutation event
+                return False  # allele fully saturated: no new mutation, genotype unchanged
             n_mutations = min(rng.poisson(n_events) + 1, len(available))
             muts = rng.choice(available, size=n_mutations, replace=False)
             allele[muts] = True  # set mutated bits
@@ -317,5 +341,6 @@ class CancerCell(Cell):
                     del self.genome[seg][hap][all] # remove
             self.update_genome_summary_cnv(selection, allele_bits, seg, sign) # for evolutionary parameters
 
-        self.update_evolutionary_parameters(selection.update_dict)
+        self.update_evolutionary_parameters(selection)
         self.set_genotype_id()
+        return True  # a new genotype was created
