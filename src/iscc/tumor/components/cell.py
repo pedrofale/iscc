@@ -13,6 +13,7 @@ class Cell(object):
         self,
         n_segments=10,
         segment_size=1000,
+        segment_sizes=None,
         parent=None,
         division_rate=1.,
         death_rate=0.1,
@@ -25,6 +26,17 @@ class Cell(object):
         n_tr=0,
     ):
         self.n_segments = n_segments
+        # Segments may have unequal sizes (real-genome mode: segment size proportional to
+        # chromosome-arm length). When ``segment_sizes`` is None we fall back to the uniform
+        # scalar ``segment_size`` for every segment, so the abstract mode is unchanged
+        # (byte-identical flat indexing). ``_seg_offsets`` gives the flat genome offset of each
+        # segment so positions can be addressed as offset[seg] + pos.
+        if segment_sizes is None:
+            segment_sizes = [segment_size] * n_segments
+        self.segment_sizes = [int(s) for s in segment_sizes]
+        self._seg_offsets = np.concatenate([[0], np.cumsum(self.segment_sizes)]).astype(int)
+        self.n_genes = int(self._seg_offsets[-1])
+        # representative scalar size (uniform fallback; equals segment_sizes[0] in real mode)
         self.segment_size = segment_size
         self.n_onc = n_onc
         self.n_tsg = n_tsg
@@ -37,9 +49,9 @@ class Cell(object):
             # Compact genome: each allele copy is a boolean bitset of length
             # segment_size (bit i == position i is mutated, infinite-sites). A fresh
             # dict/bitset per segment avoids aliasing across segments.
-            self.genome = [{'p': [np.zeros(segment_size, dtype=bool)],
-                            'm': [np.zeros(segment_size, dtype=bool)]}
-                           for _ in range(n_segments)] # copy number = 2
+            self.genome = [{'p': [np.zeros(self.segment_sizes[i], dtype=bool)],
+                            'm': [np.zeros(self.segment_sizes[i], dtype=bool)]}
+                           for i in range(n_segments)] # copy number = 2
             self.set_genotype_id()
             self.genome_summary = {'n_wt_onc': n_onc * 2,
                                 'n_mut_onc': 0,
@@ -183,11 +195,12 @@ class Cell(object):
         haps = []
         poss = []
         muts = []
-        pos_vec = np.arange(self.segment_size)
         for seg in range(self.n_segments):
-            seg_vec = seg * np.ones((self.segment_size))
+            sz = self.segment_sizes[seg]
+            pos_vec = np.arange(sz)
+            seg_vec = seg * np.ones((sz,))
             for hap in self.genome[seg]:
-                hap_vec = np.array([hap] * self.segment_size)
+                hap_vec = np.array([hap] * sz)
                 for all in self.genome[seg][hap]: # each allele copy is a boolean bitset
                     mut_vec = all.astype(int)
                     segs.extend(seg_vec)
@@ -201,29 +214,29 @@ class Cell(object):
         return pd.DataFrame(self.genome_summary, index=[0])
 
     def get_snvs(self):
-        vafs = np.zeros((self.n_segments * self.segment_size,))
+        vafs = np.zeros((self.n_genes,))
         for seg in range(self.n_segments):
             copies = self.genome[seg]['p'] + self.genome[seg]['m']
             cn = self.genome_summary['seg_cns'][seg]
             if copies and cn > 0:
                 counts = np.sum(copies, axis=0)  # mutated-copy count per position
-                vafs[seg*self.segment_size:(seg+1)*self.segment_size] = counts / cn
+                vafs[self._seg_offsets[seg]:self._seg_offsets[seg + 1]] = counts / cn
         return vafs
 
     def get_cnvs(self):
         cnvs = []
-        for seg_cn in self.genome_summary['seg_cns']:
-            cnvs.append([seg_cn] * self.segment_size)
-        cnvs = np.array(cnvs).flatten()
-        return cnvs   
+        for seg, seg_cn in enumerate(self.genome_summary['seg_cns']):
+            cnvs.append([seg_cn] * self.segment_sizes[seg])
+        cnvs = np.concatenate([np.asarray(c) for c in cnvs]) if cnvs else np.array([])
+        return cnvs
 
     def set_baseline_exp(self):
-        self.baseline_exp = np.random.beta(.1, 1, size=self.n_segments * self.segment_size) 
+        self.baseline_exp = np.random.beta(.1, 1, size=self.n_genes)
 
     def get_exp(self, seg_mut_effects):
         exp = np.array(self.baseline_exp)
         for seg in range(self.n_segments):
-            seg_baseline = self.baseline_exp[seg*self.segment_size:(seg+1)*self.segment_size]
+            seg_baseline = self.baseline_exp[self._seg_offsets[seg]:self._seg_offsets[seg + 1]]
             seg_exp = np.array(seg_baseline)
             copies = self.genome[seg]['p'] + self.genome[seg]['m']
             if len(copies) == 0:
@@ -232,7 +245,7 @@ class Cell(object):
                 for bits in copies:
                     allele_contrib = seg_baseline * seg_mut_effects[seg] ** bits.astype(float)
                     seg_exp = seg_exp + allele_contrib
-            exp[seg*self.segment_size:(seg+1)*self.segment_size] = seg_exp
+            exp[self._seg_offsets[seg]:self._seg_offsets[seg + 1]] = seg_exp
         return exp
 
     def expresses(self, coordinates, seg_mut_effects, thres=0.5):
@@ -247,7 +260,7 @@ class Cell(object):
         # Compute this single gene's expression directly (mirrors get_exp), without
         # building the whole genome's expression profile. baseline_exp is a flat
         # vector over the genome, and seg_mut_effects is indexed [segment][position].
-        gene_base = self.baseline_exp[seg * self.segment_size + pos]
+        gene_base = self.baseline_exp[self._seg_offsets[seg] + pos]
         gene_exp = gene_base
         for hap in self.genome[seg]:
             for allele in self.genome[seg][hap]:
@@ -329,7 +342,7 @@ class CancerCell(Cell):
             n_mutations = min(rng.poisson(n_events) + 1, len(available))
             muts = rng.choice(available, size=n_mutations, replace=False)
             allele[muts] = True  # set mutated bits
-            mut_bits = np.zeros(self.segment_size, dtype=bool)
+            mut_bits = np.zeros(self.segment_sizes[seg], dtype=bool)
             mut_bits[muts] = True
             self.update_genome_summary_mutation(selection, mut_bits, seg) # for evolutionary parameters
         elif event == 'cnv':
@@ -352,7 +365,7 @@ class CancerCell(Cell):
                 sign = -1
                 allele_bits = self.genome[seg][hap][all].copy()  # capture before removing
                 if len(self.genome[seg][hap]) == 1:
-                    self.genome[seg][hap][all] = np.zeros(self.segment_size, dtype=bool)
+                    self.genome[seg][hap][all] = np.zeros(self.segment_sizes[seg], dtype=bool)
                 else:
                     del self.genome[seg][hap][all] # remove
             self.update_genome_summary_cnv(selection, allele_bits, seg, sign) # for evolutionary parameters

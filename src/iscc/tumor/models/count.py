@@ -37,10 +37,24 @@ CELLTYPES = ["cancer", "epithelial", "stromal", "immune"]
 class GenotypeTumor:
     def __init__(self, config=None, seed=42, genome_params=None, selection_params=None,
                  cancer_cell_params=None, deme_params=None, spatial_params=None,
-                 epithelial_cell_params=None, stromal_cell_params=None, immune_cell_params=None):
+                 epithelial_cell_params=None, stromal_cell_params=None, immune_cell_params=None,
+                 genome_mode="abstract", genome_spec=None):
         self.seed = seed
         self.rng = np.random.default_rng(seed)
         self.type = "genotype"
+
+        # Real-genome mode (DESIGN_inference A.5): the genome is wired from a GenomeSpec built
+        # from human chromosome-arm data (arm lengths -> segment_sizes, per-arm oncogene/TSG
+        # content) and selection uses the per-arm copy-number model (selection_mode="arm",
+        # s_arm vector) instead of the abstract random gene-driver layout. The engine is
+        # otherwise unchanged. ``selection_params`` (notably ``s_arm``) still wins, so the ABC
+        # layer can inject the per-arm coefficients it is inferring.
+        self.genome_mode = genome_mode
+        self.genome_spec = genome_spec
+        if genome_mode == "real":
+            if genome_spec is None:
+                raise ValueError("genome_mode='real' requires genome_spec")
+            genome_params, selection_params = genome_spec.engine_params(selection_params)
 
         if config is not None:
             with open(config) as f:
@@ -58,6 +72,9 @@ class GenotypeTumor:
         self.genome_params = genome_params
         self.n_segments = genome_params["n_segments"]
         self.segment_size = genome_params.get("segment_size", 1000)
+        # Per-segment sizes (real-genome mode: proportional to chromosome-arm length); falls
+        # back to a uniform scalar so the abstract mode is unchanged.
+        self.segment_sizes = genome_params.get("segment_sizes")
         self._normal_params = {
             "epithelial": (EpithelialCell, epithelial_cell_params or {}),
             "stromal": (StromalCell, stromal_cell_params or {}),
@@ -65,7 +82,7 @@ class GenotypeTumor:
         }
 
         self.selection = Selection(n_segments=self.n_segments, segment_size=self.segment_size,
-                                   rng=self.rng, **selection_params)
+                                   segment_sizes=self.segment_sizes, rng=self.rng, **selection_params)
         self.n_genes = self.selection.n_genes
         self._cancer_params = cancer_cell_params
 
@@ -92,7 +109,8 @@ class GenotypeTumor:
 
         # founder cancer genotype
         founder = CancerCell(
-            n_segments=self.n_segments, segment_size=self.segment_size, seed=seed,
+            n_segments=self.n_segments, segment_size=self.segment_size,
+            segment_sizes=self.segment_sizes, seed=seed,
             n_onc=len(self.selection.get_oncogenes()), n_tsg=len(self.selection.get_tsgs()),
             n_disp=len(self.selection.get_dispersal_genes()),
             n_ir=len(self.selection.get_immune_resistant()),
@@ -148,7 +166,8 @@ class GenotypeTumor:
         if type_name in self.genotypes:
             return type_name
         cls, params = self._normal_params[type_name]
-        rep = cls(n_segments=self.n_segments, segment_size=self.segment_size, **params)
+        rep = cls(n_segments=self.n_segments, segment_size=self.segment_size,
+                  segment_sizes=self.segment_sizes, **params)
         rep.genotype_id = type_name
         self._register(rep)
         return type_name

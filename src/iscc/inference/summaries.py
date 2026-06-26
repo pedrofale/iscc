@@ -74,7 +74,7 @@ def snv_summary(tumor, vaf_quantiles=(0.25, 0.5, 0.75, 0.9)):
     """
     vaf = population_vaf(tumor, cancer_only=True)
     seg = vaf[vaf > 0]
-    genome_size = tumor.n_segments * tumor.segment_size
+    genome_size = getattr(tumor, "n_genes", tumor.n_segments * tumor.segment_size)
     if seg.size == 0:
         return dict(n_sites=0.0, mean_vaf=float("nan"),
                     vaf_quantiles=np.full(len(vaf_quantiles), np.nan), sfs_rsq=float("nan"))

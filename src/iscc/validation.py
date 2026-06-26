@@ -48,7 +48,7 @@ def population_vaf(tumor, cancer_only=True):
     of the (cancer) cells would report. Works on the genotype-count engine by
     weighting each genotype's per-site mutated-copy count by its cell count.
     """
-    n_sites = tumor.n_segments * tumor.segment_size
+    n_sites = getattr(tumor, "n_genes", tumor.n_segments * tumor.segment_size)
     num = np.zeros(n_sites)
     den = np.zeros(n_sites)
     for gid, cnt in tumor.genotypes_counts.items():
@@ -58,7 +58,7 @@ def population_vaf(tumor, cancer_only=True):
         for seg in range(rep.n_segments):
             copies = rep.genome[seg]["p"] + rep.genome[seg]["m"]
             cn = rep.genome_summary["seg_cns"][seg]
-            sl = slice(seg * rep.segment_size, (seg + 1) * rep.segment_size)
+            sl = slice(int(rep._seg_offsets[seg]), int(rep._seg_offsets[seg + 1]))
             den[sl] += cnt * cn
             if copies and cn > 0:
                 num[sl] += cnt * np.sum(copies, axis=0)

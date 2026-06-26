@@ -14,7 +14,16 @@ share the same technical parameters.
 - [x] **M3a** — real-tumour `(n, D, J₁)` overlay from Noble's published trees (§D.2). *Finding:
   iscc partially covers the real index region (best at scarce driver loci, prop_driver≈0.05); the
   abstract genome couples n and D, so it under-reaches the high-n deep-sweep tumours — motivates M3b.*
-- [ ] **M3b** — real-genome mode + fit-to-real PCAWG + Charm correlation (§A.5, A.4.2–3)
+- [x] **M3b** — real-genome mode + fit-to-real PCAWG + Charm correlation (§A.5, A.4.2–3). *Built:
+  real-genome mode (39 human arms; `GenomeSpec` from cytoBand+COSMIC CGC+Davoli; per-arm CN
+  selection `s_arm` as an alternative `Selection` mode reading `seg_cns`; variable per-arm segment
+  sizes — abstract mode byte-identical). Data generator downloads+cites cytoBand/COSMIC/Davoli/PCAWG
+  → `validation/data/realgenome_*.csv`. Estimator: the arm-CN fitness factorises, so a **pooled
+  per-arm RF** `(gain[arm],loss[arm])→s[arm]` (not a 39-D joint map, which extrapolated to the
+  wrong sign) fits `s_arm` to PCAWG; cohort summary = mean over independent tumours. Local smoke run
+  (250×6) confirms the pipeline and the **correct direction** (fit-to-real r>0, s_arm↑ with Charm &
+  with oncogene−TSG content); publication-scale fit is HPC-bound (DESIGN_scalability §7: one event
+  per `update()`). Honest partial result, like M3a.*
 - [ ] **M4** — DNA/Visium estimation (§C)
 
 Per-session ritual: `/clear` → "read DESIGN_inference.md and do M<x>" → implement + run *targeted*
