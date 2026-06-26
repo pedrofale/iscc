@@ -105,10 +105,47 @@ analysis as part of the results.
 3. **Orthogonal** — inferred per-segment selection vs Davoli Charm scores (needs A.5).
 
 ### A.5 Real-genome mode (needed only for fit-to-real / Charm correlation)
-iscc's genome is abstract (synthetic segments, random driver layout). To fit real PCAWG data
-and correlate with Charm scores, add a configuration where **segments = chromosome arms** and
-**drivers = known oncogenes/TSGs** (COSMIC/Davoli lists). Parameter *recovery* (A.4.1) does not
-need this; fit-to-real does. Scope this as its own milestone.
+iscc's genome is abstract (synthetic segments, random driver layout, single global
+`driver_effects`). Real-genome mode is **mostly a configuration of the genome + selection layer,
+plus one engine generalization** — the engine already tracks per-segment copy number and applies
+CNAs per segment.
+
+**The three mappings** (replace the random/global choices with real ones):
+
+| | abstract mode (now) | real-genome mode |
+|---|---|---|
+| segments | arbitrary `n_segments` | **= human chromosome arms** (~39 autosomal p/q arms) |
+| segment size | uniform `segment_size` | **∝ arm length** (cytoband table) |
+| driver layout | random per `prop_driver` | **real per-arm oncogene/TSG content** (COSMIC CGC / Davoli) |
+| selection strength | scalar `driver_effects` | **per-arm coefficient `s_arm`** (a vector) |
+
+**The one real engine change — per-arm selection coefficients (CINner arm model).** Generalize
+`Selection.driver_effects` from a scalar to a per-segment vector `s[seg]`, and add an arm-CN
+fitness term `∏_seg s[seg]^(seg_cns[seg] − baseline)` reading the per-segment copy numbers iscc
+already maintains (`genome_summary['seg_cns']`). `s>1` ⇒ amplification beneficial (oncogene-
+dominated arm); `s<1` ⇒ deletion beneficial (TSG arm). The current fitness already responds to
+arm CN indirectly (amplifying an oncogene segment raises `n_wt_onc`); this is the clean, direct
+reformulation. **Add it as an alternative selection mode** so the abstract gene-driver model
+keeps working.
+
+**Reused unchanged:** the CNA mechanics (`mutate()` amp/del; `seg_cns`); `inference/summaries.py`
+(per-segment gain/loss frequency = per-arm gain/loss, directly comparable to PCAWG);
+`inference/abc.py` (just infers the higher-dimensional `s_arm` vector).
+
+**Construction:** a `GenomeSpec` (built once from data) carrying arm names, per-arm lengths →
+`segment_size`s, per-arm oncogene/TSG counts, and the `s_arm` vector. `GenotypeTumor(
+genome_mode="real", genome_spec=…)` wires `n_segments = #arms`, arm-sized segments, and per-arm
+`s` into `Selection` instead of the random `prop_driver` path.
+
+**Data (download + cite, mirror M3a):** UCSC cytoBand (arm lengths); COSMIC CGC / Davoli
+oncogene+TSG lists (gene→arm); Davoli 2013 Charm scores (orthogonal target). Store under
+`validation/data/`.
+
+**Caveats:** identifiability (§A.3) — fix the CNA rate, infer `s_arm`; ~39 arm coefficients is a
+much larger ABC than M1's recovery demo → RF-ABC + `multiprocessing`, and the one-event-per-step
+engine cost (`DESIGN_scalability.md` §7) bites here; SNV drivers can be off in v1 (arm-CN model
+is what fits PCAWG; hybrid gene+arm is a later refinement). Parameter *recovery* (A.4.1) does not
+need this mode; fit-to-real (A.4.2) and Charm (A.4.3) do.
 
 ## B. scRNA estimation (Splatter-style)
 
