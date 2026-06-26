@@ -11,7 +11,9 @@ share the same technical parameters.
 - [x] **M0b** — `J₁` tree-balance index + unit tests on small trees (§D.1)
 - [x] **M1** — expose CNA/SNV rates (§A.0) + ABC engine (§A.1–2) + parameter recovery (§A.4.1)
 - [ ] **M2** — scRNA `estimate()` + fitted PBMC3k comparison (§B)
-- [ ] **M3a** — real-tumour `(n, D, J₁)` overlay from Noble's published CSV (§D.2)
+- [x] **M3a** — real-tumour `(n, D, J₁)` overlay from Noble's published trees (§D.2). *Finding:
+  iscc partially covers the real index region (best at scarce driver loci, prop_driver≈0.05); the
+  abstract genome couples n and D, so it under-reaches the high-n deep-sweep tumours — motivates M3b.*
 - [ ] **M3b** — real-genome mode + fit-to-real PCAWG + Charm correlation (§A.5, A.4.2–3)
 - [ ] **M4** — DNA/Visium estimation (§C)
 

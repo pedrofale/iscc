@@ -9,3 +9,5 @@ notebooks/notebook_example/
 notebooks/example_out/
 .DS_Store
 data/
+!validation/data/
+!validation/data/**
