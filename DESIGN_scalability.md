@@ -201,6 +201,17 @@ plausibly-sized tumor, is infeasible if a single sim is slow).
 2. **Per-event cost ← #demes / #genotypes** (the §3 Fenwick/alias item). Independent of (1);
    matters once grids get large.
 
+**REQUIREMENT — growth-over-time visualization must be preserved (and improved).** Tau-leaping
+advances by *time intervals*, not by skipping events: at the end of every τ (or every generation)
+the engine still records a **full per-clone count snapshot** into `self.traces`, so `plot_muller`
+/ `plot_grid` (which read `traces` + `genotypes_parents`) keep working unchanged — no trajectory
+is lost. It is in fact better: the trace x-axis becomes **real simulation time / generations**
+(currently it is the event/step index, a lumpy proxy for time), and snapshot resolution is a free
+parameter (record every leap, or every k). Keep the exact one-event engine as a **reference** and
+validate tau-leaping against it by distribution (clone-size distribution, Muller structure), as we
+did when introducing the genotype engine. Use small/adaptive τ (smaller when populations are tiny)
+to stay accurate and avoid carrying-capacity overshoot.
+
 **Deme abstraction lever.** Setting `carrying_capacity` to gland scale (Noble's 512–8,192) lets
 each deme/agent represent thousands of biological cells, so #agents ≪ #cells. But *growing into*
 those cells still costs events unless (1) is addressed — the abstraction reduces agent count, not
