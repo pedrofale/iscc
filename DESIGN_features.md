@@ -106,6 +106,27 @@ pIRS, InSilicoSeq). Phased:
     CNA callers normalise for); independent NB-per-segment misses (ii)–(iii). Offer NB-per-segment
     as the simpler alternative. VAF is a separate binomial layer: alt `~ Binomial(depth_seg,
     true_alt_fraction)` + error. (`κ` is M4's estimate() target alongside depth/GC/error.)
+  - **Sampling distribution depends on the data type** — the dominant noise is the *amplification*
+    regime (un-amplified bulk ≈ Poisson; whole-cell-amplified single-cell = wildly lumpy), and
+    capture (WES/panel) adds a *systematic* per-target mean, not stochastic overdispersion. Two
+    layers (depth + allele) choose separately. The single unifying knob is **κ = the amplification
+    regime** (large κ ≈ multinomial/Poisson for bulk; small κ = lumpy for single-cell):
+
+    | Data type | Depth / coverage | Allele / VAF |
+    |---|---|---|
+    | single-cell WGS | **DM, low κ** (amplification overdispersion + compositional) | **Beta-Binomial + ADO** |
+    | single-cell panel (Tapestri) | DM, low κ, few loci | Beta-Binomial + **heavy ADO** |
+    | single-cell WES | DM, low κ + capture | Beta-Binomial + ADO |
+    | bulk WGS | NB-per-bin (field convention; mild overdisp.) **or DM high κ** | Binomial |
+    | bulk WES | NB-per-target + **systematic per-target capture mean** | Binomial |
+    | bulk panel | very deep; per-amplicon efficiency mean (depth near-trivial) | Binomial / Beta-Binomial (deep, low-freq) |
+
+    Notes: (a) **ADO is a separate Bernoulli layer** (one allele lost at a locus), the dominant
+    single-cell allele artifact — model explicitly on the allele layer, not via the depth
+    distribution. (b) Offer **NB-per-segment for bulk** to match field tools (HMMcopy/CNVkit/
+    Control-FREEC). (c) WES/panel capture bias is a per-target/per-amplicon *mean* multiplier,
+    orthogonal to the depth distribution. (d) κ, per-target/amplicon efficiencies, and the ADO rate
+    are all M4 `estimate()` targets.
 - **C2 — raw reads (FASTQ)**: needs a nucleotide reference. Two options:
   - *(A) synthesise* a random per-segment reference once, apply each cell's SNVs/CNAs → per-cell
     FASTA. Works today, but lacks real sequence context (repeats, GC, mappability) — whether
