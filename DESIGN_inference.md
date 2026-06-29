@@ -36,7 +36,8 @@ share the same technical parameters.
   (250×6) confirms the pipeline and the **correct direction** (fit-to-real r>0, s_arm↑ with Charm &
   with oncogene−TSG content); publication-scale fit is HPC-bound (DESIGN_scalability §7: one event
   per `update()`). Honest partial result, like M3a.*
-- [ ] **M4** — DNA/Visium estimation (§C)
+- [~] **M4** — DNA/Visium estimation (§C). **DNA half DONE** (`estimate_dna`, §C.1: MoM/MLE fit of
+  `DNABatchHyperParams`, recovery + posterior-predictive `validate_dna`). **Visium half pending** (§C.2, needs F6).
 
 Per-session ritual: `/clear` → "read DESIGN_inference.md and do M<x>" → implement + run *targeted*
 tests → commit → tick the box above + update memory → stop (don't roll into the next milestone).
