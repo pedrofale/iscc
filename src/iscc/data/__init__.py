@@ -6,6 +6,7 @@ from .batch import (
     DNABatch, DNABatchHyperParams, DNA_DEPTH_MODELS,
 )
 from .estimate import estimate, RNAEstimate
+from .estimate_dna import estimate_dna, estimate_dna_from_assay, DNAEstimate
 
 ASSAY_NAMES = {
     'bdna': 'Bulk DNA',
