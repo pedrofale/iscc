@@ -10,7 +10,19 @@ share the same technical parameters.
 - [x] **M0** — Noble `(n, D)` indices + recast `validate_evolution` (§D.1)
 - [x] **M0b** — `J₁` tree-balance index + unit tests on small trees (§D.1)
 - [x] **M1** — expose CNA/SNV rates (§A.0) + ABC engine (§A.1–2) + parameter recovery (§A.4.1)
-- [ ] **M2** — scRNA `estimate()` + fitted PBMC3k comparison (§B)
+- [x] **M2** — scRNA `estimate()` + fitted PBMC3k comparison (§B). *Built: `src/iscc/data/
+  estimate.py` fits the F3 `BatchHyperParams` from a real count matrix — library-size lognormal
+  (`mu_lib`,`sigma_lib`), NB `dispersion` via the mean-variance trend **de-biased for the
+  library-size CV** (`phi=(S-c2)/(1+c2)`; pooled trend would inflate it), per-gene mean-expression
+  gamma (Splatter table), protocol-aware logistic dropout (on for 10x, off for Smart-seq3), and —
+  with ≥2 batches — `sigma_batch` (two-way-centred cross-batch log-fold-change) + `depth_batch_sigma`.
+  Ambient/doublet are counts-only-unidentifiable → carried from the protocol preset, flagged in
+  `fitted`. Recovery test (`tests/test_estimate_scrna.py`): simulate known params → recover mu_lib
+  (rel 5%), sigma_lib/dispersion/sigma_batch (abs ~0.05); depth_batch_sigma tracks the **realized**
+  per-batch spread (the gap to the hyper-param is genuine finite-batch sampling). `validate_scrna.py`
+  upgraded to a FITTED PBMC3k overlay (mu_lib/sigma_lib/dispersion/dropout learned, not hardcoded);
+  fitted depth+dispersion match real, but PBMC's cross-cell-type heterogeneity (median CV²≈99) stays
+  out of reach of a clonal tumour's technical params — honest partial.*
 - [x] **M3a** — real-tumour `(n, D, J₁)` overlay from Noble's published trees (§D.2). *Finding:
   iscc partially covers the real index region (best at scarce driver loci, prop_driver≈0.05); the
   abstract genome couples n and D, so it under-reaches the high-n deep-sweep tumours — motivates M3b.*
