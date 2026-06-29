@@ -100,6 +100,16 @@ pIRS, InSilicoSeq). Phased:
 
 Gate C2/C3 behind C1; C1 alone serves the many methods that take count/coverage matrices, not reads.
 
+**Read emission is per-modality** — the count matrix is the universal interface (what most methods
+consume *and* the input these read simulators take), but the read tool + reference differ:
+- **DNA** (genome reference): ART / DWGSIM / pIRS / InSilicoSeq.
+- **scRNA, droplet/10x** (count matrix → reads, barcodes+UMIs): **scReadSim** (Yan 2023, learns from
+  real data; current best) ≫ minnow (Sarkar 2019, count→reads but poor coverage realism).
+- **scRNA full-length / Smart-seq3** (5′ UMI + full-length): less standardised — polyester-style bulk
+  RNA read sim + a UMI layer. **Known gap**, not a blocker.
+- **spatial (Visium)**: read-level rarely needed; count-level (F6) suffices for nearly all
+  spatial-method benchmarking (reads would be a 10x-style sim with spatial barcodes).
+
 ## D. Per-modality technical / batch considerations
 
 | Modality | Batch unit | Dominant technical factors | iscc model |
