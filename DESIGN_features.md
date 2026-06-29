@@ -60,6 +60,13 @@ ground truth):
 - **per-batch dispersion** `φ_b`, **dropout**, **ambient profile**, **doublet rate**.
 - Counts: `y_cg ~ NB(ℓ_c · β_gb · λ_cg, φ_b)`, then add ambient counts (from a batch ambient
   profile) and doublets (merge two cells' profiles at the batch doublet rate).
+- **The count emission is a pluggable step** — keep everything above (biology → library → batch)
+  shared and swap only the final draw. **Default `count_model="nb"`** (field standard: Splatter/
+  DESeq2/edgeR, composes cleanly with the multiplicative factors, what `estimate()` fits). Optional
+  **`"dm"` (Dirichlet-Multinomial)**: total `N_c = ℓ_c`, proportions `p_c ~ Dirichlet(β_gb·λ_cg·κ_b)`
+  — the compositional model (fixed library total, gene–gene competition for reads) for later
+  robustness studies. (A scDesign-style copula over NB marginals is a third future option for
+  realistic gene–gene correlation.)
 
 **Protocol presets** set which components dominate:
 - *10x (droplet, UMI, 3′)*: significant ambient RNA + doublets; moderate depth; UMI suppresses
