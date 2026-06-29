@@ -164,8 +164,19 @@ data — so realistic defaults can be *learned*, not guessed.
 ## F. Milestones (features)
 - **F1** — spatial solid biopsy (needle / punch / multi-region) + region labels.
 - **F2** — dissociation biases (composition bias, doublets) + liquid biopsy.
-- **F3** — **scRNA batch model + 10x / Smart-seq3 presets** (the user's headline ask); multi-batch
-  output with ground-truth labels.
+- **F3 — DONE** — **scRNA batch model + 10x / Smart-seq3 presets** (the user's headline ask);
+  multi-batch output with ground-truth labels. `data/batch.py` (`BatchHyperParams` + `Batch`:
+  per-gene factor β_gb, per-batch depth/dispersion, ambient soup, doublets, dropout; **pluggable
+  count emission** `COUNT_MODELS={"nb",...}`, `"dm"` Dirichlet-Multinomial stubbed as a drop-in
+  seam). `data/rna.py` rewritten: `PROTOCOL_PRESETS` (10x: ambient+doublets+dropout; smartseq3:
+  deeper, low dispersion, well-in-plate nesting, dropout off), Splatter-style composition
+  (β reshapes per-gene, library sets total), AnnData output with clone/coords/batch in `.obs`,
+  `run_scrna_batches` (shared / split designs) + `concat_batches`. CLI: `isccdata -a scrna
+  --protocol {10x,smartseq3} --batches N --design {shared,split} --count-model nb` → one labelled
+  h5ad per batch + `scrna_all_batches.h5ad`. `load_cell_data` now also loads `cell_type` (clone
+  ground truth). Tests: `tests/test_assay_scrna.py`. Demo: `notebooks/assay_scrna.ipynb`
+  (sweeps depth/dispersion/dropout/batch-strength/#batches/protocol → counts, UMAP, library-size
+  dist, batch mixing). Hyper-param names = M2 `estimate()` targets.
 - **F4** — bulk DNA technical (depth, GC bias, error, VAF/coverage tables) across **WGS/WES/panel**
   breadth = read-counts C1.
 - **F5** — single-cell DNA (ADO + per-cell amplification, nested in run-batch), same WGS/WES/panel breadth.

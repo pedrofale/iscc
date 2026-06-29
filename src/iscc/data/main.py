@@ -14,8 +14,9 @@ from pathlib import Path
 
 import pandas as pd
 
-# Per-cell matrices the assays may consume.
-CELL_DATA_KEYS = ["cell_snv", "cell_exp", "cell_cnv", "cell_crd"]
+# Per-cell matrices the assays may consume. `cell_type` carries the clone / genotype
+# ground-truth label, surfaced into the assay output's `.obs` for benchmarking.
+CELL_DATA_KEYS = ["cell_snv", "cell_exp", "cell_cnv", "cell_crd", "cell_type"]
 
 
 def load_cell_data(path):
@@ -50,9 +51,30 @@ def load_cell_data(path):
     "--grid-side", default=0, type=int,
     help="Spatial grid side for Visium. 0 = infer from cell coordinates.",
 )
+@click.option(
+    "--protocol", default="10x", type=str,
+    help="scRNA protocol preset: 10x or smartseq3.",
+)
+@click.option(
+    "--batches", default=1, type=int,
+    help="scRNA: number of batches (same biology, different technical signature).",
+)
+@click.option(
+    "--batch-seed", default=42, type=int,
+    help="scRNA: base seed; batch b uses batch-seed + 1 + b.",
+)
+@click.option(
+    "--design", default="shared", type=click.Choice(["shared", "split"]),
+    help="scRNA multi-batch design: shared cells (replicate) or split (balanced).",
+)
+@click.option(
+    "--count-model", default="nb", type=str,
+    help="scRNA count emission: nb (default) or dm.",
+)
 @click.option("--log", default=0, help="Logging level. 0 = critical, 1 = info, 2 = debug.")
 @click.option("-o", "--output-path", default="./data_out", help="Output directory.")
-def main(sample_path, assay, assay_config, grid_side, log, output_path):
+def main(sample_path, assay, assay_config, grid_side, protocol, batches, batch_seed,
+         design, count_model, log, output_path):
     logging.basicConfig(
         level={0: logging.CRITICAL, 1: logging.INFO, 2: logging.DEBUG}.get(log, logging.CRITICAL)
     )
@@ -66,6 +88,28 @@ def main(sample_path, assay, assay_config, grid_side, log, output_path):
     cell_data = load_cell_data(sample_path)
 
     logging.info("Running %s on %d cells", ASSAY_NAMES[assay], len(next(iter(cell_data.values()))))
+
+    # scRNA multi-batch path: one labelled AnnData per batch (+ concatenated benchmark).
+    if assay == "scrna" and batches > 1:
+        from .rna import run_scrna_batches, concat_batches
+        config.pop("protocol", None)
+        config.pop("count_model", None)
+        assays = run_scrna_batches(
+            cell_data, n_batches=batches, base_seed=batch_seed, design=design,
+            protocol=protocol, count_model=count_model, **config,
+        )
+        Path(output_path).mkdir(parents=True, exist_ok=True)
+        for a in assays:
+            a.write(output_path)
+        concat_batches(assays).write_h5ad(os.path.join(output_path, "scrna_all_batches.h5ad"))
+        logging.info("Saved %d scRNA batches to %s", batches, output_path)
+        print(f"{ASSAY_NAMES[assay]} ({batches} batches, {protocol}) finished -> {output_path}")
+        return
+
+    if assay == "scrna":
+        config.setdefault("protocol", protocol)
+        config.setdefault("count_model", count_model)
+        config.setdefault("seed", batch_seed)
     instrument = ASSAYS[assay](**config)
 
     run_kwargs = {}
