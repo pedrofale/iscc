@@ -168,7 +168,14 @@ Keep the public surface (`GlandularTumor`, `grow`, `write`, `cell_data`, `isccsi
 - **Per-cell stochasticity** (expression noise, sequencing dropout) moves to the
   materialization/assay stage, consistent with the pipeline's biology → lab → assay split.
 
-## 7. Tumor-size realism & computational cost — REQUIRED ASSESSMENT (future session)
+## 7. Tumor-size realism & computational cost — REQUIRED ASSESSMENT — **DONE (2026-06-29)**
+
+> **Outcome:** benchmarked the exact engine, implemented **tau-leaping** as an alternative update
+> mode on `GenotypeTumor` (the exact one-event engine is preserved as the validation reference),
+> validated it against the exact engine by distribution, and re-benchmarked. iscc now reaches
+> **Noble parity (10⁶ cells) in ~15–50 s locally** and projects **diagnosis scale (10⁹) in ~4 h**,
+> where the exact engine was effectively capped at ~10⁴ cells/run. See **§7.1** for the numbers.
+
 
 We have not yet established how large — and therefore how *realistic* — a tumor iscc can grow,
 nor the wall-time cost of reaching realistic sizes. This is a prerequisite for credible "realistic
@@ -224,3 +231,76 @@ the number of birth events.
 - Decide: implement tau-leaping (and/or alias sampling) and re-benchmark; document the realistic
   size/time envelope vs Noble & West.
 - (A benchmark script was drafted in this session but deliberately not run; start there.)
+
+## 7.1 Results (2026-06-29)
+
+Benchmark: `validation/benchmark_scalability.py` (10×1000 = 10k-gene genome, `carrying_capacity=1`
+so growth is unbounded — the size/time envelope; low death rate so the founder survives). Machine:
+local Mac, single process, numpy only.
+
+### Exact one-event engine — the §7 baseline (the binding cost M3b flagged)
+
+| metric | value |
+|---|---|
+| reached | ~19k cells in 20 s (grid 64², mut=0.01) |
+| throughput | **degrades 20×** as the tumour grows: **9421 ev/s → 451 ev/s** over the run |
+| naïve projection (final 931 cells/s) | 10⁶ ≈ 18 min, 10⁹ ≈ 12 d |
+| honest projection | **worse than naïve** — per-event cost keeps rising with #genotypes (see below), so a single run is effectively capped at ~10⁴ cells locally; 10⁶ is HPC-bound |
+
+The throughput collapse **confirms bottleneck 2**: each `update()` does
+`sorted(cancer_gids)` + a per-genotype weight array + `rng.choice` over genotypes in the deme, so
+per-event cost grows with #genotypes/deme (169 → 1754 genotypes over the run). This is the §3
+Fenwick/alias item and is **separate** from the size problem — but it means the exact engine's size
+ceiling is even lower than the Θ(N)-events argument alone implies.
+
+### Tau-leaping engine (this session)
+
+One synchronous generation advances **all** clones: per (deme, genotype, count c) draw
+`Poisson(division·c·τ)` births and `Poisson(death·c·τ)` deaths, split births into a mutation branch
+(in-place division → new genotype) and a dispersal branch (daughter to a neighbour) by
+`Binomial(births, mut_prob)`, apply in batch. Adaptive sub-stepping keeps `rate·dt ≤ 0.34` (accurate
+Poisson regime; prevents carrying-capacity overshoot since death rates are re-read each substep).
+
+| regime | reached | rate | projection |
+|---|---|---|---|
+| mut=0.01, grid 96² | 508k cells, 33 gen, 25 s | 20k cells/s | 10⁶ ≈ 49 s |
+| mut=0.001 (clonal), grid 128² | **1.27M cells (> Noble 10⁶), 41 gen, 18.5 s** | 69k cells/s | **10⁶ ≈ 15 s, 10⁹ ≈ 4 h** |
+
+Tau-leaping makes cost scale with **#clones × #generations, not #cells** (guarantee a): a clone of
+size 10⁵ advances in one Poisson draw per generation. The residual slowdown at very large N is
+**genotype creation** (a deepcopy per *new* mutant clone) — intrinsic to the infinite-sites model
+and **identical in cost to the exact engine**; it is the §3 concern, not a tau-leaping cost, and it
+shrinks with a realistically small `mutation_rate` (the clonal regime above). Alias/Fenwick sampling
+(§3/§5.5) is the next lever if even larger grids are needed.
+
+### Validation (`validation/validate_tau_leaping.py`, `tests/test_tau_leaping.py`)
+
+Validated against the exact engine **by distribution** (as the genotype engine was validated vs the
+cell engine — it is NOT byte-identical, different random variables), grown to a matched size over
+40 seeds:
+
+- clone-size summaries agree within ~18% — size 1.18×, #clones 1.18×, top-clone-fraction 0.93×,
+  inverse-Simpson diversity 1.18× — **inside the genotype-vs-cell engine's accepted 0.5–2.0 band**.
+- **Definitive correctness signature:** the (small) clone-count bias **converges to the exact
+  process as τ → 0** — #clones ratio 1.154 (τ=1) → 1.092 (τ=0.5) → 1.054 (τ=0.25).
+- **Growth-over-time preserved (guarantee b):** a full per-clone snapshot is recorded every
+  `snapshot_every` generations into `self.traces`, so `plot_muller`/`plot_grid` work unchanged —
+  now on a **real-time x-axis** (`self.trace_times`). Figure:
+  `manuscript/figures/validate_tau_leaping.png` (growth curve · Muller · clone-size ECDF · τ→0).
+  Fixed a latent `viz` bug (dangling ancestry edges for clones born-and-lost within a snapshot
+  interval) that the higher clone counts exposed; the fix is engine-agnostic and a no-op for the
+  exact engine.
+
+### Envelope vs the literature
+
+iscc + tau-leaping now sits with **Noble 2022 (10⁶)** and the upper end of **West/HAL (10⁴–10⁶)**
+for local single runs, and reaches **SISTEM's 5×10⁵–5×10⁷ range** in minutes — exactly the
+generation-batched clonal update SISTEM uses. Diagnosis scale (10⁹) is an HPC run, not infeasible.
+This unblocks publication-scale ABC: a reference table of plausibly-sized tumours is now minutes,
+not the HPC-only cost M3b reported.
+
+### How to use
+
+`GenotypeTumor(..., update_mode="tau", tau=1.0, snapshot_every=1)`; `grow(n_steps=G)` advances `G`
+generations. Default remains `update_mode="exact"` (unchanged reference engine). Reproducible
+(seeded `numpy.Generator`, creation-ordinal genotype ordering). No JAX.

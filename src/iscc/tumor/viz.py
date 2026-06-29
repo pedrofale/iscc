@@ -24,7 +24,12 @@ def _prepare(genotype_counts, genotype_parents):
         .reset_index(drop=True)
     )
     anc_df = genotype_parents.melt(var_name="Identity", value_name="Parent").astype(str)
-    color_by = pd.Series(np.arange(anc_df.shape[0] + 1), index=pop_df["Identity"].unique())
+    # One colour per identity present in the population. (When every non-root identity has a
+    # single ancestry edge this equals anc_df.shape[0] + 1, the former hard-coded length; using
+    # the identity count directly keeps it correct when roots/dangling edges differ -- e.g. under
+    # tau-leaping, where a generation elapses between snapshots.)
+    ids = pop_df["Identity"].unique()
+    color_by = pd.Series(np.arange(len(ids)), index=ids)
     return pop_df, anc_df, color_by
 
 
@@ -44,6 +49,16 @@ def _cancer_only(traces, genotypes_parents):
     drop = list(set(normal_names).intersection(set(genotype_counts.columns)))
     genotype_counts = genotype_counts.drop(columns=drop)
     genotype_parents = genotype_parents.drop(columns=[c for c in drop if c in genotype_parents.columns])
+    # Keep only ancestry edges whose child AND parent both appear in the snapshotted counts.
+    # Clones created and lost within a single snapshot interval (common under tau-leaping, where a
+    # whole generation elapses between snapshots) get a parent edge but never enter `traces`;
+    # dropping those dangling edges keeps the population and ancestry frames consistent so the
+    # Muller layout stays well-defined. For the exact engine (snapshot every event) there are none,
+    # so this is a no-op there.
+    present = set(genotype_counts.columns)
+    keep = [c for c in genotype_parents.columns
+            if c in present and str(genotype_parents[c].iloc[0]) in present]
+    genotype_parents = genotype_parents[keep]
     return genotype_counts, genotype_parents
 
 

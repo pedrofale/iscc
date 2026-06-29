@@ -38,10 +38,23 @@ class GenotypeTumor:
     def __init__(self, config=None, seed=42, genome_params=None, selection_params=None,
                  cancer_cell_params=None, deme_params=None, spatial_params=None,
                  epithelial_cell_params=None, stromal_cell_params=None, immune_cell_params=None,
-                 genome_mode="abstract", genome_spec=None):
+                 genome_mode="abstract", genome_spec=None,
+                 update_mode="exact", tau=1.0, snapshot_every=1):
         self.seed = seed
         self.rng = np.random.default_rng(seed)
         self.type = "genotype"
+
+        # Update mode (DESIGN_scalability §7). "exact" = the reference one-birth/death-per-update
+        # Gillespie engine (default, unchanged). "tau" = tau-leaping: advance ALL clones once per
+        # discrete generation of length `tau` by drawing Poisson(rate*count*tau) births/deaths per
+        # (deme, genotype), so wall-time scales with #clones x #generations rather than #cells.
+        # `snapshot_every` records a full per-clone count snapshot every k generations (so
+        # plot_muller/plot_grid keep working, now on a real-time x-axis -- see self.trace_times).
+        self.update_mode = update_mode
+        self.tau = tau
+        self.snapshot_every = snapshot_every
+        self.time = 0.0
+        self.trace_times = []
 
         # Real-genome mode (DESIGN_inference A.5): the genome is wired from a GenomeSpec built
         # from human chromosome-arm data (arm lengths -> segment_sizes, per-arm oncogene/TSG
@@ -68,6 +81,9 @@ class GenotypeTumor:
             epithelial_cell_params = cp.get("epithelial", {})
             stromal_cell_params = cp.get("stromal", {})
             immune_cell_params = cp.get("immune", {})
+            self.update_mode = cfg.get("update_mode", update_mode)
+            self.tau = cfg.get("tau", tau)
+            self.snapshot_every = cfg.get("snapshot_every", snapshot_every)
 
         self.genome_params = genome_params
         self.n_segments = genome_params["n_segments"]
@@ -366,6 +382,8 @@ class GenotypeTumor:
                 self._tx_death_add[gid] = intensity * max(kill_rate - base, 0.0)
 
     def grow(self, n_steps=1000, seed=None, treatment=None, **kwargs):
+        if self.update_mode == "tau":
+            return self._grow_tau(n_steps=n_steps, seed=seed, treatment=treatment, **kwargs)
         if seed is None:
             seed = self.seed
         self.traces.append(dict(genotypes_counts=dict(self.genotypes_counts)))
@@ -384,6 +402,123 @@ class GenotypeTumor:
             self.update(rng)
             self.traces.append(dict(genotypes_counts=dict(self.genotypes_counts)))
         self.step += n_steps
+        self.make_cell_data()
+        return self.traces
+
+    # --- tau-leaping (generation-batched clonal update, DESIGN §7) -----------
+    def _tau_substep(self, rng, dt):
+        """One synchronous tau-leap of length `dt`.
+
+        Per (deme, genotype) with count c, draw the two reaction channels independently from
+        the CURRENT (pre-step) state -- births ~ Poisson(division_rate*c*dt) and
+        deaths ~ Poisson(death_rate*c*dt) -- then split births into a mutation branch
+        (in-place division, attempts a mutation exactly as the exact engine) and a dispersal
+        branch (daughter placed in a neighbour deme) by Binomial(n_births, mut_prob), and apply
+        everything in batch. The per-channel rates match the exact engine's
+        (event rate = c*(div+death), death share = death/(div+death)), so the two engines agree
+        in distribution as dt -> 0. Genotype ids are iterated in creation-ordinal order and all
+        randomness comes from the seeded `rng`, so runs are reproducible. Death rates are read
+        from current deme totals, so carrying-capacity crowding self-limits across substeps.
+        """
+        deaths, dispersals, mutants = [], [], []
+        for di in range(len(self.demes)):
+            deme = self.demes[di]
+            if not deme:
+                continue
+            for gid in sorted(self._cancer_gids(deme), key=lambda g: self.genotypes[g].ord):
+                c = deme[gid]
+                rep = self.genotypes[gid]
+                div = rep.evolutionary_parameters["division_rate"]
+                death = self._death_rate(gid, di)
+                disp = rep.evolutionary_parameters["dispersal_rate"]
+                n_div = int(rng.poisson(div * c * dt))
+                n_death = int(rng.poisson(death * c * dt))
+                if n_death:
+                    deaths.append((di, gid, n_death))
+                if n_div:
+                    denom = rep.mutation_rate + disp
+                    mut_prob = rep.mutation_rate / denom if denom > 0 else 0.0
+                    n_mut = int(rng.binomial(n_div, mut_prob))
+                    n_disp = n_div - n_mut
+                    if n_mut:
+                        mutants.append((di, gid, n_mut))
+                    if n_disp:
+                        dispersals.append((di, gid, n_disp))
+
+        # deaths first, capped at the pre-step count so a clone never goes negative
+        for di, gid, n in deaths:
+            n = min(n, self.demes[di].get(gid, 0))
+            if n:
+                self._remove(di, gid, n)
+        # mutation-branch births: each is one division that attempts a mutation. A successful
+        # mutate() spawns a new genotype (count 1); a saturated allele grows the parent in place.
+        # This per-mutation genotype creation is intrinsic to the infinite-sites model and costs
+        # exactly the same as in the exact engine (the separate #genotypes concern of §3).
+        for di, gid, n in mutants:
+            rep = self.genotypes[gid]
+            for _ in range(n):
+                child = rep.divide()
+                if child.mutate(rng, self.selection):
+                    self._register(child)
+                    self.genotypes_parents[child.genotype_id] = rep.genotype_id
+                    self._add(di, child.genotype_id, 1)
+                else:
+                    self._add(di, gid, 1)
+        # dispersal-branch births: same genotype, one daughter into a uniformly random neighbour
+        for di, gid, n in dispersals:
+            nbrs = self._neighbors(di)
+            if not nbrs:
+                self._add(di, gid, n)
+                continue
+            idx = rng.integers(0, len(nbrs), size=n)
+            u, cnts = np.unique(idx, return_counts=True)
+            for k, cnt in zip(u, cnts):
+                self._add(nbrs[int(k)], gid, int(cnt))
+
+    def _tau_generation(self, rng, tau):
+        """Advance the whole tumour by one generation of length `tau`, adaptively sub-stepping so
+        the largest single-cell event probability per substep stays in the accurate Poisson
+        regime (this also prevents carrying-capacity overshoot, since death rates are re-read each
+        substep). Records a full per-clone snapshot every `snapshot_every` generations."""
+        ACCURACY = 0.34  # keep rate*dt <= this so Poisson tau-leaping stays accurate
+        max_cell_rate = 0.0
+        for gid in self.genotypes_counts:
+            if self._is_cancer(gid):
+                ep = self.genotypes[gid].evolutionary_parameters
+                max_cell_rate = max(max_cell_rate,
+                                    ep["division_rate"] + ep["dispersal_rate"])
+        max_cell_rate += self.maximum_death_rate
+        n_sub = max(1, int(np.ceil(max_cell_rate * tau / ACCURACY)))
+        dt = tau / n_sub
+        for _ in range(n_sub):
+            self._tau_substep(rng, dt)
+        self.step += 1
+        self.time += tau
+        if self.step % self.snapshot_every == 0:
+            self.traces.append(dict(genotypes_counts=dict(self.genotypes_counts)))
+            self.trace_times.append(self.time)
+
+    def _grow_tau(self, n_steps=1000, seed=None, treatment=None, tau=None, **kwargs):
+        """Tau-leaping growth: `n_steps` is the number of generations to advance. A full per-clone
+        snapshot is recorded every `snapshot_every` generations, so plot_muller/plot_grid keep
+        working unchanged -- now on a REAL-TIME x-axis (self.trace_times, in generation units)."""
+        if seed is None:
+            seed = self.seed
+        if tau is None:
+            tau = self.tau
+        rng = np.random.default_rng(seed + self.step)
+        # snapshot at t=0 (matches the exact engine's initial trace)
+        self.traces.append(dict(genotypes_counts=dict(self.genotypes_counts)))
+        self.trace_times.append(self.time)
+        prev_dose = 0.0
+        for _ in range(n_steps):
+            if self.get_cancer_size() == 0:
+                break
+            if treatment is not None:
+                dose = treatment.get_dosage(self.step, self.get_tumor_size())
+                self._apply_treatment(treatment, dose)
+                prev_dose = dose
+            self._tau_generation(rng, tau)
         self.make_cell_data()
         return self.traces
 
