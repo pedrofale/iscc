@@ -165,6 +165,40 @@ consume *and* the input these read simulators take), but the read tool + referen
 - **spatial (Visium)**: read-level rarely needed; count-level (F6) suffices for nearly all
   spatial-method benchmarking (reads would be a 10x-style sim with spatial barcodes).
 
+**Keep the read-realism backends separate; unify at the count matrix + a shared variant layer.**
+DNA (DWGSIM/ART) and scRNA (scReadSim) place reads differently — DNA from a per-cell **nucleotide
+FASTA** (apply CNAs/SNVs to a reference), scRNA from a **count matrix** mapped onto read profiles —
+so the `Reference`/per-cell-FASTA path stays DNA-only and they live in separate `reads/{dna,rna}.py`
+adapters. **Asymmetry:** scReadSim needs a **real** reference/template BAM even though iscc's counts
+are synthetic, so the *synthetic-reference* backend is DNA-only (scRNA = synthetic counts → real read
+templates; R5 lands differently per modality). They unify at:
+- (i) the upstream **count/coverage matrix** — the universal interface both tools ingest;
+- (ii) a downstream `ReadEmitter` protocol + `run_binary()` util in `reads/base.py`;
+- (iii) **`reads/variants.py` — a shared variant-injection seam** keyed on `(total, alt_fraction)`:
+  given the reads/UMIs at a locus and a per-cell alt-fraction, stochastically assign alt vs ref base
+  (+ error) **preserving the total**. DNA: `total`=coverage(∝CN), `alt_fraction`=DNA-VAF (`cell_snv`).
+  RNA: `total`=UMI count from the matrix, `alt_fraction`=observed RNA-VAF (next paragraph).
+
+**Mutation-aware scRNA reads (the scDNA-vs-scRNA calling benchmark).** Real scRNA reads carry the
+cell's expressed somatic mutations; modelling this lets iscc show that **SNV calling from scRNA is
+intrinsically hard**. Design constraints (do not violate):
+- **UMI totals are conserved.** scRNA reads are *driven by* the F3 expression count matrix — we do
+  NOT invent coverage. For each cell-gene the UMI total is fixed by the matrix; the read layer only
+  adds **sequence content**, partitioning those UMIs into alt-carrying vs ref-carrying. Total reads
+  out == count matrix in, always (scReadSim already matches a given matrix, so it fits this exactly).
+- **One abstraction parameter.** A single scalar `obs_fidelity ∈ [0,1]` folds monoallelic
+  expression, transcriptional bursting, RNA editing and RT error into one knob mapping
+  **true VAF → observed VAF** (`v_obs = distort(v_true, obs_fidelity)`); not a mechanistic ASE model.
+  `v_true` is the allele-expression-weighted RNA-VAF (`(m·e)/(m·e+w)` from `get_exp`'s per-allele
+  effects; engine gap below) — or DNA-VAF as the simple first cut. Then `alt ~ Binomial(n_umi, v_obs)`.
+- **Deliver count-level first.** The observed alt/ref UMI matrix already demonstrates the effect
+  (observed VAF distorted/dropped vs true DNA-VAF); actual reads (scReadSim) are the realism layer on
+  top, totals identical. Output both the **observed-VAF matrix** and the **true DNA-VAF** for the
+  benchmark figure.
+- **Engine gap:** expose per-cell per-locus `cell_rna_vaf` (allele-expression-weighted; ingredients
+  already in `CancerCell.get_exp`). Small addition to `make_cell_data`, not a new subsystem; the
+  `obs_fidelity` distortion lives in the read/assay layer, not the engine.
+
 ## D. Per-modality technical / batch considerations
 
 | Modality | Batch unit | Dominant technical factors | iscc model |
@@ -203,9 +237,15 @@ src/iscc/data/
   rna.py          # scRNA: protocol presets 10x / smart-seq3, applies Batch
   dna.py          # bulk + single-cell DNA × {WGS, WES, panel} breadth; GC/coverage/ADO, applies Batch
   visium.py       # spatial: capture field + aggregation, applies Batch
-  reads.py        # C2 FASTQ -> C3 BAM: Reference {synthetic|real} -> per-cell FASTA ->
-                  #   C1 coverage -> read-sim adapter {dwgsim(default)|art} -> FASTQ -> bwa/samtools BAM
-                  #   (C1 count/coverage matrices already live in dna.py)
+  reads/          # C2 FASTQ -> C3 BAM. Separate read-realism ADAPTERS per modality, shared seams.
+    base.py       #   shared: ReadEmitter protocol emit(matrix, reference, outdir)->FASTQ/BAM +
+                  #   run_binary() util (PATH detect, skip-if-absent, FASTQ/BAM collection)
+    variants.py   #   shared variant-injection seam: inject(total, alt_fraction, error) -> alt/ref
+                  #     content PRESERVING total. DNA: total=coverage,alt=DNA-VAF; RNA: total=UMI,alt=v_obs
+    dna.py        #   DWGSIM(default)|ART: Reference{synthetic|real} -> per-cell FASTA -> C1 coverage
+                  #     -> variants.inject(DNA-VAF) -> reads -> bwa/samtools BAM   [F7 now]
+    rna.py        #   scReadSim: count matrix (totals conserved) -> reads on REAL template ->
+                  #     variants.inject(v_obs from cell_rna_vaf x obs_fidelity)   [later]
 ```
 CLI: `isccdata --protocol 10x --batches 2 [--batch-seed ...]` writes one labelled AnnData per
 batch. Batch hyper-parameters are exactly what `estimate()` (DESIGN_inference §B) fits from real
@@ -251,8 +291,12 @@ data — so realistic defaults can be *learned*, not guessed.
 - **F7** — read emission. **C1 count/coverage matrices** (copy-number-scaled, breadth-aware) **done**
   (in `dna.py`). Remaining: **C2 FASTQ → C3 BAM, SISTEM-faithful** — pluggable `Reference`
   (synthetic default / real-genome drop-in), per-cell FASTA from CNAs/SNVs, C1 coverage, **DWGSIM**
-  (default; ART alternative) + bwa/**samtools**. **DNA-first** (bulk + single-cell); scRNA reads
-  (scReadSim) a later adapter. External binaries optional; CI asserts the bespoke layers.
+  (default; ART alternative) + bwa/**samtools**, **plus the shared `reads/variants.py` seam**
+  (inject alt/ref preserving total; DNA uses it with DNA-VAF). **DNA-first** (bulk + single-cell).
+- **F7b (later)** — **mutation-aware scRNA reads**: scReadSim driven by the F3 count matrix (UMI
+  totals conserved) → `variants.inject` with observed RNA-VAF = `cell_rna_vaf × obs_fidelity` (single
+  abstraction parameter). Needs the engine `cell_rna_vaf` addition. Deliverable: observed-VAF vs
+  true-DNA-VAF — the **scDNA-vs-scRNA SNV-calling-is-hard** benchmark. External binaries optional; CI asserts the bespoke layers.
 
 ## Validation hooks (per DESIGN_inference conventions)
 - Batch model: *recover* injected batch params via `estimate()`; show two same-tumor batches share
