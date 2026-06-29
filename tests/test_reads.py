@@ -234,6 +234,18 @@ class TestAlleleLayer:
         cmd = res["command"]
         assert "-e" in cmd and float(cmd[cmd.index("-e") + 1]) >= 0.0
 
+    def test_sc_molecular_content_excludes_sequencing_error(self):
+        """The per-base error is the simulator's job (DWGSIM -e), not the FASTA molecular content:
+        the single-cell allele balance at a hom-ref/hom-alt locus stays ~0 / ~1 even at a high
+        error_rate, so the error floor is NOT also baked into copy multiplicity (no double-count)."""
+        from iscc.data.reads import effective_alt_fraction
+        out0 = effective_alt_fraction(np.zeros(3000), modality="sc",
+                                      batch=self._batch(beta_binom_conc=1e6, error_rate=0.05, n=3000))
+        assert out0.mean() < 5e-3                  # hom-ref stays ~0, NOT ~0.05
+        out1 = effective_alt_fraction(np.ones(3000), modality="sc",
+                                      batch=self._batch(beta_binom_conc=1e6, error_rate=0.05, n=3000))
+        assert out1.mean() > 1 - 5e-3              # hom-alt stays ~1, NOT ~0.95
+
     def test_emit_calls_binary_with_wired_paths(self, tmp_path, monkeypatch):
         """Monkeypatch the binary present + capture subprocess: assert command + FASTQ wiring."""
         import iscc.data.reads.base as base

@@ -225,14 +225,17 @@ def effective_alt_fraction(af_row, batch=None, modality="bulk"):
     Single-cell: applies the SAME allele model the count path uses (`DNABatch.apply_ado` then
     `DNABatch.allele_balance`), so reads reproduce the dominant scDNA artifacts — allelic dropout
     (het loci collapse to 0/1 with prob `ado_rate`) and Beta-Binomial allele-balance overdispersion
-    (`beta_binom_conc`). `build_cell_fasta` then quantises the result at copy-number resolution; the
-    read-level base-error floor is left to the simulator's per-base error (wired from `error_rate`).
+    (`beta_binom_conc`). The balance is taken WITHOUT the sequencing-error floor
+    (`apply_error=False`): this is the TRUE molecular content, and the per-base read error (DWGSIM
+    `-e`, wired from `error_rate`) is the SINGLE read-error source — otherwise the floor would be
+    applied twice (here AND by the simulator). `build_cell_fasta` then quantises at copy-number
+    resolution.
     """
     af = np.asarray(af_row, dtype=float)
     if modality != "sc" or batch is None:
         return af
     af_obs, _ = batch.apply_ado(af)
-    return np.asarray(batch.allele_balance(af_obs), dtype=float)
+    return np.asarray(batch.allele_balance(af_obs, apply_error=False), dtype=float)
 
 
 # ======================================================================================

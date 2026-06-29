@@ -402,18 +402,25 @@ class DNABatch:
         af_obs[ado & ~drop_alt] = 1.0      # ref allele lost -> looks homozygous alt
         return af_obs, ado
 
-    def allele_balance(self, af):
-        """SINGLE-CELL realized per-locus allele fraction theta (Beta-Binomial mean + error),
-        WITHOUT sampling reads.
+    def allele_balance(self, af, apply_error=True):
+        """SINGLE-CELL realized per-locus allele fraction theta (Beta-Binomial mean), WITHOUT
+        sampling reads.
 
-        theta ~ Beta(c*p_eff, c*(1-p_eff)) with p_eff = af*(1-e)+(1-af)*e and c = `beta_binom_conc`
-        (small c = lumpier allele balance). Degenerate p_eff in {0,1} (e.g. after ADO) collapses to
-        a fixed fraction. This is the single source of the allele balance: `alleles_betabinom`
-        samples reads from it, and the read emitter (`reads/dna.py`) sets per-copy alt multiplicity
-        from it — so count- and read-level single-cell allele statistics agree.
+        theta ~ Beta(c*p, c*(1-p)) with c = `beta_binom_conc` (small c = lumpier allele balance).
+        ``apply_error`` controls whether the per-base sequencing-error floor is folded in:
+          * ``True`` (count layer): p = af*(1-e)+(1-af)*e — the OBSERVED allele fraction a count
+            caller sees (`alleles_betabinom` samples reads from it).
+          * ``False`` (read layer): p = af — the TRUE molecular allele balance (amplification
+            overdispersion only), so the read emitter sets per-copy alt multiplicity WITHOUT the
+            error floor and the simulator's per-base error (DWGSIM `-e`) is the single read-error
+            source (no double-counting; mirrors the scRNA path).
+        Degenerate p in {0,1} (e.g. after ADO) collapses to a fixed fraction.
         """
-        e = self.error
-        p = np.clip(np.asarray(af) * (1 - e) + (1 - np.asarray(af)) * e, 0.0, 1.0)
+        af = np.asarray(af, dtype=float)
+        if apply_error:
+            p = np.clip(af * (1 - self.error) + (1 - af) * self.error, 0.0, 1.0)
+        else:
+            p = np.clip(af, 0.0, 1.0)
         c = self.h.beta_binom_conc
         a = np.maximum(c * p, 1e-9)
         b = np.maximum(c * (1 - p), 1e-9)
