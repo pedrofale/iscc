@@ -14,8 +14,14 @@ from iscc.validation import (segment_copy_numbers, segment_driver_content,
 GENOME = {"n_segments": 12, "segment_size": 50}
 DEME = {"carrying_capacity": 5}
 SPATIAL = {"grid_size": 19, "structure_radius": 0}
+# snv_prob is held low so this test isolates the *CNA* selection signature (oncogene
+# amplification / TSG deletion). With the genome-wide, ploidy-scaled SNV model
+# (n_snvs_per_allele), abundant driver SNVs accumulate across all oncogene loci and saturate
+# fitness, washing out the marginal advantage of amplifying oncogene-rich segments — a real
+# dynamic, but a confound for a test whose job is the CNA signature. Weighting events toward
+# CNAs makes the amplification signal observable (pure-CNA s_corr≈0.42; here ≈0.34).
 CANCER = {"division_rate": 0.4, "death_rate": 0.02, "max_birth_rate": 0.95,
-          "mutation_rate": 0.7, "dispersal_rate": 0.2}
+          "mutation_rate": 0.7, "dispersal_rate": 0.2, "snv_prob": 0.2, "cnv_prob": 0.8}
 
 
 def _selection(driver_effects):
