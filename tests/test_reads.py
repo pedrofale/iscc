@@ -170,11 +170,69 @@ class TestAdapters:
         assert "-C" in cmd and cmd[cmd.index("-C") + 1] == "30.0"
         assert "150" in cmd
 
+    def test_dwgsim_error_rate_wired(self):
+        # a non-default error_rate must reach DWGSIM's -e/-E (the read-level base-error floor).
+        cmd = DwgsimAdapter().build_command("ref.fa", "out/sim", 30.0, error_rate=0.07)
+        assert cmd[cmd.index("-e") + 1] == "0.07"
+        assert cmd[cmd.index("-E") + 1] == "0.07"
+
     def test_art_command(self):
         cmd = ArtAdapter().build_command("ref.fa", "out/sim", 25.0, read_length=100)
         assert "-i" in cmd and cmd[cmd.index("-i") + 1] == "ref.fa"
         assert "-o" in cmd and cmd[cmd.index("-o") + 1] == "out/sim"
         assert "-f" in cmd and cmd[cmd.index("-f") + 1] == "25.0"
+
+    def test_art_accepts_error_rate_and_ignores(self):
+        # uniform adapter API: ART takes error_rate but draws errors from the -ss profile.
+        cmd = ArtAdapter().build_command("ref.fa", "out/sim", 25.0, error_rate=0.05)
+        assert "0.05" not in cmd and "-ss" in cmd
+
+
+# ------------------------------------------------------ allele layer (ADO / overdispersion) --
+class TestAlleleLayer:
+    """The read path consumes the count model's allele hypers (ado_rate, beta_binom_conc,
+    error_rate) so reads reproduce the scDNA artifacts `estimate_dna` is fit to."""
+
+    @staticmethod
+    def _batch(ado_rate=0.0, beta_binom_conc=30.0, error_rate=0.0, seed=0, n=2000):
+        from iscc.data.batch import DNABatch, DNABatchHyperParams
+        h = DNABatchHyperParams(ado_rate=ado_rate, beta_binom_conc=beta_binom_conc,
+                                error_rate=error_rate)
+        gc = np.full(n, 0.45); mapp = np.ones(n); ct = np.zeros(n, dtype=bool)
+        return DNABatch(h, seed=seed).realize(gc, mapp, ct)
+
+    def test_bulk_returns_true_fraction(self):
+        from iscc.data.reads import effective_alt_fraction
+        af = np.array([0.0, 0.5, 1.0, 0.5])
+        out = effective_alt_fraction(af, batch=self._batch(ado_rate=0.9), modality="bulk")
+        assert np.allclose(out, af)  # bulk ignores single-cell artifacts
+
+    def test_sc_ado_collapses_hets_to_monoallelic(self):
+        from iscc.data.reads import effective_alt_fraction
+        af = np.full(2000, 0.5)
+        out = effective_alt_fraction(af, batch=self._batch(ado_rate=0.8, beta_binom_conc=1e6,
+                                                           n=2000), modality="sc")
+        mono = np.mean((out < 1e-6) | (out > 1 - 1e-6))
+        assert 0.7 < mono < 0.9                      # ~ado_rate of het loci drop to 0/1
+        # no ADO + tight concentration -> hets stay ~0.5
+        out0 = effective_alt_fraction(af, batch=self._batch(ado_rate=0.0, beta_binom_conc=1e6,
+                                                            n=2000), modality="sc")
+        assert np.mean(np.abs(out0 - 0.5) < 0.05) > 0.9
+
+    def test_sc_overdispersion_lumpier_at_low_conc(self):
+        from iscc.data.reads import effective_alt_fraction
+        af = np.full(2000, 0.5)
+        tight = effective_alt_fraction(af, batch=self._batch(beta_binom_conc=1000.0, n=2000),
+                                       modality="sc")
+        lumpy = effective_alt_fraction(af, batch=self._batch(beta_binom_conc=1.0, n=2000),
+                                       modality="sc")
+        assert np.std(lumpy) > np.std(tight)         # small conc = lumpier allele balance
+
+    def test_emit_wires_error_rate_into_command(self, tmp_path):
+        res = emit_reads(make_cell_data(amp_cn=6.0), modality="bulk", breadth="wgs",
+                         outdir=str(tmp_path), seed=3)
+        cmd = res["command"]
+        assert "-e" in cmd and float(cmd[cmd.index("-e") + 1]) >= 0.0
 
     def test_emit_calls_binary_with_wired_paths(self, tmp_path, monkeypatch):
         """Monkeypatch the binary present + capture subprocess: assert command + FASTQ wiring."""

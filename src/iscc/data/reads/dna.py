@@ -13,6 +13,18 @@ coverage -> a third-party short-read simulator -> (optional) BAM. Concretely:
   4. A read-simulator adapter (default **DWGSIM**, **ART** alternative) writes the FASTA +
      coverage, shells out via `run_binary`, collects FASTQ. C3 aligns back (bwa + samtools).
 
+Allele-layer consistency with the count model (`data/dna.py`/`batch.py`, the model `estimate_dna`
+inverts). The coverage-layer hypers (`mu_depth`, `kappa`, GC, capture, …) are already shared via
+`coverage_budget`. The allele/base-layer hypers are wired here too so reads reproduce the same
+statistics the estimate is fit to:
+  * **single-cell ADO + allele overdispersion** — `effective_alt_fraction` applies the SAME
+    `DNABatch.apply_ado` + `DNABatch.allele_balance` the count path uses, then bakes the observed
+    fraction into per-copy alt multiplicity (so het loci drop to 0/1 and allele balance is lumpy).
+  * **sequencing error** — `error_rate` is wired into the simulator's per-base error (DWGSIM `-e`),
+    the read-level base-error floor (ART uses its sequencing-system profile instead).
+  * **FFPE C>T (`ffpe_ct_rate`)** is NOT yet reproduced in reads (count-level only) — a documented
+    gap (needs per-locus C-site context in the reference).
+
 The external binaries are OPTIONAL: everything up to the shell-out (FASTA, coverage, command
 construction) runs with no tools installed, and `emit_reads` reports a graceful skip.
 """
@@ -172,9 +184,13 @@ def build_cell_fasta(reference, cnv_row, af_row, path, name="cell"):
 
     CNAs: a segment with copy number `cn` is emitted as `cn` sequence copies (amplification =
     repeated sequence; deletion `cn=0` = omitted) — so a downstream simulator at uniform
-    coverage yields reads ∝ CN. SNVs: at each mutated locus (alt-fraction `v>0`), the alt base
-    is substituted on ``round(v*cn)`` of the `cn` copies (**allele-aware**: a het `v=0.5`,
-    `cn=2` mutates exactly one copy; a homozygous `v=1` mutates all).
+    coverage yields reads ∝ CN. SNVs: at each locus with alt-fraction `v>0`, the alt base is
+    substituted on ``round(v*cn)`` of the `cn` copies (**allele-aware**: a het `v=0.5`, `cn=2`
+    mutates exactly one copy; a homozygous `v=1` mutates all).
+
+    `af_row` is whatever alt fraction the caller wants encoded: the TRUE fraction for bulk, or the
+    OBSERVED fraction (after `effective_alt_fraction`'s ADO + allele overdispersion) for single
+    cells — so single-cell allelic dropout shows up as copies collapsing to all-ref / all-alt.
 
     Returns the OrderedDict of ``contig_name -> sequence`` that was written.
     """
@@ -198,6 +214,25 @@ def build_cell_fasta(reference, cnv_row, af_row, path, name="cell"):
             records[f"{name}_seg{seg}_cp{cp}"] = "".join(seq)
     reference.write_fasta(path, records)
     return records
+
+
+def effective_alt_fraction(af_row, batch=None, modality="bulk"):
+    """Map a cell's TRUE per-locus alt fraction to the OBSERVED fraction the reads should carry.
+
+    Bulk: returns the true fraction unchanged — population mixing of many cells produces the bulk
+    VAF, and single-cell amplification artifacts do not apply.
+
+    Single-cell: applies the SAME allele model the count path uses (`DNABatch.apply_ado` then
+    `DNABatch.allele_balance`), so reads reproduce the dominant scDNA artifacts — allelic dropout
+    (het loci collapse to 0/1 with prob `ado_rate`) and Beta-Binomial allele-balance overdispersion
+    (`beta_binom_conc`). `build_cell_fasta` then quantises the result at copy-number resolution; the
+    read-level base-error floor is left to the simulator's per-base error (wired from `error_rate`).
+    """
+    af = np.asarray(af_row, dtype=float)
+    if modality != "sc" or batch is None:
+        return af
+    af_obs, _ = batch.apply_ado(af)
+    return np.asarray(batch.allele_balance(af_obs), dtype=float)
 
 
 # ======================================================================================
@@ -268,7 +303,10 @@ class ArtAdapter:
     binary = "art_illumina"
 
     def build_command(self, ref_fa, out_prefix, coverage, read_length=150,
-                      seqsys="HS25", frag_mean=200, frag_sd=10, extra=None):
+                      seqsys="HS25", frag_mean=200, frag_sd=10, error_rate=None, extra=None):
+        # ART draws base errors from the empirical sequencing-system profile (`-ss`), so the
+        # scalar `error_rate` does not map to a flag here; accepted for a uniform adapter API
+        # and ignored (DWGSIM is the error-rate-driven backend).
         cmd = [
             "-ss", seqsys, "-sam", "-p",
             "-i", ref_fa, "-l", int(read_length), "-f", float(coverage),
@@ -356,14 +394,18 @@ def emit_reads(cell_data, reference=None, simulator="dwgsim", breadth="wgs",
     if mean_coverage is None:
         mean_coverage = float(assay.hypers.mu_depth)
 
-    # per-cell FASTA (sc: one per cell; bulk: pool the cells into one reference).
+    # per-cell FASTA (sc: one per cell; bulk: pool the cells into one reference). For single
+    # cells, map the true alt fraction to the OBSERVED fraction (ADO + allele overdispersion,
+    # via the count model's allele methods) so reads carry the same scDNA artifacts the
+    # estimate is fit to; bulk uses the true fraction (population mixing gives the bulk VAF).
     cnv_df = cell_data.get("cell_cnv")
+    batch = getattr(assay, "batch", None)
     fasta_paths = []
     pool_records = OrderedDict()
     for c in cells:
         cnv_row = (cnv_df.loc[c, genes].values if cnv_df is not None
                    else np.full(len(genes), 2.0))
-        af_row = snv.loc[c, genes].values
+        af_row = effective_alt_fraction(snv.loc[c, genes].values, batch=batch, modality=modality)
         if modality == "sc":
             p = os.path.join(outdir, f"{c}.fa")
             build_cell_fasta(reference, cnv_row, af_row, p, name=str(c))
@@ -404,7 +446,8 @@ def emit_reads(cell_data, reference=None, simulator="dwgsim", breadth="wgs",
                          zip(reference.seg_ids, split.alt, split.ref)},
         "command": adapter.build_command(fasta_paths[0],
                                          os.path.join(outdir, "sim"),
-                                         mean_coverage, read_length=read_length),
+                                         mean_coverage, read_length=read_length,
+                                         error_rate=float(assay.hypers.error_rate)),
         "fastq": [],
         "bam": None,
         "status": "skipped",
@@ -417,7 +460,8 @@ def emit_reads(cell_data, reference=None, simulator="dwgsim", breadth="wgs",
     fastqs = []
     for fa in fasta_paths:
         prefix = os.path.splitext(fa)[0] + ".sim"
-        fastqs.extend(adapter.emit(fa, prefix, mean_coverage, read_length=read_length))
+        fastqs.extend(adapter.emit(fa, prefix, mean_coverage, read_length=read_length,
+                                   error_rate=float(assay.hypers.error_rate)))
     result["fastq"] = fastqs
     result["status"] = "emitted"
 

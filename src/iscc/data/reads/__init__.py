@@ -12,7 +12,7 @@ from .base import ReadEmitter, MissingBinaryError, find_binary, run_binary
 from .variants import inject, AlleleSplit
 from .dna import (
     Reference, SyntheticReference, RealGenomeReference, REFERENCES,
-    build_cell_fasta, coverage_budget, emit_reads, DNAReadEmitter,
+    build_cell_fasta, effective_alt_fraction, coverage_budget, emit_reads, DNAReadEmitter,
     DwgsimAdapter, ArtAdapter, SIMULATORS, align_to_bam,
 )
 
@@ -20,6 +20,6 @@ __all__ = [
     "ReadEmitter", "MissingBinaryError", "find_binary", "run_binary",
     "inject", "AlleleSplit",
     "Reference", "SyntheticReference", "RealGenomeReference", "REFERENCES",
-    "build_cell_fasta", "coverage_budget", "emit_reads", "DNAReadEmitter",
-    "DwgsimAdapter", "ArtAdapter", "SIMULATORS", "align_to_bam",
+    "build_cell_fasta", "effective_alt_fraction", "coverage_budget", "emit_reads",
+    "DNAReadEmitter", "DwgsimAdapter", "ArtAdapter", "SIMULATORS", "align_to_bam",
 ]
