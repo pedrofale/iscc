@@ -161,6 +161,41 @@ inference. Not in F1–F7 — a substantial new track if promoted.
 
 ---
 
+## Theme 9 — Genomic resolution & CNA mechanism richness
+
+### R10. How do we add focal (sub-arm) CNAs, WGD, and whole-chromosome events without blowing up the count engine?
+**Why it matters.** iscc's CNA model only does **amplify/delete a whole segment** — at its finest
+(real-genome mode) that is **arm resolution**. Both competitors are richer: **CINner and SISTEM both
+have the full mechanism set** — *focal (sub-arm) amplifications & deletions, chromosome-arm
+missegregation, whole-chromosome missegregation, and whole-genome duplication (WGD)*. So iscc is at
+parity for *arm-level* CNA landscapes (what M3b fits to PCAWG; the Davoli/Charm story), but **cannot
+represent a tight focal amplicon (*MYC*, *EGFR*), a focal TSG deletion, genome doubling, or
+whole-chromosome gains/losses** as distinct events — a real CNA-realism deficit vs *both* tools.
+Focal CNAs are biologically central (recurrent oncogene amplicons / TSG focal deletions, GISTIC
+peaks). The mechanism is *known* (both competitors implement it); the genuinely open part is doing
+it cheaply.
+
+**Sub-questions / approaches.**
+- *Sub-arm bins in the real-genome mode* (DESIGN_inference §A.5): segments become bins within arms;
+  a CNA event picks `(arm, start, length)`. The crux is the **resolution-vs-cost tradeoff** — more
+  bins = a bigger per-genotype genome (memory + per-event work), against the §7 scalability budget.
+  How fine is enough? A **multi-resolution** scheme (coarse by default, refine only where focal
+  events land) may be the way.
+- *New event types in `mutate()`*: focal amp/del (sub-segment span), WGD (double all `seg_cns`),
+  whole-chromosome missegregation (gain/lose a whole chromosome = a set of arms) — each a mechanism
+  with its own rate, **estimable via the inference layer / ABC** exactly as CINner fits its
+  mechanism probabilities (extends §A.0's `mut_prob`/`cnv_prob`).
+- Must stay compatible with the genotype-count engine, **tau-leaping (§7)**, and reproducibility.
+- *Validation*: recurrent **focal** amplification of oncogenes / focal deletion of TSGs (the focal
+  analogue of the arm-level Davoli/Charm result); focal-CNA frequency spectra vs real GISTIC peaks.
+
+**Serves:** CNA-mechanism parity with CINner/SISTEM; richer DNA-assay ground truth (F4/F5 already
+derive coverage from `seg_cns`, so focal events would yield realistic focal CNA profiles); more
+mechanism-rate targets for the inference layer. Lives in the tumour engine (`mutate`/`Selection` +
+real-genome mode), not F1–F7.
+
+---
+
 ## How to use this file
 - These are **questions, not scheduled work** — promote one to a DESIGN doc / milestone when we
   commit to building it.
