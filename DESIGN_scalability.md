@@ -182,6 +182,12 @@ plausibly-sized tumor, is infeasible if a single sim is slow).
 - **Jeffrey West / HAL** 2D agent-based models: typically **~10⁴–10⁶ agents** (on-lattice; HAL is
   built for efficiency + real-time viz). See HAL (Bravo et al. 2020) and the "seven-step guide to
   spatial ABM of tumour evolution" (arXiv:2311.03569).
+- **SISTEM** (Weiner et al. 2025, PMC12701798): an agent-based, **clonal-level** DNA-seq simulator
+  that reaches **5×10⁵–5×10⁷ cells across 1–5 sites in 0.46–25 min on commodity hardware** — by
+  advancing **all clones once per discrete generation** (a birth–death–migration step per clone),
+  not one event per update. **External precedent that the fix below is right and achievable**: the
+  generation-based, clone-batched update *is* the tau-leaping approach. iscc's M3b "publication-scale
+  fit is HPC-bound" is exactly the cost SISTEM's design avoids.
 
 **Two distinct bottlenecks (keep separate):**
 1. **Size ← Θ(N) sequential events.** Even with O(log n) event *sampling* (§3), the engine does
@@ -190,6 +196,8 @@ plausibly-sized tumor, is infeasible if a single sim is slow).
    per time-step τ, draw `Poisson(rate · count · τ)` births/deaths per (deme, genotype) and apply
    in batch, so wall-time scales with #clones × #timesteps rather than #cells. This is the main
    lever for realistic size; needs care at carrying capacity and to preserve reproducibility.
+   *SISTEM does the simplest concrete version: one synchronous birth–death(–migration) step per
+   clone per discrete generation — a good template to follow for iscc's genotype-count demes.*
 2. **Per-event cost ← #demes / #genotypes** (the §3 Fenwick/alias item). Independent of (1);
    matters once grids get large.
 
