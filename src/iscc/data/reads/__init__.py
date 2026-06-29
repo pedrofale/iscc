@@ -5,8 +5,9 @@ Per-modality read-realism ADAPTERS over shared seams:
   * `variants` — the modality-agnostic variant-injection seam (`inject`, total-preserving).
   * `dna`      — DWGSIM(default)/ART: Reference{synthetic|real} -> per-cell FASTA -> C1
                  coverage -> variants.inject -> reads -> bwa/samtools BAM.
-
-A later `rna` adapter (scReadSim) reuses `base` + `variants` unchanged.
+  * `rna`      — mutation-aware scRNA (F7b): F3 count matrix (UMI totals conserved) ->
+                 variants.inject(observed RNA-VAF) -> alt/ref UMIs -> self-contained 10x-style
+                 FASTQ (synthetic transcriptome) or the scReadSim seam (real template).
 """
 from .base import ReadEmitter, MissingBinaryError, find_binary, run_binary
 from .variants import inject, AlleleSplit
@@ -17,7 +18,7 @@ from .dna import (
 )
 from .rna import (
     distort_vaf, observed_allele_counts, emit_scrna_reads, ScReadSimAdapter,
-    ScrnaAlleleCounts,
+    ScrnaAlleleCounts, SyntheticTranscriptome, write_scrna_fastq,
 )
 
 __all__ = [
@@ -27,5 +28,5 @@ __all__ = [
     "build_cell_fasta", "effective_alt_fraction", "coverage_budget", "emit_reads",
     "DNAReadEmitter", "DwgsimAdapter", "ArtAdapter", "SIMULATORS", "align_to_bam",
     "distort_vaf", "observed_allele_counts", "emit_scrna_reads", "ScReadSimAdapter",
-    "ScrnaAlleleCounts",
+    "ScrnaAlleleCounts", "SyntheticTranscriptome", "write_scrna_fastq",
 ]

@@ -11,10 +11,24 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import gzip
+import os
+
 from iscc.data.reads import (
     distort_vaf, observed_allele_counts, emit_scrna_reads, ScReadSimAdapter, ScrnaAlleleCounts,
+    SyntheticTranscriptome, write_scrna_fastq,
 )
 from iscc.tumor.models import GenotypeTumor
+
+
+def _read_fastq(path):
+    """Return the list of (id, seq) records from a gzipped FASTQ."""
+    recs = []
+    with gzip.open(path, "rt") as fh:
+        lines = fh.read().splitlines()
+    for i in range(0, len(lines), 4):
+        recs.append((lines[i], lines[i + 1]))
+    return recs
 
 
 # ------------------------------------------------------------------- count-level core --------
@@ -117,3 +131,96 @@ def test_emit_scrna_requires_rna_vaf():
     del cd["cell_rna_vaf"]
     with pytest.raises(KeyError):
         emit_scrna_reads(cd, outdir="/tmp/iscc_should_not_exist")
+
+
+def test_observed_vaf_diverges_from_dna_at_low_expression(tmp_path):
+    """cell_rna_vaf == DNA-VAF at neutral loci is the EXPECTED fraction; the OBSERVED scRNA-VAF is
+    depth-sampled at the gene's expression, so it drops out at low expression and only matches
+    DNA-VAF where the gene is well expressed."""
+    t = _grow_tumor()
+    cd = t.make_cell_data()
+    res = emit_scrna_reads(cd, obs_fidelity=1.0, protocol="10x", seed=1, outdir=str(tmp_path))
+    eff = np.concatenate(t.selection.mut_effects)
+    neutral = eff == 1.0
+    dna = res["dna_vaf"].values
+    obs = res["obs_vaf"].values
+    tot = res["total"].values
+    site = (dna > 0) & neutral[None, :]
+    u, d, o = tot[site], dna[site], obs[site]
+    # unexpressed neutral sites: all drop out (observed VAF 0 != DNA-VAF > 0)
+    unexpr = u == 0
+    assert unexpr.sum() > 0 and np.all(o[unexpr] == 0.0)
+    # well-expressed neutral sites: observed VAF tracks DNA-VAF
+    welln = u >= 10
+    if welln.sum() > 30:
+        assert abs(o[welln].mean() - d[welln].mean()) < 0.1
+
+
+def test_snv_scales_expression_depth_by_gene_type():
+    """The SNV affects the expression DEPTH too (not just the VAF): an oncogene mutation raises
+    expression (better detection), a TSG mutation lowers it (worse) — controlling for copy number."""
+    t = _grow_tumor()
+    cd = t.make_cell_data()
+    exp, snv, cnv = cd["cell_exp"].values, cd["cell_snv"].values, cd["cell_cnv"].values
+    eff = np.concatenate(t.selection.mut_effects)
+
+    def ratio(cols):
+        mut_e, wt_e = [], []
+        for g in cols:
+            cn2 = np.abs(cnv[:, g] - 2) < 0.01
+            mut, wt = cn2 & (snv[:, g] > 0), cn2 & (snv[:, g] == 0)
+            if mut.sum() > 10 and wt.sum() > 10:
+                mut_e.append(exp[mut, g].mean()); wt_e.append(exp[wt, g].mean())
+        return np.mean(mut_e) / np.mean(wt_e) if mut_e else np.nan
+
+    assert ratio(np.where(eff > 1)[0]) > 1.0      # oncogene SNV -> more expression
+    assert ratio(np.where(eff < 1)[0]) < 1.0      # TSG SNV -> less expression
+
+
+# ----------------------------------------------------------------- actual reads (FASTQ) -------
+class TestScrnaFastq:
+    def _counts(self, n_cells=8, n_genes=4, umi=6, vaf=1.0):
+        cells = [f"C{i}" for i in range(n_cells)]
+        genes = [f"G_0_{g}" for g in range(n_genes)]
+        alt = pd.DataFrame(np.full((n_cells, n_genes), umi), index=cells, columns=genes)
+        ref = pd.DataFrame(np.zeros((n_cells, n_genes), dtype=int), index=cells, columns=genes)
+        return alt, ref, genes
+
+    def test_read_count_equals_total_umis(self, tmp_path):
+        alt, ref, genes = self._counts(umi=6)            # 8*4*6 = 192 alt UMIs, 0 ref
+        tx = SyntheticTranscriptome(genes, seed=0, read_length=60)
+        fq = write_scrna_fastq(alt, ref, tx, str(tmp_path), error_rate=0.0, seed=1)
+        assert fq["n_reads"] == int(alt.values.sum() + ref.values.sum())   # totals conserved
+        assert len(_read_fastq(fq["R1"])) == fq["n_reads"]
+        assert len(_read_fastq(fq["R2"])) == fq["n_reads"]
+
+    def test_alt_reads_carry_alt_base(self, tmp_path):
+        alt, ref, genes = self._counts(n_cells=4, n_genes=1, umi=10)
+        tx = SyntheticTranscriptome(genes, seed=0, read_length=60)
+        # all-alt vs all-ref: the variant base at var_pos differs
+        fq_a = write_scrna_fastq(alt, ref, tx, str(tmp_path / "a"), error_rate=0.0, seed=1)
+        fq_r = write_scrna_fastq(ref, alt, tx, str(tmp_path / "r"), error_rate=0.0, seed=1)
+        vp = tx.var_pos
+        alt_bases = {seq[vp] for _, seq in _read_fastq(fq_a["R2"])}
+        ref_bases = {seq[vp] for _, seq in _read_fastq(fq_r["R2"])}
+        assert alt_bases and ref_bases and alt_bases.isdisjoint(ref_bases)   # alt != ref base
+
+    def test_barcode_per_cell_in_r1(self, tmp_path):
+        alt, ref, genes = self._counts(n_cells=5, n_genes=2, umi=4)
+        tx = SyntheticTranscriptome(genes, seed=0, read_length=40)
+        fq = write_scrna_fastq(alt, ref, tx, str(tmp_path), error_rate=0.0, seed=2,
+                               barcode_len=16, umi_len=12)
+        # one distinct 16bp barcode per cell; R1 length == barcode+umi
+        bcs = {seq[:16] for _, seq in _read_fastq(fq["R1"])}
+        assert len(bcs) == 5
+        assert all(len(seq) == 28 for _, seq in _read_fastq(fq["R1"]))
+
+    def test_emit_scrna_reads_writes_fastq(self, tmp_path):
+        t = _grow_tumor()
+        cd = t.make_cell_data()
+        res = emit_scrna_reads(cd, obs_fidelity=0.6, protocol="10x", seed=1,
+                               emit_fastq=True, read_length=60, outdir=str(tmp_path))
+        assert res["status"] == "emitted:synthetic-fastq"
+        assert len(res["fastq"]) == 2 and all(os.path.exists(p) for p in res["fastq"])
+        # read count == conserved UMI total (alt + ref over all cells/genes)
+        assert res["n_reads"] == int(res["alt"].values.sum() + res["ref"].values.sum())

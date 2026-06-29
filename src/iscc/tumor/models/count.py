@@ -577,13 +577,18 @@ class GenotypeTumor:
             cell_type=pd.DataFrame(types, index=idx, columns=["cell_id"]),
             cell_deme=pd.DataFrame(demes_col, index=idx, columns=["deme_id"]),
         )
-        # cell_rna_vaf (F7b): allele-expression-weighted true RNA-VAF, the alt fraction the scRNA
-        # reads should carry. With m mutant + w wt copies at a locus and per-locus expression
-        # effect e (selection.mut_effects: oncogene=2, TSG=0.5, else 1), the fraction of expression
-        # from mutant alleles is (m·e)/(m·e + w) = (v·e)/(v·e + (1-v)) with v = DNA-VAF (cell_snv) —
-        # copy number cancels. e=1 -> RNA-VAF == DNA-VAF; e>1 inflates, e<1 deflates (that
-        # divergence + expression gating is why scRNA SNV calling is hard). obs_fidelity (the read
-        # layer, reads/rna.py) distorts this further; it deliberately does NOT live in the engine.
+        # cell_rna_vaf (F7b): the EXPECTED allele FRACTION in RNA (not an observed VAF). With m
+        # mutant + w wt copies at a locus and per-locus expression effect e (selection.mut_effects:
+        # oncogene=2, TSG=0.5, else 1), the fraction of expression from mutant alleles is
+        # (m·e·base)/(m·e·base + w·base) = (m·e)/(m·e + w) = (v·e)/(v·e + (1-v)) with v = DNA-VAF
+        # (cell_snv). The per-gene baseline expression CANCELS in this fraction, which is why at a
+        # neutral locus (e=1) the *expected fraction* equals DNA-VAF; e>1 inflates, e<1 deflates.
+        # This is NOT what a caller observes: the OBSERVED scRNA-VAF is this fraction SAMPLED at a
+        # depth equal to the gene's expression (the F3 UMI count, which carries the per-gene
+        # baseline + cell-type + CNV + SNV-effect scaling). Per-gene expression varies enormously,
+        # so most loci drop out or are noisy and the observed VAF does NOT match DNA-VAF at neutral
+        # loci — the read layer (reads/rna.py) does the depth-aware sampling and the obs_fidelity
+        # distortion; both deliberately live outside the engine.
         flat_eff = (np.concatenate(self.selection.mut_effects)
                     if self.selection.mut_effects else np.ones(self.n_genes))
         v = self.cell_data["cell_snv"].values
