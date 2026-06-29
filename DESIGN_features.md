@@ -74,15 +74,31 @@ Two `Assay` instances with identical hyper-parameters but different seeds → tw
 each as its own AnnData with `batch` in `.obs`, concatenate for integration benchmarking. The
 biological signal (`λ`) is shared; only the `β`, depth, ambient draws differ.
 
-## C. Read simulation (FASTQ / BAM)
+## C. Read simulation (read-count matrices → FASTQ / BAM)
 
-Phased, because the abstract genome has no nucleotide sequence:
-- **C1 — allele-specific *count* realism**: per-locus coverage (depth) + binomial VAF sampling
-  from the bitset genome with an error rate → coverage/VAF tables. Extends `data/dna.py`.
-- **C2 — read sequences (FASTQ)**: generate a synthetic reference sequence per segment/gene once,
-  apply each cell's SNVs/CNAs, sample reads under a coverage + error model → FASTQ.
-- **C3 — BAM**: align reads to the synthetic reference (optional; for tools that consume BAMs).
-Gate C2/C3 behind C1 being validated; this is the heaviest feature.
+Follow the standard 3-stage DNA-seq pipeline (as SISTEM, Weiner 2025): **per-cell reference →
+coverage model → third-party read simulator**. Only the coverage model is bespoke; do NOT
+reimplement the sequencer error model — delegate stage 3 to a validated tool (**ART**, DWGSIM,
+pIRS, InSilicoSeq). Phased:
+
+- **C1 — allele-specific *count / coverage* realism** (highest value; needs NO nucleotide sequence):
+  per-locus coverage scaled by **copy number** (amplified region → proportionally more reads — how
+  CNA callers work), depth dispersion, GC/mappability, + binomial VAF sampling with an error rate
+  → **read-count / coverage / VAF matrices**. This is what most CNA/SNV callers actually consume
+  (SISTEM emits these *separately* from raw reads), and it works on the abstract bitset genome
+  today. **Breadth-aware** (WGS/WES/panel, §D); for single-cell, apply ADO + amplification bias
+  first. Extends `data/dna.py` (already has a `data_mode='reads'` stub).
+- **C2 — raw reads (FASTQ)**: needs a nucleotide reference. Two options:
+  - *(A) synthesise* a random per-segment reference once, apply each cell's SNVs/CNAs → per-cell
+    FASTA. Works today, but lacks real sequence context (repeats, GC, mappability) — whether
+    caller-benchmarks transfer is open (RESEARCH_QUESTIONS R5).
+  - *(B) anchor to the real genome* via the M3b real-genome mode (segments = chromosome arms →
+    hg38 coordinates) and use the **real reference sequence**. Better long-term path for read-level
+    realism; the preferred option once real-genome mode is mature.
+  Then build the per-cell reference + coverage (C1) and call a **third-party read simulator** → FASTQ.
+- **C3 — BAM**: align the FASTQ back to the chosen reference (for tools that consume BAMs).
+
+Gate C2/C3 behind C1; C1 alone serves the many methods that take count/coverage matrices, not reads.
 
 ## D. Per-modality technical / batch considerations
 
@@ -137,7 +153,8 @@ data — so realistic defaults can be *learned*, not guessed.
   breadth = read-counts C1.
 - **F5** — single-cell DNA (ADO + per-cell amplification, nested in run-batch), same WGS/WES/panel breadth.
 - **F6** — spatial batch (spatially-correlated capture field, diffusion, section plane).
-- **F7** — read emission C2 (FASTQ) → C3 (BAM).
+- **F7** — read emission: **C1 count/coverage matrices** (copy-number-scaled, breadth-aware) first,
+  then C2 FASTQ (synthetic or real-genome-anchored reference → third-party read simulator) → C3 BAM.
 
 ## Validation hooks (per DESIGN_inference conventions)
 - Batch model: *recover* injected batch params via `estimate()`; show two same-tumor batches share
