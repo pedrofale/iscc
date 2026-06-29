@@ -577,6 +577,20 @@ class GenotypeTumor:
             cell_type=pd.DataFrame(types, index=idx, columns=["cell_id"]),
             cell_deme=pd.DataFrame(demes_col, index=idx, columns=["deme_id"]),
         )
+        # cell_rna_vaf (F7b): allele-expression-weighted true RNA-VAF, the alt fraction the scRNA
+        # reads should carry. With m mutant + w wt copies at a locus and per-locus expression
+        # effect e (selection.mut_effects: oncogene=2, TSG=0.5, else 1), the fraction of expression
+        # from mutant alleles is (m·e)/(m·e + w) = (v·e)/(v·e + (1-v)) with v = DNA-VAF (cell_snv) —
+        # copy number cancels. e=1 -> RNA-VAF == DNA-VAF; e>1 inflates, e<1 deflates (that
+        # divergence + expression gating is why scRNA SNV calling is hard). obs_fidelity (the read
+        # layer, reads/rna.py) distorts this further; it deliberately does NOT live in the engine.
+        flat_eff = (np.concatenate(self.selection.mut_effects)
+                    if self.selection.mut_effects else np.ones(self.n_genes))
+        v = self.cell_data["cell_snv"].values
+        num = v * flat_eff
+        denom = num + (1.0 - v)
+        rna_vaf = np.divide(num, denom, out=np.zeros_like(v, dtype=float), where=denom > 0)
+        self.cell_data["cell_rna_vaf"] = pd.DataFrame(rna_vaf, index=idx, columns=gene_names)
         return self.cell_data
 
     # --- plotting (shared, engine-agnostic) ----------------------------------

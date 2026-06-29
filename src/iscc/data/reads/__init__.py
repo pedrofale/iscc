@@ -15,6 +15,10 @@ from .dna import (
     build_cell_fasta, effective_alt_fraction, coverage_budget, emit_reads, DNAReadEmitter,
     DwgsimAdapter, ArtAdapter, SIMULATORS, align_to_bam,
 )
+from .rna import (
+    distort_vaf, observed_allele_counts, emit_scrna_reads, ScReadSimAdapter,
+    ScrnaAlleleCounts,
+)
 
 __all__ = [
     "ReadEmitter", "MissingBinaryError", "find_binary", "run_binary",
@@ -22,4 +26,6 @@ __all__ = [
     "Reference", "SyntheticReference", "RealGenomeReference", "REFERENCES",
     "build_cell_fasta", "effective_alt_fraction", "coverage_budget", "emit_reads",
     "DNAReadEmitter", "DwgsimAdapter", "ArtAdapter", "SIMULATORS", "align_to_bam",
+    "distort_vaf", "observed_allele_counts", "emit_scrna_reads", "ScReadSimAdapter",
+    "ScrnaAlleleCounts",
 ]

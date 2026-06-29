@@ -293,10 +293,13 @@ data — so realistic defaults can be *learned*, not guessed.
   (synthetic default / real-genome drop-in), per-cell FASTA from CNAs/SNVs, C1 coverage, **DWGSIM**
   (default; ART alternative) + bwa/**samtools**, **plus the shared `reads/variants.py` seam**
   (inject alt/ref preserving total; DNA uses it with DNA-VAF). **DNA-first** (bulk + single-cell).
-- **F7b (later)** — **mutation-aware scRNA reads**: scReadSim driven by the F3 count matrix (UMI
-  totals conserved) → `variants.inject` with observed RNA-VAF = `cell_rna_vaf × obs_fidelity` (single
-  abstraction parameter). Needs the engine `cell_rna_vaf` addition. Deliverable: observed-VAF vs
-  true-DNA-VAF — the **scDNA-vs-scRNA SNV-calling-is-hard** benchmark. External binaries optional; CI asserts the bespoke layers.
+- **F7b ✅ DONE** — **mutation-aware scRNA reads**: `reads/rna.py` drives off the F3 count matrix
+  (UMI totals conserved) → `variants.inject` with observed RNA-VAF = `cell_rna_vaf × obs_fidelity`
+  (single abstraction parameter). Engine adds `cell_rna_vaf` (allele-expression-weighted, both
+  `make_cell_data` paths). Count-level observed alt/ref UMI matrix is the primary output; scReadSim
+  reads are an optional realism seam (skip-if-absent). Benchmark `validation/validate_scrna_snv.py`:
+  even at `obs_fidelity=1` only ~31% of true mutations are scRNA-detectable (expression gating),
+  falling with fidelity — the **scDNA-vs-scRNA SNV-calling-is-hard** result. External binaries optional; CI asserts the bespoke layers.
 
 ## Validation hooks (per DESIGN_inference conventions)
 - Batch model: *recover* injected batch params via `estimate()`; show two same-tumor batches share

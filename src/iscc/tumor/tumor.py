@@ -265,6 +265,15 @@ class Tumor(object):
             cell_type=pd.DataFrame(cell_type, index=cell_names, columns=['cell_id']),
             cell_deme=pd.DataFrame(cell_deme, index=cell_names, columns=['deme_id'])
         )
+        # cell_rna_vaf (F7b): allele-expression-weighted RNA-VAF = (v·e)/(v·e + (1-v)), v = DNA-VAF
+        # (cell_snv), e = per-locus expression effect (selection.mut_effects); see count.py for the
+        # derivation. e=1 -> RNA-VAF == DNA-VAF; e>1 inflates / e<1 deflates. Drives scRNA reads.
+        flat_eff = (np.concatenate(self.selection.mut_effects)
+                    if self.selection.mut_effects else np.ones(self.n_genes))
+        num = cell_snv * flat_eff
+        denom = num + (1.0 - cell_snv)
+        rna_vaf = np.divide(num, denom, out=np.zeros_like(cell_snv, dtype=float), where=denom > 0)
+        self.cell_data["cell_rna_vaf"] = pd.DataFrame(rna_vaf, index=cell_names, columns=gene_names)
 
 
 
