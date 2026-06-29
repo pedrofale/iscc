@@ -189,17 +189,77 @@ Then:
   → overlay (vs the current default-params overlay).
 - **Estimation-recovery test:** simulate with known params → estimate → recover (incl. batch params).
 
-## C. DNA & Visium estimation (later)
-Fit the per-modality technical parameters defined in `DESIGN_features.md` §D.
-- **DNA:** **breadth-aware** (WGS / WES / panel — the orthogonal axis in `DESIGN_features.md` §D,
-  applies to both bulk and single-cell). Estimate and validate the statistics that a given breadth
-  actually exposes: WGS/WES → coverage depth + GC-bias curve + (sc) ADO, validated on coverage and
-  CNA log-ratio distributions; targeted panel → deep on-target depth + per-amplicon bias, validated
-  on VAF accuracy (no genome-wide CNA). `estimate(real, breadth=…)`. (Couples to read-level
-  emission, DESIGN_features C/F4–F5.)
-- **Visium:** estimate spots-per-tissue, counts-per-spot, and the (spatially autocorrelated)
-  capture-efficiency field from a real Visium dataset; validate spatial autocorrelation (Moran's
-  I) and spot count distribution.
+## C. DNA & Visium estimation
+
+Fit the per-modality technical parameters defined in `DESIGN_features.md` §D. The DNA half (C.1)
+is **unblocked** — F4/F5 already give a generative model with named parameters
+(`DNABatchHyperParams` in `data/batch.py`). The Visium half (C.2) waits on the spatial assay (F6).
+
+### C.1 DNA estimation (M4 DNA half)
+
+**This is method-of-moments / MLE, not ABC.** The flagship tumour layer (§A) needs ABC because the
+map parameters→observables is implicit (only reachable by simulating). The DNA *assay* parameters
+are the opposite: each maps **directly to a marginal summary statistic** of a real coverage /
+allele-count matrix. So DNA estimation is closed-form / 1-D MLE on summary statistics — the same
+machinery as the scRNA `estimate()` (§B), fast and simulation-free. ABC stays reserved for the
+biology.
+
+**Target & shape.** Fit a `DNABatchHyperParams` (the `estimate()` targets are already documented on
+that dataclass). Add a `DNAEstimate` dataclass + `estimate_dna(...)` in `data/estimate.py` (or a
+sibling `estimate_dna.py`), mirroring `RNAEstimate`/`estimate()`: it returns fitted hypers ready to
+drive `DNABatch` / the F4–F5 runners, plus a `.fitted` map flagging which fields were learned vs
+carried from a preset. **Breadth-aware** (WGS / WES / panel) and **modality-aware** (bulk vs
+single-cell), exactly as §B is protocol-aware (10x vs Smart-seq3) — the active noise components
+differ by breadth and modality.
+
+**Conditional on called copy number (the one wrinkle).** Our depth model is copy-number-scaled
+(coverage ∝ CN × efficiency). Real data does not hand you true CN, so estimation is a **two-pass**:
+(1) run a CN caller on the real data (ASCAT/Sequenza for bulk; Ginkgo/HMMcopy for single-cell) to
+get per-locus CN, then (2) estimate the *residual technical noise given that CN*. We are explicit
+that the technical params are fit **conditional on the caller's CN** — which is precisely the CN
+regime we re-inject when simulating. This is the DNA analogue of §B's library-size de-biasing of the
+dispersion: separate the technical layer from the part that is really biology.
+
+**Per-field estimators (the `DNABatchHyperParams` targets).**
+
+| Field | Estimated from real data by | Needs |
+|---|---|---|
+| `mu_depth` | mean per-locus coverage | counts only |
+| `kappa` (DM) / `nb_dispersion` (NB) | coverage variance **after** dividing out CN×efficiency → MoM on the residual dispersion | counts + called CN |
+| `gc_curve_sigma` | LOESS regress log-coverage on per-locus GC; curvature of the fit | counts + reference GC |
+| `capture_sigma` | LogNormal sd of per-target (WES) / per-amplicon (panel) coverage after removing GC+CN (ideally vs a panel-of-normals) | counts + CN |
+| `error_rate` | alt fraction at non-variant / hom-ref loci (the noise floor) | counts + variant mask |
+| `depth_batch_sigma` | sd of log mean-depth across samples/batches | ≥2 batches |
+| `ado_rate` (sc) | fraction of **known-het** loci collapsing to ~0 or ~1 BAF | single-cell + het sites |
+| `beta_binom_conc` (sc) | BAF overdispersion at het loci beyond Binomial | single-cell + het sites |
+| `ffpe_ct_rate` | excess alt at C>T-eligible sites vs the error floor | counts + variant context |
+| `doublet_rate` | **not identifiable from counts** → prior-only (carried from preset, flagged not-fit) | demultiplexing |
+| `breadth`, `depth_model` | **chosen, not estimated** (you know the assay) | — |
+
+The `_PRIOR_ONLY` escape that §B's `estimate()` already uses (ambient/doublet) carries the genuinely
+unidentifiable fields honestly instead of pretending to fit them.
+
+**Bulk vs single-cell.** Same `DNABatchHyperParams`; fit shared fields (depth, dispersion, GC,
+capture, error) from either modality. `ado_rate` / `beta_binom_conc` / `doublet_rate` are the
+per-cell amplification/dropout layer — fittable **only from single-cell** data. `kappa` is the
+amplification regime: large from pooled bulk, small from lumpy MDA/MALBAC single-cell; it falls out
+of the residual coverage dispersion but means different things per modality.
+
+**Validation (posterior-predictive, same loop as §B).** Fit hypers from a real DNA-seq dataset →
+simulate DNA from a synthetic iscc tumour with those hypers → recompute the **same** summary stats
+(coverage CV per CN level, BAF spread at hets, realized ADO rate, GC curve, CNA log-ratio
+distribution) → overlay vs real. Plus an **estimation-recovery test**: simulate with known hypers →
+estimate → recover (the DNA analogue of §B's recovery test). Targeted-panel validation focuses on
+VAF accuracy + per-amplicon bias (no genome-wide CNA); WGS/WES on coverage + GC + CNA log-ratio.
+
+**Deliverables.** `estimate_dna()` + `DNAEstimate`; a recovery test; a fitted real-data overlay
+(`validation/validate_dna.py`); honest `.fitted` flags. Couples to read-level emission
+(`DESIGN_features.md` C / F4–F5) but does **not** require it — counts-level estimation stands alone.
+
+### C.2 Visium estimation (deferred — needs F6)
+Estimate spots-per-tissue, counts-per-spot, and the (spatially autocorrelated) capture-efficiency
+field from a real Visium dataset; validate spatial autocorrelation (Moran's I) and spot count
+distribution. Blocked until the spatial assay (`DESIGN_features.md` F6) exists.
 
 ## D. Tumour-evolution-mode validation (Noble-style indices + real-data overlay)
 
@@ -281,9 +341,10 @@ validation/
   for 35 real tumours on the iscc sweep; needs only a small CSV, not a genome-mapping layer.
 - **M3b — real-genome mode + fit-to-real PCAWG/TCGA + Charm correlation** (A.5, A.4.2–3).
   The CINner-parity CNA result; needs external data + a genome-mapping layer.
-- **M4 — DNA/Visium estimation** (C). DNA is **breadth-aware** (WGS/WES/panel × bulk/sc), so M4
-  covers a small matrix of breadth-specific estimate/validate cases. Couples to read-level emission
-  and a real Visium dataset.
+- **M4 — DNA/Visium estimation** (C). **DNA half (C.1) is unblocked** (F4/F5 done): MoM/MLE fit of
+  `DNABatchHyperParams`, two-pass CN-conditional, breadth-aware (WGS/WES/panel × bulk/sc) — a small
+  matrix of breadth-specific estimate/validate cases, counts-level (no read emission required).
+  **Visium half (C.2) still blocked** on the spatial assay (F6) + a real Visium dataset.
 
 ## Risks
 - **Compute:** ABC needs thousands of sims. The genotype engine is fast (~seconds for a small
