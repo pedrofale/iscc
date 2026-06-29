@@ -287,7 +287,32 @@ data — so realistic defaults can be *learned*, not guessed.
   Tests `tests/test_assay_dna.py` (coverage∝CN, compositional read-stealing, VAF recovery, ADO allele
   loss, breadth, NB, multi-batch). Demo `notebooks/assay_dna.ipynb`. κ / capture efficiencies / ADO rate
   are named M4 `estimate()` targets.
-- **F6** — spatial batch (spatially-correlated capture field, diffusion, section plane).
+- **F6** — **spatial (Visium) assay** — upgrade the `visium.py` stub (grid spots → averaged
+  expression → fixed multinomial) to a proper assay matching F3/F4/F5 (Assay + batch model +
+  hyper-params + AnnData + estimate + validation). The **distinctive requirement is that the
+  technical noise is SPATIALLY CORRELATED** (§D spatial row). Components:
+  1. **Spot layout** — Visium-like spots over the deme grid (~55µm, **1–10 cells/spot**); a
+     `spot_radius`/pitch sets aggregation. Keep iscc's single 2D section (no z).
+  2. **Spot→cell aggregation** — pool the `cell_exp` of cells whose `cell_crd` falls in the spot;
+     surface ground truth per spot (n_cells, **dominant clone / cell-type fractions**).
+  3. **Lateral mRNA diffusion/bleed** — a Gaussian kernel spreading expression to neighbouring
+     spots (one `diffusion_sigma` knob); the spatial-mixing artifact spatial-deconvolution methods fight.
+  4. **Spatially-correlated capture-efficiency field** — a smooth positive random field over the
+     spots (low-pass-filtered noise / squared-exponential GP, `field_lengthscale` = autocorrelation
+     scale) × **edge effects** (lower efficiency near the tissue boundary). This is the headline
+     piece — it makes Moran's I of the capture field > 0.
+  5. Reuse the §B.2 **per-gene batch factor**, **ambient**, and the pluggable **NB/DM count model**
+     (`COUNT_MODELS`); **per-spot library size** (lognormal). Output **AnnData** with
+     `obsm["spatial"]` = spot coords, `.obs` ground truth, `.uns["hyperparams"]`. CLI: wire
+     `isccdata --assay visium`. Demo `notebooks/assay_spatial.ipynb` (§G).
+  - **`VisiumBatchHyperParams`** (the estimate targets): `spot_radius`/pitch, `mu_counts`/
+    `sigma_counts` (per-spot library), `field_lengthscale`, `field_sigma`, `edge_sigma`,
+    `diffusion_sigma`, `sigma_batch` (per-gene), `ambient_frac`, `kappa`/`nb_dispersion`.
+  - **M4 Visium estimate (`DESIGN_inference §C.2`)**: `estimate_visium()` mirroring
+    `estimate()`/`estimate_dna()` (`.fitted` map, `_PRIOR_ONLY`) — fit spots-per-tissue,
+    counts-per-spot, and the capture-field autocorrelation (Moran's I / variogram length-scale)
+    from a real Visium AnnData. Validation `validate_visium.py`: posterior-predictive overlay of
+    **Moran's I** (spatial autocorrelation) + spot-count distribution + spots-per-tissue.
 - **F7** — read emission. **C1 count/coverage matrices** (copy-number-scaled, breadth-aware) **done**
   (in `dna.py`). Remaining: **C2 FASTQ → C3 BAM, SISTEM-faithful** — pluggable `Reference`
   (synthetic default / real-genome drop-in), per-cell FASTA from CNAs/SNVs, C1 coverage, **DWGSIM**

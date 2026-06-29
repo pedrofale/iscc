@@ -257,10 +257,14 @@ VAF accuracy + per-amplicon bias (no genome-wide CNA); WGS/WES on coverage + GC 
 (`validation/validate_dna.py`); honest `.fitted` flags. Couples to read-level emission
 (`DESIGN_features.md` C / F4–F5) but does **not** require it — counts-level estimation stands alone.
 
-### C.2 Visium estimation (deferred — needs F6)
-Estimate spots-per-tissue, counts-per-spot, and the (spatially autocorrelated) capture-efficiency
-field from a real Visium dataset; validate spatial autocorrelation (Moran's I) and spot count
-distribution. Blocked until the spatial assay (`DESIGN_features.md` F6) exists.
+### C.2 Visium estimation (M4 Visium half — unblocked once F6 lands)
+`estimate_visium()` mirroring `estimate()`/`estimate_dna()` (MoM/MLE, `.fitted` map, `_PRIOR_ONLY`
+escape): fit a `VisiumBatchHyperParams` from a real Visium AnnData — **spots-per-tissue**,
+**counts-per-spot** (lognormal `mu_counts`/`sigma_counts`), the **per-gene batch factor**, and the
+**capture-field autocorrelation** (`field_lengthscale` from a Moran's-I / variogram fit on the
+per-spot library-size residual). Validation `validation/validate_visium.py`: posterior-predictive
+overlay — fit → re-simulate → match **Moran's I** (spatial autocorrelation), the spot-count
+distribution, and spots-per-tissue. Built together with F6 (the generative model it inverts).
 
 ## D. Tumour-evolution-mode validation (Noble-style indices + real-data overlay)
 
