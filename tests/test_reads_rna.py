@@ -215,6 +215,24 @@ class TestScrnaFastq:
         assert len(bcs) == 5
         assert all(len(seq) == 28 for _, seq in _read_fastq(fq["R1"]))
 
+    def test_error_rate_is_single_source(self, tmp_path):
+        """The FASTQ's proportion of reads not matching the true sequence == error_rate (the per-base
+        sequencing error is the ONLY read-error source — not doubled by also folding it into the
+        alt/ref split). Hom-ref molecular content -> non-ref fraction at the variant site ~ e."""
+        n_cells, n_genes, umi, e = 40, 3, 100, 0.05
+        cells = [f"C{i}" for i in range(n_cells)]
+        genes = [f"G_0_{g}" for g in range(n_genes)]
+        alt = pd.DataFrame(np.zeros((n_cells, n_genes), dtype=int), index=cells, columns=genes)
+        ref = pd.DataFrame(np.full((n_cells, n_genes), umi), index=cells, columns=genes)
+        tx = SyntheticTranscriptome(genes, seed=0, read_length=50)
+        vp = tx.var_pos
+        fq = write_scrna_fastq(alt, ref, tx, str(tmp_path), error_rate=e, seed=1)
+        nonref = tot = 0
+        for rid, seq in _read_fastq(fq["R2"]):
+            g = rid.split(":")[1]
+            nonref += int(seq[vp] != tx.seq[g][vp]); tot += 1
+        assert abs(nonref / tot - e) < 0.015          # ~e, NOT ~2e
+
     def test_emit_scrna_reads_writes_fastq(self, tmp_path):
         t = _grow_tumor()
         cd = t.make_cell_data()
