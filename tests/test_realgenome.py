@@ -52,7 +52,7 @@ def test_variable_sizes_snv_indexing():
     sizes = [4, 6]
     sel = Selection(n_segments=2, segment_sizes=sizes, prop_driver=0.0,
                     rng=np.random.default_rng(0))
-    c = CancerCell(n_segments=2, segment_sizes=sizes, snv_prob=1.0, cnv_prob=0.0, n_events=1)
+    c = CancerCell(n_segments=2, segment_sizes=sizes, snv_prob=1.0, cnv_prob=0.0, n_snvs_per_allele=1)
     rng = np.random.default_rng(1)
     for _ in range(8):
         c.mutate(rng, sel)
@@ -112,7 +112,7 @@ def test_real_genome_tumor_runs_and_responds():
         selection_params={"s_arm": s},
         cancer_cell_params={"max_birth_rate": 0.95, "division_rate": 0.4, "death_rate": 0.02,
                             "mutation_rate": 0.4, "dispersal_rate": 0.2,
-                            "snv_prob": 0.0, "cnv_prob": 1.0, "n_events": 1, "amp_prob": 0.5},
+                            "snv_prob": 0.0, "cnv_prob": 1.0, "n_snvs_per_allele": 1, "amp_prob": 0.5},
         deme_params={"carrying_capacity": 8, "maximum_death_rate": 0.5},
         spatial_params={"grid_size": 10, "structure_radius": 0, "immune_density": 0.0},
     )

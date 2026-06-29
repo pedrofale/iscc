@@ -161,7 +161,7 @@ def test_mutation_does_not_corrupt_shared_clonemates():
     # snapshot the parent's genome/summary, then mutate the daughter
     parent_snv_before = cell.get_snvs().copy()
     parent_summary_before = dict(cell.genome_summary)
-    daughter.mutate(np.random.default_rng(0), selection, n_events=3)
+    daughter.mutate(np.random.default_rng(0), selection, n_snvs_per_allele=3)
     # daughter diverged...
     assert daughter.genome is not cell.genome
     # ...and the parent (and any other sharer) is untouched

@@ -36,7 +36,7 @@ cell_params:
     dispersal_rate: 0.1
     snv_prob: 0.5      # relative weight of an SNV event (vs a CNA event)
     cnv_prob: 0.5      # relative weight of a CNA event
-    n_events: 1        # SNV positions per event: 1 = point mutations (>1 = clustered/indel-like)
+    n_snvs_per_allele: 0.3   # Poisson mean new SNVs per allele copy; spread genome-wide, total scales with ploidy
     amp_prob: 0.5      # P(amplification | CNA event); 1 - amp_prob = deletion
   epithelial:
     max_birth_rate: 0.8

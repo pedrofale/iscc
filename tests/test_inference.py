@@ -38,8 +38,8 @@ def _cancer_cell(selection, **overrides):
 
 # --- A.0: SNV/CNA rates are exposed parameters ------------------------------
 def test_cancer_cell_exposes_event_rates():
-    c = _cancer_cell(_selection(), snv_prob=0.3, cnv_prob=0.7, n_events=4, amp_prob=0.9)
-    assert (c.snv_prob, c.cnv_prob, c.n_events, c.amp_prob) == (0.3, 0.7, 4, 0.9)
+    c = _cancer_cell(_selection(), snv_prob=0.3, cnv_prob=0.7, n_snvs_per_allele=4, amp_prob=0.9)
+    assert (c.snv_prob, c.cnv_prob, c.n_snvs_per_allele, c.amp_prob) == (0.3, 0.7, 4, 0.9)
 
 
 def test_divide_inherits_event_rates():
@@ -69,12 +69,12 @@ def test_amp_prob_zero_only_deletes():
 
 
 def test_event_rates_thread_through_config():
-    cancer = {**CANCER, "amp_prob": 0.123, "n_events": 7}
+    cancer = {**CANCER, "amp_prob": 0.123, "n_snvs_per_allele": 7}
     t = GenotypeTumor(genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
                       cancer_cell_params=cancer, deme_params=DEME_PARAMS, spatial_params=SPATIAL,
                       seed=0)
     founder = t.genotypes[t.founder_id]
-    assert founder.amp_prob == 0.123 and founder.n_events == 7
+    assert founder.amp_prob == 0.123 and founder.n_snvs_per_allele == 7
 
 
 # --- A.2: summary statistics ------------------------------------------------

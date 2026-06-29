@@ -35,7 +35,7 @@ def cancer_params(mutation_rate=0.01):
     # §3 concern.) division >> death so growth is robustly positive.
     return {"division_rate": 0.3, "death_rate": 0.02, "max_birth_rate": 0.8,
             "mutation_rate": mutation_rate, "dispersal_rate": 0.1,
-            "snv_prob": 0.5, "cnv_prob": 0.5, "n_events": 2, "amp_prob": 0.5}
+            "snv_prob": 0.5, "cnv_prob": 0.5, "n_snvs_per_allele": 0.5, "amp_prob": 0.5}
 
 
 def _make(grid_size=64, mutation_rate=0.01, update_mode="exact", **kw):

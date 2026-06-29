@@ -25,7 +25,7 @@ PARAM_PATHS = {
     "amp_prob": ("cancer_cell_params", "amp_prob"),
     "snv_prob": ("cancer_cell_params", "snv_prob"),
     "cnv_prob": ("cancer_cell_params", "cnv_prob"),
-    "n_events": ("cancer_cell_params", "n_events"),
+    "n_snvs_per_allele": ("cancer_cell_params", "n_snvs_per_allele"),
     "dispersal_rate": ("cancer_cell_params", "dispersal_rate"),
     "driver_effects": ("selection_params", "driver_effects"),
     "prop_driver": ("selection_params", "prop_driver"),
@@ -51,7 +51,7 @@ def default_base_config():
         cancer_cell_params={
             "max_birth_rate": 0.95, "division_rate": 0.4, "death_rate": 0.02,
             "mutation_rate": 0.3, "dispersal_rate": 0.2,
-            "snv_prob": 0.5, "cnv_prob": 0.5, "n_events": 2, "amp_prob": 0.5,
+            "snv_prob": 0.5, "cnv_prob": 0.5, "n_snvs_per_allele": 0.5, "amp_prob": 0.5,
         },
         deme_params={"carrying_capacity": 8, "maximum_death_rate": 0.5},
         spatial_params={"grid_size": 14, "structure_radius": 0, "immune_density": 0.0},
@@ -68,7 +68,7 @@ def default_prior(params=("mutation_rate", "amp_prob")):
         "dispersal_rate": (0.0, 0.6),
         "driver_effects": (1.0, 2.0),
         "prop_driver": (0.05, 0.4),
-        "n_events": (1.0, 10.0),
+        "n_snvs_per_allele": (0.0, 1.5),
     }
     return Prior({p: ranges[p] for p in params})
 

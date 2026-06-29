@@ -87,10 +87,10 @@ by module, against each module's leading competitor.
 ## A. Tumor / CNA inference (flagship — CINner-equivalent)
 
 ### A.0 Prerequisite: expose the rates as parameters
-`CancerCell.mutate(..., n_events=5, mut_prob=.1, cnv_prob=.1)` currently hardcodes the SNV/CNA
-event probabilities. Inference requires them as configurable parameters (per-cell or selection
+`CancerCell.mutate(..., n_snvs_per_allele=0.5, mut_prob=.1, cnv_prob=.1)` currently hardcodes the
+SNV/CNA event probabilities. Inference requires them as configurable parameters (per-cell or selection
 params) threaded through `GenotypeTumor`. Likewise `driver_effects` (selection strength) is
-already a param. **First task: lift `mut_prob`, `cnv_prob` (and amp/del split, event length)
+already a param. **First task: lift `mut_prob`, `cnv_prob` (and amp/del split, per-allele SNV rate)
 into the config and the engine.**
 
 ### A.1 ABC engine (`src/iscc/inference/abc.py`)

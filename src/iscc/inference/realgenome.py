@@ -104,7 +104,7 @@ def default_real_config(genome_spec):
         cancer_cell_params={
             "max_birth_rate": 0.95, "division_rate": 0.4, "death_rate": 0.02,
             "mutation_rate": 0.3, "dispersal_rate": 0.2,
-            "snv_prob": 0.02, "cnv_prob": 0.98, "n_events": 1, "amp_prob": 0.5,
+            "snv_prob": 0.02, "cnv_prob": 0.98, "n_snvs_per_allele": 0.3, "amp_prob": 0.5,
         },
         deme_params={"carrying_capacity": 8, "maximum_death_rate": 0.5},
         spatial_params={"grid_size": 12, "structure_radius": 0, "immune_density": 0.0},

@@ -291,18 +291,21 @@ class ImmuneCell(Cell):
 
 class CancerCell(Cell):
     def __init__(self, mutation_rate=0.1, snv_prob=0.5, cnv_prob=0.5,
-                 n_events=5, amp_prob=0.5, genotype_id=None, seed=42, **cell_kwargs):
+                 n_snvs_per_allele=0.5, amp_prob=0.5, genotype_id=None, seed=42, **cell_kwargs):
         super(CancerCell, self).__init__(**cell_kwargs)
         self.type = "cancer"
         # mutation_rate is the per-division probability of *any* genome change relative to
         # dispersal (read in the engine). Once a change happens, snv_prob / cnv_prob are the
-        # relative weights of the two event kinds; n_events is the Poisson mean number of SNV
-        # positions hit per SNV event (event length); amp_prob is P(amplification | CNA event).
-        # Exposed as configurable parameters so inference can estimate them (DESIGN_inference A.0).
+        # relative weights of the two event kinds; amp_prob is P(amplification | CNA event).
+        # n_snvs_per_allele is the Poisson mean number of new SNVs each allele (physical copy)
+        # acquires in a mutating division: SNVs are spread genome-wide over all alleles, so the
+        # expected number of new SNVs scales with ploidy/copy number (≈ n_snvs_per_allele ×
+        # number of alleles). Exposed as configurable parameters so inference can estimate them
+        # (DESIGN_inference A.0).
         self.mutation_rate = mutation_rate
         self.snv_prob = snv_prob
         self.cnv_prob = cnv_prob
-        self.n_events = n_events
+        self.n_snvs_per_allele = n_snvs_per_allele
         self.amp_prob = amp_prob
         self.seed  = seed
         self.set_params()
@@ -311,10 +314,10 @@ class CancerCell(Cell):
         if self.parent is not None:
             self.genotype_id = self.parent.genotype_id
 
-    def mutate(self, rng, selection, n_events=None, snv_prob=None, cnv_prob=None, amp_prob=None):
-        # SNV/CNA split, event length and amp/del split default to this genotype's configured
-        # rates (set in __init__, inherited through divide()), but stay overridable per call.
-        n_events = self.n_events if n_events is None else n_events
+    def mutate(self, rng, selection, n_snvs_per_allele=None, snv_prob=None, cnv_prob=None, amp_prob=None):
+        # SNV/CNA split, per-allele SNV rate and amp/del split default to this genotype's
+        # configured rates (set in __init__, inherited through divide()), but stay overridable per call.
+        n_snvs_per_allele = self.n_snvs_per_allele if n_snvs_per_allele is None else n_snvs_per_allele
         snv_prob = self.snv_prob if snv_prob is None else snv_prob
         cnv_prob = self.cnv_prob if cnv_prob is None else cnv_prob
         amp_prob = self.amp_prob if amp_prob is None else amp_prob
@@ -329,26 +332,49 @@ class CancerCell(Cell):
             return False
         event = rng.choice(['cnv', 'mut'], p=np.array([cnv_prob, snv_prob])/(cnv_prob + snv_prob)) # add WGDs too...
         if event == 'mut':
-            # Sample segment
-            segment_probs = np.array([len(self.genome[seg]['p'] + self.genome[seg]['m']) for seg in range(self.n_segments)]) # can't select empty segment
-            segment_probs = segment_probs / np.sum(segment_probs)
-            seg = rng.choice(range(self.n_segments), p=segment_probs)
-            # Sample haplotype
-            n_p, n_m = len(self.genome[seg]['p']), len(self.genome[seg]['m'])
-            hap = rng.choice(['p', 'm'], p=np.array([n_p, n_m])/(n_p + n_m))
-            # Sample allele
-            all = rng.choice(range(len(self.genome[seg][hap])))
-            allele = self.genome[seg][hap][all]
-            # Sample only from positions not yet mutated in this allele (ISA)
-            available = np.where(~allele)[0]
-            if len(available) == 0:
-                return False  # allele fully saturated: no new mutation, genotype unchanged
-            n_mutations = min(rng.poisson(n_events) + 1, len(available))
-            muts = rng.choice(available, size=n_mutations, replace=False)
-            allele[muts] = True  # set mutated bits
-            mut_bits = np.zeros(self.segment_sizes[seg], dtype=bool)
-            mut_bits[muts] = True
-            self.update_genome_summary_mutation(selection, mut_bits, seg) # for evolutionary parameters
+            # A dividing cell can fix several SNVs at once, scattered across the whole genome
+            # rather than clustered in one segment. Each allele (physical copy) independently
+            # accrues ~Poisson(n_snvs_per_allele) new SNVs, so the expected number of new SNVs
+            # scales with ploidy/copy number (≈ n_snvs_per_allele × number of alleles). Within an
+            # allele, positions are drawn only from sites not yet mutated on that copy (infinite-
+            # sites per allele); the same locus may still be hit independently on a different copy.
+            placed = 0
+            for seg in range(self.n_segments):
+                for hap in ('p', 'm'):
+                    for allele in self.genome[seg][hap]:
+                        k = rng.poisson(n_snvs_per_allele)
+                        if k == 0:
+                            continue
+                        available = np.where(~allele)[0]
+                        if len(available) == 0:
+                            continue
+                        n_mutations = min(k, len(available))
+                        muts = rng.choice(available, size=n_mutations, replace=False)
+                        allele[muts] = True  # set mutated bits on this copy
+                        mut_bits = np.zeros(self.segment_sizes[seg], dtype=bool)
+                        mut_bits[muts] = True
+                        self.update_genome_summary_mutation(selection, mut_bits, seg)
+                        placed += n_mutations
+            if placed == 0:
+                # The engine already decided this division mutates, so an SNV event must change
+                # the genotype. Every per-allele Poisson draw came up 0 (or the rate is tiny):
+                # force a single SNV on a random allele that still has an unmutated site.
+                candidates = [
+                    (seg, hap, ai)
+                    for seg in range(self.n_segments)
+                    for hap in ('p', 'm')
+                    for ai, allele in enumerate(self.genome[seg][hap])
+                    if (~allele).any()
+                ]
+                if not candidates:
+                    return False  # genome fully saturated everywhere: nothing to mutate
+                seg, hap, ai = candidates[rng.choice(len(candidates))]
+                allele = self.genome[seg][hap][ai]
+                pos = int(rng.choice(np.where(~allele)[0]))
+                allele[pos] = True
+                mut_bits = np.zeros(self.segment_sizes[seg], dtype=bool)
+                mut_bits[pos] = True
+                self.update_genome_summary_mutation(selection, mut_bits, seg)
         elif event == 'cnv':
             # Sample segment
             segment_probs = np.array([len(self.genome[seg]['p'] + self.genome[seg]['m']) for seg in range(self.n_segments)]) # can't select empty segment

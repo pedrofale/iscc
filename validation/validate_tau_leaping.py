@@ -26,7 +26,7 @@ SELECTION = {"prop_driver": 0.1, "prop_dispersal": 0.1,
              "prop_immune_resistance": 0.1, "prop_treatment_resistance": 0.1}
 CANCER = {"division_rate": 0.3, "death_rate": 0.05, "max_birth_rate": 0.8,
           "mutation_rate": 0.05, "dispersal_rate": 0.1,
-          "snv_prob": 0.5, "cnv_prob": 0.5, "n_events": 2, "amp_prob": 0.5}
+          "snv_prob": 0.5, "cnv_prob": 0.5, "n_snvs_per_allele": 0.5, "amp_prob": 0.5}
 DEME = {"carrying_capacity": 1, "maximum_death_rate": 0.5}
 SPATIAL = {"grid_size": 31, "n_structures": 1, "structure_radius": 0}
 TARGET = 2000
