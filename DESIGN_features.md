@@ -25,21 +25,36 @@ integration methods must handle.
 
 ## A. Sampling layer (`isccsample`)
 
-Currently a uniform random subset; biopsy/dissociation/slice are stubs. Plan:
+Solid + liquid biopsy (F1) and dissociation biases (F2) are **DONE**; slice stays a stub. The CLI
+keeps the `load_cell_data` / write-`cell_data` / `sample_meta.yaml` contract and adds two methods
+(`--method {biopsy,dissociation}`) on top of the legacy uniform `--fraction` thinning.
 
-- **Solid biopsy — spatial region selection** over the deme grid:
-  - *needle core*: a narrow strip of demes; *punch*: a disk; *multi-region*: k disjoint regions,
-    each tagged with a `region` label. This reproduces multi-region heterogeneity (you only see
-    the clones present in the sampled region) — the substrate for phylogeny studies.
-- **Liquid biopsy (blood / CTC)**: sample a small number of circulating cells, biased toward
-  high-dispersal / invasive clones; very low counts. Models liquid biopsy.
-- **Dissociation biases** (sample-prep, *biological* not sequencing-technical):
-  - cell-type-dependent dissociation efficiency → composition bias (e.g. immune/stromal vs
-    epithelial recover differently); doublet formation; dissociation-stress signature; ambient
-    release.
+- **Solid biopsy — spatial region selection** over the cell grid (`cell_crd` row/col), in
+  `sample/biopsy/biopsy.py` (`Biopsy`): **DONE**
+  - *needle core*: a narrow strip (perpendicular distance ≤ width/2 to a line through the tumour at
+    a chosen `--angle`); *punch*: a disk (`--center` + `--radius`); *multi-region*: `--n-regions` k
+    disjoint disks (centres drawn from occupied cells, kept ≥ 2·radius apart), EACH tagged with its
+    own `region_i` label. This reproduces multi-region heterogeneity (you only see the clones present
+    in the sampled region) — the substrate for phylogeny studies.
+- **Liquid biopsy (blood / CTC)**: `--biopsy-type liquid` — `--n-liquid` circulating cells,
+  restricted to cancer clones and weighted by a per-cell dispersal signal from `cell_evo`
+  (`n_mut_disp`, else `dispersal_rate`; degrades to uniform if absent); region label `blood`. **DONE**
+- **Dissociation biases** (sample-prep, *biological* not sequencing-technical), in
+  `sample/dissociation/dissociation.py` (`Dissociation`): **DONE**
+  - cell-type-dependent recovery probability per biological type (cancer / immune / stromal /
+    epithelial, derived from the genotype id) → **composition bias** (`DEFAULT_RECOVERY` under-recovers
+    immune/stromal; override with `--recovery 'immune=0.4,...'`). Optional dissociation-stress
+    expression signature (`--stress-strength`, multiplicative bump on a small stress-gene set of
+    recovered cells' `cell_exp`). Droplet doublets / ambient release are NOT here — they live in the
+    F3 assay.
 - **Slicing** (for spatial): select the 2D section presented to the spatial assay. iscc is 2D so
-  the section = grid or sub-grid; a true 3D tumor + arbitrary cut plane is future work.
-- Output: subset of cells + metadata (region labels, method) preserving per-cell ground truth.
+  the section = grid or sub-grid; a true 3D tumor + arbitrary cut plane is future work. *(stub)*
+- Output: subset of cells preserving per-cell ground truth + `cell_data/cell_region.csv` (per-cell
+  `region` label, biopsy only) + geometry / recovery probs / realized composition shift recorded in
+  `sample_meta.yaml`. The extra `cell_region.csv` is ignored by `isccdata`'s fixed-key loader, so the
+  region labels flow through to the assay's `cell_data` for downstream multi-region analyses.
+  Validation: `validation/validate_sampling.py` → `manuscript/figures/validation_sampling.png`.
+  Tests: `tests/test_sample_biopsy.py`, `tests/test_sample_dissociation.py`.
 
 ## B. Assay batch-effect model (the core new piece)
 
@@ -254,8 +269,21 @@ batch. Batch hyper-parameters are exactly what `estimate()` (DESIGN_inference §
 data — so realistic defaults can be *learned*, not guessed.
 
 ## F. Milestones (features)
-- **F1** — spatial solid biopsy (needle / punch / multi-region) + region labels.
-- **F2** — dissociation biases (composition bias, doublets) + liquid biopsy.
+- **F1 — DONE** — spatial solid biopsy (needle / punch / multi-region) + region labels, plus liquid
+  biopsy. `sample/biopsy/biopsy.py` (`Biopsy`): geometries over `cell_crd` (punch disk, needle strip,
+  k disjoint multi-region disks each with its own `region_i` label, liquid CTC draw biased by the
+  `cell_evo` dispersal signal). CLI `isccsample --method biopsy --biopsy-type {needle,punch,
+  multiregion,liquid}` (+ `--radius/--width/--angle/--n-regions/--n-liquid/--center/--grid-size`)
+  writes the subset + `cell_data/cell_region.csv` (region labels flow to `isccdata`) + geometry in
+  `sample_meta.yaml`. Tests `tests/test_sample_biopsy.py`; validation panels (a)/(c) in
+  `validation/validate_sampling.py`.
+- **F2 — DONE** — dissociation biases (composition bias + optional stress signature) + liquid biopsy
+  (liquid lives in F1's `Biopsy`). `sample/dissociation/dissociation.py` (`Dissociation`):
+  cell-type-dependent recovery → composition bias (`DEFAULT_RECOVERY`; `--recovery`, `--stress-strength`),
+  realized composition shift in `sample_meta.yaml`. Droplet doublets / ambient release deferred to the
+  F3 assay (sample-prep biology only here). Tests `tests/test_sample_dissociation.py`; validation panel
+  (b) in `validation/validate_sampling.py`. Demo notebooks `sampling_biopsy.ipynb` / `dissociation.ipynb`
+  pending (§G).
 - **F3 — DONE** — **scRNA batch model + 10x / Smart-seq3 presets** (the user's headline ask);
   multi-batch output with ground-truth labels. `data/batch.py` (`BatchHyperParams` + `Batch`:
   per-gene factor β_gb, per-batch depth/dispersion, ambient soup, doublets, dropout; **pluggable
