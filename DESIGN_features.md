@@ -95,6 +95,17 @@ pIRS, InSilicoSeq). Phased:
   (SISTEM emits these *separately* from raw reads), and it works on the abstract bitset genome
   today. **Breadth-aware** (WGS/WES/panel, §D); for single-cell, apply ADO + amplification bias
   first. Extends `data/dna.py` (already has a `data_mode='reads'` stub).
+  - **Depth model is pluggable; default to Dirichlet-Multinomial (compositional) for DNA** (the
+    reverse of scRNA's NB default — the physics differ). DNA coverage is a fixed read budget `N`
+    partitioned across segments with proportions `p_seg ∝ CN_seg · length_seg · GC/mappability_seg`;
+    counts `~ Multinomial(N, p)` with `p ~ Dirichlet(κ · p̄)` for over-Poisson coverage lumpiness
+    (`κ` = concentration). DM is the right default because (i) copy number is the natural proportion
+    driver, (ii) with coarse segments + **large segmental CN**, the compositional coupling
+    (an amplicon stealing reads at fixed total depth) is non-negligible, and (iii) it correctly
+    makes depth **relative** not absolute (a WGD/high-ploidy genome is not uniformly deeper — what
+    CNA callers normalise for); independent NB-per-segment misses (ii)–(iii). Offer NB-per-segment
+    as the simpler alternative. VAF is a separate binomial layer: alt `~ Binomial(depth_seg,
+    true_alt_fraction)` + error. (`κ` is M4's estimate() target alongside depth/GC/error.)
 - **C2 — raw reads (FASTQ)**: needs a nucleotide reference. Two options:
   - *(A) synthesise* a random per-segment reference once, apply each cell's SNVs/CNAs → per-cell
     FASTA. Works today, but lacks real sequence context (repeats, GC, mappability) — whether
