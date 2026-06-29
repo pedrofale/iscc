@@ -134,6 +134,33 @@ predict good schedules in vivo? **Serves:** treatment realism; immune milestone.
 
 ---
 
+## Theme 8 — Metastasis & multi-site dissemination
+
+### R9. How do we extend iscc's single-tumour spatial model to multi-site / metastatic disease, tractably?
+**Why it matters.** iscc currently grows one spatially structured tumour; real disease (and much
+of clinical genomics) is **multi-site** — primary plus metastases linked by cell migration. SISTEM
+(Weiner & Bansal 2025) shows this is feasible at clonal resolution with organotropic, genotype-
+dependent migration and a migration-graph ground truth — but it's DNA-seq-only. The question is how
+to add multi-site dissemination to iscc *while keeping the multi-modal + inference machinery*.
+
+**Sub-questions / approaches.**
+- A small number of coupled deme-grids (sites) linked by a migration process; per-site selection
+  landscapes (a metastasis is a different microenvironment) reusing the per-arm/region selection of
+  the real-genome mode.
+- **Organotropism**: migration probability as a function of genotype–site fitness compatibility
+  (seed-and-soil), vs a fixed pairwise-distance model.
+- Ground truth to emit: the **migration graph** and per-site clonal composition — a labelled
+  benchmark for metastatic-seeding / clonal-origin inference methods.
+- How does multi-region/multi-site **sampling** (R3) interact — can iscc recover the true seeding
+  topology from sampled data?
+- Cost: multi-site multiplies the §7 scale problem; the generation-based clonal update (SISTEM /
+  §7 tau-leaping) is the enabling primitive.
+
+**Serves:** a new disease axis (metastasis); positions iscc against SISTEM with multi-modality +
+inference. Not in F1–F7 — a substantial new track if promoted.
+
+---
+
 ## How to use this file
 - These are **questions, not scheduled work** — promote one to a DESIGN doc / milestone when we
   commit to building it.
