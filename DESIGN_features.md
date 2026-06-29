@@ -162,8 +162,10 @@ consume *and* the input these read simulators take), but the read tool + referen
   real data; current best) ≫ minnow (Sarkar 2019, count→reads but poor coverage realism).
 - **scRNA full-length / Smart-seq3** (5′ UMI + full-length): less standardised — polyester-style bulk
   RNA read sim + a UMI layer. **Known gap**, not a blocker.
-- **spatial (Visium)**: read-level rarely needed; count-level (F6) suffices for nearly all
-  spatial-method benchmarking (reads would be a 10x-style sim with spatial barcodes).
+- **spatial (Visium)**: count-level (F6 spot×gene matrix) suffices for most spatial-method
+  benchmarking, but reads are supported (F6 reads component) — a 10x-style sim with **spatial**
+  barcodes, reusing the F7b scRNA read machinery (`write_scrna_fastq`) with spot-level
+  clone-mixture RNA-VAF.
 
 **Keep the read-realism backends separate; unify at the count matrix + a shared variant layer.**
 DNA (DWGSIM/ART) and scRNA (scReadSim) place reads differently — DNA from a per-cell **nucleotide
@@ -313,6 +315,14 @@ data — so realistic defaults can be *learned*, not guessed.
     counts-per-spot, and the capture-field autocorrelation (Moran's I / variogram length-scale)
     from a real Visium AnnData. Validation `validate_visium.py`: posterior-predictive overlay of
     **Moran's I** (spatial autocorrelation) + spot-count distribution + spots-per-tissue.
+  - **Visium reads (optional, reuses F7b)**: spot-barcoded 10x-style FASTQ — Visium reads are scRNA
+    reads barcoded by SPOT not cell, so `observed_allele_counts` / `write_scrna_fastq` /
+    `SyntheticTranscriptome` (reads/rna.py) apply unchanged on the spot×gene axis (the per-"cell"
+    barcode becomes the spatial barcode). NEW piece: the spot pools several cells of possibly
+    different clones, so spot-level RNA-VAF = the **expression-weighted mixture** of member cells'
+    `cell_rna_vaf` (the clone-mixture ground truth spatial deconvolution must untangle). Same
+    invariants as scRNA: spot UMI totals conserved, single-source error (error-free molecular split
+    + per-base read error).
 - **F7** — read emission. **C1 count/coverage matrices** (copy-number-scaled, breadth-aware) **done**
   (in `dna.py`). Remaining: **C2 FASTQ → C3 BAM, SISTEM-faithful** — pluggable `Reference`
   (synthetic default / real-genome drop-in), per-cell FASTA from CNAs/SNVs, C1 coverage, **DWGSIM**
