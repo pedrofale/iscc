@@ -208,3 +208,212 @@ class Batch:
             counts[i] = counts[i] + counts[p]
             is_doublet[i] = True
         return counts, is_doublet
+
+
+# ======================================================================================
+# DNA assay batch model (DESIGN_features.md §C / §D) — shared by bulk and single-cell.
+#
+# The physics of DNA coverage differ from scRNA expression, so the pluggable choices flip
+# (§C C1): the *depth* default is **Dirichlet-Multinomial** (compositional — a fixed read
+# budget partitioned across loci, proportions driven by COPY NUMBER) rather than NB, and
+# the *allele* layer is a separate binomial/beta-binomial draw with explicit ADO for
+# single-cell. The unifying knob across bulk vs single-cell is **kappa = the amplification
+# regime**: large kappa  ≈ multinomial/Poisson (un-amplified BULK), small kappa = lumpy
+# (whole-cell-amplified SINGLE-CELL).
+#
+# All hyper-parameter names here are M4 `estimate()` targets (DESIGN_inference): `kappa`
+# (amplification regime), `capture_sigma` (per-target/amplicon efficiency), `ado_rate`,
+# `beta_binom_conc`, the GC-curve params, and `error_rate`.
+# ======================================================================================
+
+# ---- Pluggable DNA depth-emission step (DESIGN_features §C C1) ------------------------
+# Each emitter has the signature  emit(rng, weights, N, h) -> counts (n_loci,)  where
+# `weights` are non-negative per-locus relative coverage drivers (∝ CN · length · GC /
+# mappability efficiency), `N` is the total read budget, and `h` is the hyper-parameters.
+# Keeping the (weights, N) interface shared means DM and NB are true drop-ins.
+def _dna_depth_dm(rng, weights, N, h):
+    """Default DNA depth model: Dirichlet-Multinomial (compositional, fixed budget N).
+
+        p_seg ~ Dirichlet(kappa * p_bar),  p_bar ∝ weights;   y ~ Multinomial(N, p)
+
+    Large `kappa` → p≈p_bar → multinomial/Poisson (BULK); small `kappa` → lumpy
+    over-Poisson coverage (SINGLE-CELL amplification). Because the budget is fixed, an
+    amplified (high-CN) segment compositionally *steals* reads from the rest — exactly the
+    coupling independent-per-bin models miss, and the reason depth is RELATIVE not absolute.
+    """
+    w = np.asarray(weights, dtype=float)
+    s = w.sum()
+    N = int(round(N))
+    if s <= 0 or N <= 0:
+        return np.zeros(len(w), dtype=int)
+    p_bar = w / s
+    alpha = np.maximum(h.kappa * p_bar, 1e-12)
+    p = rng.dirichlet(alpha)
+    return rng.multinomial(N, p)
+
+
+def _dna_depth_nb(rng, weights, N, h):
+    """Alternative DNA depth model: independent Negative-Binomial per locus/bin.
+
+    The field convention for BULK CNA tools (HMMcopy / CNVkit / Control-FREEC): each bin
+    drawn independently with mean ∝ its weight (no fixed-total coupling, so the total
+    fluctuates and high-CN bins do not steal from others). `nb_dispersion` sets the
+    over-Poisson lumpiness (var = mu + phi*mu^2); phi<=0 collapses to Poisson.
+    """
+    w = np.asarray(weights, dtype=float)
+    s = w.sum()
+    if s <= 0:
+        return np.zeros(len(w), dtype=int)
+    mu = np.maximum(N * (w / s), 0.0)  # expected per-locus coverage
+    phi = h.nb_dispersion
+    if phi <= 0:
+        return rng.poisson(mu)
+    shape = 1.0 / phi
+    gamma = rng.gamma(shape=shape, scale=mu * phi)
+    return rng.poisson(gamma)
+
+
+DNA_DEPTH_MODELS = {"dm": _dna_depth_dm, "nb": _dna_depth_nb}
+
+
+@dataclass
+class DNABatchHyperParams:
+    """Protocol-typical magnitudes for the DNA batch model (the targets of `estimate()`).
+
+        breadth          capture breadth {wgs, wes, panel} (sets locus set + depth regime)
+        depth_model      depth emission {"dm" (default), "nb"}
+        mu_depth         mean per-locus coverage (the depth regime; breadth sets it)
+        kappa            DM concentration = AMPLIFICATION REGIME (large=bulk, small=single-cell)
+        nb_dispersion    NB per-bin overdispersion phi (only for depth_model="nb")
+        gc_curve_sigma   per-batch GC->coverage curve strength (the GC bias a panel-of-normals fits)
+        mappability_sigma  unused placeholder kept for symmetry with the genome mappability field
+        capture_sigma    per-target (WES) / per-amplicon (panel) capture-efficiency LogNormal sd
+        error_rate       per-base sequencing error (false alt/ref on the allele layer)
+        depth_batch_sigma per-batch depth-shift LogNormal sd (batches differ in depth)
+        ado_rate         single-cell allelic dropout Bernoulli prob (one allele lost at a locus)
+        beta_binom_conc  single-cell allele-fraction overdispersion (Beta-Binomial concentration)
+        doublet_rate     single-cell doublet fraction
+        ffpe_ct_rate     optional FFPE C>T deamination extra-error at C-sites
+    """
+    breadth: str = "wgs"
+    depth_model: str = "dm"
+    mu_depth: float = 30.0
+    kappa: float = 2000.0
+    nb_dispersion: float = 0.1
+    gc_curve_sigma: float = 0.20
+    mappability_sigma: float = 0.10
+    capture_sigma: float = 0.0
+    error_rate: float = 0.001
+    depth_batch_sigma: float = 0.05
+    ado_rate: float = 0.0
+    beta_binom_conc: float = 30.0
+    doublet_rate: float = 0.0
+    ffpe_ct_rate: float = 0.0
+
+    def to_dict(self):
+        return asdict(self)
+
+
+class DNABatch:
+    """One seeded realization of a DNA assay instance (a library / run / chip).
+
+    Mirrors `Batch` (scRNA) for DNA (DESIGN_features §D): draws the run-level technical
+    state shared across the assay — a **per-batch GC->coverage curve**, a per-locus
+    mappability multiplier, a systematic **per-target/amplicon capture efficiency**, a
+    per-batch **depth shift**, and a per-locus **error rate** (+ optional FFPE C>T) — then
+    exposes the per-locus operations the bulk/single-cell DNA assays compose: the pluggable
+    depth draw and the allele layer (binomial for bulk; beta-binomial + ADO for single-cell).
+    """
+
+    def __init__(self, hypers: DNABatchHyperParams, seed=0, label=None):
+        self.h = hypers
+        self.seed = int(seed)
+        self.label = str(label) if label is not None else f"dnabatch{self.seed}"
+        self.rng = np.random.default_rng(self.seed)
+        self._realized = False
+
+    def realize(self, gc, mappability, ct_sites=None):
+        """Draw the batch-level technical state for the observed loci.
+
+        `gc` and `mappability` are *genome* properties (stable across batches); the GC
+        *curve* and capture draws are the per-batch (technical) signature. The combined
+        per-locus efficiency is normalized to mean 1 so it reshapes coverage (bias) without
+        moving the absolute depth scale, which `mu_depth` / the budget set separately.
+        """
+        gc = np.asarray(gc, dtype=float)
+        mappability = np.asarray(mappability, dtype=float)
+        n = len(gc)
+        self.n = n
+        # per-batch realized depth (so two batches differ in depth)
+        self.depth = float(self.h.mu_depth * self.rng.lognormal(0.0, self.h.depth_batch_sigma))
+        # per-batch GC->coverage curve: a smooth unimodal bias peaking at gc_opt.
+        # gc_curve_sigma scales both the peak jitter and the curvature (bias strength).
+        self.gc_opt = float(0.42 + self.rng.normal(0.0, 0.05) * self.h.gc_curve_sigma / 0.20)
+        self.gc_strength = float(self.rng.uniform(4.0, 10.0) * self.h.gc_curve_sigma / 0.20)
+        gc_mult = np.exp(-self.gc_strength * (gc - self.gc_opt) ** 2)
+        # systematic per-target/amplicon capture efficiency MEAN (WES/panel); 1 for WGS.
+        if self.h.capture_sigma > 0:
+            self.capture_eff = self.rng.lognormal(0.0, self.h.capture_sigma, size=n)
+        else:
+            self.capture_eff = np.ones(n)
+        eff = gc_mult * mappability * self.capture_eff
+        m = eff.mean()
+        self.efficiency = eff / m if m > 0 else np.ones(n)
+        # per-locus effective error (+ FFPE C>T deamination at C-sites)
+        err = np.full(n, self.h.error_rate, dtype=float)
+        if self.h.ffpe_ct_rate > 0 and ct_sites is not None:
+            err = err + self.h.ffpe_ct_rate * np.asarray(ct_sites, dtype=float)
+        self.error = np.clip(err, 0.0, 1.0)
+        self._realized = True
+        return self
+
+    # -- depth -------------------------------------------------------------------------
+    def emit_depth(self, weights, N):
+        """Draw per-locus coverage via the pluggable depth model (DM default / NB)."""
+        return DNA_DEPTH_MODELS[self.h.depth_model](self.rng, weights, N, self.h)
+
+    # -- allele layer ------------------------------------------------------------------
+    def alleles_binomial(self, coverage, true_af):
+        """BULK allele draw: alt ~ Binomial(coverage, p_eff) with sequencing error.
+
+        p_eff = true_af*(1-e) + (1-true_af)*e folds the per-base error in both directions
+        (false alt on ref bases, false ref on alt bases).
+        """
+        e = self.error
+        p = np.clip(np.asarray(true_af) * (1 - e) + (1 - np.asarray(true_af)) * e, 0.0, 1.0)
+        return self.rng.binomial(coverage, p)
+
+    def apply_ado(self, true_af):
+        """SINGLE-CELL allelic dropout: with prob `ado_rate`, one allele is lost at a het
+        locus, flipping the observed fraction to 0 or 1 (the dominant single-cell allele
+        artifact — modelled as a separate Bernoulli layer, NOT via the depth distribution).
+
+        Returns (af_observed, ado_mask). Only heterozygous loci (0<af<1) can drop.
+        """
+        af = np.asarray(true_af, dtype=float)
+        mask = np.zeros(af.shape, dtype=bool)
+        if self.h.ado_rate <= 0:
+            return af.copy(), mask
+        het = (af > 0) & (af < 1)
+        ado = (self.rng.random(af.shape) < self.h.ado_rate) & het
+        drop_alt = self.rng.random(af.shape) < 0.5
+        af_obs = af.copy()
+        af_obs[ado & drop_alt] = 0.0       # alt allele lost -> looks homozygous reference
+        af_obs[ado & ~drop_alt] = 1.0      # ref allele lost -> looks homozygous alt
+        return af_obs, ado
+
+    def alleles_betabinom(self, coverage, af):
+        """SINGLE-CELL allele draw: Beta-Binomial (amplification-overdispersed) + error.
+
+        theta ~ Beta(c*p_eff, c*(1-p_eff));  alt ~ Binomial(coverage, theta). `beta_binom_conc`
+        = c controls the overdispersion (small c = lumpier allele balance). Degenerate
+        p_eff in {0,1} (e.g. after ADO) collapses to a fixed fraction.
+        """
+        e = self.error
+        p = np.clip(np.asarray(af) * (1 - e) + (1 - np.asarray(af)) * e, 0.0, 1.0)
+        c = self.h.beta_binom_conc
+        a = np.maximum(c * p, 1e-9)
+        b = np.maximum(c * (1 - p), 1e-9)
+        theta = self.rng.beta(a, b)
+        theta = np.where(p <= 0, 0.0, np.where(p >= 1, 1.0, theta))
+        return self.rng.binomial(coverage, np.clip(theta, 0.0, 1.0))

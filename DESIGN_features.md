@@ -209,9 +209,26 @@ data — so realistic defaults can be *learned*, not guessed.
   ground truth). Tests: `tests/test_assay_scrna.py`. Demo: `notebooks/assay_scrna.ipynb`
   (sweeps depth/dispersion/dropout/batch-strength/#batches/protocol → counts, UMAP, library-size
   dist, batch mixing). Hyper-param names = M2 `estimate()` targets.
-- **F4** — bulk DNA technical (depth, GC bias, error, VAF/coverage tables) across **WGS/WES/panel**
-  breadth = read-counts C1.
-- **F5** — single-cell DNA (ADO + per-cell amplification, nested in run-batch), same WGS/WES/panel breadth.
+- **F4 — DONE** — **bulk DNA** technical realism across **WGS/WES/panel** breadth (= read-counts C1).
+- **F5 — DONE** — **single-cell DNA** (ADO + per-cell amplification, nested in run-batch), same breadth.
+  F4+F5 built together on a **shared coverage core** (`data/batch.py` `DNABatch` + `data/dna.py`),
+  replacing the old uniform-multinomial + fpr/fnr placeholders. **Copy-number-scaled coverage** from
+  the engine's `cell_cnv` (per-locus CN) / `cell_snv` (per-locus true alt fraction). **Pluggable depth
+  model** `DNA_DEPTH_MODELS={"dm","nb"}`: default **Dirichlet-Multinomial** (fixed budget `N`,
+  `p_seg ∝ CN·length·GC/mappability`, `p~Dir(κ·p̄)`) — `κ` = amplification regime (BULK large κ ≈
+  multinomial/Poisson; SINGLE-CELL small κ = lumpy), plus independent **NB-per-bin** as the field-tool
+  alternative (HMMcopy/CNVkit). **Allele layer** is data-type-dependent: BULK `Binomial(depth, true_af)`
+  + error; SINGLE-CELL **Beta-Binomial + explicit ADO** (separate Bernoulli, het locus → homozygous) +
+  doublets; optional FFPE C>T. **Capture breadth** (`DNA_BREADTH_PRESETS`, orthogonal to bulk/sc) sets
+  observed loci (wgs=all / wes=fraction / panel=`target_genes` drivers), depth regime (wgs low → panel
+  very high), and a systematic per-target/amplicon **capture-efficiency mean**. **DNA batch** (`DNABatch`,
+  mirrors §B): per-batch GC→coverage curve + depth shift + per-locus error; `run_dna_batches`
+  (shared/split) → multi-batch labelled output, ground truth preserved. Outputs: per-locus
+  coverage/alt/VAF/**CNA log2-ratio** + true CN/alt-fraction/ADO (bulk DataFrame + AnnData; sc matrices
+  + AnnData). CLI: `isccdata -a {bdna,scdna} --breadth {wgs,wes,panel} --depth-model {dm,nb} [--batches N]`.
+  Tests `tests/test_assay_dna.py` (coverage∝CN, compositional read-stealing, VAF recovery, ADO allele
+  loss, breadth, NB, multi-batch). Demo `notebooks/assay_dna.ipynb`. κ / capture efficiencies / ADO rate
+  are named M4 `estimate()` targets.
 - **F6** — spatial batch (spatially-correlated capture field, diffusion, section plane).
 - **F7** — read emission: **C1 count/coverage matrices** (copy-number-scaled, breadth-aware) first,
   then C2 FASTQ (synthetic or real-genome-anchored reference → third-party read simulator) → C3 BAM.

@@ -56,6 +56,14 @@ def load_cell_data(path):
     help="scRNA protocol preset: 10x or smartseq3.",
 )
 @click.option(
+    "--breadth", default="wgs", type=click.Choice(["wgs", "wes", "panel"]),
+    help="DNA capture breadth (bdna / scdna): wgs, wes, or panel.",
+)
+@click.option(
+    "--depth-model", default="dm", type=click.Choice(["dm", "nb"]),
+    help="DNA depth model: dm (Dirichlet-Multinomial, default) or nb (per-bin NB).",
+)
+@click.option(
     "--batches", default=1, type=int,
     help="scRNA: number of batches (same biology, different technical signature).",
 )
@@ -73,8 +81,8 @@ def load_cell_data(path):
 )
 @click.option("--log", default=0, help="Logging level. 0 = critical, 1 = info, 2 = debug.")
 @click.option("-o", "--output-path", default="./data_out", help="Output directory.")
-def main(sample_path, assay, assay_config, grid_side, protocol, batches, batch_seed,
-         design, count_model, log, output_path):
+def main(sample_path, assay, assay_config, grid_side, protocol, breadth, depth_model,
+         batches, batch_seed, design, count_model, log, output_path):
     logging.basicConfig(
         level={0: logging.CRITICAL, 1: logging.INFO, 2: logging.DEBUG}.get(log, logging.CRITICAL)
     )
@@ -106,9 +114,30 @@ def main(sample_path, assay, assay_config, grid_side, protocol, batches, batch_s
         print(f"{ASSAY_NAMES[assay]} ({batches} batches, {protocol}) finished -> {output_path}")
         return
 
+    # DNA multi-batch path: one labelled output per batch (same biology, different run).
+    if assay in ("bdna", "scdna") and batches > 1:
+        from .dna import run_dna_batches
+        config.setdefault("breadth", breadth)
+        config.setdefault("depth_model", depth_model)
+        mode = "bulk" if assay == "bdna" else "sc"
+        assays = run_dna_batches(
+            cell_data, mode=mode, n_batches=batches, base_seed=batch_seed,
+            design=design, **config,
+        )
+        Path(output_path).mkdir(parents=True, exist_ok=True)
+        for a in assays:
+            a.write(os.path.join(output_path, a.batch.label))
+        logging.info("Saved %d %s batches to %s", batches, ASSAY_NAMES[assay], output_path)
+        print(f"{ASSAY_NAMES[assay]} ({batches} batches, {breadth}) finished -> {output_path}")
+        return
+
     if assay == "scrna":
         config.setdefault("protocol", protocol)
         config.setdefault("count_model", count_model)
+        config.setdefault("seed", batch_seed)
+    if assay in ("bdna", "scdna"):
+        config.setdefault("breadth", breadth)
+        config.setdefault("depth_model", depth_model)
         config.setdefault("seed", batch_seed)
     instrument = ASSAYS[assay](**config)
 
