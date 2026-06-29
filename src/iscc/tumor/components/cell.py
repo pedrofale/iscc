@@ -323,6 +323,10 @@ class CancerCell(Cell):
         # This is the only place the genome is mutated, so sharing elsewhere is safe.
         self.genome = deepcopy(self.genome)
         self.genome_summary = deepcopy(self.genome_summary)
+        # A fully deleted genome (every segment at nullisomy) has no allele to act on; the
+        # per-segment selection weights would be all-zero (0/0 -> NaN). Nothing to mutate.
+        if not any(self.genome[s]['p'] or self.genome[s]['m'] for s in range(self.n_segments)):
+            return False
         event = rng.choice(['cnv', 'mut'], p=np.array([cnv_prob, snv_prob])/(cnv_prob + snv_prob)) # add WGDs too...
         if event == 'mut':
             # Sample segment
@@ -364,10 +368,12 @@ class CancerCell(Cell):
             elif evt == 'del':
                 sign = -1
                 allele_bits = self.genome[seg][hap][all].copy()  # capture before removing
-                if len(self.genome[seg][hap]) == 1:
-                    self.genome[seg][hap][all] = np.zeros(self.segment_sizes[seg], dtype=bool)
-                else:
-                    del self.genome[seg][hap][all] # remove
+                # Remove the copy. The segment may reach 0 copies (nullisomy) — a real state the
+                # viability check handles. Keeping the allele but still decrementing seg_cns (the
+                # old len==1 special case) drove copy number NEGATIVE; deleting keeps seg_cns equal
+                # to the actual allele count. Segments with 0 copies carry zero CNV selection
+                # weight, so they are never picked for further deletion.
+                del self.genome[seg][hap][all]
             self.update_genome_summary_cnv(selection, allele_bits, seg, sign) # for evolutionary parameters
 
         self.update_evolutionary_parameters(selection)

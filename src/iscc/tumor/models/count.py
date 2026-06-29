@@ -142,6 +142,11 @@ class GenotypeTumor:
         self.carrying_capacity = deme_params.get("carrying_capacity", 1)
         self.maximum_death_rate = deme_params.get("maximum_death_rate", 0.5)
         self.structure_radius = spatial_params.get("structure_radius", 0)
+        # Number of founder cancer cells to seed (an established micro-lesion). A single founder
+        # has P(extinction) ≈ death/division (~7% for the defaults) regardless of carrying
+        # capacity, so a one-cell start makes runs/demos randomly cancer-free; seeding a small
+        # cluster removes that founder bottleneck. Default 1 preserves prior behaviour.
+        self.initial_cancer_cells = deme_params.get("initial_cancer_cells", 1)
         n_demes = self.grid_size * self.grid_size
         self.demes = [dict() for _ in range(n_demes)]
         self.deme_coords = [(i // self.grid_size, i % self.grid_size) for i in range(n_demes)]
@@ -150,7 +155,7 @@ class GenotypeTumor:
             self._seed_structure()
         else:
             center = (self.grid_size // 2) * self.grid_size + (self.grid_size // 2)
-            self._add(center, self.founder_id, 1)
+            self._add(center, self.founder_id, max(1, min(self.initial_cancer_cells, self.carrying_capacity)))
 
         # Optional immune microenvironment: seed immune cells in every deme so that
         # cancer growing into them experiences local immune pressure (and so that
@@ -206,7 +211,8 @@ class GenotypeTumor:
         in_border = [(r, c) for (r, c) in in_border if 0 <= r < self.grid_size and 0 <= c < self.grid_size]
         if in_border:
             pos = in_border[int(self.rng.choice(len(in_border)))]
-            self._add(pos[0] * self.grid_size + pos[1], self.founder_id, 1)
+            self._add(pos[0] * self.grid_size + pos[1], self.founder_id,
+                      max(1, min(self.initial_cancer_cells, self.carrying_capacity)))
 
         stroma = self._normal_genotype("stromal")
         for r in range(self.grid_size):

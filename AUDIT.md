@@ -319,6 +319,28 @@ assortment 0.21→0.61 as dispersal increases.
 
 ## Known modeling issues (deferred to the realism milestones)
 
+- **Copy number could go negative.** ✅ FIXED (2026-06-29). `CancerCell.mutate` deletion branch
+  had a `len==1` special case that *kept* the last allele (zeroed it) yet still passed `sign=-1`
+  to `update_genome_summary_cnv`, so `seg_cns` drifted **below 0** under repeated deletions.
+  Fixed by always removing the copy (allowing nullisomy at CN 0, which the viability check
+  handles), keeping `seg_cns` equal to the actual allele count. Also added a guard so `mutate`
+  returns `False` (no-op) on a fully-deleted genome instead of dividing by an all-zero
+  segment-selection weight (`0/0 → NaN` in `rng.choice`). Surfaced only once the example tumour
+  actually produced CNAs (below); previously masked.
+
+- **Example config produced a cancer-free tumour.** ✅ FIXED (2026-06-29). The shipped
+  `notebooks/example_config.yaml` had `carrying_capacity=1` + a `structure_radius=4` duct, so the
+  single cancer founder was boxed in by normal cells and went extinct (or could not expand) —
+  runs yielded ~588 cells but **`cancer=0`** (pure normal tissue, no CNAs/SNVs), which is why the
+  F4/F5 assay notebook saw a diploid, mutation-free sample. Root causes: (a) a single founder has
+  `P(extinction) ≈ death/division ≈ 7%` regardless of `cc`; (b) `cc=1` left no room to grow. Fixed
+  by seeding an established micro-lesion (new additive engine param `deme_params.initial_cancer_cells`,
+  default 1) and updating the example config to `cc=5`, `structure_radius=5`,
+  `initial_cancer_cells=5`, `mutation_rate=0.4`. Now produces ~1000 cancer cells with CNAs (CN
+  0–7) and SNVs across all seeds (incl. seed 42), within the duct. The engine's evolutionary
+  dynamics were already validated — but only in free-growth (`structure_radius=0`, `cc≥5`) configs;
+  the duct + `cc=1` demo path had never been exercised end-to-end.
+
 - **Immune-effect formula is degenerate/inverted.** ✅ FIXED (2026-06-25). The old
   `cell_death_rate * (immune_cell_fraction ** immune_resistance)` could only *lower* the death
   rate and gave `0 ** r = 0` (immortal cancer) in immune-free demes. Replaced in both engines
