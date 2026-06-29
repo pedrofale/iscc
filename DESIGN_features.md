@@ -127,17 +127,33 @@ pIRS, InSilicoSeq). Phased:
     Control-FREEC). (c) WES/panel capture bias is a per-target/per-amplicon *mean* multiplier,
     orthogonal to the depth distribution. (d) κ, per-target/amplicon efficiencies, and the ADO rate
     are all M4 `estimate()` targets.
-- **C2 — raw reads (FASTQ)**: needs a nucleotide reference. Two options:
-  - *(A) synthesise* a random per-segment reference once, apply each cell's SNVs/CNAs → per-cell
-    FASTA. Works today, but lacks real sequence context (repeats, GC, mappability) — whether
-    caller-benchmarks transfer is open (RESEARCH_QUESTIONS R5).
-  - *(B) anchor to the real genome* via the M3b real-genome mode (segments = chromosome arms →
-    hg38 coordinates) and use the **real reference sequence**. Better long-term path for read-level
-    realism; the preferred option once real-genome mode is mature.
-  Then build the per-cell reference + coverage (C1) and call a **third-party read simulator** → FASTQ.
-- **C3 — BAM**: align the FASTQ back to the chosen reference (for tools that consume BAMs).
+- **C2 — raw reads (FASTQ)**: needs a nucleotide reference. **Follow SISTEM (Weiner & Bansal 2025)
+  exactly** — verified from their docs/source: SISTEM *"constructs a full reference sequence for each
+  mutated cell and computes a coverage distribution before calling a third-party short-read
+  simulator"*, the reference is **user-supplied** (*"pass one or multiple reference genomes"*), and
+  the external tools are **DWGSIM (≥0.1.13)** + **samtools** (read-the-docs install page). So the
+  iscc design is:
+  - **Pluggable reference, not hardwired** (SISTEM's model). A `Reference` interface with two
+    backends: *(A) synthetic* — generate a random per-segment FASTA once, the default that works on
+    today's abstract genome (lacks real sequence context → benchmark transfer is open,
+    RESEARCH_QUESTIONS R5); *(B) real-genome* — supply a real FASTA, anchored via the M3b real-genome
+    mode (segments = chromosome arms → hg38 coordinates), the drop-in once that mode is mature.
+    Same interface; the reference is swappable input exactly as in SISTEM.
+  - **Per-cell reference construction**: apply each cell's CNAs (duplicate / delete the segment
+    sequence) and SNVs (substitute bases) to the chosen reference → per-cell FASTA.
+  - **Coverage distribution**: reuse the C1 copy-number-scaled coverage model already in
+    `data/dna.py` (DM depth, GC/mappability, breadth) — this is the bespoke part; do NOT reimplement
+    the sequencer error model.
+  - **Read simulator = pluggable adapter, default DWGSIM** (matches SISTEM), **ART as alternative**.
+    A thin wrapper writes the per-cell FASTA + per-segment coverage, shells out to the binary,
+    collects FASTQ. The external binary is an optional runtime dependency.
+- **C3 — BAM**: align the FASTQ back to the chosen reference (bwa) + **samtools** sort/index (SISTEM's
+  toolchain) for tools that consume BAMs.
 
 Gate C2/C3 behind C1; C1 alone serves the many methods that take count/coverage matrices, not reads.
+**CI stays light**: DWGSIM/ART/samtools are optional binaries — tests skip the shell-out gracefully
+when absent and instead assert the *bespoke* layers (per-cell FASTA reflects CNAs/SNVs; coverage
+allocation ∝ copy number; adapter command is built correctly, mocked).
 
 **Read emission is per-modality** — the count matrix is the universal interface (what most methods
 consume *and* the input these read simulators take), but the read tool + reference differ:
@@ -187,7 +203,9 @@ src/iscc/data/
   rna.py          # scRNA: protocol presets 10x / smart-seq3, applies Batch
   dna.py          # bulk + single-cell DNA × {WGS, WES, panel} breadth; GC/coverage/ADO, applies Batch
   visium.py       # spatial: capture field + aggregation, applies Batch
-  reads.py        # C1 counts -> (C2 FASTQ -> C3 BAM)
+  reads.py        # C2 FASTQ -> C3 BAM: Reference {synthetic|real} -> per-cell FASTA ->
+                  #   C1 coverage -> read-sim adapter {dwgsim(default)|art} -> FASTQ -> bwa/samtools BAM
+                  #   (C1 count/coverage matrices already live in dna.py)
 ```
 CLI: `isccdata --protocol 10x --batches 2 [--batch-seed ...]` writes one labelled AnnData per
 batch. Batch hyper-parameters are exactly what `estimate()` (DESIGN_inference §B) fits from real
@@ -230,8 +248,11 @@ data — so realistic defaults can be *learned*, not guessed.
   loss, breadth, NB, multi-batch). Demo `notebooks/assay_dna.ipynb`. κ / capture efficiencies / ADO rate
   are named M4 `estimate()` targets.
 - **F6** — spatial batch (spatially-correlated capture field, diffusion, section plane).
-- **F7** — read emission: **C1 count/coverage matrices** (copy-number-scaled, breadth-aware) first,
-  then C2 FASTQ (synthetic or real-genome-anchored reference → third-party read simulator) → C3 BAM.
+- **F7** — read emission. **C1 count/coverage matrices** (copy-number-scaled, breadth-aware) **done**
+  (in `dna.py`). Remaining: **C2 FASTQ → C3 BAM, SISTEM-faithful** — pluggable `Reference`
+  (synthetic default / real-genome drop-in), per-cell FASTA from CNAs/SNVs, C1 coverage, **DWGSIM**
+  (default; ART alternative) + bwa/**samtools**. **DNA-first** (bulk + single-cell); scRNA reads
+  (scReadSim) a later adapter. External binaries optional; CI asserts the bespoke layers.
 
 ## Validation hooks (per DESIGN_inference conventions)
 - Batch model: *recover* injected batch params via `estimate()`; show two same-tumor batches share
