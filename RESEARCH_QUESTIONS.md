@@ -196,6 +196,22 @@ real-genome mode), not F1–F7.
 
 ---
 
+## Theme 10 — Experimental design ("recommender mode")
+
+### R11. Can iscc recommend an experimental design, not just generate data?
+**Why it matters.** Existing power/design tools (scPower, powsimR, POWSC for scRNA; PoweREST for
+spatial; Tarabichi/Boutros for subclone reconstruction) are all single-modality and single-task
+(usually DE/eQTL or subclone detection) and statistical rather than biology-generative. iscc's full
+tumor→sample→assay→(reads)→treatment chain, scored against a known ground truth, could turn the
+generative engine into a **goal-agnostic, multi-modal, biology-grounded design engine**: fit
+technical/batch priors from a pilot (`estimate*`), then for a stated goal + budget assess which
+analyses are feasible and which design is optimal — including cross-modal allocation and adaptive-
+therapy monitoring (sequential design / value of information, the West–Anderson tie-in). **This is a
+second mode and likely a separate paper.** **Serves / see:** `DESIGN_recommender.md` (full scoping);
+operationalizes R3 (sampling), R4 (benchmark transfer), R8 (treatment-schedule transfer).
+
+---
+
 ## How to use this file
 - These are **questions, not scheduled work** — promote one to a DESIGN doc / milestone when we
   commit to building it.
