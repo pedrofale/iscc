@@ -52,6 +52,18 @@ share the same technical parameters.
   log-library residual via an SE autocorrelation fit → `field_sigma`/`field_lengthscale`; count
   overdispersion), recovery + posterior-predictive `validate_visium`.
 
+**Calibrated defaults (the contract: run with NO data + use ANY data).** iscc runs out-of-the-box
+from baked-in defaults (no data required) AND every `estimate*` accepts arbitrary user data. The
+assay defaults (`BatchHyperParams`/`VisiumBatchHyperParams`) are now CALIBRATED to the real default
+fits (PBMC3k, 10x Visium breast cancer) so no-data simulation is realistic — but only the
+**scale-free / unit-reconciled** params transfer: Visium `mu_counts`≈21.8k, `sigma_counts`,
+`field_sigma`, `field_lengthscale` (in spot-pitch units); scRNA `mu_lib`≈2.4k, `sigma_lib`. Params
+that depend on the gene set / sparsity (`kappa`, `dispersion`) are NOT transferred — e.g. the real
+Visium `kappa` fits ~89k purely because it is averaged over 36k mostly-zero genes (D→1 ⇒ kappa→∞);
+on a comparable dense gene set it is ~50–90, so iscc keeps its scale. DNA defaults are already
+sensible per modality/breadth preset (`scDNA` ado=0.20, etc.). The paper figures show fit → params →
+realistic re-simulated data; the calibrated defaults make that the out-of-box behavior.
+
 Per-session ritual: `/clear` → "read DESIGN_inference.md and do M<x>" → implement + run *targeted*
 tests → commit → tick the box above + update memory → stop (don't roll into the next milestone).
 Use Sonnet for mechanical milestones (M2, M3a, M0 indices); Opus for reasoning-heavy ones (M0b

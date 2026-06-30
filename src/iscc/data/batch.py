@@ -91,10 +91,14 @@ COUNT_MODELS = {"nb": _emit_nb, "dm": _emit_dm}
 @dataclass
 class BatchHyperParams:
     """Protocol-typical magnitudes for the scRNA batch model (the targets of `estimate()`)."""
+    # mu_lib / sigma_lib CALIBRATED to real 10x PBMC3k (`estimate(sc.datasets.pbmc3k())`) — the
+    # scale-free library-size magnitudes transfer. `dispersion` and the dropout curve are NOT taken
+    # from PBMC3k: they are gene-set / cell-type-heterogeneity dependent (PBMC's fit ~0.6 is inflated
+    # by cross-cell-type variance unreachable by a clonal tumour, see M2), so iscc-scale values stay.
     protocol: str = "10x"
     sigma_batch: float = 0.10
-    mu_lib: float = 4000.0
-    sigma_lib: float = 0.35
+    mu_lib: float = 2400.0      # real PBMC3k ~2,367 UMIs/cell; was 4,000
+    sigma_lib: float = 0.43     # real PBMC3k 0.431
     dispersion: float = 0.30
     ambient_frac: float = 0.05
     doublet_rate: float = 0.05
@@ -478,19 +482,25 @@ class VisiumBatchHyperParams:
         kappa             Dirichlet-Multinomial concentration (only for count_model="dm")
         nb_dispersion     NB overdispersion phi (var = mu + phi*mu^2; only for count_model="nb")
     """
+    # Defaults CALIBRATED to a real 10x Visium breast-cancer section (estimate_visium on
+    # `scanpy.datasets.visium_sge('V1_Breast_Cancer_Block_A_Section_1')`), so out-of-the-box Visium
+    # is realistic with no user data. Only the SCALE-FREE / unit-reconciled fits are transferred;
+    # `kappa` is NOT (the real fit's ~89k is a full-transcriptome sparsity artifact — averaged over
+    # 36k mostly-zero genes — and does not transfer to iscc's small dense gene model; the
+    # comparable-gene fit gives ~50–90, so the iscc-scale default is kept).
     protocol: str = "visium"
     spot_pitch: float = 2.0
     spot_radius: float = 1.0
-    mu_counts: float = 5000.0
-    sigma_counts: float = 0.35
-    field_lengthscale: float = 4.0
-    field_sigma: float = 0.30
+    mu_counts: float = 20000.0       # real ~21,815 UMIs/spot (deep Visium); was 5,000
+    sigma_counts: float = 0.45       # real 0.455
+    field_lengthscale: float = 18.0  # real ~9 spots x spot_pitch 2.0 (coord units); was 4.0
+    field_sigma: float = 0.70        # real 0.697 (capture-field strength)
     edge_sigma: float = 0.30
     diffusion_sigma: float = 0.0
     sigma_batch: float = 0.10
     ambient_frac: float = 0.05
     count_model: str = "dm"
-    kappa: float = 50.0
+    kappa: float = 50.0              # iscc-scale (NOT the sparse-transcriptome 89k — see note above)
     nb_dispersion: float = 0.30
 
     def to_dict(self):
