@@ -22,8 +22,9 @@ statistics the estimate is fit to:
     fraction into per-copy alt multiplicity (so het loci drop to 0/1 and allele balance is lumpy).
   * **sequencing error** — `error_rate` is wired into the simulator's per-base error (DWGSIM `-e`),
     the read-level base-error floor (ART uses its sequencing-system profile instead).
-  * **FFPE C>T (`ffpe_ct_rate`)** is NOT yet reproduced in reads (count-level only) — a documented
-    gap (needs per-locus C-site context in the reference).
+  * **FFPE C>T (`ffpe_ct_rate`)** — reproduced in the reads via per-template-molecule deamination at
+    the shared `ct_sites` (`build_cell_fasta`), the read-level single source matching the count
+    model's elevated alt at those sites (bulk ≈ ffpe_ct_rate; single cells quantised by copy number).
 
 The external binaries are OPTIONAL: everything up to the shell-out (FASTA, coverage, command
 construction) runs with no tools installed, and `emit_reads` reports a graceful skip.
@@ -37,7 +38,7 @@ import numpy as np
 
 from .base import collect_fastq, find_binary, run_binary
 from . import variants
-from ..dna import genome_bases, _gene_base_seed, _alt_for_ref
+from ..dna import genome_bases, genome_features, _gene_base_seed, _alt_for_ref
 
 _BASES = np.array(list("ACGT"))
 # Legacy fixed-transition alt map. SUPERSEDED for SNV identity by the canonical per-locus
@@ -74,6 +75,8 @@ class Reference:
       * ``alt_base[gl]``      — the canonical alt nucleotide an SNV at locus `gl` substitutes in
                                 (the SAME canonical (ref, alt) every modality uses; see
                                 `iscc.data.dna.genome_bases`).
+      * ``ct_sites[gl]``      — whether locus `gl` is C>T-eligible (FFPE), the SAME `genome_features`
+                                flags the count model uses, so FFPE in reads matches FFPE in counts.
     """
 
     seg_ids: list
@@ -81,6 +84,7 @@ class Reference:
     base_seq: dict
     locus_local_pos: dict
     alt_base: dict
+    ct_sites: dict
 
     def write_fasta(self, path, sequences=None):
         """Write `sequences` (default = the bare reference) as ``>seg{id}`` records."""
@@ -112,6 +116,9 @@ class SyntheticReference(Reference):
         # from the FIXED `genome_seed` (NOT the per-run `seed`): only the surrounding window CONTEXT
         # is run-random; the variant site itself carries the canonical ref/alt every modality uses.
         ref_b, alt_b = genome_bases(self.genes, seed=genome_seed)
+        # C>T-eligible (FFPE) loci — the SAME `genome_features` flags the count model uses, so
+        # FFPE injected into the reads lands at the same sites it does in the count matrices.
+        self.ct_sites = {gl: bool(b) for gl, b in enumerate(genome_features(self.genes)[2])}
         seg_to_loci = OrderedDict()
         for gl, g in enumerate(self.genes):
             seg_to_loci.setdefault(_segment_of(g), []).append(gl)
@@ -176,6 +183,8 @@ class RealGenomeReference(Reference):
                 ref_base = seq[self.locus_local_pos[gl]]
                 rng = np.random.default_rng(_gene_base_seed(self.genes[gl], genome_seed))
                 self.alt_base[gl] = _alt_for_ref(ref_base, rng)
+        # C>T-eligible (FFPE) loci — same `genome_features` flags the count model uses.
+        self.ct_sites = {gl: bool(b) for gl, b in enumerate(genome_features(self.genes)[2])}
 
     @staticmethod
     def _read_fasta(path):
@@ -207,7 +216,7 @@ def _segment_cn(cnv_row, loci):
     return int(round(float(np.median(vals)))) if len(vals) else 2
 
 
-def build_cell_fasta(reference, cnv_row, af_row, path, name="cell"):
+def build_cell_fasta(reference, cnv_row, af_row, path, name="cell", ffpe_ct_rate=0.0, rng=None):
     """Apply one cell's CNAs + SNVs to `reference` -> a per-cell FASTA on disk.
 
     CNAs: a segment with copy number `cn` is emitted as `cn` sequence copies (amplification =
@@ -220,10 +229,21 @@ def build_cell_fasta(reference, cnv_row, af_row, path, name="cell"):
     OBSERVED fraction (after `effective_alt_fraction`'s ADO + allele overdispersion) for single
     cells — so single-cell allelic dropout shows up as copies collapsing to all-ref / all-alt.
 
+    FFPE deamination (`ffpe_ct_rate` > 0): at each C>T-eligible locus (`reference.ct_sites`, the
+    SAME flags the count model uses) that is NOT a true SNV, each copy independently acquires the
+    canonical alt with probability `ffpe_ct_rate` — deamination happens per template molecule, so
+    it is applied per-copy. A bulk pool of many copies then shows ~`ffpe_ct_rate` alt at C-sites,
+    matching the count model's elevated alt there; single cells (few copies) are quantised. This is
+    the read-level SINGLE SOURCE of the FFPE artifact (the count model applies it analytically; the
+    reads here), keeping the two views consistent.
+
     Returns the OrderedDict of ``contig_name -> sequence`` that was written.
     """
     cnv_row = np.asarray(cnv_row, dtype=float)
     af_row = np.asarray(af_row, dtype=float)
+    ffpe_on = ffpe_ct_rate > 0 and getattr(reference, "ct_sites", None) is not None
+    if ffpe_on and rng is None:
+        rng = np.random.default_rng()
     records = OrderedDict()
     for seg in reference.seg_ids:
         loci = reference.segments[seg]
@@ -236,10 +256,16 @@ def build_cell_fasta(reference, cnv_row, af_row, path, name="cell"):
         mutated = [(reference.locus_local_pos[gl], reference.alt_base[gl],
                     int(round(af_row[gl] * cn)))
                    for gl in loci if af_row[gl] > 0]
+        # FFPE-eligible loci in this segment: C>T-eligible AND not already a true SNV.
+        ffpe_loci = ([(reference.locus_local_pos[gl], reference.alt_base[gl]) for gl in loci
+                      if reference.ct_sites.get(gl) and not (af_row[gl] > 0)] if ffpe_on else [])
         for cp in range(cn):
             seq = list(base)
             for pos, alt_b, n_alt in mutated:
                 if cp < n_alt:  # this copy carries the alt allele at this locus
+                    seq[pos] = alt_b
+            for pos, alt_b in ffpe_loci:        # per-template-molecule deamination at C-sites
+                if rng.random() < ffpe_ct_rate:
                     seq[pos] = alt_b
             records[f"{name}_seg{seg}_cp{cp}"] = "".join(seq)
     reference.write_fasta(path, records)
@@ -435,6 +461,10 @@ def emit_reads(cell_data, reference=None, simulator="dwgsim", breadth="wgs",
     # estimate is fit to; bulk uses the true fraction (population mixing gives the bulk VAF).
     cnv_df = cell_data.get("cell_cnv")
     batch = getattr(assay, "batch", None)
+    # FFPE C>T deamination wired from the same hyper the count model uses, applied per template
+    # molecule at the shared ct_sites -> reads carry the FFPE artifact consistently with the counts.
+    ffpe = float(getattr(assay.hypers, "ffpe_ct_rate", 0.0))
+    ffpe_rng = np.random.default_rng(seed + 5)
     fasta_paths = []
     pool_records = OrderedDict()
     for c in cells:
@@ -443,11 +473,13 @@ def emit_reads(cell_data, reference=None, simulator="dwgsim", breadth="wgs",
         af_row = effective_alt_fraction(snv.loc[c, genes].values, batch=batch, modality=modality)
         if modality == "sc":
             p = os.path.join(outdir, f"{c}.fa")
-            build_cell_fasta(reference, cnv_row, af_row, p, name=str(c))
+            build_cell_fasta(reference, cnv_row, af_row, p, name=str(c),
+                             ffpe_ct_rate=ffpe, rng=ffpe_rng)
             fasta_paths.append(p)
         else:  # bulk: accumulate records into one pooled FASTA
             recs = build_cell_fasta(reference, cnv_row, af_row,
-                                    os.path.join(outdir, "_tmp.fa"), name=str(c))
+                                    os.path.join(outdir, "_tmp.fa"), name=str(c),
+                                    ffpe_ct_rate=ffpe, rng=ffpe_rng)
             pool_records.update(recs)
     if modality == "bulk":
         p = os.path.join(outdir, "pooled.fa")

@@ -143,6 +143,40 @@ class TestCellFasta:
         assert _segment_cn(np.array([2.0, 2.0, 2.0]), [0, 1, 2]) == 2
         assert _segment_cn(np.array([0.0, 0.0]), [0, 1]) == 0
 
+    def test_ffpe_introduces_alt_only_at_ct_sites(self, tmp_path):
+        # FFPE deamination at the shared ct_sites: a bulk-like pool of many hom-ref copies shows
+        # ~ffpe_ct_rate alt at C-sites and none elsewhere (matches the count model's elevated alt).
+        genes = [f"G_0_{p}" for p in range(40)]                # one segment, so all copies align
+        ref = SyntheticReference(genes, seed=1, locus_length=40)
+        ct = [gl for gl in range(len(genes)) if ref.ct_sites[gl]]
+        nonct = [gl for gl in range(len(genes)) if not ref.ct_sites[gl]]
+        assert 0 < len(ct) < len(genes)                       # genome_features flags a subset
+        cnv = np.full(len(genes), 400.0); af = np.zeros(len(genes))   # 400 hom-ref copies
+        recs = build_cell_fasta(ref, cnv, af, os.path.join(tmp_path, "f.fa"),
+                                ffpe_ct_rate=0.1, rng=np.random.default_rng(0))
+        seqs = list(recs.values())
+
+        def alt_frac(gl):
+            pos, altb = ref.locus_local_pos[gl], ref.alt_base[gl]
+            return np.mean([s[pos] == altb for s in seqs])
+        assert abs(np.mean([alt_frac(gl) for gl in ct]) - 0.1) < 0.03   # ~ffpe_ct_rate at C-sites
+        assert np.mean([alt_frac(gl) for gl in nonct]) == 0.0           # none at non-C-sites
+
+    def test_ffpe_off_by_default(self, tmp_path):
+        genes = [f"G_0_{p}" for p in range(40)]
+        ref = SyntheticReference(genes, seed=1, locus_length=40)
+        recs = build_cell_fasta(ref, np.full(len(genes), 100.0), np.zeros(len(genes)),
+                                os.path.join(tmp_path, "g.fa"))   # no ffpe_ct_rate
+        assert all(s == ref.base_seq[0] for s in recs.values())  # every copy == reference
+
+    def test_read_ct_sites_match_count_model(self):
+        # the read reference uses the SAME genome_features ct_sites the count model conditions on.
+        from iscc.data.dna import genome_features
+        genes = [f"G_0_{p}" for p in range(40)]
+        ref = SyntheticReference(genes, seed=1)
+        ct_count = genome_features(ref.genes)[2]
+        assert all(ref.ct_sites[gl] == bool(ct_count[gl]) for gl in range(len(genes)))
+
 
 # ----------------------------------------------------------- coverage allocation ∝ CN -------
 class TestCoverage:
