@@ -8,9 +8,10 @@ notebooks/.ipynb_checkpoints
 notebooks/notebook_example/
 notebooks/example_out/
 .DS_Store
-data/
-!validation/data/
-!validation/data/**
+# root-level scratch/output data ONLY — anchored with a leading slash so it does NOT also catch
+# the package dir `src/iscc/data/` (its new files would be silently untracked) or the committed
+# `validation/data/`.
+/data/
 # transient raw DNA-reference downloads (e.g. the 406 MB Tapestri h5) + caches — never committed
 validation/data/_cache/
 validation/data/**/__pycache__/
