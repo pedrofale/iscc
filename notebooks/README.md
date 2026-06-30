@@ -12,6 +12,21 @@ top-to-bottom in the `iscc` environment.
 3. **`03_data_overview.ipynb`** — explore the *data*: bulk DNA, single-cell DNA, scRNA (scanpy),
    and Visium spatial transcriptomics (squidpy).
 
+## Assay deep-dives
+
+Per-modality demos of the data module's realism (counts/coverage and how parameters are fit to
+real references). They are generated from the matching `_build_*.py` scripts (re-run the script,
+then execute the notebook):
+
+- **`assay_dna.ipynb`** — bulk + single-cell DNA: copy-number-dependent and GC-biased coverage,
+  het allele-fraction spread with allelic dropout, and `estimate_dna` round-trips.
+- **`assay_scrna.ipynb`** — scRNA counts: variable library size, negative-binomial
+  overdispersion, dropout, and batch/technical effects.
+- **`assay_spatial.ipynb`** — 10x Visium: per-spot aggregation, spatial autocorrelation, and
+  `estimate_visium` fit to a real section.
+- **`reads.ipynb`** — read-level output: per-cell reference → coverage budget → the shared
+  variant seam → FASTQ/BAM (DWGSIM/ART), degrading gracefully without the binaries.
+
 ## Shared example data
 
 `02` and `03` read a small shared dataset under `example_out/` (git-ignored). It is produced by:
