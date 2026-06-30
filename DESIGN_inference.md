@@ -32,10 +32,20 @@ share the same technical parameters.
   sizes — abstract mode byte-identical). Data generator downloads+cites cytoBand/COSMIC/Davoli/PCAWG
   → `validation/data/realgenome_*.csv`. Estimator: the arm-CN fitness factorises, so a **pooled
   per-arm RF** `(gain[arm],loss[arm])→s[arm]` (not a 39-D joint map, which extrapolated to the
-  wrong sign) fits `s_arm` to PCAWG; cohort summary = mean over independent tumours. Local smoke run
-  (250×6) confirms the pipeline and the **correct direction** (fit-to-real r>0, s_arm↑ with Charm &
-  with oncogene−TSG content); publication-scale fit is HPC-bound (DESIGN_scalability §7: one event
-  per `update()`). Honest partial result, like M3a.*
+  wrong sign) fits `s_arm` to PCAWG; cohort summary = mean over independent tumours. **Now
+  tau-leaped (DESIGN_scalability §7):** `RealGenomeSimulator` grows each cohort tumour with
+  tau-leaping (`update_mode="tau"`, the default) and bounds growth by **size** (`grow_to_size`,
+  default 600 cells) — bounded per-sim cost, no exponential-growth stragglers. At a *matched* size
+  tau and exact give a statistically identical per-arm summary (bias ≈ +0.003; tau-vs-exact
+  agreement ≈ the exact-vs-exact Monte-Carlo noise floor: r≈0.47 vs floor≈0.48, meanAbsDiff 0.030
+  vs 0.027 — `tests/test_realgenome_tau.py`, validation `--equivalence` panel), and tau is faster
+  at every size with the gap **widening with size** (~1.3× @ 600 cells, ~1.9× @ 1500, ~6.2× @ 4000,
+  where exact hits ~14 s/cohort-tumour and was the HPC bottleneck). The scaled in-session fit
+  (4000×8, grow-to-600 ≈ 26× the prior smoke) reproduces the result: **fit-to-real r=0.78**
+  (RMSE 0.25) and **s_arm↑ with Charm** (Pearson r=0.33, p=0.04; Spearman ρ=0.32) and with
+  oncogene−TSG content (r=0.38, p=0.02) — oncogene-dense arms inferred amplification-favoured,
+  TSG-dense deletion-favoured. HPC settings for the canonical figure live in the validation
+  docstring (larger `--target-size`, where the tau speedup compounds).*
 - [~] **M4** — DNA/Visium estimation (§C). **DNA half DONE** (`estimate_dna`, §C.1: MoM/MLE fit of
   `DNABatchHyperParams`, recovery + posterior-predictive `validate_dna`). **Visium half pending** (§C.2, needs F6).
 

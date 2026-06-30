@@ -16,7 +16,6 @@ This module mirrors ``inference.tumor`` but for the per-arm copy-number model:
 **Identifiability (A.3):** the CNA *rate* is fixed in the base config and only ``s_arm`` is
 inferred, exactly as CINner fixes the missegregation probability to identify selection.
 """
-import copy
 import warnings
 
 import numpy as np
@@ -111,6 +110,60 @@ def default_real_config(genome_spec):
     )
 
 
+def build_real_tumor(genome_spec, s_arm, seed, base_config=None,
+                     update_mode="tau", tau=1.0, snapshot_every=1):
+    """Construct a ``GenotypeTumor(genome_mode='real')`` with ``s_arm`` injected (not yet grown).
+
+    Shared by :class:`RealGenomeSimulator` and the tau/exact equivalence harness so both build the
+    engine identically (only ``update_mode`` differs).
+    """
+    cfg = base_config or default_real_config(genome_spec)
+    sp = dict(cfg["selection_params"])
+    sp["s_arm"] = list(np.asarray(s_arm, dtype=float))
+    return GenotypeTumor(
+        seed=seed, genome_mode="real", genome_spec=genome_spec,
+        selection_params=sp, cancer_cell_params=cfg["cancer_cell_params"],
+        deme_params=cfg["deme_params"], spatial_params=cfg["spatial_params"],
+        update_mode=update_mode, tau=tau, snapshot_every=snapshot_every,
+    )
+
+
+def grow_to_size(genome_spec, s_arm, seed, target, mode="tau", base_config=None,
+                 tau=1.0, max_iter=100000):
+    """Grow one real-genome tumour to a target cancer-cell count under ``mode`` ("exact"|"tau").
+
+    Steps the chosen engine one *event* ("exact") or one *generation* ("tau") at a time until the
+    cancer population first reaches ``target`` (or goes extinct), then materialises it. Growing both
+    engines to the **same size** is the clean equivalence comparison: it controls for developmental
+    stage so any difference in the per-arm gain/loss summary is attributable to the update rule
+    (tau-leaping vs one-event Gillespie), not to the tumour being caught at a different size.
+    """
+    t = build_real_tumor(genome_spec, s_arm, seed, base_config=base_config,
+                         update_mode=mode, tau=tau)
+    rng = np.random.default_rng(seed) if mode == "tau" else t.rng
+    for _ in range(max_iter):
+        cs = t.get_cancer_size()
+        if cs == 0 or cs >= target:
+            break
+        if mode == "tau":
+            t._tau_generation(rng, t.tau)
+        else:
+            t.update(rng)
+            t.step += 1
+    t.make_cell_data()
+    return t
+
+
+def matched_size_cohort_vector(genome_spec, s_arm, mode, seeds, target,
+                               base_config=None, tau=1.0):
+    """Cohort per-arm gain/loss vector for tumours all grown to the same ``target`` size."""
+    tumors = [grow_to_size(genome_spec, s_arm, sd, target, mode=mode,
+                           base_config=base_config, tau=tau) for sd in seeds]
+    vec, _ = cohort_summary_vector(tumors, genome_spec.n_arms)
+    survivors = sum(1 for t in tumors if t.get_cancer_size() > 0)
+    return vec, survivors
+
+
 def s_arm_prior(n_arms, low=0.5, high=1.6):
     """Uniform product prior over the per-arm coefficients (CINner-style U(low, high))."""
     return Prior({f"s{i}": (low, high) for i in range(n_arms)})
@@ -164,10 +217,30 @@ class RealGenomeSimulator:
     Each evaluation simulates a small **cohort** of ``cohort_size`` independent tumours under the
     same ``s_arm`` and returns the cohort's per-arm gain/loss frequencies (the PCAWG-comparable
     summary). Picklable so the ABC engine can parallelise it with multiprocessing.
+
+    Set ``update_mode="tau"`` (the default) to grow each cohort tumour with **tau-leaping**
+    (DESIGN_scalability §7): the whole tumour is advanced one generation of length ``tau`` per
+    ``grow`` step (Poisson births/deaths per clone) instead of one event per update, so a cohort
+    that reaches a developed copy-number landscape costs ``#clones x #generations`` rather than
+    ``#cells`` events — ~250x faster than the exact one-event engine at the production size. The
+    per-arm gain/loss summary the ABC fits to is statistically the same as the exact engine's at a
+    matched tumour size (see ``tests/test_realgenome_tau.py`` and the ``--equivalence`` gate in
+    ``validate_inference_realgenome.py``). ``update_mode="exact"`` recovers the one-event reference
+    engine.
+
+    **Growth is bounded by size, not generations.** Each tumour is grown until its cancer
+    population first reaches ``target_size`` (default), then materialised. This is what makes the
+    scaled fit feasible *and* trustworthy: (a) the per-sim cost is bounded regardless of seed — the
+    tau engine grows exponentially without a hard carrying-capacity cap, so a fixed generation count
+    would let lucky seeds explode into multi-minute straggler sims; growing to a size cap removes
+    those tails. (b) Comparing tau and exact at the **same size** controls for developmental stage,
+    which is precisely the equivalence the gate checks. Pass ``target_size=None`` to fall back to a
+    fixed ``n_steps`` budget (generations under tau, per-event steps under exact).
     """
 
-    def __init__(self, genome_spec, base_config=None, n_steps=600, cohort_size=8,
-                 thr=0.5, seed=0):
+    def __init__(self, genome_spec, base_config=None, n_steps=1000, cohort_size=8,
+                 thr=0.5, seed=0, update_mode="tau", tau=1.0, snapshot_every=1,
+                 target_size=500):
         self.spec = genome_spec
         self.n_arms = genome_spec.n_arms
         self.base_config = base_config or default_real_config(genome_spec)
@@ -175,22 +248,22 @@ class RealGenomeSimulator:
         self.cohort_size = cohort_size
         self.thr = thr
         self.seed = seed
+        self.update_mode = update_mode
+        self.tau = tau
+        self.snapshot_every = snapshot_every
+        self.target_size = target_size
         self.names = None
 
     def _s_arm(self, theta):
         return np.array([theta[f"s{i}"] for i in range(self.n_arms)], dtype=float)
 
     def simulate_tumor(self, theta, seed):
-        cfg = copy.deepcopy(self.base_config)
-        sp = dict(cfg["selection_params"])
-        sp["s_arm"] = self._s_arm(theta).tolist()
-        t = GenotypeTumor(
-            seed=seed, genome_mode="real", genome_spec=self.spec,
-            selection_params=sp,
-            cancer_cell_params=cfg["cancer_cell_params"],
-            deme_params=cfg["deme_params"],
-            spatial_params=cfg["spatial_params"],
-        )
+        if self.target_size is not None:
+            return grow_to_size(self.spec, self._s_arm(theta), seed, self.target_size,
+                                mode=self.update_mode, base_config=self.base_config, tau=self.tau)
+        t = build_real_tumor(
+            self.spec, self._s_arm(theta), seed, base_config=self.base_config,
+            update_mode=self.update_mode, tau=self.tau, snapshot_every=self.snapshot_every)
         t.grow(n_steps=self.n_steps, seed=seed)
         return t
 
