@@ -19,6 +19,7 @@ from .dna import (
 from .rna import (
     distort_vaf, observed_allele_counts, emit_scrna_reads, ScReadSimAdapter,
     ScrnaAlleleCounts, SyntheticTranscriptome, write_scrna_fastq,
+    emit_visium_reads, spot_clone_mixture_vaf,
 )
 
 __all__ = [
@@ -29,4 +30,5 @@ __all__ = [
     "DNAReadEmitter", "DwgsimAdapter", "ArtAdapter", "SIMULATORS", "align_to_bam",
     "distort_vaf", "observed_allele_counts", "emit_scrna_reads", "ScReadSimAdapter",
     "ScrnaAlleleCounts", "SyntheticTranscriptome", "write_scrna_fastq",
+    "emit_visium_reads", "spot_clone_mixture_vaf",
 ]

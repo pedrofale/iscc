@@ -46,8 +46,11 @@ share the same technical parameters.
   oncogene−TSG content (r=0.38, p=0.02) — oncogene-dense arms inferred amplification-favoured,
   TSG-dense deletion-favoured. HPC settings for the canonical figure live in the validation
   docstring (larger `--target-size`, where the tau speedup compounds).*
-- [~] **M4** — DNA/Visium estimation (§C). **DNA half DONE** (`estimate_dna`, §C.1: MoM/MLE fit of
-  `DNABatchHyperParams`, recovery + posterior-predictive `validate_dna`). **Visium half pending** (§C.2, needs F6).
+- [x] **M4** — DNA/Visium estimation (§C). **DNA half DONE** (`estimate_dna`, §C.1: MoM/MLE fit of
+  `DNABatchHyperParams`, recovery + posterior-predictive `validate_dna`). **Visium half DONE** (§C.2):
+  `estimate_visium` fits `VisiumBatchHyperParams` (per-spot library + the spatial/nugget split of the
+  log-library residual via an SE autocorrelation fit → `field_sigma`/`field_lengthscale`; count
+  overdispersion), recovery + posterior-predictive `validate_visium`.
 
 Per-session ritual: `/clear` → "read DESIGN_inference.md and do M<x>" → implement + run *targeted*
 tests → commit → tick the box above + update memory → stop (don't roll into the next milestone).
@@ -93,7 +96,7 @@ by module, against each module's leading competitor.
 | Tumor evolution mode | Noble 2022: characterize tumours by `(n, D, J₁)` indices; overlay real tumour phylogenies in index space | qualitative dispersal→mode with non-Noble metrics | Noble indices (§D.1) + real-tumour overlay (§D.2), single structure |
 | scRNA | Splatter `splatEstimate`, scDesign2/3: estimate NB mean/dispersion/dropout/library-size (+ batch) from real data | params hardcoded | `rna.estimate(real_adata)` → fitted PBMC3k; also fit batch model (DESIGN_features §B) |
 | DNA assay | CellCoal / CNAsim: realistic coverage, error, allelic dropout | counts-only, fixed fpr/fnr | breadth-aware (WGS/WES/panel × bulk/sc) estimate of coverage/GC/ADO or panel VAF |
-| Spatial (Visium) | SRTsim / scDesign3: estimate spot params from real Visium; validate spatial autocorrelation | basic aggregation | estimate spots/capture; validate Moran's I |
+| Spatial (Visium) | SRTsim / scDesign3: estimate spot params from real Visium; validate spatial autocorrelation | **done**: spatially-autocorrelated capture field + aggregation + diffusion; `estimate_visium` fits spots/library/field; validate Moran's I | estimate spots/capture; validate Moran's I |
 
 ## A. Tumor / CNA inference (flagship — CINner-equivalent)
 
@@ -204,7 +207,8 @@ Then:
 
 Fit the per-modality technical parameters defined in `DESIGN_features.md` §D. The DNA half (C.1)
 is **unblocked** — F4/F5 already give a generative model with named parameters
-(`DNABatchHyperParams` in `data/batch.py`). The Visium half (C.2) waits on the spatial assay (F6).
+(`DNABatchHyperParams` in `data/batch.py`). The Visium half (C.2) is **DONE** (landed with F6):
+`estimate_visium` inverts the `VisiumBatchHyperParams` generative model.
 
 ### C.1 DNA estimation (M4 DNA half)
 
@@ -267,14 +271,23 @@ VAF accuracy + per-amplicon bias (no genome-wide CNA); WGS/WES on coverage + GC 
 (`validation/validate_dna.py`); honest `.fitted` flags. Couples to read-level emission
 (`DESIGN_features.md` C / F4–F5) but does **not** require it — counts-level estimation stands alone.
 
-### C.2 Visium estimation (M4 Visium half — unblocked once F6 lands)
-`estimate_visium()` mirroring `estimate()`/`estimate_dna()` (MoM/MLE, `.fitted` map, `_PRIOR_ONLY`
-escape): fit a `VisiumBatchHyperParams` from a real Visium AnnData — **spots-per-tissue**,
-**counts-per-spot** (lognormal `mu_counts`/`sigma_counts`), the **per-gene batch factor**, and the
-**capture-field autocorrelation** (`field_lengthscale` from a Moran's-I / variogram fit on the
-per-spot library-size residual). Validation `validation/validate_visium.py`: posterior-predictive
+### C.2 Visium estimation (M4 Visium half — DONE, landed with F6)
+`estimate_visium()` mirrors `estimate()`/`estimate_dna()` (MoM/curve-fit, `.fitted` map,
+`_PRIOR_ONLY` escape): fits a `VisiumBatchHyperParams` from a Visium AnnData (per-spot counts +
+`obsm["spatial"]`). **Spots-per-tissue** (on-tissue spot count / occupied fraction) and
+**counts-per-spot** (`mu_counts` = mean per-spot total). The **headline decomposition**: the
+variance of `log(per-spot library)` splits into a SPATIAL part (the capture field, recovered as the
+zero-lag amplitude `a` of an SE autocorrelation fit → `field_sigma`) and a NON-SPATIAL nugget (the
+i.i.d. depth noise → `sigma_counts`), with **`field_lengthscale`** the SE range of that same
+correlogram fit on the per-spot library-size residual — the spatial analogue of M2's library-size
+de-biasing. Count overdispersion → `kappa` (DM) / `nb_dispersion` (NB). The **per-gene batch
+factor** (`sigma_batch`) is identifiable only across **≥2 sections** (constant within one section,
+so confounded with biology — like M2 needing ≥2 batches); on a single section it (and
+`ambient_frac`/`edge_sigma`/`diffusion_sigma`) is carried `_PRIOR_ONLY`. Recovery (simulate known
+hypers → estimate → recover `mu_counts`/`sigma_counts`/`field_lengthscale`) in
+`tests/test_estimate_visium.py`. Validation `validation/validate_visium.py`: posterior-predictive
 overlay — fit → re-simulate → match **Moran's I** (spatial autocorrelation), the spot-count
-distribution, and spots-per-tissue. Built together with F6 (the generative model it inverts).
+distribution, and spots-per-tissue (`manuscript/figures/validation_visium.png`).
 
 ## D. Tumour-evolution-mode validation (Noble-style indices + real-data overlay)
 
@@ -359,7 +372,9 @@ validation/
 - **M4 — DNA/Visium estimation** (C). **DNA half (C.1) is unblocked** (F4/F5 done): MoM/MLE fit of
   `DNABatchHyperParams`, two-pass CN-conditional, breadth-aware (WGS/WES/panel × bulk/sc) — a small
   matrix of breadth-specific estimate/validate cases, counts-level (no read emission required).
-  **Visium half (C.2) still blocked** on the spatial assay (F6) + a real Visium dataset.
+  **Visium half (C.2) DONE** (landed with F6): `estimate_visium` fits the per-spot library + the
+  spatial/nugget split of the capture field (`field_sigma`/`field_lengthscale`) + count
+  overdispersion from per-spot counts + coords; recovery + `validate_visium` posterior-predictive.
 
 ## Risks
 - **Compute:** ABC needs thousands of sims. The genotype engine is fast (~seconds for a small

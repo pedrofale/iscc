@@ -55,26 +55,34 @@ def _emit_nb(rng, comp, lib, batch):
 
 
 def _emit_dm(rng, comp, lib, batch):
-    """Optional `count_model="dm"` (Dirichlet-Multinomial) — planned drop-in alternative.
+    """`count_model="dm"` (Dirichlet-Multinomial): a fixed library total with gene-gene
+    competition for reads (the compositional alternative to the independent-per-gene NB).
 
-    The compositional model: a fixed library total with gene-gene competition for reads.
     The shared pipeline already produces exactly the two pieces this needs — the per-cell
-    composition `comp` (= normalized beta_gb * lambda_cg) and the per-cell library `lib` —
-    so wiring it up is only this function:
+    composition `comp` (= normalized beta_gb * lambda_cg) and the per-cell library `lib`:
 
         for each cell c:
             N_c = round(lib_c)                              # fixed total
             p_c ~ Dirichlet(kappa_b * comp_c)              # proportions
             y_c ~ Multinomial(N_c, p_c)
 
-    Left unimplemented for F3 (NB is the default and what M2 fits); the seam is here so it
-    is a one-function add, not a rewrite.
+    `kappa` (= `BatchHyperParams.kappa` / `VisiumBatchHyperParams.kappa`) is the Dirichlet
+    concentration: large kappa -> p≈comp (multinomial/Poisson-like); small kappa -> lumpy,
+    over-dispersed proportions. NB stays the default for scRNA (what M2 fits); DM is the
+    default-eligible model for the Visium assay (compositional per-spot capture).
     """
-    raise NotImplementedError(
-        "count_model='dm' (Dirichlet-Multinomial) is not implemented yet. The biology->"
-        "library->batch pipeline already yields `comp` and `lib`; only this emission step "
-        "needs: N_c=round(lib_c); p_c~Dirichlet(kappa_b*comp_c); y_c~Multinomial(N_c,p_c)."
-    )
+    comp = np.asarray(comp, dtype=float)
+    N = np.round(np.asarray(lib, dtype=float)).astype(np.int64)
+    kappa = float(batch.h.kappa)
+    out = np.zeros(comp.shape, dtype=np.int64)
+    for c in range(comp.shape[0]):
+        s = comp[c].sum()
+        if N[c] <= 0 or s <= 0:
+            continue
+        alpha = np.maximum(kappa * comp[c], 1e-12)
+        p = rng.dirichlet(alpha)
+        out[c] = rng.multinomial(N[c], p)
+    return out
 
 
 COUNT_MODELS = {"nb": _emit_nb, "dm": _emit_dm}
@@ -431,3 +439,163 @@ class DNABatch:
         """SINGLE-CELL allele draw: alt ~ Binomial(coverage, allele_balance(af))."""
         theta = self.allele_balance(af)
         return self.rng.binomial(coverage, np.clip(theta, 0.0, 1.0))
+
+
+# ======================================================================================
+# Visium (spatial transcriptomics) batch model (DESIGN_features.md §D "spatial" row / F6).
+#
+# The distinctive requirement of the spatial assay is that the technical noise is SPATIALLY
+# CORRELATED: neighbouring spots share capture efficiency. So the headline component is a
+# smooth POSITIVE random field over the spot coordinates (a squared-exponential GP), whose
+# autocorrelation length is `field_lengthscale` and strength `field_sigma`, multiplied by a
+# tissue-boundary efficiency falloff (`edge_sigma`). It scales the per-spot library size, so
+# the realized per-spot depth carries positive spatial autocorrelation (Moran's I > 0) — the
+# signal `estimate_visium()` inverts and `validate_visium.py` checks.
+#
+# Everything else is shared with the scRNA batch model (§B.2): the per-gene LogNormal batch
+# factor (`sigma_batch`), ambient soup (`ambient_frac`), and the pluggable NB/DM count draw
+# (`COUNT_MODELS`). `VisiumBatch` therefore subclasses `Batch` and reuses `composition` /
+# `emit` / `add_ambient` unchanged; only the realization (per-gene factor + spatial field) and
+# the per-spot library draw are spatial-specific. All hyper-parameter names here are the M4
+# `estimate_visium()` targets (DESIGN_inference §C.2).
+# ======================================================================================
+@dataclass
+class VisiumBatchHyperParams:
+    """Protocol-typical magnitudes for the Visium batch model (the targets of `estimate_visium`).
+
+        spot_pitch        spot centre-to-centre spacing (sets spot density / spots-per-tissue)
+        spot_radius       spot capture radius (sets spot->cell aggregation, ~1-10 cells/spot)
+        mu_counts         mean per-spot library size (total UMIs / spot)
+        sigma_counts      per-spot library-size LogNormal sd
+        field_lengthscale capture-field spatial autocorrelation scale (the SE-GP length-scale);
+                          larger -> smoother field -> higher Moran's I
+        field_sigma       capture-field strength (log-space sd of the smooth field)
+        edge_sigma        tissue-boundary capture-efficiency falloff (0 = none; <1 keeps it +ve)
+        diffusion_sigma   lateral mRNA bleed: Gaussian kernel sd spreading expression to neighbours
+        sigma_batch       per-gene batch-factor LogNormal sd (reuses §B.2; Splatter `batch.facScale`)
+        ambient_frac      fraction of the spot library that is ambient ("soup") contamination
+        count_model       count emission {"dm" (default, compositional capture), "nb"}
+        kappa             Dirichlet-Multinomial concentration (only for count_model="dm")
+        nb_dispersion     NB overdispersion phi (var = mu + phi*mu^2; only for count_model="nb")
+    """
+    protocol: str = "visium"
+    spot_pitch: float = 2.0
+    spot_radius: float = 1.0
+    mu_counts: float = 5000.0
+    sigma_counts: float = 0.35
+    field_lengthscale: float = 4.0
+    field_sigma: float = 0.30
+    edge_sigma: float = 0.30
+    diffusion_sigma: float = 0.0
+    sigma_batch: float = 0.10
+    ambient_frac: float = 0.05
+    count_model: str = "dm"
+    kappa: float = 50.0
+    nb_dispersion: float = 0.30
+
+    def to_dict(self):
+        return asdict(self)
+
+
+class VisiumBatch(Batch):
+    """One seeded realization of a Visium section (a slide / capture area).
+
+    Mirrors `Batch` (scRNA) for spatial transcriptomics (DESIGN_features §D): draws the per-gene
+    batch factor + ambient soup (shared §B.2 machinery) AND the spatial-specific piece — a smooth
+    positive **capture-efficiency field** over the spot coordinates (a squared-exponential GP times
+    a tissue-boundary falloff). It reuses `composition` / `emit` / `add_ambient` from `Batch`
+    unchanged; only `realize` (which now also samples the spatial field) and `spot_library` (the
+    per-spot depth, scaled by the field) are overridden. Reproducible from `seed`.
+    """
+
+    def __init__(self, hypers: VisiumBatchHyperParams, seed=0, label=None):
+        self.h = hypers
+        self.seed = int(seed)
+        self.label = str(label) if label is not None else f"visium{self.seed}"
+        self.rng = np.random.default_rng(self.seed)
+        self._realized = False
+
+    def realize(self, genes, base_profile, spot_coords):
+        """Draw the section-level technical state for `spot_coords` (n_spots, 2).
+
+        `base_profile` (pooled spot expression) sets the ambient soup; the per-gene batch factor
+        and the spatial capture field are the technical signature (reproducible from the seed).
+        """
+        n = len(genes)
+        self.genes = list(genes)
+        # per-gene batch factor beta_g ~ LogNormal(0, sigma_batch^2), shared across spots (§B.2)
+        self.beta = self.rng.lognormal(mean=0.0, sigma=self.h.sigma_batch, size=n)
+        # NB dispersion (used only when count_model="nb"; exposed via the `dispersion` property)
+        self._phi = float(self.h.nb_dispersion)
+        # ambient ("soup") profile for this section: normalized pooled expression
+        amb = np.asarray(base_profile, dtype=float)
+        tot = amb.sum()
+        self.ambient_profile = amb / tot if tot > 0 else np.full(n, 1.0 / n)
+        # the headline piece: a spatially-autocorrelated positive capture-efficiency field
+        self.spot_coords = np.asarray(spot_coords, dtype=float)
+        self.capture_field = self._draw_capture_field(self.spot_coords)
+        self._realized = True
+        return self
+
+    # -- the spatially-correlated capture-efficiency field -----------------------------
+    def _draw_capture_field(self, coords):
+        """Smooth POSITIVE random field over spot coords: squared-exponential GP x edge falloff.
+
+        A zero-mean GP with an RBF (squared-exponential) covariance ``K_ij = exp(-||x_i - x_j||^2
+        / (2*ell^2))`` (ell = `field_lengthscale`) is sampled on the spot grid and pushed through a
+        LogNormal link (strength `field_sigma`) so the field is positive. Larger `field_lengthscale`
+        -> smoother field -> stronger positive spatial autocorrelation (higher Moran's I). The field
+        is then multiplied by a tissue-boundary falloff (`edge_sigma`) and normalized to mean 1, so
+        it RESHAPES capture (a spatial bias) without moving the absolute depth scale `mu_counts` sets.
+        """
+        coords = np.asarray(coords, dtype=float)
+        n = coords.shape[0]
+        if n == 0:
+            return np.ones(0)
+        ell = max(float(self.h.field_lengthscale), 1e-6)
+        diff = coords[:, None, :] - coords[None, :, :]
+        d2 = np.sum(diff * diff, axis=-1)
+        K = np.exp(-d2 / (2.0 * ell * ell))
+        K[np.diag_indices(n)] += 1e-6                      # jitter so K is positive-definite
+        L = np.linalg.cholesky(K)
+        g = L @ self.rng.standard_normal(n)                # zero-mean unit-variance SE-GP sample
+        # LogNormal link -> positive field with mean ~1 (before edge / renormalization)
+        field = np.exp(self.h.field_sigma * g - 0.5 * self.h.field_sigma ** 2)
+        field = field * self._edge_falloff(coords)
+        m = field.mean()
+        return field / m if m > 0 else np.ones(n)
+
+    def _edge_falloff(self, coords):
+        """Tissue-boundary capture-efficiency falloff: lower efficiency near the section edge.
+
+        Distance of each spot to the nearest boundary of the spot-grid extent, normalized to [0,1]
+        (0 at the boundary, 1 at the centre); efficiency = ``1 - edge_sigma * exp(-3*dnorm)`` so the
+        very edge is reduced by `edge_sigma` and the interior is ~1. `edge_sigma<1` keeps it positive.
+        """
+        n = coords.shape[0]
+        if self.h.edge_sigma <= 0 or n == 0:
+            return np.ones(n)
+        r, c = coords[:, 0], coords[:, 1]
+        dr = np.minimum(r - r.min(), r.max() - r)
+        dc = np.minimum(c - c.min(), c.max() - c)
+        dist = np.minimum(dr, dc)
+        span = 0.5 * min(np.ptp(r), np.ptp(c))
+        if span <= 0:
+            return np.ones(n)
+        dnorm = dist / span
+        return 1.0 - float(self.h.edge_sigma) * np.exp(-3.0 * dnorm)
+
+    # -- per-spot library size (scaled by the spatial capture field) -------------------
+    def spot_library(self, occupied=None):
+        """Per-spot library size ell_s ~ LogNormal(log mu_counts, sigma_counts^2) x capture_field_s.
+
+        The capture field injects the spatial autocorrelation into the realized depth. `occupied`
+        (a 0/1 per-spot mask) zeroes the library of off-tissue (empty) spots so they emit nothing.
+        """
+        n = self.capture_field.shape[0]
+        mu_ln = np.log(self.h.mu_counts) - 0.5 * self.h.sigma_counts ** 2
+        lib = self.rng.lognormal(mean=mu_ln, sigma=self.h.sigma_counts, size=n)
+        lib = lib * self.capture_field
+        if occupied is not None:
+            lib = lib * np.asarray(occupied, dtype=float)
+        return lib

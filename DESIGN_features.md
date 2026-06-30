@@ -317,10 +317,18 @@ data — so realistic defaults can be *learned*, not guessed.
   Tests `tests/test_assay_dna.py` (coverage∝CN, compositional read-stealing, VAF recovery, ADO allele
   loss, breadth, NB, multi-batch). Demo `notebooks/assay_dna.ipynb`. κ / capture efficiencies / ADO rate
   are named M4 `estimate()` targets.
-- **F6** — **spatial (Visium) assay** — upgrade the `visium.py` stub (grid spots → averaged
-  expression → fixed multinomial) to a proper assay matching F3/F4/F5 (Assay + batch model +
-  hyper-params + AnnData + estimate + validation). The **distinctive requirement is that the
-  technical noise is SPATIALLY CORRELATED** (§D spatial row). Components:
+- **F6 — DONE** — **spatial (Visium) assay** — upgraded the `visium.py` stub (grid spots → averaged
+  expression → fixed multinomial) to a proper assay matching F3/F4/F5 (`Assay` + `VisiumBatch` batch
+  model + `VisiumBatchHyperParams` + AnnData + `estimate_visium` + `validate_visium`). The
+  **distinctive requirement is that the technical noise is SPATIALLY CORRELATED** (§D spatial row).
+  Built: the capture field is a squared-exponential GP over the spot coords through a LogNormal link
+  × an `edge_sigma` boundary falloff, normalized to mean 1, achieving Moran's I ≈ 0.5–0.9 (rising
+  with `field_lengthscale`); the DM count seam (`batch._emit_dm`) is now implemented (Visium's
+  default). Spot-barcoded reads in `reads.emit_visium_reads`; `estimate_visium` fits
+  `mu_counts`/`sigma_counts` + `field_sigma` + `field_lengthscale` + the count overdispersion
+  (carrying ambient/edge/diffusion + single-section `sigma_batch` `_PRIOR_ONLY`). Tests
+  `tests/test_assay_visium.py` + `test_estimate_visium.py` + `test_reads_visium.py`; demo
+  `notebooks/assay_spatial.ipynb`; CLI `isccdata --assay visium`. Components:
   1. **Spot layout** — Visium-like spots over the deme grid (~55µm, **1–10 cells/spot**); a
      `spot_radius`/pitch sets aggregation. Keep iscc's single 2D section (no z).
   2. **Spot→cell aggregation** — pool the `cell_exp` of cells whose `cell_crd` falls in the spot;

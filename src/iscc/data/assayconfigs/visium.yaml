@@ -1,4 +1,12 @@
-n_reads: 5000
-n_spots_x: 10
-n_spots_y: 10
-spot_radius: 2
+# Visium (spatial transcriptomics) assay config (F6). Fields map onto VisiumBatchHyperParams.
+count_model: dm          # per-spot count draw: dm (compositional capture) or nb
+spot_pitch: 2.0          # spot centre-to-centre spacing (sets spots-per-tissue)
+spot_radius: 1.2         # spot capture radius (~1-10 cells / spot)
+mu_counts: 5000.0        # mean per-spot library size (total UMIs / spot)
+sigma_counts: 0.35       # per-spot library-size LogNormal sd
+field_lengthscale: 6.0   # capture-field spatial autocorrelation scale (Moran's I rises with it)
+field_sigma: 0.40        # capture-field strength (log-space sd)
+edge_sigma: 0.25         # tissue-boundary capture-efficiency falloff
+diffusion_sigma: 0.0     # lateral mRNA bleed (Gaussian kernel sd; 0 = off)
+ambient_frac: 0.05       # ambient ("soup") contamination fraction
+kappa: 50.0              # DM concentration (count_model=dm)

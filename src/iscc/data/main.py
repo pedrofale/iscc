@@ -139,6 +139,11 @@ def main(sample_path, assay, assay_config, grid_side, protocol, breadth, depth_m
         config.setdefault("breadth", breadth)
         config.setdefault("depth_model", depth_model)
         config.setdefault("seed", batch_seed)
+    if assay == "visium":
+        # Visium's compositional per-spot capture defaults to the DM count model (the CLI
+        # --count-model default is "nb" for scRNA; only override here if the user passed one).
+        config.setdefault("count_model", count_model if count_model != "nb" else "dm")
+        config.setdefault("seed", batch_seed)
     instrument = ASSAYS[assay](**config)
 
     run_kwargs = {}

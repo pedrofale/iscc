@@ -51,12 +51,17 @@ class TestBatch:
         comp = b.composition(probs)
         assert np.allclose(comp.sum(axis=1), 1.0)
 
-    def test_dm_count_model_is_a_stubbed_seam(self):
+    def test_dm_count_model_emits_fixed_total(self):
+        # The DM seam is now implemented (F6 wired it for the Visium assay): a fixed library total
+        # partitioned across genes via Dirichlet(kappa*comp) -> Multinomial, so each cell's counts
+        # sum to round(lib) exactly (the compositional alternative to the independent-per-gene NB).
         from iscc.data.batch import Batch, BatchHyperParams
-        b = Batch(BatchHyperParams(), seed=4).realize([f"g{i}" for i in range(3)], np.ones(3))
+        b = Batch(BatchHyperParams(kappa=50.0), seed=4).realize([f"g{i}" for i in range(3)],
+                                                                 np.ones(3))
         comp = np.full((2, 3), 1 / 3)
-        with pytest.raises(NotImplementedError):
-            b.emit(comp, np.array([100.0, 100.0]), count_model="dm")
+        counts = b.emit(comp, np.array([100.0, 100.0]), count_model="dm")
+        assert counts.shape == (2, 3)
+        assert np.all(counts.sum(axis=1) == 100)        # fixed total per cell (compositional)
 
     def test_unknown_count_model_raises(self):
         from iscc.data.batch import Batch, BatchHyperParams

@@ -10,7 +10,8 @@ the tumour's ground-truth expression `lambda_cg` (= `cell_data['cell_exp']`):
     + ambient soup counts, + doublets, + optional dropout
 
 Everything above (biology -> library -> batch) is shared; only the final count draw is
-swapped via `count_model` (default "nb"; "dm" Dirichlet-Multinomial is a stubbed seam).
+swapped via `count_model` (default "nb"; "dm" Dirichlet-Multinomial is the implemented
+compositional alternative, the Visium assay's default — see `batch.COUNT_MODELS`).
 
 Protocol presets set which technical components dominate:
   * 10x        — droplet / UMI / 3': prominent ambient RNA + doublets, moderate depth.
