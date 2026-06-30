@@ -7,16 +7,20 @@ autocorrelation fit), **re-simulate** a Visium section with the fitted hypers, t
 means the fitted technical layer reproduces the data's spatial-autocorrelation / depth structure.
 
 The recomputed summaries (the §C.2 validation set):
-  * Moran's I of the per-spot log-library          (the spatially-correlated capture field)
-  * the spatial autocorrelation correlogram r(d)    (the field_lengthscale)
+  * Moran's I of the per-spot library              (the spatially-correlated capture field)
   * the per-spot total-count distribution           (mu_counts / sigma_counts)
   * spots-per-tissue                                (the spatial extent)
 
-Per the deliverable a synthetic fit->simulate->overlay is acceptable: the "observed" data is itself
-an iscc Visium simulation with chosen ground-truth hypers (the stand-in for a real Visium section),
-so the figure shows the full round-trip: ground-truth -> observed -> estimate -> re-simulate -> match.
+DEFAULTS TO REAL DATA — the spatial analogue of scRNA fitting PBMC3k. It downloads a real 10x Visium
+section via ``scanpy.datasets.visium_sge`` (default `V1_Breast_Cancer_Block_A_Section_1`), fits
+``estimate_visium`` on it (so we have realistic technical magnitudes), then re-simulates the
+technical layer on a synthetic tissue and overlays the summaries. The biology differs (synthetic
+tissue), so the TECHNICAL summaries are what's validated — depth distribution + spatial
+autocorrelation magnitude. Real coords (full-res pixels) are normalized to SPOT-PITCH units so the
+fitted ``field_lengthscale`` is dimensionless (~N spots) and transfers to the grid. ``--synthetic``
+runs the offline ground-truth round-trip instead (also the automatic fallback if the download fails).
 
-Usage:  python validation/validate_visium.py
+Usage:  python validation/validate_visium.py [--sample-id ID] [--synthetic]
 Produces manuscript/figures/validation_visium.png.
 """
 import argparse
@@ -25,9 +29,14 @@ import os
 import numpy as np
 import pandas as pd
 
-from iscc.data import Visium, morans_i, estimate_visium_from_assay
+from iscc.data import Visium, morans_i, estimate_visium, estimate_visium_from_assay
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _to_dense(adata):
+    X = adata.X if hasattr(adata, "X") else adata
+    return np.asarray(X.todense()) if hasattr(X, "todense") else np.asarray(X)
 
 # Ground-truth technical hypers for the "observed" data (the stand-in for a real Visium section).
 TRUE = dict(mu_counts=6000.0, sigma_counts=0.30, field_sigma=0.45, field_lengthscale=7.0,
@@ -60,6 +69,43 @@ def make_tissue(grid=34, seed=0):
     }, grid
 
 
+def load_real_visium(sample_id="V1_Breast_Cancer_Block_A_Section_1"):
+    """Download a real 10x Visium section via scanpy — the spatial analogue of PBMC3k.
+
+    `estimate_visium` learns the technical magnitudes (per-spot library, the spatially-correlated
+    capture field, count overdispersion) from this, so simulated Visium has realistic parameters
+    instead of guessed ones. Returns an AnnData (raw spots x genes counts + `obsm['spatial']`), or
+    `None` if scanpy / the download is unavailable (the validation then falls back to the synthetic
+    round-trip, so it still runs offline / in CI)."""
+    try:
+        import scanpy as sc
+        ad = sc.datasets.visium_sge(sample_id=sample_id)
+        ad.var_names_make_unique()
+        return ad
+    except Exception as e:  # offline, scanpy missing, or 10x host down
+        print(f"[real Visium '{sample_id}' unavailable: {e}]\n -> falling back to synthetic round-trip")
+        return None
+
+
+def _median_nn(coords):
+    """Median nearest-neighbour spot distance = the spot pitch, used to normalize real Visium
+    coordinates (full-res pixels) to dimensionless SPOT-PITCH units so a fitted absolute
+    `field_lengthscale` becomes "~N spots" and transfers to the synthetic grid."""
+    from scipy.spatial import cKDTree
+    d, _ = cKDTree(np.asarray(coords, dtype=float)).query(np.asarray(coords, dtype=float), k=2)
+    return float(np.median(d[:, 1]))
+
+
+def _lib_residual_raw(counts, coords):
+    """Per-spot log-library residual over on-tissue spots, from a raw counts matrix + coords."""
+    tot = np.asarray(counts).sum(axis=1)
+    occ = tot > 0
+    tot = tot[occ].astype(float)
+    coords = np.asarray(coords, dtype=float)[occ]
+    z = np.log(tot) - np.log(tot).mean()
+    return z, coords, tot
+
+
 # --------------------------------------------------------------------------------------
 # Summary statistics (recomputed identically on observed + re-simulated)
 # --------------------------------------------------------------------------------------
@@ -72,104 +118,103 @@ def _log_library_residual(assay):
     return z, coords, tot
 
 
-def _correlogram(z, coords, nbins=12, max_frac=0.6):
-    """Empirical spatial autocorrelation r(d) = <z_i z_j>/Var[z] in distance bins."""
-    n = len(z)
-    iu = np.triu_indices(n, k=1)
-    d = coords[iu[0]] - coords[iu[1]]
-    dist = np.sqrt((d * d).sum(axis=1))
-    var = float(np.mean(z * z))
-    zz = z[iu[0]] * z[iu[1]] / max(var, 1e-12)
-    edges = np.linspace(dist.min(), np.percentile(dist, 100 * max_frac), nbins + 1)
-    centers, corr = [], []
-    for i in range(nbins):
-        m = (dist >= edges[i]) & (dist < edges[i + 1])
-        if m.sum() >= 20:
-            centers.append(0.5 * (edges[i] + edges[i + 1]))
-            corr.append(float(zz[m].mean()))
-    return np.asarray(centers), np.asarray(corr)
+def _make_figure(toto, co, tots, cs, est, mi_o, mi_s, out, header, true=None):
+    """2x2 overlay: spot-count distribution + observed/re-sim per-spot-library heatmaps + summary.
 
-
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--seed", type=int, default=3)
-    ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_visium.png"))
-    args = ap.parse_args()
-
-    cell_data, grid = make_tissue(seed=args.seed)
-
-    # observed -> estimate -> re-simulate (the round-trip)
-    obs = Visium(seed=10, spot_pitch=2.0, spot_radius=1.0, count_model="dm", **TRUE).run(
-        cell_data, grid_side=grid)
-    est = estimate_visium_from_assay(obs)
-    # visium_kwargs() already carries spot_pitch / spot_radius (preset, not fit)
-    sim = Visium(seed=11, count_model="dm", **est.visium_kwargs()).run(cell_data, grid_side=grid)
-    print(f"Visium fit: {est}")
-
-    zo, co, toto = _log_library_residual(obs)
-    zs, cs, tots = _log_library_residual(sim)
-    mi_o, mi_s = morans_i(toto, co), morans_i(tots, cs)
-    cx_o, cy_o = _correlogram(zo, co)
-    cx_s, cy_s = _correlogram(zs, cs)
-
+    Works for both the real-data fit (`true=None`) and the synthetic round-trip (`true=TRUE`)."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    h = est.hypers
     fig, axes = plt.subplots(2, 2, figsize=(11, 8))
 
     ax = axes[0, 0]
-    rng = (min(toto.min(), tots.min()), max(toto.max(), tots.max()))
-    bins = np.linspace(rng[0], rng[1], 31)
+    bins = np.linspace(min(toto.min(), tots.min()), max(toto.max(), tots.max()), 31)
     ax.hist(toto, bins=bins, density=True, alpha=0.5, label="observed", color="tab:gray")
     ax.hist(tots, bins=bins, density=True, alpha=0.5, label="re-simulated (fitted)", color="tab:red")
-    ax.set_xlabel("per-spot total counts"); ax.set_ylabel("density")
-    ax.set_title(f"Spot-count distribution\n(mu_counts true={TRUE['mu_counts']:.0f}, "
-                 f"fit={est.hypers.mu_counts:.0f})")
+    ax.set(xlabel="per-spot total counts", ylabel="density", title="Spot-count distribution")
     ax.legend(fontsize=8)
 
     ax = axes[0, 1]
-    ax.plot(cx_o, cy_o, "o-", label="observed", color="tab:gray")
-    ax.plot(cx_s, cy_s, "s--", label="re-simulated (fitted)", color="tab:red")
-    ax.axhline(0, color="k", lw=0.5)
-    ax.set_xlabel("spot-spot distance"); ax.set_ylabel("autocorrelation r(d)")
-    ax.set_title(f"Capture-field spatial autocorrelation\n(field_lengthscale true="
-                 f"{TRUE['field_lengthscale']:.1f}, fit={est.hypers.field_lengthscale:.1f})")
-    ax.legend(fontsize=8)
+    s = ax.scatter(co[:, 1], co[:, 0], c=toto, cmap="viridis", s=10)
+    ax.set(xlabel="col", ylabel="row", title=f"Observed per-spot library\n(Moran's I = {mi_o:.2f})")
+    ax.invert_yaxis(); fig.colorbar(s, ax=ax, fraction=0.046, pad=0.04)
 
     ax = axes[1, 0]
-    sc = ax.scatter(obs.spot_coords[:, 1], obs.spot_coords[:, 0], c=obs.capture_field,
-                    cmap="viridis", s=18)
-    ax.set_title(f"Observed capture-efficiency field\n(Moran's I obs={mi_o:.2f}, "
-                 f"fit-sim={mi_s:.2f})")
-    ax.set_xlabel("col"); ax.set_ylabel("row"); ax.invert_yaxis()
-    fig.colorbar(sc, ax=ax, fraction=0.046, pad=0.04)
+    s = ax.scatter(cs[:, 1], cs[:, 0], c=tots, cmap="viridis", s=10)
+    ax.set(xlabel="col", ylabel="row",
+           title=f"Re-simulated per-spot library (fitted)\n(Moran's I = {mi_s:.2f})")
+    ax.invert_yaxis(); fig.colorbar(s, ax=ax, fraction=0.046, pad=0.04)
 
-    ax = axes[1, 1]
-    ax.axis("off")
-    summary = (
-        f"spots-per-tissue:\n"
-        f"   observed = {int((obs.obs.n_cells.values>0).sum())}\n"
-        f"   re-sim   = {int((sim.obs.n_cells.values>0).sum())}\n\n"
-        f"Moran's I (per-spot library):\n"
-        f"   observed = {mi_o:.3f}\n   re-sim   = {mi_s:.3f}\n\n"
-        f"mu_counts   true={TRUE['mu_counts']:.0f}  fit={est.hypers.mu_counts:.0f}\n"
-        f"sigma_counts true={TRUE['sigma_counts']:.2f}  fit={est.hypers.sigma_counts:.2f}\n"
-        f"field_sigma  true={TRUE['field_sigma']:.2f}  fit={est.hypers.field_sigma:.2f}\n"
-        f"field_length true={TRUE['field_lengthscale']:.1f}  fit={est.hypers.field_lengthscale:.1f}\n"
-        f"kappa        true={TRUE['kappa']:.0f}  fit={est.hypers.kappa:.0f}\n\n"
-        f"fitted: {est.fitted}"
-    )
-    ax.text(0.0, 0.5, summary, fontsize=9, family="monospace", va="center")
+    ax = axes[1, 1]; ax.axis("off")
+    lines = [f"source: {header}", "",
+             f"spots-per-tissue: obs={len(toto)}  re-sim={len(tots)}",
+             f"Moran's I:        obs={mi_o:.3f}  re-sim={mi_s:.3f}", ""]
+    if true is not None:  # synthetic round-trip: show recovered vs ground truth
+        lines += [f"mu_counts    true={true['mu_counts']:.0f}  fit={h.mu_counts:.0f}",
+                  f"sigma_counts true={true['sigma_counts']:.2f}  fit={h.sigma_counts:.2f}",
+                  f"field_sigma  true={true['field_sigma']:.2f}  fit={h.field_sigma:.2f}",
+                  f"field_length true={true['field_lengthscale']:.1f}  fit={h.field_lengthscale:.1f}",
+                  f"kappa        true={true['kappa']:.0f}  fit={h.kappa:.0f}"]
+    else:  # real fit: just the learned magnitudes
+        lines += [f"mu_counts    = {h.mu_counts:.0f}",
+                  f"sigma_counts = {h.sigma_counts:.2f}",
+                  f"field_sigma  = {h.field_sigma:.2f}",
+                  f"field_length = {h.field_lengthscale:.1f}",
+                  f"kappa        = {h.kappa:.0f}"]
+    lines += ["", f"fitted: {est.fitted}"]
+    ax.text(0.0, 0.5, "\n".join(lines), fontsize=9, family="monospace", va="center")
 
     fig.suptitle("Visium estimate_visium(): fitted technical params reproduce observed summaries "
                  "(fit -> re-simulate -> overlay)", fontsize=12)
-    fig.tight_layout(rect=(0, 0, 1, 0.97))
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    fig.savefig(args.out, dpi=120, bbox_inches="tight")
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    fig.savefig(out, dpi=120, bbox_inches="tight")
 
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--sample-id", default="V1_Breast_Cancer_Block_A_Section_1",
+                    help="10x Visium sample for scanpy.datasets.visium_sge (the real default).")
+    ap.add_argument("--synthetic", action="store_true",
+                    help="Skip the real download; use the synthetic ground-truth round-trip.")
+    ap.add_argument("--seed", type=int, default=3)
+    ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_visium.png"))
+    args = ap.parse_args()
+
+    adata = None if args.synthetic else load_real_visium(args.sample_id)
+    cell_data, grid = make_tissue(seed=args.seed)
+
+    if adata is not None:
+        # FIT ON REAL Visium -> re-simulate the technical layer on a synthetic tissue -> overlay.
+        # (Biology differs; the TECHNICAL summaries — depth distribution + spatial autocorrelation —
+        # are what's validated, exactly as scRNA fits PBMC3k then simulates on a tumour.)
+        counts = _to_dense(adata)
+        # Normalize real coords (full-res pixels) to SPOT-PITCH units so the fitted field_lengthscale
+        # is dimensionless (~N spots) and transfers to the synthetic grid; then re-simulate at
+        # spot_pitch=1.0 so that spot-unit length-scale applies directly.
+        coords = np.asarray(adata.obsm["spatial"], dtype=float) / _median_nn(adata.obsm["spatial"])
+        est = estimate_visium(adata, count_model="dm", coords=coords)
+        kw = {**est.visium_kwargs(), "spot_pitch": 1.0, "spot_radius": 0.5}
+        sim = Visium(seed=11, count_model="dm", **kw).run(cell_data, grid_side=grid)
+        zo, co, toto = _lib_residual_raw(counts, coords)
+        header, true = f"real 10x Visium '{args.sample_id}'", None
+    else:
+        # SYNTHETIC round-trip: known ground-truth hypers -> observed -> estimate -> re-simulate.
+        obs = Visium(seed=10, spot_pitch=2.0, spot_radius=1.0, count_model="dm", **TRUE).run(
+            cell_data, grid_side=grid)
+        est = estimate_visium_from_assay(obs)
+        sim = Visium(seed=11, count_model="dm", **est.visium_kwargs()).run(cell_data, grid_side=grid)
+        zo, co, toto = _log_library_residual(obs)
+        header, true = "synthetic ground-truth round-trip", TRUE
+
+    zs, cs, tots = _log_library_residual(sim)
+    mi_o, mi_s = morans_i(toto, co), morans_i(tots, cs)
+    print(f"Visium fit ({header}): {est}")
+    _make_figure(toto, co, tots, cs, est, mi_o, mi_s, out=args.out, header=header, true=true)
     print(f"Moran's I  observed={mi_o:.3f}  fit-sim={mi_s:.3f}")
-    print(f"spots-per-tissue observed={int((obs.obs.n_cells.values>0).sum())}")
+    print(f"spots-per-tissue observed={len(toto)}  re-sim={len(tots)}")
     print(f"figure -> {args.out}")
 
 

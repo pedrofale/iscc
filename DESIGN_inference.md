@@ -287,7 +287,11 @@ so confounded with biology — like M2 needing ≥2 batches); on a single sectio
 hypers → estimate → recover `mu_counts`/`sigma_counts`/`field_lengthscale`) in
 `tests/test_estimate_visium.py`. Validation `validation/validate_visium.py`: posterior-predictive
 overlay — fit → re-simulate → match **Moran's I** (spatial autocorrelation), the spot-count
-distribution, and spots-per-tissue (`manuscript/figures/validation_visium.png`).
+distribution, and spots-per-tissue (`manuscript/figures/validation_visium.png`). **Defaults to REAL
+data** (spatial analogue of scRNA/PBMC3k): `scanpy.datasets.visium_sge`
+(`V1_Breast_Cancer_Block_A_Section_1`); real coords are normalized to spot-pitch units so the fitted
+`field_lengthscale` is dimensionless and transfers to the synthetic grid. `--synthetic` is the
+offline ground-truth round-trip + automatic fallback.
 
 ## D. Tumour-evolution-mode validation (Noble-style indices + real-data overlay)
 
