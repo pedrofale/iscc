@@ -75,10 +75,40 @@ class TestTapestriReducer:
         cov, alt, cn, het = B.reduce_tapestri(dp, af, ngt, var_amplicon, amplicon_reads, amplicon_ids)
         assert cov.shape == alt.shape == cn.shape == het.shape == (4, 3)
         assert alt[0, 0] == 20 and alt[0, 2] == 60                       # round(50/100*40), 100/100*60
-        assert het.tolist()[0] == [True, False, False]                  # NGT==1 only
+        # het is now a GERMLINE-het LOCUS mask (not per-cell NGT==1): var0 is het in all cells
+        # (balanced BAF) -> germline; var1/var2 are not -> excluded. For cell0 that still reads
+        # [T,F,F], but the difference is that germline loci are marked over DROPOUT cells too
+        # (see TestGermlineHetMask).
+        assert het.tolist()[0] == [True, False, False]
         # missing genotype (cell1, var1) -> zero coverage so it drops out of fits
         assert cov[1, 1] == 0 and alt[1, 1] == 0
         assert np.all(cn >= 0) and np.all(cn <= 8)
+
+
+class TestGermlineHetMask:
+    """ADO fix: het is a germline-het LOCUS mask broadcast over covered cells, so the dropout cells
+    (genotyped homozygous) are visible to the ADO estimator — the per-cell NGT==1 mask hid them,
+    collapsing the Tapestri ADO fit to ~0."""
+
+    def test_germline_locus_marked_over_dropout_cells(self):
+        cov = np.full((10, 2), 30)
+        per_cell_het = np.zeros((10, 2), bool)
+        per_cell_het[:6, 0] = True            # locus 0: 6/10 cells genotyped het (germline)
+        alt = np.zeros((10, 2), int)
+        alt[:6, 0] = 15                        # het cells ~0.5 BAF
+        alt[8:, 0] = 30                        # 2 ADO cells -> alt-only; cells 6,7 -> ref-only
+        # locus 0 pseudobulk BAF = (6*15 + 2*30)/300 = 0.5 (balanced); locus 1 is hom-ref (alt=0)
+        mask = B.germline_het_mask(cov, alt, per_cell_het)
+        assert mask[:, 0].all()               # germline locus marked for ALL cells, incl. the 4 dropouts
+        assert not mask[:, 1].any()           # homozygous locus excluded
+
+    def test_skewed_homozygous_site_excluded(self):
+        # a site het-called in few cells with skewed pseudobulk BAF is NOT germline-het (not ADO).
+        cov = np.full((20, 1), 30)
+        per_cell_het = np.zeros((20, 1), bool)
+        per_cell_het[:3, 0] = True            # only 3/20 het -> below min_het_frac
+        alt = np.zeros((20, 1), int); alt[:3, 0] = 15
+        assert not B.germline_het_mask(cov, alt, per_cell_het).any()
 
 
 # --------------------------------------------------------------------------------------

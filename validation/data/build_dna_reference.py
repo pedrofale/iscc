@@ -175,10 +175,18 @@ def reduce_tapestri(dp, af_pct, ngt, var_amplicon, amplicon_reads, amplicon_ids,
                     cn_clip=8.0):
     """Reduce Tapestri DNA-variant + amplicon-read arrays -> (coverage, alt, cn, het_mask).
 
-    coverage = DP; alt = round(AF/100 * DP) (AF is a 0–100 percentage); het = NGT==1; CN per
-    (cell, variant) from the variant's amplicon: 2 x (per-cell-normalized amplicon depth) / its
-    cross-cell median, clipped to [0, ``cn_clip``]. Missing genotypes (NGT==3) get zero coverage so
-    they drop out of every fit.
+    coverage = DP; alt = round(AF/100 * DP) (AF is a 0–100 percentage); CN per (cell, variant) from
+    the variant's amplicon: 2 x (per-cell-normalized amplicon depth) / its cross-cell median, clipped
+    to [0, ``cn_clip``]. Missing genotypes (NGT==3) get zero coverage so they drop out of every fit.
+
+    het_mask marks GERMLINE-het LOCI broadcast over all covered cells — NOT the per-cell `NGT==1`
+    genotype calls. ADO is exactly the cells where a constitutive het collapses to monoallelic, and
+    those cells are genotyped HOMOZYGOUS (NGT!=1), so masking on `NGT==1` selects only the cells that
+    did NOT drop out and the ADO estimate collapses to ~0. Instead, a variant is called germline-het
+    when it is genotyped het in a substantial fraction of covered cells AND its pseudobulk BAF is
+    balanced (excludes true-homozygous / strongly-skewed somatic sites whose "collapse" is not ADO).
+    `estimate_dna._fit_ado_and_conc` then measures the per-cell monoallelic fraction at those loci
+    (de-biased for the Beta-Binomial floor) -> a real Tapestri-scale ADO.
     """
     dp = np.asarray(dp, dtype=float).copy()
     alt = np.rint(np.asarray(af_pct, dtype=float) / 100.0 * dp).astype(int)
@@ -197,7 +205,25 @@ def reduce_tapestri(dp, af_pct, ngt, var_amplicon, amplicon_reads, amplicon_ids,
     missing = ngt == 3
     dp[missing] = 0.0
     alt[missing] = 0
-    return dp.astype(int), alt, cn, (ngt == 1)
+    het_mask = germline_het_mask(dp.astype(int), alt, ngt == 1)
+    return dp.astype(int), alt, cn, het_mask
+
+
+def germline_het_mask(coverage, alt, per_cell_het, min_het_frac=0.30, baf_lo=0.30, baf_hi=0.70):
+    """Boolean (cells x variants) mask of GERMLINE-het loci over covered cells (for ADO fitting).
+
+    A variant is germline-het if it is genotyped het (``per_cell_het``) in >= ``min_het_frac`` of its
+    covered cells AND its pseudobulk BAF (summed alt / summed coverage) is balanced
+    (``[baf_lo, baf_hi]``). The mask is that per-locus call broadcast over every covered cell, so the
+    ADO estimator sees the DROPOUT cells (collapsed to ~0/1) — not just the successfully-genotyped
+    hets. Stateless; also used to migrate an already-reduced cache without re-downloading the raw h5.
+    """
+    coverage = np.asarray(coverage); alt = np.asarray(alt)
+    covered = coverage > 0
+    het_frac = per_cell_het.sum(0) / np.maximum(covered.sum(0), 1)
+    pb_baf = alt.sum(0) / np.maximum(coverage.sum(0), 1)
+    germline = (het_frac >= min_het_frac) & (pb_baf >= baf_lo) & (pb_baf <= baf_hi)
+    return covered & germline[None, :]
 
 
 # --------------------------------------------------------------------------------------
