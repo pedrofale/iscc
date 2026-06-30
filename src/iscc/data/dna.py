@@ -26,6 +26,7 @@ from .assay import Assay
 from .batch import DNABatch, DNABatchHyperParams, DNA_DEPTH_MODELS
 
 import os
+import zlib
 
 import numpy as np
 import pandas as pd
@@ -62,6 +63,64 @@ def genome_features(genes, seed=20240601):
     mappability = np.clip(rng.beta(9.0, 1.0, size=n), 0.05, 1.0)
     ct_sites = rng.random(n) < 0.25
     return gc, mappability, ct_sites
+
+
+#: Canonical somatic-SNV substitution structure. A *transition* (purine<->purine A<->G, or
+#: pyrimidine<->pyrimidine C<->T) is the biologically favoured change (~2:1 over transversions in
+#: real somatic spectra); the two *transversions* are the cross-class changes. `genome_bases` draws
+#: a per-locus alt with this Ti:Tv ratio so an injected SNV is a realistic, consistent substitution.
+_TRANSITION = {"A": "G", "G": "A", "C": "T", "T": "C"}
+_TRANSVERSIONS = {"A": ["C", "T"], "G": ["C", "T"], "C": ["A", "G"], "T": ["A", "G"]}
+
+
+def _gene_base_seed(gene, genome_seed):
+    """A stable per-gene RNG seed from the gene NAME + the genome seed (order/subset independent).
+
+    Uses CRC32 of the gene name (a stable hash, unlike Python's salted `hash`) so a given locus
+    always draws the SAME (ref, alt) regardless of its position in the gene list or which other
+    genes accompany it — the property that lets every modality agree on a locus's alleles.
+    """
+    return (int(genome_seed) ^ zlib.crc32(str(gene).encode())) & 0xFFFFFFFF
+
+
+def _alt_for_ref(ref_base, rng, ti_tv=2.0):
+    """Draw a realistic single alt base for a known `ref_base` (transition with prob ti_tv/(ti_tv+1),
+    else one of the two transversions). For a non-ACGT ref (e.g. real-genome 'N') falls back to 'A'.
+    """
+    r = str(ref_base).upper()
+    if r not in _TRANSITION:
+        return "A"
+    if rng.random() < ti_tv / (ti_tv + 1.0):
+        return _TRANSITION[r]
+    return _TRANSVERSIONS[r][int(rng.integers(0, 2))]
+
+
+def genome_bases(genes, seed=20240601, ti_tv=2.0):
+    """Canonical per-locus (ref_base, alt_base) nucleotide identity — a stable GENOME PROPERTY.
+
+    Like `genome_features`, this is deterministic in the gene set and a FIXED genome seed (NOT a
+    per-run / per-batch seed): the ref/alt alleles are properties of the genome, the SAME across
+    runs, batches, breadths AND modalities (DNA, RNA, Visium). Sharing this map is exactly what
+    makes a somatic SNV emit the SAME ref/alt in every modality's reads — the multi-modal
+    "one tumour -> shared ground truth" promise, now honoured at the read/allele level.
+
+    Each locus is drawn from its OWN gene-name-seeded RNG (see `_gene_base_seed`), so a gene's
+    (ref, alt) is independent of its position in `genes` or of which other genes are present — two
+    modalities that order or subset their gene columns differently still agree locus-by-locus.
+
+    The alt is a REAL substitution of the ref drawn with a realistic transition:transversion ratio
+    (`ti_tv`, default ~2:1); `alt != ref` always. Returns ``(ref_base, alt_base)`` as object arrays
+    of single characters aligned to `genes`.
+    """
+    genes = list(genes)
+    ref = np.empty(len(genes), dtype="<U1")
+    alt = np.empty(len(genes), dtype="<U1")
+    for i, g in enumerate(genes):
+        rng = np.random.default_rng(_gene_base_seed(g, seed))
+        r = "ACGT"[int(rng.integers(0, 4))]
+        ref[i] = r
+        alt[i] = _alt_for_ref(r, rng, ti_tv=ti_tv)
+    return ref, alt
 
 
 def _segment_of(gene):

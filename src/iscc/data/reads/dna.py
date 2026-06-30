@@ -37,10 +37,13 @@ import numpy as np
 
 from .base import collect_fastq, find_binary, run_binary
 from . import variants
+from ..dna import genome_bases, _gene_base_seed, _alt_for_ref
 
 _BASES = np.array(list("ACGT"))
-# Deterministic alt base for each ref base (a fixed transition/transversion), so an injected
-# SNV is always a real substitution (alt != ref) and reproducible.
+# Legacy fixed-transition alt map. SUPERSEDED for SNV identity by the canonical per-locus
+# (ref, alt) genome property `genome_bases` (placed at the variant site of every reference, shared
+# across modalities). Retained only for the per-base SEQUENCING-ERROR floor (flip a base to a
+# different one), which is unrelated to the SNV allele and need not be modality-consistent.
 _ALT_OF = {"A": "G", "G": "A", "C": "T", "T": "C", "N": "A"}
 
 
@@ -64,15 +67,20 @@ class Reference:
     Subclasses expose:
       * ``seg_ids``           — ordered segment ids present in the genome.
       * ``segments[seg]``     — global locus indices belonging to that segment.
-      * ``base_seq[seg]``     — the segment's reference nucleotide string.
+      * ``base_seq[seg]``     — the segment's reference nucleotide string (carrying the canonical
+                                ref base at each locus's variant site).
       * ``locus_local_pos[gl]`` — the base offset (within its segment seq) of locus `gl`,
                                   i.e. the site an SNV at that locus substitutes.
+      * ``alt_base[gl]``      — the canonical alt nucleotide an SNV at locus `gl` substitutes in
+                                (the SAME canonical (ref, alt) every modality uses; see
+                                `iscc.data.dna.genome_bases`).
     """
 
     seg_ids: list
     segments: dict
     base_seq: dict
     locus_local_pos: dict
+    alt_base: dict
 
     def write_fasta(self, path, sequences=None):
         """Write `sequences` (default = the bare reference) as ``>seg{id}`` records."""
@@ -96,10 +104,14 @@ class SyntheticReference(Reference):
     the real-genome backend below, behind the same interface.
     """
 
-    def __init__(self, genes, seed=20240601, locus_length=60):
+    def __init__(self, genes, seed=20240601, locus_length=60, genome_seed=20240601):
         self.genes = list(genes)
         self.locus_length = int(locus_length)
         rng = np.random.default_rng(seed)
+        # Canonical per-locus (ref, alt) — the genome property shared across DNA/RNA/Visium. Drawn
+        # from the FIXED `genome_seed` (NOT the per-run `seed`): only the surrounding window CONTEXT
+        # is run-random; the variant site itself carries the canonical ref/alt every modality uses.
+        ref_b, alt_b = genome_bases(self.genes, seed=genome_seed)
         seg_to_loci = OrderedDict()
         for gl, g in enumerate(self.genes):
             seg_to_loci.setdefault(_segment_of(g), []).append(gl)
@@ -107,12 +119,16 @@ class SyntheticReference(Reference):
         self.segments = {seg: loci for seg, loci in seg_to_loci.items()}
         self.base_seq = {}
         self.locus_local_pos = {}
+        self.alt_base = {}
         for seg, loci in self.segments.items():
-            chars = _BASES[rng.integers(0, 4, size=len(loci) * self.locus_length)]
-            self.base_seq[seg] = "".join(chars.tolist())
+            chars = list(_BASES[rng.integers(0, 4, size=len(loci) * self.locus_length)].tolist())
             for j, gl in enumerate(loci):
                 # substitute at the window midpoint (a stable, well-inside-read site).
-                self.locus_local_pos[gl] = j * self.locus_length + self.locus_length // 2
+                pos = j * self.locus_length + self.locus_length // 2
+                self.locus_local_pos[gl] = pos
+                chars[pos] = str(ref_b[gl])        # canonical ref base at the variant site
+                self.alt_base[gl] = str(alt_b[gl])  # canonical alt base for this locus
+            self.base_seq[seg] = "".join(chars)
 
 
 class RealGenomeReference(Reference):
@@ -125,7 +141,8 @@ class RealGenomeReference(Reference):
     override. Requires a real per-segment FASTA, hence not a synthetic fallback.
     """
 
-    def __init__(self, fasta_path, genes, seg_to_contig=None, locus_coords=None):
+    def __init__(self, fasta_path, genes, seg_to_contig=None, locus_coords=None,
+                 genome_seed=20240601):
         self.fasta_path = fasta_path
         self.genes = list(genes)
         self._contigs = self._read_fasta(fasta_path)
@@ -148,6 +165,17 @@ class RealGenomeReference(Reference):
                     self.locus_local_pos[gl] = int(locus_coords[gl])
                 else:  # thin default: evenly spaced sites within the contig.
                     self.locus_local_pos[gl] = int((j + 0.5) / max(len(loci), 1) * L)
+        # Here the REF base comes from the real FASTA at each locus coordinate (not invented). The
+        # ALT is derived from that ref by the SAME canonical rule `genome_bases` uses (gene-name-
+        # seeded transition/transversion), so the (ref, alt)-per-locus abstraction holds identically
+        # for both backends, keeping the real-genome seam intact.
+        self.alt_base = {}
+        for seg, loci in self.segments.items():
+            seq = self.base_seq[seg]
+            for gl in loci:
+                ref_base = seq[self.locus_local_pos[gl]]
+                rng = np.random.default_rng(_gene_base_seed(self.genes[gl], genome_seed))
+                self.alt_base[gl] = _alt_for_ref(ref_base, rng)
 
     @staticmethod
     def _read_fasta(path):
@@ -203,14 +231,16 @@ def build_cell_fasta(reference, cnv_row, af_row, path, name="cell"):
         if cn <= 0:
             continue  # homozygous deletion -> segment absent from this cell's genome
         base = reference.base_seq[seg]
-        # which copies carry the alt allele at each mutated locus (allele-aware).
-        mutated = [(reference.locus_local_pos[gl], int(round(af_row[gl] * cn)))
+        # which copies carry the alt allele at each mutated locus (allele-aware). The alt is the
+        # CANONICAL per-locus alt base (shared across DNA/RNA/Visium), not a per-reference invention.
+        mutated = [(reference.locus_local_pos[gl], reference.alt_base[gl],
+                    int(round(af_row[gl] * cn)))
                    for gl in loci if af_row[gl] > 0]
         for cp in range(cn):
             seq = list(base)
-            for pos, n_alt in mutated:
+            for pos, alt_b, n_alt in mutated:
                 if cp < n_alt:  # this copy carries the alt allele at this locus
-                    seq[pos] = _ALT_OF.get(seq[pos], "A")
+                    seq[pos] = alt_b
             records[f"{name}_seg{seg}_cp{cp}"] = "".join(seq)
     reference.write_fasta(path, records)
     return records
@@ -367,7 +397,7 @@ def _select_cells(cell_data, modality, n_cells, cell_subset, seed):
 def emit_reads(cell_data, reference=None, simulator="dwgsim", breadth="wgs",
                modality="bulk", outdir="reads_out", seed=42, n_cells=20,
                cell_subset=None, mean_coverage=None, emit_bam=False,
-               read_length=150, **dna_kwargs):
+               read_length=150, genome_seed=20240601, **dna_kwargs):
     """End-to-end DNA read emission: cell_data -> per-cell FASTA -> FASTQ (+ BAM).
 
       reference     a `Reference` instance, or None for the SyntheticReference default.
@@ -386,7 +416,9 @@ def emit_reads(cell_data, reference=None, simulator="dwgsim", breadth="wgs",
     snv = cell_data["cell_snv"]
     genes = list(snv.columns)
     if reference is None:
-        reference = SyntheticReference(genes, seed=seed)
+        # genome_seed (NOT the per-run seed) selects the canonical (ref, alt) map, so DNA reads
+        # share allele identity with scRNA/Visium reads for the same gene set.
+        reference = SyntheticReference(genes, seed=seed, genome_seed=genome_seed)
     if simulator not in SIMULATORS:
         raise ValueError(f"unknown simulator {simulator!r}; choose from {sorted(SIMULATORS)}")
     adapter = SIMULATORS[simulator]()

@@ -35,6 +35,7 @@ import pandas as pd
 
 from .base import find_binary
 from .dna import _BASES, _ALT_OF
+from ..dna import genome_bases
 from . import variants
 
 
@@ -87,20 +88,32 @@ class SyntheticTranscriptome:
     """Per-gene cDNA sequences for self-contained scRNA read emission (synthetic genome).
 
     Each gene gets a deterministic random cDNA of `read_length` bases with the variant site at a
-    fixed interior position; an alt-carrying molecule substitutes the alt base there. Mirrors the
-    DNA `SyntheticReference`: works on today's abstract genome with no external reference. All
-    emitted reads cover the variant site — real 3'-bias coverage gaps (a real reason scRNA SNV
-    calling is hard) are folded into `obs_fidelity`; the scReadSim path is for real-template
-    realism on real sequence.
+    fixed interior position carrying the CANONICAL per-locus ref base; an alt-carrying molecule
+    substitutes the CANONICAL alt base there. Mirrors the DNA `SyntheticReference`: works on today's
+    abstract genome with no external reference, and crucially shares the SAME canonical (ref, alt)
+    map (`iscc.data.dna.genome_bases`) so a somatic SNV emits identical alleles in scRNA/Visium and
+    DNA reads. Only the variant SITE must match across modalities; the surrounding transcript
+    context legitimately differs from genomic context, so it stays independently random. All emitted
+    reads cover the variant site — real 3'-bias coverage gaps (a real reason scRNA SNV calling is
+    hard) are folded into `obs_fidelity`; the scReadSim path is for real-template realism.
     """
 
-    def __init__(self, genes, seed=20240601, read_length=90):
+    def __init__(self, genes, seed=20240601, read_length=90, genome_seed=20240601):
         self.genes = list(genes)
         self.read_length = int(read_length)
         self.var_pos = self.read_length // 2
         rng = np.random.default_rng(seed)
-        self.seq = {g: "".join(_BASES[rng.integers(0, 4, size=self.read_length)].tolist())
-                    for g in self.genes}
+        # Canonical per-locus (ref, alt) from the FIXED genome_seed — shared with DNA/Visium reads.
+        ref_b, alt_b = genome_bases(self.genes, seed=genome_seed)
+        self.seq = {}
+        self.ref_base = {}
+        self.alt_base = {}
+        for gi, g in enumerate(self.genes):
+            chars = list(_BASES[rng.integers(0, 4, size=self.read_length)].tolist())
+            chars[self.var_pos] = str(ref_b[gi])   # canonical ref base at the variant site
+            self.seq[g] = "".join(chars)
+            self.ref_base[g] = str(ref_b[gi])
+            self.alt_base[g] = str(alt_b[gi])       # canonical alt base for this locus
 
 
 def write_scrna_fastq(alt, ref, transcriptome, outdir, barcode_len=16, umi_len=12,
@@ -130,11 +143,12 @@ def write_scrna_fastq(alt, ref, transcriptome, outdir, barcode_len=16, umi_len=1
                 if na + nr == 0:
                     continue
                 base_seq = transcriptome.seq[g]
+                alt_at_vp = transcriptome.alt_base[g]   # canonical alt (shared across modalities)
                 for carries_alt, n in ((True, na), (False, nr)):
                     for _ in range(n):
                         seq = list(base_seq)
                         if carries_alt:
-                            seq[vp] = _ALT_OF.get(seq[vp], "A")
+                            seq[vp] = alt_at_vp
                         if error_rate > 0:
                             for p in np.where(rng.random(len(seq)) < error_rate)[0]:
                                 seq[p] = _ALT_OF.get(seq[p], "A")
@@ -181,7 +195,8 @@ def spot_clone_mixture_vaf(spot_members, cell_exp, cell_rna_vaf, genes):
 
 def emit_visium_reads(cell_data, grid_side=None, obs_fidelity=0.5, error_rate=0.001, seed=42,
                       cell_subset=None, emit_fastq=False, read_length=90, transcriptome=None,
-                      outdir="visium_reads_out", count_model="dm", **visium_kwargs):
+                      outdir="visium_reads_out", count_model="dm", genome_seed=20240601,
+                      **visium_kwargs):
     """End-to-end mutation-aware Visium reads (F6 reads, reuses F7b): spot counts -> alt/ref UMIs.
 
     Visium reads ARE scRNA reads barcoded by SPOT instead of cell, so this reuses the F7b seam
@@ -237,7 +252,8 @@ def emit_visium_reads(cell_data, grid_side=None, obs_fidelity=0.5, error_rate=0.
     # self-contained synthetic-transcriptome reads (spot-barcoded; no external binary).
     if emit_fastq:
         if transcriptome is None:
-            transcriptome = SyntheticTranscriptome(genes, seed=seed, read_length=read_length)
+            transcriptome = SyntheticTranscriptome(genes, seed=seed, read_length=read_length,
+                                                   genome_seed=genome_seed)
         # Molecular content WITHOUT the sequencing-error floor (error_rate=0): the per-base error in
         # write_scrna_fastq is the SINGLE read-error source (otherwise it would be applied twice,
         # doubling the FASTQ's error reads — same single-source contract as scRNA reads).
@@ -275,7 +291,7 @@ class ScReadSimAdapter:
 def emit_scrna_reads(cell_data, obs_fidelity=0.5, protocol="10x", error_rate=0.001,
                      seed=42, cell_subset=None, emit_fastq=False, read_length=90,
                      transcriptome=None, reference=None, template_bam=None,
-                     outdir="scrna_reads_out", **scrna_kwargs):
+                     outdir="scrna_reads_out", genome_seed=20240601, **scrna_kwargs):
     """End-to-end mutation-aware scRNA: F3 counts -> observed alt/ref UMI matrices -> reads.
 
     Runs the F3 scRNA assay to get the expression count matrix (fixing UMI totals), pulls the
@@ -328,7 +344,8 @@ def emit_scrna_reads(cell_data, obs_fidelity=0.5, protocol="10x", error_rate=0.0
     # self-contained synthetic-transcriptome reads (no external binary).
     if emit_fastq:
         if transcriptome is None:
-            transcriptome = SyntheticTranscriptome(expr.columns, seed=seed, read_length=read_length)
+            transcriptome = SyntheticTranscriptome(expr.columns, seed=seed, read_length=read_length,
+                                                   genome_seed=genome_seed)
         # The molecular content handed to the writer is the TRUE alt/ref after obs_fidelity but
         # WITHOUT the sequencing-error floor (error_rate=0): the per-base error in
         # write_scrna_fastq is the SINGLE read-error source. Otherwise the floor would be applied
