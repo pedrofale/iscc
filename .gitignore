@@ -11,3 +11,6 @@ notebooks/example_out/
 data/
 !validation/data/
 !validation/data/**
+# transient raw DNA-reference downloads (e.g. the 406 MB Tapestri h5) + caches — never committed
+validation/data/_cache/
+validation/data/**/__pycache__/
