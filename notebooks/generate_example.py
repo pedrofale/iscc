@@ -38,21 +38,25 @@ def simulate_tumor(steps=400, seed=2):
     return tumor
 
 
-def sample_cells(tumor_dir, sample_dir, fraction=0.5, seed=0):
+def sample_cells(tumor_dir, sample_dir, biopsy_type="punch", seed=0):
     import pandas as pd
+    from iscc.sample.biopsy.biopsy import Biopsy
     keys = ["cell_evo", "cell_exp", "cell_snv", "cell_cnv", "cell_crd", "cell_type", "cell_deme"]
     src = os.path.join(tumor_dir, "cell_data")
     data = {k: pd.read_csv(os.path.join(src, f"{k}.csv"), index_col=0) for k in keys}
-    ids = data["cell_snv"].index
-    rng = np.random.default_rng(seed)
-    chosen = rng.choice(np.asarray(ids), size=max(1, int(round(fraction * len(ids)))), replace=False)
+    # F1 spatial biopsy over the cell_crd grid (a punch = disk), not a random subset.
+    bx = Biopsy(data, rng=np.random.default_rng(seed))
+    chosen, region, geom = bx.sample(biopsy_type=biopsy_type)
     out = os.path.join(sample_dir, "cell_data")
     os.makedirs(out, exist_ok=True)
     for k, df in data.items():
         df.loc[chosen].to_csv(os.path.join(out, f"{k}.csv"))
+    if region is not None and len(region):
+        region.to_csv(os.path.join(out, "cell_region.csv"))
     with open(os.path.join(sample_dir, "sample_meta.yaml"), "w") as f:
-        yaml.safe_dump(dict(method="biopsy", fraction=fraction, n_input=int(len(ids)),
-                            n_sampled=int(len(chosen)), seed=seed, source=tumor_dir), f)
+        yaml.safe_dump(dict(method="biopsy", biopsy_type=biopsy_type, biopsy=geom,
+                            n_input=int(len(data["cell_snv"])), n_sampled=int(len(chosen)),
+                            seed=seed, source=tumor_dir), f)
     return data, chosen
 
 
@@ -93,8 +97,8 @@ def main():
     tumor.write(tumor_dir)
     print(f"  tumor size = {tumor.get_tumor_size()} cells")
 
-    print("Sampling (biopsy) ...")
-    sample_cells(tumor_dir, sample_dir, fraction=0.5, seed=args.seed)
+    print("Sampling (punch biopsy) ...")
+    sample_cells(tumor_dir, sample_dir, biopsy_type="punch", seed=args.seed)
 
     print("Running assays (scrna, bdna, scdna, visium) ...")
     run_assays(sample_dir)
