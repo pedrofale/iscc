@@ -259,6 +259,38 @@ ax.set_xlabel(f"coverage — {a.batch.label}"); ax.set_ylabel(f"coverage — {b.
 ax.set_title("Two batches: shared CN signal, different technical noise")
 plt.tight_layout(); plt.show()""")
 
+md(r"""## 8. Fitting the technical parameters back from data (M4 `estimate_dna`)
+
+The knobs above ($\kappa$, ADO, the $\beta$-binomial concentration, the GC curve) are **not
+hand-set** in practice — they are **inferred** from a reference dataset with `estimate_dna`, and
+iscc ships defaults *calibrated* to such fits (so it is realistic out of the box). Here is the
+synthetic **round-trip**: simulate with known parameters, then recover them from the assay output
+with `estimate_dna_from_assay`. Point the same estimator at a **real** reference (GIAB HG002, a
+Mission Bio Tapestri panel, DLP+ scWGS) to calibrate to real data — `validation/validate_dna.py`
+runs exactly that.""")
+
+code(r"""from iscc.data import estimate_dna_from_assay
+
+# a clean diploid reference with a handful of heterozygous loci makes the round-trip crisp
+Gt = [f"G_{s}_{p}" for s in range(6) for p in range(20)]
+N = 300; idx = [f"C{i}" for i in range(N)]
+rt = {
+    "cell_cnv": pd.DataFrame(2.0, index=idx, columns=Gt),
+    "cell_snv": pd.DataFrame(0.0, index=idx, columns=Gt),
+    "cell_type": pd.DataFrame(["cloneA"] * N, index=idx, columns=["cell_id"]),
+}
+for loc in [5, 25, 45, 65, 85, 105]:
+    rt["cell_snv"].iloc[:, loc] = 0.5                         # heterozygous loci (true VAF 0.5)
+
+TRUE_KAPPA, TRUE_ADO = 1500.0, 0.30
+bulk_rt = bulkDNA(breadth="wgs", seed=1, kappa=TRUE_KAPPA).run(rt)
+sc_rt   = scDNA(n_cells=N, breadth="panel", seed=4, ado_rate=TRUE_ADO, mu_depth=200.0).run(rt)
+eb, es = estimate_dna_from_assay(bulk_rt), estimate_dna_from_assay(sc_rt)
+print(f"bulk  kappa : true {TRUE_KAPPA:>7.0f}  ->  fit {eb.hypers.kappa:>7.0f}")
+print(f"sc    ADO   : true {TRUE_ADO:>7.2f}  ->  fit {es.hypers.ado_rate:>7.2f}   "
+      f"(beta-binomial conc fit {es.hypers.beta_binom_conc:.1f})")
+print("\nThese fitted values are what iscc's calibrated defaults are set from.")""")
+
 md(r"""## Summary
 
 * **Coverage tracks copy number** (bulk + single-cell), via a copy-number-driven

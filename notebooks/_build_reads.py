@@ -115,6 +115,39 @@ ingests a user FASTA via the same interface, anchored to M3b). **Simulators:** D
 + ART. **To actually emit:** `dwgsim>=0.1.13` (or `art_illumina`) for FASTQ, `bwa` + `samtools`
 for the BAM. The `variants.inject` seam is modality-generic and reused unchanged by scRNA.""")
 
+md(r"""## 5. Mutation-aware scRNA reads — and why variant calling from scRNA is hard (F7b)
+
+The **same** variant seam drives scRNA: `emit_scrna_reads` conserves the F3 UMI totals and, at a
+mutated locus, splits UMIs into alt/ref at the observed RNA-VAF (`cell_rna_vaf × obs_fidelity`).
+Because a variant is only seen where its gene is **expressed** and captured, and is further
+under-detected by the single `obs_fidelity` knob (monoallelic expression / bursting / RT error),
+scRNA **misses most true mutations** that scDNA would call — the payoff result for benchmarking
+scRNA variant callers. This is the cross-modal consistency in action: the *same* mutation, read out
+by DNA vs RNA, gives very different answers, for known reasons.""")
+
+code(r"""from iscc.tumor.models import GenotypeTumor
+from iscc.data.reads import emit_scrna_reads
+
+# grow a small tumour so cells carry real, expressed mutations (ground truth)
+tum = GenotypeTumor(config="example_config.yaml", seed=2); tum.grow(n_steps=150, seed=2)
+cd = tum.cell_data
+n_sites = int((cd["cell_snv"].values > 0).sum())
+print(f"grew {tum.get_tumor_size()} cells with {n_sites} true (cell, locus) mutation sites")
+
+for f in [0.4, 0.7, 1.0]:
+    r = emit_scrna_reads(cd, obs_fidelity=f, protocol="10x", seed=1)
+    dna = np.asarray(r["dna_vaf"]); alt = np.asarray(r["alt"]); tot = np.asarray(r["total"])
+    site = dna > 0                                   # a true somatic mutation
+    detected = site & (tot > 0) & (alt >= 1)         # seen in scRNA (expressed + >=1 alt UMI)
+    rate = detected[site].mean()
+    print(f"  obs_fidelity={f}: scRNA detects {rate:5.1%} of true mutations "
+          f"(scDNA would call them at their genomic VAF)")""")
+
+md(r"""So even at perfect fidelity scRNA recovers only a minority of true mutations — the detection
+is **gated by expression**. `validation/validate_scrna_snv.py` renders the full result (observed
+RNA-VAF vs true DNA-VAF, detection vs fidelity, detection vs expression). Spot-barcoded **Visium**
+reads reuse the same seam (`emit_visium_reads`).""")
+
 nb["cells"] = cells
 out = os.path.join(os.path.dirname(__file__), "reads.ipynb")
 with open(out, "w") as f:
