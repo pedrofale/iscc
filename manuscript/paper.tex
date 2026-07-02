@@ -9,6 +9,7 @@
 \usepackage{xurl}            % simple URL typesetting
 \usepackage{booktabs}       % professional-quality tables
 \usepackage{amsfonts}       % blackboard math symbols
+\usepackage{amssymb}        % \checkmark for the comparison table
 \usepackage{nicefrac}       % compact symbols for 1/2, etc.
 \usepackage{microtype}      % microtypography
 \usepackage{amsmath}
@@ -113,9 +114,9 @@ process. General agent-based modelling frameworks such as the Hybrid Automata Li
 multicellular tumor dynamics in detail, but are not designed to emit the standardized
 sequencing data modalities used by computational biologists.
 
-What is missing is a single framework that connects these pieces: an evolving, spatially
-structured tumor whose ground-truth cell populations are carried through realistic sampling and
-assay steps into multiple data modalities. A direct consequence is that there is no common
+What is missing is a single framework that connects these pieces (\Cref{tab:comparison}): an
+evolving, spatially structured tumor whose ground-truth cell populations are carried through
+realistic sampling and assay steps into multiple data modalities. A direct consequence is that there is no common
 ground truth for methods that \emph{integrate} DNA, RNA and spatial measurements of the same
 tumor~\cite{campbell_clonealign_2019}: generating each modality independently --- or bolting an
 expression model onto a separately simulated copy-number profile --- yields cross-modal
@@ -138,6 +139,38 @@ cell groups. Because all data are anchored to a known evolutionary history and c
 structure, \texttt{iscc} can be used to benchmark methods for profiling intra-tumor
 heterogeneity in a standardized manner --- including methods that integrate DNA, RNA and
 spatial measurements, for which a consistent cross-modal ground truth is otherwise unavailable.
+
+\begin{table}[t]
+  \centering
+  \footnotesize
+  \setlength{\tabcolsep}{5pt}
+  \caption{\textbf{Capability comparison of tumor and molecular-data simulators.}
+  \checkmark~= supported, $\sim$~= partial or limited, blank = not supported. \texttt{iscc} is the
+  only framework that spans an evolving spatially-structured tumor, all three sequencing modalities
+  (down to reads), realistic sampling and treatment, with parameters that can be inferred from real
+  data. $^{a}$spatial-evolution and sequencing simulators (J-SPACE~\cite{angaroni_jspace_2022},
+  CHESS, TEMULATOR); $^{b}$agent-based modelling frameworks (HAL~\cite{bravo_hal_2020},
+  PhysiCell~\cite{ghaffarizadeh_physicell_2018}); $^{c}$statistical count simulators
+  (Splatter~\cite{zappia_splatter_2017}, scDesign3~\cite{song_scdesign3_2024},
+  SRTsim~\cite{zhu_srtsim_2023}).}
+  \label{tab:comparison}
+  \begin{tabular}{l ccccccc}
+    \toprule
+    & \texttt{iscc} & CINner & SISTEM & J-SPACE$^{a}$ & scMultiSim & HAL$^{b}$ & Count$^{c}$ \\
+    \midrule
+    Spatially-explicit tumor growth      & \checkmark &            & $\sim$     & \checkmark &            & \checkmark &            \\
+    Copy-number / driver selection       & \checkmark & \checkmark & \checkmark & $\sim$     &            & $\sim$     &            \\
+    Bulk \& single-cell DNA-seq          & \checkmark & $\sim$     & \checkmark & \checkmark & $\sim$     &            &            \\
+    scRNA-seq                            & \checkmark &            &            &            & \checkmark &            & \checkmark \\
+    Spatial transcriptomics              & \checkmark &            &            &            & \checkmark &            & \checkmark \\
+    Aligned reads (FASTQ / BAM)          & \checkmark &            & $\sim$     & \checkmark &            &            &            \\
+    Biopsy / dissociation sampling       & \checkmark &            &            & $\sim$     &            &            &            \\
+    Treatment                            & \checkmark &            &            &            &            & \checkmark &            \\
+    Parameter inference from real data   & \checkmark & \checkmark &            &            &            &            & \checkmark \\
+    Cross-modal consistency              & \checkmark &            &            &            & $\sim$     &            &            \\
+    \bottomrule
+  \end{tabular}
+\end{table}
 
 
 \section*{Results}
