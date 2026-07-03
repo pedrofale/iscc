@@ -384,6 +384,17 @@ data — so realistic defaults can be *learned*, not guessed.
   **DNA+RNA+spatial integration** (the SISTEM-analog claim for paper 1) and completes the
   "coupled-process beats CNA-sim-plus-expression-on-top" argument.
 
+- **F9 — PLANNED — single-cell spatial assay (imaging-based; MERFISH/Xenium-like).** Complements
+  the spot-based Visium (F6) with a **single-cell-resolution** spatial assay: per-cell counts at the
+  cell's `(row, col)` (NO spot aggregation), over a **targeted gene panel** (the *transcriptome
+  coverage* knob — subset size / gene list), drawn from the shared NB count model with
+  imaging-appropriate *data-distribution* params (lower depth, near-zero panel dropout, higher
+  per-gene sensitivity). Surfaces per-cell coords + clone/type ground truth; reuses the F3 scRNA NB
+  machinery + the `cell_crd` coords. Platform-agnostic (MERFISH/Xenium = parameter presets, not a
+  hardcoded name). Output: AnnData (cells × panel genes), coords in `obsm`. Enables validation
+  against single-cell spatial + lineage datasets (**PEtracer**, Science 2025 — spatial clonal
+  architecture + tree statistics now; the intrinsic-vs-extrinsic module decomposition once F8 lands).
+
 ## Validation hooks (per DESIGN_inference conventions)
 - Batch model: *recover* injected batch params via `estimate()`; show two same-tumor batches share
   biology but differ technically (e.g. kBET / iLISI-style mixing only after correction).
@@ -477,3 +488,33 @@ L–R pairs + a CCI-strength knob. All optional (off → current behaviour, back
 (recapitulating PhysiCell's rim/core); CCI-target genes elevated at clone/cell-type boundaries;
 spatial-niche methods recover the known niches; `clonealign`-type DNA↔RNA assignment still succeeds
 (CNA dosage preserved) **and** niche/CCI methods now have a ground truth to be scored against.
+
+## I. External-simulator adapters (a recipe for plugging in scMultiSim, simATAC, …)
+
+Rather than natively implement every modality (ATAC, GRN-driven expression, …), let iscc be the
+**evolutionary + spatial substrate provider** and let mature external simulators be **modality
+plugins** conditioned on that substrate. This gives users e.g. ATAC/GRN "on our tumor-evolution
+process" without iscc reimplementing scMultiSim.
+
+**The seam.** iscc already holds, per cell: a **lineage tree**, **spatial coordinates**, **clone /
+cell-type identity**, expression, CNA. Expose it in standard interchange formats:
+- lineage tree → **Newick** (the cell-division tree external tools consume);
+- coords + identity + expression → **AnnData** (`obsm["spatial"]`, `obs["clone"]/["cell_type"]`).
+
+**Per-simulator adapter.** A thin function maps the export to the tool's expected input, runs it, and
+re-attaches the output to the same cell ids for a consistent multi-modal object. Worked example —
+**scMultiSim**: feed iscc's cell-division tree as its input tree, iscc's cell states/coords as its
+CIF / spatial inputs → scMultiSim emits RNA / ATAC / GRN-driven data on iscc's cells, inheriting
+iscc's clonal + spatial structure. Same pattern for SymSim (tree), simATAC/simPIC (cell groups),
+SRTsim (spatial reference).
+
+**Honest limitation — structure-conditioned, not genome-consistent.** The plugged-in modality
+inherits iscc's *tree / space / identity* but NOT the *genome* (the external tool doesn't know iscc's
+CNAs/SNVs). So scMultiSim-via-adapter ATAC has iscc's clonal/spatial structure but not the
+CNA→accessibility coupling a **native** iscc ATAC (the deferred "regulatory layer") would. Adequate
+for "I want ATAC support"; not for "I want genome-consistent ATAC ground truth". Document this
+tradeoff wherever adapters are offered.
+
+**Deliverable.** An `iscc.integrations` seam: `to_newick(tumor)`, `to_anndata(cell_data)`, and
+adapter stubs (`adapters/scmultisim.py`, …). Low-risk, additive; each adapter is optional and guarded
+on the external package being installed (mirrors the reads.py binary-optional pattern).

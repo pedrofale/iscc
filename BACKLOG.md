@@ -33,6 +33,14 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   - Already in-paper (count as suite members): **selection/rate inference** (ABC recovery), **sampling/
     experimental-design**, realism-vs-real. Niche/**CCI** inference waits on F8.
   - Manuscript: reframe validation as *"iscc as a benchmarking substrate"* organized as this suite.
+- **NEXT — PEtracer real-data validation** (realism pillar; the most complete real reference).
+  [PEtracer](https://www.science.org/doi/10.1126/science.adx3800) (Weissman, Science 2025) is one of
+  the only real datasets with spatial + expression (MERFISH) + lineage tree jointly — matches iscc's
+  integrated output, so it validates the *coupling* (iscc's differentiator). Data public on Figshare
+  (10.6084/m9.figshare.28473866). Now (no F8): spatial clonal architecture + lineage-tree statistics.
+  Post-F8: the cell-intrinsic (heritable) vs cell-extrinsic (spatial) module decomposition (flagship).
+  Caveats: MERFISH≠Visium (→ needs **F9** single-cell spatial assay for expression comparison); mouse
+  metastasis model (multi-site = R9, out of scope).
 - **DONE — Capability/feature matrix** (Table 1, `paper.tex`; commit 4ecc7ab). Verify a few competitor
   cells (SISTEM spatial/reads, CINner DNA, J-SPACE selection/sampling, scMultiSim DNA/consistency).
 - **OPTIONAL (lean) — one realism head-to-head** iscc vs Splatter vs real on the 8 scRNA summary stats,
@@ -47,6 +55,19 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   `handoffs/F8_microenvironment_expression.md`. Adds deme-resolution hypoxia field (BioFVM-style) +
   ligand–receptor CCI (scMultiSim/sCCIgen-style) to `get_exp`. Required for the spatial half of the
   integration story and for niche/CCI tutorials.
+
+## F9 — single-cell spatial assay (imaging-based; lightweight)
+- **NOW / NEXT** — per-cell-resolution spatial assay (MERFISH/Xenium-like): per-cell panel counts at
+  `cell_crd`, NB model, transcriptome-coverage (panel) + data-distribution knobs; reuses F3 scRNA
+  machinery, no spot aggregation. Design: `DESIGN_features.md` F9 milestone. Enables the PEtracer
+  expression comparison. Lightweight — buildable inline.
+
+## External-simulator adapters (recipe; additive `iscc.integrations` seam)
+- **LATER** — let iscc be the evolutionary+spatial substrate; export lineage tree (Newick) + AnnData
+  (coords/identity) so external sims (scMultiSim ATAC/GRN, SymSim, simATAC, SRTsim) generate their
+  modality *on iscc's tumor*. Design: `DESIGN_features.md` §I. Honest limit: structure-conditioned,
+  NOT genome-consistent (external tool doesn't see iscc's CNAs/SNVs). Gives ATAC/GRN support without
+  building the native regulatory layer.
 
 ## Pedagogy notebook track (teaching tumor data analysis on iscc data)
 - **NOW (plan) / NEXT (build)** — curriculum in `notebooks/TUTORIALS_PLAN.md`. Running example: a
