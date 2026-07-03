@@ -110,16 +110,23 @@ differs; still, we warn if a subgroup delta touches a `prop_*`, since that desyn
 layout. This is exactly how molecular subtypes work: **same recurrent driver genes, different fitness
 / therapy consequences**.
 
-**Resistance mechanism — subclonal by default (faithful).** Real therapy resistance usually
-**pre-exists as a rare subclone**, not clonally. A `Subgroup` therefore supports two mechanisms:
-(a) `founder_mutations` — a **truncal/clonal** resistance driver (primary/intrinsic resistance,
-present in every cell, observable in bulk); and (b) `subclone_mutations` + `subclone_cells` — a
-**pre-existing resistant SUBCLONE** seeded at low count alongside the wild-type founder, so at baseline
-resistance is a *minority* of cells (subclonal). Under therapy the subclone is selected and drives
-**relapse**, while the sensitive subtype is eradicated. The subclone is below bulk VAF prominence but
-detectable at single-cell resolution — iscc's single-cell ground truth exposes the actionable subclone
-a bulk assay would miss, and the stratification benchmark contrasts a bulk biomarker (mean
-resistance-locus VAF) with a single-cell one (fraction of cells co-mutated at the resistance loci).
+**Resistance mechanism — it must EMERGE, never seeded.** The whole point of a mechanistic simulator is
+that resistance ARISES from mutation + selection; injecting a resistant subclone (or a truncal
+resistance mutation) would hand-impose the very answer the benchmark is meant to test — the "bolt-on
+simulator" anti-pattern iscc avoids elsewhere (cf. the clonealign non-circularity argument). So a
+subtype is defined ONLY by an **effect scalar** (`treatment_resistant_effects`). During an untreated
+**burn-in**, treatment-resistance mutations arise spontaneously at the shared resistance loci and drift
+as **neutral standing variation** (resistance is inert without drug). **Adjuvant** therapy then
+**selects** them: in the high-effect (resistant) subtype the standing resistant cells survive and
+**relapse**; in the low-effect (sensitive) subtype the same mutations are inert and the tumour is
+eradicated. The differential response is thus a genuine evolutionary outcome. (`founder_mutations`
+remains only for a truly *inherited/germline* truncal background — e.g. the per-patient private demux
+markers — never for acquired resistance.) **Honest consequence for the biomarker:** at BASELINE the two
+subtypes are molecularly indistinguishable (the same standing resistance mutations are present in both;
+only their functional effect differs), so a bulk baseline call is **non-predictive** — a realistic
+precision-oncology point iscc surfaces. Recovery of the responsive subtype comes from the therapy-
+selected **emergent** signature (the relapsed tumour is clonally enriched for the selected resistance
+mutations) and the response readout itself (who benefits, the known answer).
 
 ### 2.2 Patient→batch multiplexing (`cohort/batch.py`)
 A **user-specified assignment** of patients to sequencing batches:

@@ -868,15 +868,21 @@ style) --- by reusing the multi-batch scRNA machinery, so each batch carries bot
 patients) and technical variation.
 
 This cohort ground truth turns four otherwise-unfalsifiable analyses into scorable benchmarks
-(\Cref{fig:cohort}). \emph{Personalized medicine} is the headline: we define two molecular subtypes
-over the same landscape, differing only in a resistance-conferring effect and, for the resistant
-subtype, a \emph{pre-existing subclonal} resistance clone --- the biologically common case, in which
-resistance is a rare minority at baseline rather than clonal. A single therapy then eradicates the
-sensitive tumors and the resistant tumors relapse from the selected subclone (\Cref{fig:cohort}B), a
-differential response with a known answer key; and because \texttt{iscc} carries per-cell truth, the
-responsive subtype is recovered from the baseline molecular profile by the resistant subclone's
-signature (area under the curve $1.0$), a subclone that is a small fraction of cells and hence visible
-only at single-cell resolution --- the actionable minority a bulk assay would miss. \emph{Multi-patient
+(\Cref{fig:cohort}). \emph{Personalized medicine} is the headline, and here resistance is not imposed
+but \emph{emerges}: we define two molecular subtypes over the same landscape that differ only in a
+resistance \emph{effect}, and during an untreated burn-in resistance mutations arise spontaneously at
+the shared resistance loci and drift as neutral standing variation (they are inert without drug).
+Adjuvant therapy then selects them --- the high-effect (resistant) subtype relapses from its
+standing resistant cells while the low-effect (sensitive) subtype, in which the same mutations are
+inert, is eradicated (\Cref{fig:cohort}B). The differential response is therefore a genuine
+evolutionary outcome with a known answer key, not a hand-imposed one. Recovering the responsive
+subtype from molecular data reproduces a real precision-oncology difficulty: at \emph{baseline} the
+two subtypes are molecularly indistinguishable (the standing resistance mutations are present in both;
+only their functional effect differs), so a bulk baseline call is non-predictive (area under the curve
+$\approx0.5$); the responder is instead recovered from the therapy-selected \emph{emergent} signature
+(the relapsed tumor is clonally enriched for the selected resistance mutations, AUC $\approx0.8$) and
+from the response itself (AUC $1.0$) --- a distinction \texttt{iscc}'s per-cell ground truth makes
+explicit. \emph{Multi-patient
 integration} (\Cref{fig:cohort}C) exposes the central over/under-correction failure mode: with one
 patient per batch, a naive embedding over-separates the \emph{shared} cell states by patient (low
 integration-LISI), and a batch correction restores cross-patient mixing of shared states while
@@ -897,9 +903,11 @@ which concentrates selection on specific chromosome arms, is the sharper substra
   \textbf{(A)} Cross-patient recurrence is well-posed only under the shared-landscape fix: driver-gene
   identities are identical across patients (Jaccard $1.0$) versus disjoint under per-seed layouts
   ($\approx0.04$); drivers recur more than private passengers (inset). \textbf{(B)} Personalized
-  medicine: one therapy eradicates the sensitive subtype and the resistant subtype relapses from a
-  pre-existing subclone; the responsive subtype is recovered from the baseline single-cell profile
-  (inset, AUC $1.0$). \textbf{(C)} Multi-patient integration must mix the shared cell states across
+  medicine: one therapy eradicates the sensitive subtype while the resistant subtype relapses from
+  resistance that \emph{emerged} as standing variation and was selected by the drug (nothing is
+  seeded). Recovering the responder (inset) is non-predictive at baseline (the subtypes are
+  molecularly identical there) but is revealed by the therapy-selected emergent signature and by the
+  response itself. \textbf{(C)} Multi-patient integration must mix the shared cell states across
   patients (raising integration-LISI toward the ideal) without erasing private biology (preserving
   cell-type ARI). \textbf{(D)} Demultiplexing assigns pooled cells to patient-of-origin from private
   variants, far above chance.}

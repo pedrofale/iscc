@@ -11,11 +11,14 @@ Figure (manuscript/figures/validation_cohort.png), the strongest first-pass benc
      across patients (mean pairwise Jaccard = 1.0) with the fix, versus ~0 without it (per-seed
      layouts) — so cross-patient recurrence / driver detection is meaningful only because of the fix.
      Drivers still sit at higher recurrence than private passengers.
-  B. PERSONALIZED MEDICINE. Two molecular subtypes over the SAME landscape: 'resistant' carries a
-     pre-existing (SUBCLONAL) resistance subclone, 'sensitive' does not. One therapy eradicates the
-     sensitive tumours and the resistant ones relapse — a ground-truth differential response — and the
-     resistant subclone (subclonal, single-cell-only) recovers the responsive subtype (a known-answer
-     biomarker).
+  B. PERSONALIZED MEDICINE (resistance EMERGES, not seeded). Two molecular subtypes over the SAME
+     landscape differ only in a resistance EFFECT; during an untreated burn-in, resistance mutations
+     arise and drift as neutral standing variation, and adjuvant therapy SELECTS them in the resistant
+     subtype (which relapses) while eradicating the sensitive subtype — a ground-truth differential
+     response that is a genuine evolutionary outcome. Recovering the responder from molecular data is
+     honestly non-predictive at BASELINE (the standing resistance mutations are present in both
+     subtypes; only their functional effect differs) but is revealed by the therapy-selected emergent
+     signature and the response itself.
   C. MULTI-PATIENT INTEGRATION. 1:1 pooling -> one batch per patient. Naive embedding OVER-SEPARATES
      the SHARED cell states by patient (low iLISI); a correction restores cross-patient mixing while
      preserving the biology (cell-type ARI) — scored against iscc's shared-vs-private ground truth
@@ -61,15 +64,15 @@ def main():
     print(f"    recurrence: drivers={ra['driver_recurrence'].mean():.3f} vs "
           f"passengers={ra['passenger_recurrence'].mean():.3f} (MWU p={ra['mwu_p']:.3g})")
 
-    # ---- B. personalized medicine -----------------------------------------------------
-    print("\n[B] personalized medicine / stratification ...")
+    # ---- B. personalized medicine (resistance EMERGES) --------------------------------
+    print("\n[B] personalized medicine / stratification (emergent resistance) ...")
     pm = cc.pm_cohort(n_patients=args.pm_patients)
-    dr = cc.differential_response(pm)
-    st = cc.stratification(pm)
+    pmres = cc.pm_analysis(pm)
     for sg in ("sensitive", "resistant"):
-        m = dr["subgroup"] == sg
-        print(f"    {sg:9s}: baseline~{dr['baseline'][m].mean():4.0f}  treated~{dr['treated'][m].mean():4.0f}")
-    print(f"    stratification AUC — bulk={st['bulk_auc']:.2f}  single-cell subclone={st['singlecell_auc']:.2f}")
+        m = pmres["subgroup"] == sg
+        print(f"    {sg:9s}: baseline~{pmres['baseline'][m].mean():4.0f}  treated~{pmres['treated'][m].mean():4.0f}")
+    print(f"    recovery AUC — baseline (non-predictive)={pmres['baseline_auc']:.2f}  "
+          f"emergent relapse signature={pmres['relapse_auc']:.2f}  response readout={pmres['response_auc']:.2f}")
 
     # ---- C. integration ---------------------------------------------------------------
     print("\n[C] multi-patient integration (shared-vs-private) ...")
@@ -89,11 +92,11 @@ def main():
     print(f"    patient-of-origin accuracy={da['accuracy']:.3f} (chance={da['chance']:.3f}, "
           f"{da['n_cells']} pooled cells)")
 
-    _figure(args.out, ra, dr, st, ia, da)
+    _figure(args.out, ra, pmres, ia, da)
     print(f"\nsaved figure -> {args.out}")
 
 
-def _figure(out, ra, dr, st, ia, da):
+def _figure(out, ra, pm, ia, da):
     fig, ax = plt.subplots(2, 2, figsize=(13, 10))
 
     # A. recurrence enablement -----------------------------------------------------------
@@ -113,26 +116,29 @@ def _figure(out, ra, dr, st, ia, da):
     ai.set_title(f"recurrence\n(p={ra['mwu_p']:.2g})", fontsize=8)
     ai.tick_params(labelsize=7)
 
-    # B. personalized medicine -----------------------------------------------------------
+    # B. personalized medicine (emergent resistance) ------------------------------------
     b = ax[0, 1]
-    order = np.argsort(dr["subgroup"])
+    order = np.argsort(pm["subgroup"])
     colors = {"sensitive": "#2980b9", "resistant": "#c0392b"}
     xs = np.arange(len(order))
-    b.bar(xs, dr["treated"][order], color=[colors[s] for s in dr["subgroup"][order]])
-    b.plot(xs, dr["baseline"][order], "k_", ms=12, mew=2, label="baseline (untreated)")
+    b.bar(xs, pm["treated"][order], color=[colors[s] for s in pm["subgroup"][order]])
+    b.plot(xs, pm["baseline"][order], "k_", ms=12, mew=2, label="baseline (untreated)")
     b.set_xlabel("patient (grouped by subtype)")
     b.set_ylabel("cancer cells after therapy")
     b.set_title("B. One therapy, two fates: sensitive eradicated,\n"
-                "resistant relapse (subclonal resistance) — known truth")
+                "resistant relapse from EMERGENT resistance — known truth")
     handles = [plt.Rectangle((0, 0), 1, 1, color=colors[s]) for s in ("sensitive", "resistant")]
     b.legend(handles + [plt.Line2D([0], [0], color="k", marker="_", ls="", mew=2)],
              ["sensitive", "resistant", "baseline"], fontsize=8, loc="upper center")
-    bi = b.inset_axes([0.60, 0.52, 0.36, 0.40])
-    y = st["y"]
-    bi.scatter(np.where(y == 0)[0] * 0 + 0, st["singlecell"][y == 0], c="#2980b9", s=18)
-    bi.scatter(np.where(y == 1)[0] * 0 + 1, st["singlecell"][y == 1], c="#c0392b", s=18)
-    bi.set_xticks([0, 1]); bi.set_xticklabels(["sens", "res"], fontsize=7)
-    bi.set_title(f"single-cell subclone\nAUC={st['singlecell_auc']:.2f}", fontsize=8)
+    # inset: recovery AUC — baseline is non-predictive; therapy REVEALS the emergent resistance
+    bi = b.inset_axes([0.60, 0.50, 0.36, 0.42])
+    labs = ["baseline", "relapse", "response"]
+    vals = [pm["baseline_auc"], pm["relapse_auc"], pm["response_auc"]]
+    bi.bar(range(3), vals, color=["#7f8c8d", "#e67e22", "#27ae60"])
+    bi.axhline(0.5, ls=":", color="k", lw=0.8)
+    bi.set_xticks(range(3)); bi.set_xticklabels(labs, fontsize=7, rotation=20)
+    bi.set_ylim(0, 1.05); bi.set_ylabel("recovery AUC", fontsize=7)
+    bi.set_title("recover responders", fontsize=8)
     bi.tick_params(labelsize=7)
 
     # C. integration ---------------------------------------------------------------------

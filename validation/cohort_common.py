@@ -124,32 +124,35 @@ def recurrence_analysis(cohort, clonal_thresh=0.05):
 
 
 # ======================================================================================
-# 2) personalized medicine / stratification (uses the treatment module)
+# 2) personalized medicine / stratification (uses the treatment module) — resistance EMERGES
 # ======================================================================================
-# A larger genome (2400 loci) so the specific resistance loci are NOT saturated by genome-wide random
-# mutation — the pre-existing resistant subclone is then a distinct, detectable minority signature.
-PM_GENOME = {"n_segments": 12, "segment_size": 200}
-PM_SEL = {"prop_driver": 0.05, "prop_dispersal": 0.0, "prop_immune_resistance": 0.0,
-          "prop_treatment_resistance": 0.05, "driver_effects": 1.15, "treatment_resistant_effects": 1.0}
-PM_DEME = {"carrying_capacity": 8, "initial_cancer_cells": 6}
-PM_SPATIAL = {"grid_size": 15, "structure_radius": 4}
-PM_CANCER = {"division_rate": 0.6, "death_rate": 0.05, "max_birth_rate": 0.98,
-             "mutation_rate": 0.5, "dispersal_rate": 0.3}
+# Nothing is seeded: resistance ARISES from mutation + selection. Two subtypes share the landscape and
+# differ ONLY in an effect scalar (``treatment_resistant_effects``). A larger genome (1200 loci) keeps
+# the shared resistance loci from being saturated by genome-wide passenger mutation, so the emergent
+# resistant clone is a distinct signature.
+PM_GENOME = {"n_segments": 10, "segment_size": 120}
+PM_SEL = {"prop_driver": 0.04, "prop_dispersal": 0.0, "prop_immune_resistance": 0.0,
+          "prop_treatment_resistance": 0.06, "driver_effects": 1.15, "treatment_resistant_effects": 1.0}
+PM_DEME = {"carrying_capacity": 10, "initial_cancer_cells": 8}
+PM_SPATIAL = {"grid_size": 17, "structure_radius": 0}
+PM_CANCER = {"division_rate": 0.6, "death_rate": 0.08, "max_birth_rate": 0.98,
+             "mutation_rate": 0.9, "dispersal_rate": 0.3}
+PM_STEPS = 520
+PM_THERAPY_START = 200      # untreated burn-in during which resistance emerges as standing variation
 
 
-def pm_cohort(n_patients=16, steps=260, n_loci=6, subclone_cells=2):
-    """Two subgroups over the shared landscape: 'sensitive' and 'resistant'. The resistant subtype
-    carries a PRE-EXISTING RESISTANT SUBCLONE (biologically faithful: resistance usually pre-exists as
-    a rare subclone, not clonally) at the shared treatment-resistance loci + a high resistance effect.
-    A therapy eradicates the sensitive tumours; the resistant ones relapse from the selected subclone.
-    The subclone is SUBCLONAL at baseline (a minority of cells) — below bulk VAF prominence, detectable
-    at single-cell resolution: iscc's ground truth shows the actionable subclone bulk would miss."""
+def pm_cohort(n_patients=14, steps=PM_STEPS):
+    """Two molecular subtypes over ONE shared landscape, 'sensitive' and 'resistant', differing only in
+    ``treatment_resistant_effects``. Resistance is NOT seeded — it EMERGES: during an untreated burn-in,
+    treatment-resistance mutations arise at the shared resistance loci and drift as neutral standing
+    variation; ADJUVANT therapy then SELECTS them in the resistant subtype (which relapses) while they
+    stay inert in the sensitive subtype (which is eradicated). The differential response is therefore a
+    genuine evolutionary outcome, not an imposed one."""
     sel = Cohort(patient_seeds=[1], genome_params=PM_GENOME, selection_params=PM_SEL,
                  cancer_cell_params=PM_CANCER, deme_params=PM_DEME, spatial_params=PM_SPATIAL).selection
-    loci = tuple(int(x) for x in sel.get_treatment_resistant()[:n_loci])
+    loci = [int(x) for x in sel.get_treatment_resistant()]
     subs = [Subgroup("sensitive", {"treatment_resistant_effects": 1.0}, therapy_response=1),
-            Subgroup("resistant", {"treatment_resistant_effects": 4.0},
-                     subclone_mutations=loci, subclone_cells=subclone_cells, therapy_response=0)]
+            Subgroup("resistant", {"treatment_resistant_effects": 6.0}, therapy_response=0)]
     co = Cohort(patient_seeds=list(range(1, n_patients + 1)), genome_params=PM_GENOME,
                 selection_params=PM_SEL, cancer_cell_params=PM_CANCER, deme_params=PM_DEME,
                 spatial_params=PM_SPATIAL, subgroups=subs, grow_steps=steps)
@@ -157,50 +160,54 @@ def pm_cohort(n_patients=16, steps=260, n_loci=6, subclone_cells=2):
     return co
 
 
-def _chemo():
-    return Chemotherapy(start=0, effectiveness=0.95, toxicity=0.01, kill_rate=1.8, rate_multiplier=2.5)
+def _adjuvant_chemo():
+    return Chemotherapy(start=PM_THERAPY_START, effectiveness=0.95, toxicity=0.01,
+                        kill_rate=1.8, rate_multiplier=2.5)
 
 
-def differential_response(cohort):
-    """Per-patient baseline and treated cancer size (fresh, identical-setup runs differing only in the
-    therapy) — the ground-truth differential response by subgroup."""
-    base = np.array([cohort.grow_patient(i).get_cancer_size() for i in range(cohort.n_patients)], float)
-    treated = np.array([cohort.grow_patient(i, treatment=_chemo()).get_cancer_size()
-                        for i in range(cohort.n_patients)], float)
-    subgroup = np.array([cohort.subgroup_assignment[i] for i in range(cohort.n_patients)])
-    return dict(baseline=base, treated=treated, subgroup=subgroup)
+def _cancer_snv_of(tumor):
+    tumor.make_cell_data()
+    cs = tumor.cell_data["cell_snv"].values
+    gid = tumor.cell_data["cell_type"].iloc[:, 0].astype(str).values
+    can = np.array([tumor.genotypes[g].type == "cancer" for g in gid], dtype=bool)
+    return cs[can] if can.size else cs[:0]
 
 
-def stratification(cohort):
-    """Recover the therapy-responsive subgroup from the BASELINE molecular profile — contrasting a BULK
-    biomarker (mean VAF at the resistance loci) with a SINGLE-CELL one (fraction of cells co-mutated at
-    the resistance loci = the pre-existing resistant subclone). The subclone is subclonal, so the
-    single-cell signature is the clean, specific marker of a non-responder — stratification with a known
-    answer key. Also reports a cross-validated whole-profile classifier."""
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.model_selection import cross_val_predict
-    from sklearn.metrics import roc_auc_score, accuracy_score
-    if not cohort.patients:
-        cohort.run()
+def pm_analysis(cohort):
+    """Grow each patient untreated (baseline) and under ADJUVANT therapy, and score:
+      * the ground-truth DIFFERENTIAL RESPONSE (treated cancer size by subtype);
+      * RECOVERY of the responsive subtype from molecular data — honestly contrasting the non-predictive
+        BASELINE (standing resistance mutations are present in BOTH subtypes; only their functional
+        effect differs, so a bulk baseline call cannot separate them) with the EMERGENT signature the
+        therapy reveals (the relapsed tumour is clonally enriched for the selected resistance mutations)
+        and the response readout itself (who benefits, the known answer)."""
+    from sklearn.metrics import roc_auc_score
+    y = np.array([0 if cohort.subgroup_assignment[i] == "sensitive" else 1
+                  for i in range(cohort.n_patients)])
     loci = list(getattr(cohort, "_resistance_loci", ()))
-    feats, y, bulk, singlecell = [], [], [], []
-    for i, pr in enumerate(cohort.patients):
-        cs, _ = _cancer_snv(pr)
-        feats.append(cs.mean(0) if cs.shape[0] else np.zeros(pr.tumor.n_genes))
-        y.append(0 if cohort.subgroup_assignment[i] == "sensitive" else 1)
-        bulk.append(float(cs[:, loci].mean()) if (cs.shape[0] and loci) else 0.0)             # bulk mean VAF
-        singlecell.append(float((cs[:, loci] > 0).all(1).mean()) if (cs.shape[0] and loci) else 0.0)  # subclone frac
-    X = np.vstack(feats)
-    y = np.array(y)
-    bulk = np.array(bulk)
-    singlecell = np.array(singlecell)
-    clf = LogisticRegression(max_iter=1000, C=1.0)
-    proba = cross_val_predict(clf, X, y, cv=min(5, cohort.n_patients // 2), method="predict_proba")[:, 1]
-    auc = lambda s: roc_auc_score(y, s) if 0 < y.sum() < len(y) else float("nan")
-    return dict(X=X, y=y, proba=proba, clf_auc=float(auc(proba)),
-                clf_acc=float(accuracy_score(y, (proba >= 0.5).astype(int))),
-                bulk=bulk, singlecell=singlecell, bulk_auc=float(auc(bulk)),
-                singlecell_auc=float(auc(singlecell)), resistance_loci=loci)
+    auc = lambda s: float(roc_auc_score(y, s)) if 0 < y.sum() < len(y) else float("nan")
+
+    baseline_sizes, treated_sizes, baseline_bm, relapse_bm = [], [], [], []
+    for i in range(cohort.n_patients):
+        base = cohort.grow_patient(i)                                   # untreated
+        treat = cohort.grow_patient(i, treatment=_adjuvant_chemo())     # adjuvant therapy
+        baseline_sizes.append(base.get_cancer_size())
+        treated_sizes.append(treat.get_cancer_size())
+        cb, ct = _cancer_snv_of(base), _cancer_snv_of(treat)
+        # baseline "standing resistance" = any resistance-locus mutation present (emergent, neutral)
+        baseline_bm.append(float((cb[:, loci] > 0).any(1).mean()) if (cb.shape[0] and loci) else 0.0)
+        # emergent signature therapy REVEALS = fraction of surviving cells carrying a resistance mutation
+        relapse_bm.append(float((ct[:, loci] > 0).any(1).mean()) if (ct.shape[0] and loci) else 0.0)
+
+    baseline_sizes = np.array(baseline_sizes, float)
+    treated_sizes = np.array(treated_sizes, float)
+    baseline_bm = np.array(baseline_bm)
+    relapse_bm = np.array(relapse_bm)
+    subgroup = np.array([cohort.subgroup_assignment[i] for i in range(cohort.n_patients)])
+    return dict(subgroup=subgroup, y=y, baseline=baseline_sizes, treated=treated_sizes,
+                baseline_bm=baseline_bm, relapse_bm=relapse_bm,
+                response_auc=auc(treated_sizes), baseline_auc=auc(baseline_bm),
+                relapse_auc=auc(relapse_bm), resistance_loci=loci)
 
 
 # ======================================================================================

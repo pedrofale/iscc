@@ -39,24 +39,22 @@ class Subgroup:
     ``selection_delta`` is merged onto the cohort's base ``selection_params`` for patients in this
     subgroup; keep it to EFFECT scalars (``driver_effects``, ``treatment_resistant_effects``,
     ``immune_resistant_effects``, ``dispersal_effects``) so the driver landscape stays shared.
-    ``founder_mutations`` (list of flat gene indices) are TRUNCAL alterations pre-seeded into the
-    founder genome — present in EVERY cancer cell (clonal), the *primary/intrinsic* resistance case.
+    Resistance itself is NOT seeded: it must EMERGE from mutation + selection (the whole point of a
+    mechanistic simulator — a bolt-on injection would hand-impose the answer). A subtype is defined by
+    an EFFECT scalar such as ``treatment_resistant_effects``; during growth, resistance mutations arise
+    spontaneously at the shared resistance loci and drift as neutral standing variation, and under
+    therapy they are selected in the high-effect subtype (which relapses) and inert in the low-effect
+    subtype (which is eradicated). See :func:`iscc.cohort.cohort` / the personalized-medicine benchmark.
 
-    ``subclone_mutations`` + ``subclone_cells`` seed a PRE-EXISTING RESISTANT SUBCLONE: ``subclone_cells``
-    cells carrying ``subclone_mutations`` are added alongside the wild-type founder, so at baseline the
-    resistance is SUBCLONAL (a small minority) — the biologically common case (resistance usually
-    pre-exists as a rare subclone, not clonally). Under therapy that subclone is selected and drives
-    relapse; at baseline it is below bulk detection but visible at single-cell resolution — a sharper
-    demonstration of iscc's single-cell ground truth (bulk misses the actionable subclone, single-cell
-    finds it). Pair either mechanism with a high ``treatment_resistant_effects`` so the resistance
-    mutations actually confer escape. ``therapy_response`` is a free-form ground-truth label (e.g.
-    "sensitive"/"resistant", or a numeric expected response) — the stratification / biomarker answer key.
+    ``founder_mutations`` (flat gene indices) seed a TRUNCAL, INHERITED alteration into the founder
+    genome (present in every cancer cell) — appropriate for a *germline*/hereditary subtype-defining
+    background (e.g. a germline variant), NOT for modelling acquired resistance (which must emerge).
+    ``therapy_response`` is a free-form ground-truth label (e.g. "sensitive"/"resistant", or a numeric
+    expected response) — the stratification / biomarker answer key.
     """
     name: str
     selection_delta: dict = field(default_factory=dict)
     founder_mutations: tuple = ()
-    subclone_mutations: tuple = ()
-    subclone_cells: int = 0
     therapy_response: object = None
 
 
@@ -219,9 +217,6 @@ class Cohort:
             founder_muts = founder_muts + list(self.germline_markers[patient_idx])
         if founder_muts:
             _apply_founder_mutations(t, founder_muts)
-        # pre-existing resistant SUBCLONE (subclonal at baseline; selected under therapy)
-        if sub.subclone_cells and sub.subclone_mutations:
-            _seed_subclone(t, sub.subclone_mutations, sub.subclone_cells)
         return t
 
     def grow_patient(self, patient_idx, treatment=None, grow_steps=None):
@@ -286,38 +281,4 @@ def _apply_founder_mutations(tumor, gene_indices):
         rep.update_genome_summary_mutation(sel, mut_bits, seg)
     rep.update_evolutionary_parameters(sel)
     # the founder's rates changed -> refresh every deme rate so event sampling is correct
-    tumor.deme_rates = np.array([tumor._deme_rate(i) for i in range(len(tumor.demes))], dtype=float)
-
-
-def _seed_subclone(tumor, gene_indices, n_cells):
-    """Seed a PRE-EXISTING resistant SUBCLONE: a new genotype carrying ``gene_indices`` mutations,
-    added at ``n_cells`` count into the founder's deme (a subclonal minority alongside the wild-type
-    founder). Under therapy it is selected and drives relapse; at baseline it is subclonal. Mirrors a
-    single mutating division: it deep-copies the founder genome first (copy-on-write) so the founder
-    is untouched, then registers a new child genotype."""
-    from copy import deepcopy
-    founder = tumor.genotypes[tumor.founder_id]
-    sel = tumor.selection
-    child = founder.divide()
-    child.genome = deepcopy(founder.genome)
-    child.genome_summary = deepcopy(founder.genome_summary)
-    offs = np.concatenate([[0], np.cumsum(sel.segment_sizes)]).astype(int)
-    for g in gene_indices:
-        g = int(g)
-        seg = int(np.searchsorted(offs, g, side="right") - 1)
-        pos = g - int(offs[seg])
-        allele = child.genome[seg]["p"][0]
-        if allele[pos]:
-            continue
-        allele[pos] = True
-        mut_bits = np.zeros(sel.segment_sizes[seg], dtype=bool)
-        mut_bits[pos] = True
-        child.update_genome_summary_mutation(sel, mut_bits, seg)
-    child.update_evolutionary_parameters(sel)
-    child.set_genotype_id()
-    tumor._register(child)
-    tumor.genotypes_parents[child.genotype_id] = founder.genotype_id
-    # add to a deme that already holds the founder (the seeded micro-lesion)
-    home = next((i for i, d in enumerate(tumor.demes) if tumor.founder_id in d), len(tumor.demes) // 2)
-    tumor._add(home, child.genotype_id, int(n_cells))
     tumor.deme_rates = np.array([tumor._deme_rate(i) for i in range(len(tumor.demes))], dtype=float)

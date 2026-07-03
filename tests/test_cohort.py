@@ -98,57 +98,47 @@ def test_subgroups_assignment_and_response():
     assert rt.loc[0, "therapy_response"] == 1 and rt.loc[1, "therapy_response"] == 0
 
 
-def test_truncal_founder_mutation_is_clonal_and_resistant():
-    """A subgroup truncal founder mutation is present in every cancer cell and (with a resistance
-    effect) makes the founder constitutively treatment-resistant."""
-    sel = _cohort().selection
-    tr_genes = [int(x) for x in sel.get_treatment_resistant()][:5]
-    subs = [Subgroup("R", {"treatment_resistant_effects": 4.0},
-                     founder_mutations=tuple(tr_genes), therapy_response=0)]
+def test_founder_mutations_are_clonal():
+    """`founder_mutations` (a truncal/inherited alteration, e.g. a germline background) is present in
+    the vast majority of cancer cells — the mechanism the per-patient germline demux markers use."""
+    marks = [3, 11, 27]
+    subs = [Subgroup("G", founder_mutations=tuple(marks))]
     co = Cohort(patient_seeds=[1], genome_params=GENOME, selection_params=SELECTION,
                 cancer_cell_params=CANCER, deme_params=DEME, spatial_params=SPATIAL,
-                grow_steps=120, subgroups=subs)
-    t = co._build_tumor(0)
-    rep = t.genotypes[t.founder_id]
-    assert rep.evolutionary_parameters["treatment_resistance"] > 0.5     # constitutively resistant
-    co.run()
+                grow_steps=120, subgroups=subs).run()
     snv = co.patients[0].cell_data["cell_snv"].values
     ct = co.patients[0].cell_data["cell_type"].iloc[:, 0].astype(str).values
     genos = co.patients[0].tumor.genotypes
     cancer = np.array([genos[g].type == "cancer" for g in ct])
-    # the truncal mutations are clonal — present in the vast majority of cancer cells (a few may lose
-    # a copy via CNA deletion, dropping VAF to 0), unlike a random passenger.
-    assert (snv[cancer][:, tr_genes] > 0).mean() > 0.9
+    assert (snv[cancer][:, marks] > 0).mean() > 0.9
 
 
-def test_resistant_subclone_is_subclonal_and_selected_by_therapy():
-    """A seeded resistant SUBCLONE is a minority at baseline (subclonal) and is SELECTED under therapy
-    (the resistant patient relapses while a subclone-free control is eradicated)."""
+def test_resistance_EMERGES_and_drives_differential_response():
+    """Resistance is NOT seeded — it emerges from mutation + selection. Two runs of the SAME patient
+    (same seed/layout, so identical emergent standing variation) that differ ONLY in
+    `treatment_resistant_effects` diverge under adjuvant therapy: the high-effect (resistant) subtype
+    relapses from the SELECTED emergent resistance mutations while the low-effect (sensitive) subtype is
+    eradicated. The emergent resistance mutations are inert in the sensitive run — nothing was imposed."""
     from iscc.treatment.chemotherapy import Chemotherapy
-    # larger genome so the resistance loci are not saturated by random mutation
-    genome = {"n_segments": 12, "segment_size": 150}
-    sel_kw = {**SELECTION, "prop_treatment_resistance": 0.05}
-    tmp = Cohort(patient_seeds=[1], genome_params=genome, selection_params=sel_kw,
-                 cancer_cell_params=CANCER, deme_params=DEME, spatial_params=SPATIAL)
-    loci = tuple(int(x) for x in tmp.selection.get_treatment_resistant()[:6])
-    subs = [Subgroup("sensitive", {"treatment_resistant_effects": 1.0}, therapy_response=1),
-            Subgroup("resistant", {"treatment_resistant_effects": 4.0},
-                     subclone_mutations=loci, subclone_cells=2, therapy_response=0)]
-    co = Cohort(patient_seeds=[1, 2], genome_params=genome, selection_params=sel_kw,
-                cancer_cell_params=CANCER, deme_params=DEME, spatial_params=SPATIAL,
-                grow_steps=220, subgroups=subs, subgroup_assignment=["sensitive", "resistant"])
-    chemo = lambda: Chemotherapy(start=0, effectiveness=0.95, toxicity=0.01, kill_rate=1.8, rate_multiplier=2.5)
-    sens_treated = co.grow_patient(0, treatment=chemo()).get_cancer_size()
-    res_treated = co.grow_patient(1, treatment=chemo()).get_cancer_size()
-    assert sens_treated < res_treated                       # differential response
-    # baseline: the co-mutated subclone is a MINORITY of the resistant tumour's cancer cells
-    co.run()
-    from iscc.cohort.groundtruth import _cancer_snv
-    cs, _ = _cancer_snv(co.patients[1])
-    frac = (cs[:, list(loci)] > 0).all(1).mean()
-    assert 0.0 < frac < 0.6                                  # present but subclonal
-    cs0, _ = _cancer_snv(co.patients[0])
-    assert (cs0[:, list(loci)] > 0).all(1).mean() < frac     # sensitive has ~no such subclone
+    genome = {"n_segments": 8, "segment_size": 80}
+    deme = {"carrying_capacity": 10, "initial_cancer_cells": 8}
+    spatial = {"grid_size": 15, "structure_radius": 0}
+    cancer = {"division_rate": 0.6, "death_rate": 0.08, "max_birth_rate": 0.98,
+              "mutation_rate": 0.9, "dispersal_rate": 0.3}
+
+    def treated(seed, tr_eff):
+        sel = {"prop_driver": 0.04, "prop_dispersal": 0.0, "prop_immune_resistance": 0.0,
+               "prop_treatment_resistance": 0.06, "driver_effects": 1.15,
+               "treatment_resistant_effects": tr_eff}
+        co = Cohort(patient_seeds=[seed], genome_params=genome, selection_params=sel,
+                    cancer_cell_params=cancer, deme_params=deme, spatial_params=spatial, grow_steps=320)
+        chemo = Chemotherapy(start=120, effectiveness=0.95, toxicity=0.01, kill_rate=1.8, rate_multiplier=2.5)
+        return co.grow_patient(0, treatment=chemo).get_cancer_size()
+
+    seeds = (1, 2, 3)
+    sens = sum(treated(s, 1.0) for s in seeds)
+    res = sum(treated(s, 6.0) for s in seeds)
+    assert res > 3 * sens        # the resistant subtype carries a much larger post-therapy burden
 
 
 def test_germline_markers_are_disjoint_and_private():
