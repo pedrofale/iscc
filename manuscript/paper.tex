@@ -618,6 +618,64 @@ guide the interpretation of state-of-the-art spatial lineage-tracing experiments
   \label{fig:petracer_real}
 \end{figure}
 
+\subsection*{\texttt{iscc} provides non-circular ground truth for multi-modal integration}
+\label{sec:integration}
+The same logic extends to methods that \emph{integrate} DNA and RNA. Two widely used tools invert the
+relationship between copy number and expression: clonealign~\cite{campbell_clonealign_2019} assigns
+single-cell RNA to a clone-of-origin under the model that expression is proportional to copy number,
+and inferCNV / copyKAT~\cite{patel_single_2014, gao_copykat_2021} infer copy number from expression by
+smoothing along the genome. Benchmarking such methods requires a consistent cross-modal ground truth,
+which real data lack; but it also requires that the benchmark be \emph{non-circular}. A simulator that
+layers expression onto externally supplied CNAs must hand-impose a copy-number-to-expression law --- and
+if that law is the dosage model the method assumes, the benchmark merely re-tests the method on its own
+assumption. In \texttt{iscc} the coupling is not imposed: it emerges from the engine's per-allele
+dosage model (a neutral gene's expression scales with its copy number, modulated by selection) and, for
+the spatial programmes, from the microenvironment. The method's assumption is therefore only
+approximately correct on \texttt{iscc} data, and every cell additionally carries its true clone label
+and true copy number.
+
+We ran the genuine tools --- the R \texttt{clonealign} package and \texttt{infercnvpy} (the scverse
+reimplementation of inferCNV), each in its own environment --- on a simulated multi-clone tumour
+measured by both scDNA-seq and scRNA-seq, and scored them against \texttt{iscc}'s ground truth
+(\Cref{fig:clonealign,fig:infercnv}). Given the clones' copy-number profiles from the DNA modality,
+clonealign assigns scRNA cells to their true clone-of-origin with a mean one-vs-rest AUC of $0.84$
+(accuracy $0.58$ across four clones against a chance level of $0.25$), from expression alone. Crucially
+the assignment is driven by the emergent dosage coupling: sweeping the fraction of genes that carry a
+clone-specific copy-number difference, assignment quality rises monotonically from the chance baseline
+to its full value (\Cref{fig:clonealign}D), and the clones that blur together are exactly those
+separated by a single altered segment. inferCNV, in turn, separates the malignant cells from the
+diploid normal compartment almost perfectly (AUC $0.99$ by CNV burden) and recovers the clonal
+gain/loss structure (clone-level correlation $0.86$ with the true copy number); per-cell copy-number
+correlation is real but modest, reflecting the genuine difficulty of the inverse problem at single-cell
+resolution. Together with the PEtracer benchmark, these demonstrate a general pattern: because
+\texttt{iscc} generates every modality from one evolving tumour, it supplies the non-circular,
+cross-modal ground truth that integration methods are otherwise validated without.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{validation_clonealign.png}
+  \caption{\textbf{clonealign recovers clone-of-origin from the emergent copy-number dosage.}
+  (A) expression embedding of the scRNA cells coloured by true clone: the clones overlap, so expression
+  encodes clone only weakly. (B) clonealign's assignment confusion (row-normalised): clones defined by
+  distinct copy-number segments are recovered, while clones separated by a single segment blur.
+  (C) per-clone one-vs-rest AUC (mean $0.84$). (D) assignment quality rises with the fraction of genes
+  carrying a clone-specific copy-number effect --- the method works \emph{because} of the emergent
+  dosage coupling, a non-circular test.}
+  \label{fig:clonealign}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{validation_infercnv.png}
+  \caption{\textbf{inferCNV recovers copy number from expression against \texttt{iscc}'s ground truth.}
+  (A) true (left) and inferred (right, $z$-scored per segment) copy number, cells $\times$ segments,
+  malignant cells ordered by clone --- the clonal gain/loss blocks are recovered.
+  (B) per-segment single-cell correlation (red = copy-number-altered segments); the denoised clone-level
+  correlation with the true copy number is $0.86$. (C) inferCNV separates malignant from normal cells by
+  CNV burden (AUC $0.99$).}
+  \label{fig:infercnv}
+\end{figure}
+
 \subsection*{A ground-truth benchmark: multi-region bulk ``sample trees'' are not phylogenies}
 \label{sec:multiregion}
 The same coupling of lineage and space lets \texttt{iscc} quantify a second, long-argued error.

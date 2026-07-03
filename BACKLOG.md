@@ -25,10 +25,19 @@ Pitch: "as scMultiSim provides ground truth for cell-state/regulatory tasks, isc
 full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (their turf; deferred).
 
 - **NOW (separate session) — the ground-truth benchmark suite** (run real methods on iscc data,
-  score vs known truth). **Active next: `clonealign` + `inferCNV`** (handoff:
-  `handoffs/clonealign_infercnv.md`):
-  - **Flagship — `clonealign`** (CNA-dosage DNA↔RNA clone assignment; works today, non-circular). AUC vs true clone.
-  - `inferCNV`/`copyKAT` (CNA-from-expression) — correlation vs true per-cell CNA.
+  score vs known truth). **Active next: multi-batch integration / clustering / deconvolution:**
+  - **DONE — `clonealign`** (CNA-dosage DNA↔RNA clone assignment; non-circular). The GENUINE R
+    `clonealign` (kieranrcampbell/clonealign, in the dedicated `iscc-clonealign` env) assigns scRNA
+    cells to their true clone at mean AUC 0.84 (acc 0.58 vs 0.25 chance, 4 clones), driven by the
+    EMERGENT dosage coupling (accuracy rises with the CN-informative-gene fraction).
+    `validation/validate_clonealign.py` + `validation/clonealign_runner.R` + fig `validation_clonealign.png`.
+  - **DONE — `inferCNV`/`copyKAT`** (CNA-from-expression). The GENUINE `infercnvpy` (scverse, in the
+    dedicated `iscc-infercnv` env) separates malignant vs normal at AUC 0.99 and recovers the clonal
+    CNA structure (clone-level r 0.86 vs true per-cell CN). `validation/validate_infercnv.py` +
+    `validation/infercnv_runner.py` + fig `validation_infercnv.png`. Shared data-gen +
+    run/score helpers in `validation/integration_common.py`; `tests/test_integration.py` (8 tests,
+    real tools guarded by dedicated-env availability); manuscript §"non-circular ground truth for
+    multi-modal integration". Setup: `validation/README_integration.md`.
   - Multi-batch **integration/correction** on F3 batches (Harmony/scVI) — iLISI/ARI vs known clones/types.
     *(subsumed by / graduates into the Multi-patient cohort milestone below.)*
   - Cell-type/clone **clustering** — ARI; **spatial deconvolution** (cell2location/Tangram) — per-spot accuracy.
