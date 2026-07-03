@@ -350,8 +350,10 @@ cells within each spot. Each modality can additionally be emitted as aligned seq
 (\Cref{sec:reads}).
 
 To verify that the simulated single-cell RNA-seq data are realistic, we compared \texttt{iscc}'s
-output to a real 10x dataset (PBMC3k) using standard count-realism statistics
-(\Cref{fig:validation_scrna}). The simulated data reproduce the variation in library size
+output to a real 10x dataset (PBMC3k) using the same count-realism summary statistics that
+single-cell simulators such as Splatter and scDesign are evaluated
+on~\cite{zappia_splatter_2017, song_scdesign3_2024} (\Cref{fig:validation_scrna}). The simulated
+data reproduce the variation in library size
 across cells (coefficient of variation $0.40$ vs $0.46$ in real data), the mean--variance
 overdispersion relationship, and the increase of dropout with decreasing mean expression. As
 expected, the abstract gene model and smaller synthetic genome yield somewhat denser data than
@@ -401,6 +403,39 @@ re-simulating a fitted 10x Visium breast-cancer section (\Cref{fig:validation_vi
   library size and overdispersion, in contrast to the fixed-depth, underdispersed counts of a
   plain multinomial model.}
   \label{fig:validation_scrna}
+\end{figure}
+
+\subsection*{\texttt{iscc} reproduces spatial microenvironment structure}
+\label{sec:microenv}
+Beyond clonal and copy-number structure, real tumor expression is shaped by the microenvironment:
+cells in a poorly perfused core become hypoxic, and paracrine signalling couples neighbouring cells.
+\texttt{iscc} models this on the deme grid, so that a cell's expression depends on where it sits, not
+only on its genotype. Oxygen is supplied by the vasculature --- which in a solid tumor resides in the
+surrounding perfused stroma rather than inside the mass --- and consumed in proportion to local cell
+density; solving the resulting reaction--diffusion balance yields a hypoxia field that is high in the
+tumor core and low at the oxygenated rim, recapitulating the viable-rim/necrotic-core organization
+long reproduced by agent-based tumor models such as PhysiCell~\cite{ghaffarizadeh_physicell_2018}
+(\Cref{fig:microenv}). Because the vascular supply is external, a cancer-filled duct develops a
+hypoxic centre even with no oxygenated margin --- the comedonecrosis of high-grade ductal carcinoma
+\textit{in situ}. Hypoxia-responsive genes, and a ligand--receptor programme driven by neighbouring
+cell density (in the spirit of the cell--cell-interaction models of
+scMultiSim~\cite{li_scmultisim_2025}), are modulated accordingly. Crucially this microenvironmental
+component is spatial but not heritable, and it perturbs the expression read-out only, leaving the
+evolutionary dynamics unchanged --- so the same tumor can be generated with and without it. This
+gives simulated spatial data realistic niche structure (without which spatial analyses have no ground
+truth to be tested against) and, as we show below, sets up a subtle failure mode of lineage-based
+analyses.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{validation_microenvironment.png}
+  \caption{\textbf{Microenvironment-driven expression.} (A) the hypoxia field with oxygen supplied
+  uniformly versus (B) supplied only by perfused non-cancer tissue, which drives a hypoxic core even
+  in a filled tissue (the comedonecrosis mechanism); (C) the cell--cell-communication field
+  (neighbourhood-averaged emitter density, spatially autocorrelated); (D) the induced expression
+  change is a graded, spatially-coherent programme applied to the read-out only (fold-change
+  $= 1 + s\cdot\text{hypoxia}$), leaving growth unchanged.}
+  \label{fig:microenv}
 \end{figure}
 
 \subsection*{Biopsy and dissociation shape the sampled data}
@@ -518,6 +553,62 @@ mutations are detectable and why.
   across capture fidelities; (right) detection is gated by expression, rising from near zero for
   lowly expressed genes and saturating only at high UMI counts.}
   \label{fig:scrna_snv}
+\end{figure}
+
+\subsection*{A ground-truth benchmark: a lineage--space confound in spatial lineage tracing}
+\label{sec:petracer}
+Because every simulated cell carries both its lineage and its spatial niche as ground truth,
+\texttt{iscc} can be used to benchmark methods that analyse spatial lineage-tracing data --- the same
+way scMultiSim and SISTEM validate their simulators by scoring downstream inference against a known
+answer~\cite{li_scmultisim_2025, weiner_sistem_2025}. We consider the decomposition of expression into
+cell-intrinsic (heritable) and cell-extrinsic (microenvironmental) programmes that spatial
+lineage-tracing studies perform by measuring gene autocorrelation on the lineage tree versus in space,
+as in PEtracer~\cite{koblan_petracer_2025} using Hotspot/PhyloVision~\cite{detomaso_hotspot_2021}.
+
+Applying this decomposition to \texttt{iscc} data, where the true category of every gene is known, we
+uncover a systematic confound (\Cref{fig:petracer}). When cells disperse little, clones form compact
+spatial territories, so closely related cells occupy the same region --- and therefore the same niche.
+A purely environmental programme (hypoxia) then acquires lineage autocorrelation and is
+\emph{misclassified as heritable} by a tree-based method, even though it is not inherited at all. The
+effect is graded: as the dispersal rate rises and clones intermix, lineage and space decorrelate and
+the misclassification resolves (the fraction of extrinsic genes called heritable falls from
+essentially all toward the neutral baseline). This is exactly the error that real data cannot
+diagnose --- there is no ground truth for which genes are environmental --- and that \texttt{iscc}
+exposes because it has one.
+
+The same confound is measurable in real PEtracer tumors (\Cref{fig:petracer_real}). Its
+ground-truth-free signature --- whether genes that are spatially autocorrelated also carry lineage
+autocorrelation --- is strong in the territorial lineages of a mouse mammary tumor
+($r = 0.4$--$0.5$) and absent in an intermixed one ($r \approx 0$), and \texttt{iscc}'s dispersal
+sweep brackets the real values. A failure mode discovered with \texttt{iscc}'s ground truth is thus
+both real and quantitatively reproduced, illustrating how a consistent tumor-to-data simulator can
+guide the interpretation of state-of-the-art spatial lineage-tracing experiments.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{validation_petracer.png}
+  \caption{\textbf{A lineage--space confound, exposed by \texttt{iscc}'s ground truth.} (A) at low
+  dispersal clones form contiguous spatial territories (lineage $\approx$ space). (B) per-gene
+  decomposition (spatial vs lineage autocorrelation) coloured by true category: the extrinsic
+  (hypoxia/cell--cell-communication) genes ride high on the lineage axis --- misclassified as
+  heritable. (C) as dispersal increases and clones intermix, the fraction of extrinsic genes called
+  heritable collapses toward the neutral baseline. (D) at high dispersal the extrinsic genes fall off
+  the lineage axis (the confound is resolved).}
+  \label{fig:petracer}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{validation_petracer_real.png}
+  \caption{\textbf{The confound is measurable in real PEtracer tumors.}
+  (A) the ground-truth-free confound signature --- the across-gene correlation between spatial and
+  lineage autocorrelation --- versus the lineage--space coupling, for \texttt{iscc}'s dispersal sweep
+  (blue) and three real PEtracer lineages of a mouse mammary tumor (red): \texttt{iscc} brackets the
+  real regime. (B) in a real territorial lineage, spatially-autocorrelated genes also carry lineage
+  autocorrelation ($r \approx 0.42$). (C) clone-size distributions, \texttt{iscc} versus the real
+  lineages. Statistics are computed per tumor (the model is single-site; multi-site metastasis is
+  future work).}
+  \label{fig:petracer_real}
 \end{figure}
 
 \subsection*{\texttt{iscc} implements conventional and adaptive therapy strategies}
