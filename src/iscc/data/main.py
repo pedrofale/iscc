@@ -144,6 +144,9 @@ def main(sample_path, assay, assay_config, grid_side, protocol, breadth, depth_m
         # --count-model default is "nb" for scRNA; only override here if the user passed one).
         config.setdefault("count_model", count_model if count_model != "nb" else "dm")
         config.setdefault("seed", batch_seed)
+    if assay == "scspatial":
+        config.setdefault("count_model", count_model)
+        config.setdefault("seed", batch_seed)
     instrument = ASSAYS[assay](**config)
 
     run_kwargs = {}

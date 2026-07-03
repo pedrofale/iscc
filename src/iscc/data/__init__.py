@@ -3,6 +3,7 @@ from .dna import (
 )
 from .rna import scRNA, run_scrna_batches, concat_batches
 from .visium import Visium, morans_i
+from .imaging import scSpatial, IMAGING_PRESETS
 from .batch import (
     Batch, BatchHyperParams, COUNT_MODELS,
     DNABatch, DNABatchHyperParams, DNA_DEPTH_MODELS,
@@ -17,6 +18,7 @@ ASSAY_NAMES = {
     'scdna': 'scDNA',
     'scrna': 'scRNA',
     'visium': 'Visium',
+    'scspatial': 'Single-cell spatial',
 }
 
 ASSAYS = {
@@ -24,4 +26,5 @@ ASSAYS = {
     'scdna': scDNA,
     'scrna': scRNA,
     'visium': Visium,
+    'scspatial': scSpatial,
 }

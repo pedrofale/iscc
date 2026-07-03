@@ -384,16 +384,16 @@ data — so realistic defaults can be *learned*, not guessed.
   **DNA+RNA+spatial integration** (the SISTEM-analog claim for paper 1) and completes the
   "coupled-process beats CNA-sim-plus-expression-on-top" argument.
 
-- **F9 — PLANNED — single-cell spatial assay (imaging-based; MERFISH/Xenium-like).** Complements
-  the spot-based Visium (F6) with a **single-cell-resolution** spatial assay: per-cell counts at the
-  cell's `(row, col)` (NO spot aggregation), over a **targeted gene panel** (the *transcriptome
-  coverage* knob — subset size / gene list), drawn from the shared NB count model with
-  imaging-appropriate *data-distribution* params (lower depth, near-zero panel dropout, higher
-  per-gene sensitivity). Surfaces per-cell coords + clone/type ground truth; reuses the F3 scRNA NB
-  machinery + the `cell_crd` coords. Platform-agnostic (MERFISH/Xenium = parameter presets, not a
-  hardcoded name). Output: AnnData (cells × panel genes), coords in `obsm`. Enables validation
-  against single-cell spatial + lineage datasets (**PEtracer**, Science 2025 — spatial clonal
-  architecture + tree statistics now; the intrinsic-vs-extrinsic module decomposition once F8 lands).
+- **F9 ✅ DONE — single-cell spatial assay (imaging-based; MERFISH/Xenium-like).** `data/imaging.py`
+  `scSpatial` (registered as `ASSAYS["scspatial"]`): per-cell counts at the cell's `(row, col)` (NO
+  spot aggregation), over a **targeted gene panel** (the *transcriptome coverage* knob — `panel` list
+  or `n_panel_genes` top-N; whole-transcriptome default), drawn from the shared `batch.Batch` NB/DM
+  count machinery with imaging *data-distribution* params (`IMAGING_PRESETS` merfish/xenium: lower
+  depth, near-zero dropout, no droplet doublets). Surfaces per-cell coords + clone/type ground truth;
+  output AnnData (cells × panel genes), coords in `obsm["spatial"]`. Platform-agnostic (presets, not
+  a hardcoded name). Tests `tests/test_assay_scspatial.py` (14). Enables validation against
+  single-cell spatial + lineage datasets (**PEtracer**, Science 2025 — spatial clonal architecture +
+  tree statistics now; the intrinsic-vs-extrinsic module decomposition once F8 lands).
 
 ## Validation hooks (per DESIGN_inference conventions)
 - Batch model: *recover* injected batch params via `estimate()`; show two same-tumor batches share

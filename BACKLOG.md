@@ -56,11 +56,11 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   ligand–receptor CCI (scMultiSim/sCCIgen-style) to `get_exp`. Required for the spatial half of the
   integration story and for niche/CCI tutorials.
 
-## F9 — single-cell spatial assay (imaging-based; lightweight)
-- **NOW / NEXT** — per-cell-resolution spatial assay (MERFISH/Xenium-like): per-cell panel counts at
-  `cell_crd`, NB model, transcriptome-coverage (panel) + data-distribution knobs; reuses F3 scRNA
-  machinery, no spot aggregation. Design: `DESIGN_features.md` F9 milestone. Enables the PEtracer
-  expression comparison. Lightweight — buildable inline.
+## F9 — single-cell spatial assay (imaging-based) ✅ DONE
+- **DONE** — `data/imaging.py` `scSpatial` (`ASSAYS["scspatial"]`): per-cell panel counts at
+  `cell_crd`, NB/DM, transcriptome-coverage (`panel`/`n_panel_genes`) + data-distribution knobs
+  (`IMAGING_PRESETS`), no spot aggregation, coords retained. 14 tests; wired into `isccdata` CLI
+  (`-a scspatial`). Unblocks the PEtracer expression comparison. **Next (optional):** a demo notebook.
 
 ## External-simulator adapters (recipe; additive `iscc.integrations` seam)
 - **LATER** — let iscc be the evolutionary+spatial substrate; export lineage tree (Newick) + AnnData
