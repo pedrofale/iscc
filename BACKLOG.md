@@ -33,14 +33,17 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   - Already in-paper (count as suite members): **selection/rate inference** (ABC recovery), **sampling/
     experimental-design**, realism-vs-real. Niche/**CCI** inference waits on F8.
   - Manuscript: reframe validation as *"iscc as a benchmarking substrate"* organized as this suite.
-- **NEXT — PEtracer real-data validation** (realism pillar; the most complete real reference).
-  [PEtracer](https://www.science.org/doi/10.1126/science.adx3800) (Weissman, Science 2025) is one of
-  the only real datasets with spatial + expression (MERFISH) + lineage tree jointly — matches iscc's
-  integrated output, so it validates the *coupling* (iscc's differentiator). Data public on Figshare
-  (10.6084/m9.figshare.28473866). Now (no F8): spatial clonal architecture + lineage-tree statistics.
-  Post-F8: the cell-intrinsic (heritable) vs cell-extrinsic (spatial) module decomposition (flagship).
-  Caveats: MERFISH≠Visium (→ needs **F9** single-cell spatial assay for expression comparison); mouse
-  metastasis model (multi-site = R9, out of scope).
+- **NEXT (separate session) — PEtracer validation** (flagship real-data + ground-truth benchmark).
+  Handoff saved: `handoffs/PEtracer_validation.md`. F8 (extrinsic) + F9 (single-cell spatial) + the
+  engine's `genotypes_parents` lineage now make the intrinsic-vs-extrinsic decomposition possible.
+  **Tier 1 (self-contained):** run the Hotspot-style lineage-vs-spatial autocorrelation decomposition
+  on iscc data with a KNOWN split, and **expose the lineage-space CONFOUND** — under clonal
+  territories a purely environmental (hypoxia) signal gets lineage-autocorrelation, so a tree-based
+  method MIS-CLASSIFIES it as heritable; iscc uniquely reveals this (real data can't). Tunable via
+  `dispersal_rate` (territories vs intermixed). **The headline finding.** **Tier 2 (real data):**
+  reduce PEtracer (Figshare 10.6084/m9.figshare.28473866 + GEO GSE290975; DNA-reference cache
+  pattern), compare lineage/spatial-autocorrelation + clone-territory + tree stats. Caveats: MERFISH↔F9
+  ok; mouse metastasis (multi-site = R9) → validate per-tumour. User wants BOTH tiers.
 - **DONE — Capability/feature matrix** (Table 1, `paper.tex`; commit 4ecc7ab). Verify a few competitor
   cells (SISTEM spatial/reads, CINner DNA, J-SPACE selection/sampling, scMultiSim DNA/consistency).
 - **OPTIONAL (lean) — one realism head-to-head** iscc vs Splatter vs real on the 8 scRNA summary stats,
