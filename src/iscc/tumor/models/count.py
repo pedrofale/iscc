@@ -573,16 +573,27 @@ class GenotypeTumor:
                          if self.genotypes[gid].type == emitter_type) / cc
         return out
 
-    def _o2_field(self, D=1.0, k=1.0, s=0.2, n_iter=500, tol=1e-5):
+    def _o2_field(self, D=1.0, k=1.0, s=0.2, source="uniform", n_iter=500, tol=1e-5):
         """Steady-state O2 on the deme grid (BioFVM-style), returned as hypoxia = 1 - O2.
 
-        Solves D∇²O2 + s(1-O2) - k·density·O2 = 0 (supply everywhere from microvasculature,
-        consumed ∝ local density) by Jacobi relaxation with zero-flux edges. O2 ∈ [0,1] (a
-        weighted average of neighbours and the supply target 1), so hypoxia ∈ [0,1], high in the
-        dense core and low at the sparse rim — the viable-rim / necrotic-core signature.
+        Solves D∇²O2 + supply·(1-O2) - k·density·O2 = 0 by Jacobi relaxation with zero-flux edges.
+        O2 ∈ [0,1] (a weighted average of neighbours and the supply target 1), so hypoxia ∈ [0,1].
+
+        `source` sets where O2 comes from:
+          * ``"uniform"`` — supplied everywhere (a well-vascularised-tissue assumption). Gives a
+            hypoxic core only when the tumour has an oxygenated (empty/normal) margin.
+          * ``"perfused"`` — supplied ONLY by non-cancer (perfused stroma / empty) tissue:
+            supply ∝ (1 - cancer density). A solid cancer mass or a cancer-filled duct then develops
+            a hypoxic core from the O2 diffusion limit (comedonecrosis in DCIS) even with no empty
+            margin, because the vasculature does not live inside the tumour.
         """
         G = self.grid_size
         dens = self._deme_density().reshape(G, G)
+        if source == "perfused":
+            perfusion = np.clip(1.0 - self._emitter_density("cancer"), 0.0, 1.0).reshape(G, G)
+            supply = s * perfusion
+        else:
+            supply = s
         nn = np.full((G, G), 4.0)
         nn[0, :] -= 1; nn[-1, :] -= 1; nn[:, 0] -= 1; nn[:, -1] -= 1
         O2 = np.ones((G, G))
@@ -590,7 +601,7 @@ class GenotypeTumor:
             nb = np.zeros((G, G))
             nb[1:, :] += O2[:-1, :]; nb[:-1, :] += O2[1:, :]
             nb[:, 1:] += O2[:, :-1]; nb[:, :-1] += O2[:, 1:]
-            new = (D * nb + s) / (D * nn + s + k * dens)
+            new = (D * nb + supply) / (D * nn + supply + k * dens)
             if np.max(np.abs(new - O2)) < tol:
                 O2 = new
                 break
@@ -626,7 +637,8 @@ class GenotypeTumor:
         if len(self._hypoxia_genes) and float(hyp.get("strength", 0.0)) != 0.0:
             hypoxia = self._o2_field(D=float(hyp.get("o2_diffusion", 1.0)),
                                      k=float(hyp.get("o2_consumption", 1.0)),
-                                     s=float(hyp.get("o2_supply", 0.2)))
+                                     s=float(hyp.get("o2_supply", 0.2)),
+                                     source=hyp.get("o2_source", "uniform"))
             mod[:, self._hypoxia_genes] *= (1.0 + float(hyp["strength"]) * hypoxia[:, None])
         if len(self._cci_target_genes) and float(cci.get("strength", 0.0)) != 0.0:
             cci_signal = self._cci_field(cci.get("emitter_type", "immune"),

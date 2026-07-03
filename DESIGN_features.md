@@ -445,10 +445,15 @@ methods — the exact tools the integration story needs to run on.
 snapshot so it stays tau-leaping-compatible; per-cell expression still materialized on demand):
 
 1. **Diffusible fields (hypoxia / secreted factors)** — *translate PhysiCell/BioFVM*. Solve a
-   steady-state reaction–diffusion on the deme grid: O₂ supplied at the tumour boundary (or seeded
-   "vessels"), consumed ∝ local cell density → a hypoxia field with a tunable diffusion lengthscale.
-   Generic secreted-factor fields (e.g. a stromal morphogen) work the same way. Each cell reads its
-   deme's field value. Recapitulates the classic **viable rim / hypoxic-necrotic core**.
+   steady-state reaction–diffusion on the deme grid, consumed ∝ local cell density → a hypoxia
+   field. The O₂ **source** is configurable (`o2_source`): `"uniform"` supplies everywhere (a
+   well-vascularised-tissue assumption; a hypoxic core needs an oxygenated margin); `"perfused"`
+   supplies **only from non-cancer (perfused stroma / empty) tissue** — vasculature does not live
+   inside a tumour — so a solid cancer mass or a **cancer-filled duct** develops a hypoxic core from
+   the O₂ diffusion limit (**comedonecrosis** in DCIS) even with no empty margin. Each cell reads
+   its deme's field value. Recapitulates the classic **viable rim / hypoxic-necrotic core**.
+   (Explicit vessel demes as discrete O₂ sources — the substrate for angiogenesis / anti-VEGF
+   studies — are a future richer variant; see RESEARCH_QUESTIONS R8b.)
 2. **Cell–cell communication (ligand–receptor)** — *translate scMultiSim / sCCIgen*. A cell's
    receptor-target genes are modulated by the **ligand-emitting cell density in its deme
    neighbourhood** (immune, stromal, or clone-specific ligands). Deme-neighbourhood aggregation, the

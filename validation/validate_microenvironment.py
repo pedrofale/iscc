@@ -45,7 +45,8 @@ def main():
     from iscc.data import morans_i
 
     mp = {
-        "hypoxia": {"strength": 1.0, "n_genes": 60, "o2_consumption": 1.5, "o2_supply": 0.5},
+        "hypoxia": {"strength": 1.0, "n_genes": 60, "o2_consumption": 1.5, "o2_supply": 0.5,
+                    "o2_source": "perfused"},
         "cci": {"strength": 0.8, "n_target_genes": 60, "emitter_type": "cancer", "lengthscale": 3.0},
     }
 
@@ -60,48 +61,47 @@ def main():
     on = grow(mp)
     print(f"tumour: {on.get_tumor_size()} cells on a {SPATIAL['grid_size']}^2 grid")
 
-    # per-deme fields (occupied demes only)
+    # per-deme fields (occupied demes only). Compare the two O2-source models on the SAME tumour.
     dens = on._deme_density()
     occ = np.where(dens > 0)[0]
     coords = np.array([on.deme_coords[d] for d in occ], dtype=float)
-    hyp = on.microenv_truth["hypoxia"]
+    H = dict(o2_consumption=1.5, o2_supply=0.5)
+    hyp_u = on._o2_field(k=H["o2_consumption"], s=H["o2_supply"], source="uniform")
+    hyp_p = on._o2_field(k=H["o2_consumption"], s=H["o2_supply"], source="perfused")
     cci = on.microenv_truth["cci"]
-    emit = on._emitter_density("cancer")
 
-    mi_hyp = morans_i(hyp[occ], coords)
+    mi_u, mi_p = morans_i(hyp_u[occ], coords), morans_i(hyp_p[occ], coords)
     mi_cci = morans_i(cci[occ], coords)
-    r_dens = np.corrcoef(dens[occ], hyp[occ])[0, 1]
-    r_emit = np.corrcoef(emit[occ], cci[occ])[0, 1]
 
     # the pure extrinsic effect: ON/OFF fold-change of the hypoxia programme, per cell
-    hyp_g = on.microenv_truth["hypoxia_genes"]
-    cci_g = on.microenv_truth["cci_target_genes"]
-    hyp_only = np.setdiff1d(hyp_g, cci_g)
+    hyp_only = np.setdiff1d(on.microenv_truth["hypoxia_genes"], on.microenv_truth["cci_target_genes"])
     on_e, off_e = on.cell_data["cell_exp"].values, off.cell_data["cell_exp"].values
     ratio = np.divide(on_e, off_e, out=np.full_like(on_e, np.nan), where=off_e > 0)
     fold = np.nanmean(ratio[:, hyp_only], axis=1)                 # per-cell mean fold-change
     lvl = on.cell_data["cell_microenv"]["hypoxia_level"].values
 
-    print(f"hypoxia field  : Moran's I {mi_hyp:.3f}  corr(density) {r_dens:.3f}  "
-          f"range {hyp[occ].min():.2f}..{hyp[occ].max():.2f}")
-    print(f"CCI field      : Moran's I {mi_cci:.3f}  corr(emitter) {r_emit:.3f}")
+    print(f"uniform  O2 source: hypoxia {hyp_u[occ].min():.2f}..{hyp_u[occ].max():.2f}  "
+          f"mean {hyp_u[occ].mean():.2f}  Moran's I {mi_u:.2f}")
+    print(f"perfused O2 source: hypoxia {hyp_p[occ].min():.2f}..{hyp_p[occ].max():.2f}  "
+          f"mean {hyp_p[occ].mean():.2f}  Moran's I {mi_p:.2f}  (stronger core -> comedonecrosis)")
 
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(1, 4, figsize=(19, 4.3))
+    vmax = max(hyp_u[occ].max(), hyp_p[occ].max())
 
-    sc = ax[0].scatter(coords[:, 1], coords[:, 0], c=hyp[occ], cmap="inferno_r", s=26)
-    ax[0].set_title(f"A. hypoxia field (O2-derived)\nMoran's I = {mi_hyp:.2f} — hypoxic core, oxygenated rim")
+    sc = ax[0].scatter(coords[:, 1], coords[:, 0], c=hyp_u[occ], cmap="inferno_r", s=26, vmin=0, vmax=vmax)
+    ax[0].set_title(f"A. hypoxia — UNIFORM O2 source\n(supplied everywhere) mean {hyp_u[occ].mean():.2f}")
     ax[0].invert_yaxis(); fig.colorbar(sc, ax=ax[0], fraction=0.046)
 
-    ax[1].scatter(dens[occ], hyp[occ], s=14, alpha=0.6, color="#c0413b")
-    ax[1].set(xlabel="deme cell density", ylabel="hypoxia",
-              title=f"B. hypoxia tracks density\ncorr = {r_dens:.2f}")
+    sc1 = ax[1].scatter(coords[:, 1], coords[:, 0], c=hyp_p[occ], cmap="inferno_r", s=26, vmin=0, vmax=vmax)
+    ax[1].set_title(f"B. hypoxia — PERFUSED O2 source\n(from non-cancer tissue) mean {hyp_p[occ].mean():.2f} — hypoxic core")
+    ax[1].invert_yaxis(); fig.colorbar(sc1, ax=ax[1], fraction=0.046)
 
     sc2 = ax[2].scatter(coords[:, 1], coords[:, 0], c=cci[occ], cmap="viridis", s=26)
-    ax[2].set_title(f"C. cell-cell-communication field\nMoran's I = {mi_cci:.2f}  corr(emitter) = {r_emit:.2f}")
+    ax[2].set_title(f"C. cell-cell-communication field\nMoran's I = {mi_cci:.2f}")
     ax[2].invert_yaxis(); fig.colorbar(sc2, ax=ax[2], fraction=0.046)
 
     order = np.argsort(lvl)

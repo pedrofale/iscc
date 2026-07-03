@@ -121,6 +121,16 @@ class TestFields:
         h = on.microenv_truth["hypoxia"]
         assert (h >= 0).all() and (h <= 1).all()
 
+    def test_perfused_source_more_hypoxic_than_uniform(self, on):
+        # "perfused": O2 supplied only by non-cancer tissue (supply <= uniform everywhere), so a
+        # solid cancer mass is MORE hypoxic in its interior -> the DCIS comedonecrosis mechanism.
+        hu = on._o2_field(source="uniform")
+        hp = on._o2_field(source="perfused")
+        occ = on._deme_density() > 0
+        assert (hp >= hu - 1e-6).all()              # monotone: never less hypoxic than uniform
+        assert hp[occ].mean() > hu[occ].mean()      # strictly more hypoxic within the tumour
+        assert (hp >= 0).all() and (hp <= 1).all()
+
 
 # --------------------------------------------------------------------- ground truth -----------
 class TestGroundTruth:
