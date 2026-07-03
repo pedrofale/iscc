@@ -75,9 +75,11 @@ def build_treatment(kind, tumor, adaptive, start, duration, max_tumor_size):
 @click.option(
     "--log", default=0, help="Logging level. 0 = critical, 1 = info, 2 = debug."
 )
+@click.option("--no-diagnose", is_flag=True,
+              help="Skip the built-in operating-envelope QC that warns on degenerate tumors.")
 @click.option("-o", "--output-path", default="./sim_out", help="Output directory.")
 def main(sim_config, steps, random_seed, batch_size, treatment_kind, adaptive,
-         treatment_start, treatment_duration, max_tumor_size, log, output_path):
+         treatment_start, treatment_duration, max_tumor_size, log, no_diagnose, output_path):
     logging.basicConfig(
         level={0: logging.CRITICAL, 1: logging.INFO, 2: logging.DEBUG}.get(log, logging.CRITICAL)
     )
@@ -114,6 +116,20 @@ def main(sim_config, steps, random_seed, batch_size, treatment_kind, adaptive,
     if treatment is not None:
         msg += f" [treatment: {treatment_kind}]"
     print(msg)
+
+    # Operating-envelope QC: warn (opt-out) if the run produced a degenerate tumor, or surface a
+    # size advisory (e.g. "grow to a realistic size"). Read-only — it never touches the simulation
+    # output (see DESIGN_operating_envelope.md).
+    if not no_diagnose and hasattr(tumor, "diagnose"):
+        diag = tumor.diagnose()
+        if not diag.ok:
+            click.echo("\n" + click.style(
+                "warning: this run produced a DEGENERATE tumor (see --no-diagnose to silence)",
+                fg="yellow"))
+            click.echo(diag.report())
+        elif diag.advisories:
+            for a in diag.advisories:
+                click.echo(click.style(f"note: {a}", fg="yellow"))
 
 
 if __name__ == "__main__":

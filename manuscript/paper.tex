@@ -774,7 +774,12 @@ when the mutation supply is too low and grows with it (\Cref{fig:envelope}E), wh
 mutation rate produces a hypermutated tumor in which almost every cell is unique and the neutral
 $1/f$ tail breaks. Copy-number burden rises with the amplification probability but \emph{saturates}
 rather than running away, because the genome-viability caps cull non-viable karyotypes --- an
-honest limit of the model rather than a tunable failure.
+honest limit of the model rather than a tunable failure. Realistic analyses expect tumors of
+$\sim$$10^3$--$10^4$ cancer cells; both structured (glandular-duct) and unstructured growth reach
+this range once the arena is large enough to hold them ($\text{grid\_size}^2\times\text{carrying
+\_capacity}$) and the simulation is run long enough --- in the exact engine tumor size grows by
+roughly one cell per step, so the genotype-level $\tau$-leaping engine (\Cref{sec:scalability}) is
+used to reach large sizes efficiently.
 
 Two degenerate regimes are worth emphasizing because they silently break the ground-truth benchmarks
 of \Cref{sec:petracer,sec:multiregion}. When the dispersal rate is large relative to the division
