@@ -107,16 +107,34 @@ both **structured** (`structure_radius > 0`, a glandular duct) and **unstructure
 - **Capacity.** The soft ceiling is `grid_size² × carrying_capacity` (crowding death switches on once
   a deme exceeds `carrying_capacity`). The shipped `grid_size = 25`, `carrying_capacity = 5` holds
   ~3×10³; scale either up (e.g. `grid_size = 40`, `carrying_capacity = 10` → ~10⁴) for bigger tumours.
-- **Time.** In the **exact** engine each step is one birth/death event, so tumour size grows roughly
-  **one cell per step** — reaching thousands needs thousands of steps (measured on the default
-  config: ~710 cells at 1000 steps, **2174 at 3000**, 4440 at 6000; unstructured reaches ~2280
-  similarly). For large tumours use **`update_mode="tau"`** (tau-leaping), which advances all clones
-  per generation so wall-time scales with #clones × #generations rather than #cells.
+- **Time / engine.** In the **exact** engine each step is one birth/death event, so tumour size grows
+  roughly **one cell per step** — reaching thousands needs thousands of steps (default config: ~710
+  cells at 1000 steps, **2174 at 3000**, 4440 at 6000; unstructured reaches ~2280 similarly). For
+  large tumours use **`update_mode="tau"`** (tau-leaping), which advances all clones per generation.
 
-Both structured and unstructured configs reach thousands of cells this way. The diagnostic emits a
-**non-failing `small tumour` advisory** (threshold `min_realistic = 1000`) pointing the user at these
-levers; it does not mark a small-but-healthy tumour as degenerate (only genuine extinction,
-`n_cancer < min_cancer = 25`, is a hard fail).
+**Performance is bounded by the number of distinct genotypes (clones), not the cell count.** The
+infinite-sites genome spawns a new tracked genotype — a Python cell object carrying the full genome —
+for essentially every mutation, so #clones grows ≈ cells × `mutation_rate`. Measured (tau-leaping,
+`grid_size=20`, `carrying_capacity=8`, 30 generations, single core):
+
+| mutation_rate | cells | clones | wall-time |
+|---|---|---|---|
+| 0.2 (default) | 134 000 | 74 500 | **~20 s** |
+| 0.02 | 6 300 | 1 000 | ~0.4 s |
+
+So a moderately large tumour (~10⁵ cells) is reached in seconds–tens-of-seconds, well under any
+10-minute budget; the lever for *even* larger/faster is the clone count (a lower `mutation_rate`, or
+accepting fewer genotypes). This is competitive with lattice agent-based tumour models (HAL,
+PhysiCell, Waclaw et al.), with the caveat that iscc tracks a *full genome per clone* (single-cell,
+infinite-sites resolution) rather than only a clone label, which is what the per-clone cost buys.
+(A hot-path optimisation — skipping the immune-density scan when no immune cells are present and
+computing each deme's occupancy once per substep instead of once per clone — gives a ~9× speed-up on
+this clone-heavy path with byte-identical output.)
+
+Both structured and unstructured configs reach thousands–hundreds-of-thousands of cells this way. The
+diagnostic emits a **non-failing `small tumour` advisory** (threshold `min_realistic = 1000`) pointing
+the user at these levers; it does not mark a small-but-healthy tumour as degenerate (only genuine
+extinction, `n_cancer < min_cancer = 25`, is a hard fail).
 
 ## Layer 1 — characterisation sweep (`analysis/characterize_regimes.py`)
 

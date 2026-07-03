@@ -210,6 +210,10 @@ class GenotypeTumor:
             imm = self._normal_genotype("immune")
             for i in range(n_demes):
                 self._add(i, imm, n_immune)
+        # Whether any immune cells exist (static: only seeded here). When false, the immune-killing
+        # term is always zero, so the per-genotype death-rate can skip the O(#genotypes-in-deme)
+        # immune sum entirely — a big win for the clone-heavy tau-leaping path (see _immune_fraction).
+        self._has_immune = "immune" in self.genotypes
 
         self.deme_rates = np.array([self._deme_rate(i) for i in range(n_demes)], dtype=float)
         self.traces = []
@@ -285,30 +289,38 @@ class GenotypeTumor:
         return out
 
     # --- rates (mirror Deme.get_cancer_death_rate) ---------------------------
-    def _immune_fraction(self, deme):
-        total = sum(deme.values())
+    def _immune_fraction(self, deme, total=None):
+        # No immune cells anywhere -> the fraction is identically zero; skip the per-genotype scan
+        # (this is O(#genotypes-in-deme) and dominates the clone-heavy tau-leaping loop otherwise).
+        if not getattr(self, "_has_immune", True):
+            return 0.0
+        if total is None:
+            total = sum(deme.values())
         if total == 0:
             return 0.0
         immune = sum(cnt for gid, cnt in deme.items() if self.genotypes[gid].type == "immune")
         return immune / total
 
-    def _death_rate(self, gid, deme_idx):
+    def _death_rate(self, gid, deme_idx, total=None):
         """Cancer death rate = crowding-modulated baseline + local immune killing + treatment.
 
         Mirrors the corrected Deme.get_cancer_death_rate: immune killing is additive contact
         pressure (more local immune cells -> higher death, attenuated by immune resistance),
         and active therapy adds a death hazard (chemo/targeted) or strips immune resistance
-        (immunotherapy, via the per-step _tx_* overrides).
+        (immunotherapy, via the per-step _tx_* overrides). ``total`` (the deme's cell count) may be
+        passed in when the caller already computed it, so a per-deme loop doesn't recompute it once
+        per genotype.
         """
         rep = self.genotypes[gid]
         deme = self.demes[deme_idx]
-        total = sum(deme.values())
+        if total is None:
+            total = sum(deme.values())
         crowd = self.carrying_capacity if total > self.carrying_capacity else 1.0
         death = min(rep.evolutionary_parameters["death_rate"] * crowd, self.maximum_death_rate)
 
         ir = self._tx_immune_resist.get(gid, rep.evolutionary_parameters["immune_resistance"])
         ir = min(max(ir, 0.0), 1.0)
-        death += self._immune_prob_kill * self._immune_fraction(deme) * (1.0 - ir)
+        death += self._immune_prob_kill * self._immune_fraction(deme, total) * (1.0 - ir)
 
         death += self._tx_death_add.get(gid, 0.0)
         return death
@@ -319,10 +331,11 @@ class GenotypeTumor:
     def _deme_rate(self, deme_idx):
         """Total event rate of a deme. Only cancer genotypes are dynamic; normals are static."""
         deme = self.demes[deme_idx]
+        total = sum(deme.values())
         rate = 0.0
         for gid in self._cancer_gids(deme):
             div = self.genotypes[gid].evolutionary_parameters["division_rate"]
-            rate += deme[gid] * (div + self._death_rate(gid, deme_idx))
+            rate += deme[gid] * (div + self._death_rate(gid, deme_idx, total))
         return rate
 
     def _refresh_rate(self, deme_idx):
@@ -346,15 +359,16 @@ class GenotypeTumor:
         # pick a cancer genotype in the deme proportionally to count * (div + death),
         # ordered by creation ordinal (NOT the id()-based genotype_id) for reproducibility
         gids = sorted(self._cancer_gids(deme), key=lambda g: self.genotypes[g].ord)
+        total = sum(deme.values())
         weights = np.array([
             deme[gid] * (self.genotypes[gid].evolutionary_parameters["division_rate"]
-                         + self._death_rate(gid, di))
+                         + self._death_rate(gid, di, total))
             for gid in gids
         ])
         gid = gids[int(rng.choice(len(gids), p=weights / weights.sum()))]
         rep = self.genotypes[gid]
         div = rep.evolutionary_parameters["division_rate"]
-        death = self._death_rate(gid, di)
+        death = self._death_rate(gid, di, total)
 
         affected = [di]
         if rng.random() < death / (div + death):
@@ -472,11 +486,12 @@ class GenotypeTumor:
             deme = self.demes[di]
             if not deme:
                 continue
+            total = sum(deme.values())
             for gid in sorted(self._cancer_gids(deme), key=lambda g: self.genotypes[g].ord):
                 c = deme[gid]
                 rep = self.genotypes[gid]
                 div = rep.evolutionary_parameters["division_rate"]
-                death = self._death_rate(gid, di)
+                death = self._death_rate(gid, di, total)
                 disp = rep.evolutionary_parameters["dispersal_rate"]
                 n_div = int(rng.poisson(div * c * dt))
                 n_death = int(rng.poisson(death * c * dt))
