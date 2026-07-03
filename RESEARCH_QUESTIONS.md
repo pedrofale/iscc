@@ -132,6 +132,16 @@ predation need dynamics that still fit the count-based engine. **Sub-questions.*
 recruitment field coupled to tumour burden? Do iscc-simulated adaptive-therapy schedules transfer to
 predict good schedules in vivo? **Serves:** treatment realism; immune milestone.
 
+### R8b. Should the microenvironment couple to FITNESS, not just expression? (F8 future extension)
+**Why it matters.** F8 (microenvironment-driven expression, `DESIGN_features` §H) modulates the
+expression **readout** only — the hypoxia and cell-cell-communication fields do not change division
+or death, so growth is byte-identical F8 on/off. Real hypoxia slows proliferation, drives necrosis
+and selects for hypoxia-tolerant clones; paracrine signalling can be pro- or anti-proliferative. The
+open question is how to feed the F8 deme fields back into the per-genotype rates **without breaking
+reproducibility, the genotype-count caching, or tau-leaping**, and whether the resulting
+eco-evolutionary feedback (niche construction) reproduces known patterns (necrotic cores, invasive
+fronts). **Serves:** F8 realism; ties to the treatment/immune milestone (R8).
+
 ---
 
 ## Theme 8 — Metastasis & multi-site dissemination

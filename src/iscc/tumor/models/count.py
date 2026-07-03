@@ -39,7 +39,7 @@ class GenotypeTumor:
                  cancer_cell_params=None, deme_params=None, spatial_params=None,
                  epithelial_cell_params=None, stromal_cell_params=None, immune_cell_params=None,
                  genome_mode="abstract", genome_spec=None,
-                 update_mode="exact", tau=1.0, snapshot_every=1):
+                 update_mode="exact", tau=1.0, snapshot_every=1, microenv_params=None):
         self.seed = seed
         self.rng = np.random.default_rng(seed)
         self.type = "genotype"
@@ -84,6 +84,14 @@ class GenotypeTumor:
             self.update_mode = cfg.get("update_mode", update_mode)
             self.tau = cfg.get("tau", tau)
             self.snapshot_every = cfg.get("snapshot_every", snapshot_every)
+            microenv_params = cfg.get("microenv_params", microenv_params)
+        # F8 microenvironment-driven expression (DESIGN_features §H): OPTIONAL and OFF by default
+        # (absent -> None -> `make_cell_data` output is bit-identical to the base engine). When
+        # enabled, a per-deme expression modifier (hypoxia field + cell-cell communication) is
+        # applied at materialisation only; GROWTH is untouched, so a tumour is byte-identical with
+        # F8 on or off at the same seed (the modifier draws from a dedicated rng). Fitness-coupling
+        # of the microenvironment (hypoxia slowing division, etc.) is a FUTURE EXTENSION.
+        self.microenv_params = microenv_params
 
         self.genome_params = genome_params
         self.n_segments = genome_params["n_segments"]
@@ -109,6 +117,24 @@ class GenotypeTumor:
             exp[self.selection.get_tsgs()] = 0.8
             exp[self.selection.get_oncogenes()] = 0.01
             self.celltype_exps[ct] = exp
+
+        # F8 program designation: pick the hypoxia-responsive and CCI-receptor-target gene sets
+        # (the ground-truth cell-extrinsic modules). A DEDICATED rng (not self.rng) keeps the
+        # growth trajectory byte-identical whether F8 is on or off at a given seed.
+        self._hypoxia_genes = np.array([], dtype=int)
+        self._cci_target_genes = np.array([], dtype=int)
+        if self.microenv_params:
+            prog_rng = np.random.default_rng(self.seed + 9973)
+            hyp = ((self.microenv_params.get("hypoxia") or {}) if isinstance(self.microenv_params, dict) else {})
+            cci = ((self.microenv_params.get("cci") or {}) if isinstance(self.microenv_params, dict) else {})
+            n_hyp = int(hyp.get("n_genes", 0))
+            n_cci = int(cci.get("n_target_genes", 0))
+            if n_hyp > 0:
+                self._hypoxia_genes = prog_rng.choice(self.n_genes, size=min(n_hyp, self.n_genes),
+                                                      replace=False)
+            if n_cci > 0:
+                self._cci_target_genes = prog_rng.choice(self.n_genes, size=min(n_cci, self.n_genes),
+                                                         replace=False)
 
         # genotype registry: id -> representative cell. Normals keyed by their type name.
         self.genotypes = {}
@@ -528,6 +554,89 @@ class GenotypeTumor:
         self.make_cell_data()
         return self.traces
 
+    # --- F8 microenvironment fields (DESIGN_features §H) ---------------------
+    # All operate on the regular grid_size x grid_size deme lattice (deme i at
+    # (i//G, i%G)); computed once per make_cell_data (a snapshot), so tau-leaping-compatible.
+    # NOTE (future extension): these modulate the expression READOUT only. Coupling the
+    # microenvironment to FITNESS (hypoxia slowing division, etc.) is deliberately left for later.
+    def _deme_density(self):
+        """Per-deme occupancy = total cells / carrying capacity (drives O2 consumption)."""
+        cc = max(self.carrying_capacity, 1)
+        return np.array([sum(d.values()) / cc for d in self.demes], dtype=float)
+
+    def _emitter_density(self, emitter_type):
+        """Per-deme density of a ligand-emitting cell type (e.g. immune)."""
+        cc = max(self.carrying_capacity, 1)
+        out = np.zeros(len(self.demes))
+        for i, deme in enumerate(self.demes):
+            out[i] = sum(c for gid, c in deme.items()
+                         if self.genotypes[gid].type == emitter_type) / cc
+        return out
+
+    def _o2_field(self, D=1.0, k=1.0, s=0.2, n_iter=500, tol=1e-5):
+        """Steady-state O2 on the deme grid (BioFVM-style), returned as hypoxia = 1 - O2.
+
+        Solves D∇²O2 + s(1-O2) - k·density·O2 = 0 (supply everywhere from microvasculature,
+        consumed ∝ local density) by Jacobi relaxation with zero-flux edges. O2 ∈ [0,1] (a
+        weighted average of neighbours and the supply target 1), so hypoxia ∈ [0,1], high in the
+        dense core and low at the sparse rim — the viable-rim / necrotic-core signature.
+        """
+        G = self.grid_size
+        dens = self._deme_density().reshape(G, G)
+        nn = np.full((G, G), 4.0)
+        nn[0, :] -= 1; nn[-1, :] -= 1; nn[:, 0] -= 1; nn[:, -1] -= 1
+        O2 = np.ones((G, G))
+        for _ in range(n_iter):
+            nb = np.zeros((G, G))
+            nb[1:, :] += O2[:-1, :]; nb[:-1, :] += O2[1:, :]
+            nb[:, 1:] += O2[:, :-1]; nb[:, :-1] += O2[:, 1:]
+            new = (D * nb + s) / (D * nn + s + k * dens)
+            if np.max(np.abs(new - O2)) < tol:
+                O2 = new
+                break
+            O2 = new
+        return np.clip(1.0 - O2.ravel(), 0.0, 1.0)
+
+    def _cci_field(self, emitter_type="immune", lengthscale=2.0):
+        """Per-deme ligand signal = neighbourhood-averaged emitter density (Gaussian `lengthscale`)."""
+        emit = self._emitter_density(emitter_type)
+        coords = np.array(self.deme_coords, dtype=float)
+        diff = coords[:, None, :] - coords[None, :, :]
+        d2 = np.sum(diff * diff, axis=-1)
+        L = max(float(lengthscale), 1e-9)
+        W = np.exp(-d2 / (2.0 * L * L))
+        wsum = W.sum(axis=1)
+        return np.divide(W @ emit, wsum, out=np.zeros_like(emit), where=wsum > 0)
+
+    def _microenv_deme_mod(self):
+        """The F8 per-deme x gene expression modifier (n_demes x n_genes), or None if disabled.
+
+        `mod[deme, hypoxia_genes] *= 1 + strength·hypoxia[deme]` and likewise for CCI target genes.
+        Stores the ground-truth programs + fields on `self.microenv_truth` for validation/benchmarks.
+        """
+        mp = self.microenv_params
+        if not mp:
+            return None
+        hyp = (mp.get("hypoxia") or {}) if isinstance(mp, dict) else {}
+        cci = (mp.get("cci") or {}) if isinstance(mp, dict) else {}
+        n_demes = len(self.demes)
+        mod = np.ones((n_demes, self.n_genes))
+        hypoxia = np.zeros(n_demes)
+        cci_signal = np.zeros(n_demes)
+        if len(self._hypoxia_genes) and float(hyp.get("strength", 0.0)) != 0.0:
+            hypoxia = self._o2_field(D=float(hyp.get("o2_diffusion", 1.0)),
+                                     k=float(hyp.get("o2_consumption", 1.0)),
+                                     s=float(hyp.get("o2_supply", 0.2)))
+            mod[:, self._hypoxia_genes] *= (1.0 + float(hyp["strength"]) * hypoxia[:, None])
+        if len(self._cci_target_genes) and float(cci.get("strength", 0.0)) != 0.0:
+            cci_signal = self._cci_field(cci.get("emitter_type", "immune"),
+                                         float(cci.get("lengthscale", 2.0)))
+            mod[:, self._cci_target_genes] *= (1.0 + float(cci["strength"]) * cci_signal[:, None])
+        self.microenv_truth = dict(
+            hypoxia_genes=np.asarray(self._hypoxia_genes), cci_target_genes=np.asarray(self._cci_target_genes),
+            hypoxia=hypoxia, cci=cci_signal)
+        return mod
+
     # --- materialisation: counts -> per-cell matrices ------------------------
     def make_cell_data(self, cell_prefix="C", **kwargs):
         gene_names = self.selection.get_gene_names()
@@ -555,14 +664,26 @@ class GenotypeTumor:
             evo["n_mut_tr"] = int((snv[tr_idx] > 0).sum())
             evo_cache[gid] = evo
 
+        # F8: per-deme expression modifier (None -> disabled -> exp is bit-identical to the base
+        # engine). Cache the modified expression per (deme, genotype) since many cells share both.
+        deme_mod = self._microenv_deme_mod()
+        mod_exp_cache = {}
+
         rows_snv, rows_cnv, rows_exp, rows_evo, crd, types, demes_col, names = [], [], [], [], [], [], [], []
         i = 0
         for deme_idx, deme in enumerate(self.demes):
             r, c = self.deme_coords[deme_idx]
             for gid in sorted(deme.keys(), key=lambda g: self.genotypes[g].ord):
+                if deme_mod is None:
+                    exp_row = exp_cache[gid]
+                else:
+                    exp_row = mod_exp_cache.get((deme_idx, gid))
+                    if exp_row is None:
+                        exp_row = exp_cache[gid] * deme_mod[deme_idx]
+                        mod_exp_cache[(deme_idx, gid)] = exp_row
                 for _ in range(deme[gid]):
                     rows_snv.append(snv_cache[gid]); rows_cnv.append(cnv_cache[gid])
-                    rows_exp.append(exp_cache[gid]); rows_evo.append(evo_cache[gid])
+                    rows_exp.append(exp_row); rows_evo.append(evo_cache[gid])
                     crd.append((r, c)); types.append(gid); demes_col.append(deme_idx)
                     names.append(f"{cell_prefix}{i}"); i += 1
 
@@ -596,6 +717,14 @@ class GenotypeTumor:
         denom = num + (1.0 - v)
         rna_vaf = np.divide(num, denom, out=np.zeros_like(v, dtype=float), where=denom > 0)
         self.cell_data["cell_rna_vaf"] = pd.DataFrame(rna_vaf, index=idx, columns=gene_names)
+        # F8: surface the per-cell cell-extrinsic levels (ground truth for the intrinsic-vs-extrinsic
+        # decomposition benchmark). Only added when F8 is enabled, so the base schema is unchanged.
+        if deme_mod is not None:
+            dcol = np.asarray(demes_col, dtype=int)
+            hyp, cci = self.microenv_truth["hypoxia"], self.microenv_truth["cci"]
+            self.cell_data["cell_microenv"] = pd.DataFrame(
+                {"hypoxia_level": hyp[dcol] if dcol.size else np.array([]),
+                 "cci_level": cci[dcol] if dcol.size else np.array([])}, index=idx)
         return self.cell_data
 
     # --- plotting (shared, engine-agnostic) ----------------------------------

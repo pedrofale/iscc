@@ -375,14 +375,19 @@ data — so realistic defaults can be *learned*, not guessed.
   real-template option. Benchmark `validation/validate_scrna_snv.py`: even at `obs_fidelity=1`
   only ~31% of true mutations are scRNA-detectable (expression gating), falling with fidelity —
   the **scDNA-vs-scRNA SNV-calling-is-hard** result. External binaries optional; CI asserts the bespoke layers.
-- **F8 — PLANNED — microenvironment-driven expression (the integration keystone).** Make a cell's
-  expression depend on its **spatial microenvironment**, not only its genotype/CNA/cell-type. Today
-  `cell.get_exp` (cell.py) = `baseline(cell_type) × dosage(CNA) × mut_effects(SNV)` — there is **no
-  spatial term**, so Visium carries clonal/CNA structure but no *niche* structure. F8 adds two
-  deme-resolution mechanisms (cheap, count-engine- and tau-leaping-compatible) that modulate
-  `get_exp`. **Full design: section H.** This is what makes iscc the benchmark substrate for
-  **DNA+RNA+spatial integration** (the SISTEM-analog claim for paper 1) and completes the
-  "coupled-process beats CNA-sim-plus-expression-on-top" argument.
+- **F8 ✅ DONE — microenvironment-driven expression (the integration keystone).** A cell's
+  expression now depends on its **spatial microenvironment**, not only genotype/CNA/cell-type.
+  Implemented in the count engine (`models/count.py`) as a **per-deme × gene modifier applied at
+  materialisation** (`_o2_field` hypoxia + `_cci_field` cell-cell communication → `_microenv_deme_mod`
+  → `make_cell_data`), NOT inside `get_exp` (which is per-genotype/cached). OPTIONAL via a
+  `microenv_params` config block; OFF ⇒ output bit-identical, and even ON the **growth is
+  byte-identical** (modifier draws from a dedicated rng) — F8 modulates the READOUT only.
+  Ground truth surfaced (`self.microenv_truth` + per-cell `cell_microenv`). Tests
+  `tests/test_microenvironment.py` (12); validation `validation/validate_microenvironment.py` →
+  `validation_microenvironment.png`. **Full design: section H.** Makes iscc the benchmark substrate
+  for **DNA+RNA+spatial integration** and gives Visium/imaging real *niche* structure.
+  **Future extension (deferred):** coupling the microenvironment to FITNESS (hypoxia slowing
+  division, etc.) — v1 is expression-only so growth stays invariant.
 
 - **F9 ✅ DONE — single-cell spatial assay (imaging-based; MERFISH/Xenium-like).** `data/imaging.py`
   `scSpatial` (registered as `ASSAYS["scspatial"]`): per-cell counts at the cell's `(row, col)` (NO

@@ -50,11 +50,14 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   spine/assay notebooks re-executed and feature-complete (estimation/tau/reads demos).
 - **LATER — bib hygiene**: verify the "auto-added — verify" entries in `references.bib`.
 
-## F8 — microenvironment-driven expression (engine feature; the integration keystone)
-- **NEXT (own session)** — implement per `DESIGN_features.md` §H. Prompt saved:
-  `handoffs/F8_microenvironment_expression.md`. Adds deme-resolution hypoxia field (BioFVM-style) +
-  ligand–receptor CCI (scMultiSim/sCCIgen-style) to `get_exp`. Required for the spatial half of the
-  integration story and for niche/CCI tutorials.
+## F8 — microenvironment-driven expression (the integration keystone) ✅ DONE
+- **DONE** — `models/count.py`: per-deme × gene modifier at materialisation (hypoxia `_o2_field` +
+  CCI `_cci_field`), OPTIONAL via `microenv_params`, OFF ⇒ bit-identical, growth byte-identical
+  on/off (readout only). Ground truth surfaced (`microenv_truth` + `cell_microenv`). 12 tests;
+  `validation/validate_microenvironment.py` → figure. Unblocks spatial-niche/CCI benchmarks + the
+  PEtracer intrinsic-vs-extrinsic decomposition. **Future extension:** microenvironment→FITNESS
+  coupling (hypoxia slowing division) — deferred; v1 is expression-only. **Next (optional):** demo
+  notebook; a manuscript niche/microenvironment paragraph + the figure.
 
 ## F9 — single-cell spatial assay (imaging-based) ✅ DONE
 - **DONE** — `data/imaging.py` `scSpatial` (`ASSAYS["scspatial"]`): per-cell panel counts at
