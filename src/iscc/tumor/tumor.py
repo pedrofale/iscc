@@ -18,12 +18,22 @@ import pymuller
 from collections import Counter
 
 class Tumor(object):
-    def __init__(self, config=None, genome_params=dict(), cancer_cell_params=dict(), epithelial_cell_params=dict(), stromal_cell_params=dict(), immune_cell_params=dict(), deme_params=dict(), selection_params=dict(), seed=42):
+    def __init__(self, config=None, genome_params=dict(), cancer_cell_params=dict(), epithelial_cell_params=dict(), stromal_cell_params=dict(), immune_cell_params=dict(), deme_params=dict(), selection_params=dict(), seed=42, layout_seed=None):
         self.config = None
-        # Seeded generator for everything set up at construction time (driver layout,
-        # baseline expression, spatial seeding) so that config + seed -> identical tumor.
+        # Two decoupled seeds (DESIGN_cohort.md §1). ``seed`` (EVOLUTION) drives the per-run
+        # stochastic dynamics AND the per-run spatial seeding via ``self.rng``. ``layout_seed``
+        # (config-determined GENOME LAYOUT, shared across runs of the same config) drives the
+        # gene-role layout (Selection) and the shared per-cell-type baseline expression via
+        # ``self.layout_rng``. Defaulting layout_seed to the fixed DEFAULT_LAYOUT_SEED makes any
+        # two same-config runs share their driver identities by construction (comparability by
+        # default), differing only in evolution — so recurrence / cohort analysis is meaningful.
+        # NOTE: evolution never reads self.rng (grow() draws a fresh default_rng(seed+step)), and
+        # the default structure_radius=0 path does not consume self.rng at construction, so this
+        # split is byte-identical to the previous single-rng plumbing at the default seed 42.
         self.seed = seed
+        self.layout_seed = DEFAULT_LAYOUT_SEED if layout_seed is None else layout_seed
         self.rng = np.random.default_rng(seed)
+        self.layout_rng = np.random.default_rng(self.layout_seed)
         self.genome_params = genome_params
         if config is not None:
             with open(config) as f:
@@ -33,6 +43,9 @@ class Tumor(object):
             deme_params = self.config['deme_params']
             self.genome_params = self.config['genome_params']
             self.cell_params = self.config['cell_params']
+            if self.config.get('layout_seed') is not None:
+                self.layout_seed = self.config['layout_seed']
+                self.layout_rng = np.random.default_rng(self.layout_seed)
 
             cancer_cell_params = self.cell_params['cancer']
             epithelial_cell_params = self.cell_params['epithelial']
@@ -42,7 +55,7 @@ class Tumor(object):
         self.selection = Selection(
             n_segments=self.genome_params['n_segments'],
             segment_size=self.genome_params.get('segment_size', 1000),
-            rng=self.rng,
+            rng=self.layout_rng,
             **selection_params,
         )
         self.n_genes = self.selection.n_genes
@@ -83,9 +96,12 @@ class Tumor(object):
         return obj
 
     def make_celltype_exps(self):
+        # Baseline per-cell-type expression is part of the SHARED landscape (layout_rng), not the
+        # per-run evolution: a "shared cell state" (e.g. epithelial) must have the same baseline
+        # profile across patients for cross-patient integration to have a shared axis to align.
         self.celltype_exps = dict()
         for celltype in self.celltypes:
-            exp = self.rng.beta(.1, 1., size=self.n_genes)
+            exp = self.layout_rng.beta(.1, 1., size=self.n_genes)
             # get_tsgs()/get_oncogenes() already return the gene indices; index with
             # them directly (np.where(idx_array) would return 0..k-1, the wrong genes).
             exp[self.selection.get_tsgs()] = 0.8

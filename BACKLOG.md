@@ -108,7 +108,33 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   (`IMAGING_PRESETS`), no spot aggregation, coords retained. 14 tests; wired into `isccdata` CLI
   (`-a scspatial`). Unblocks the PEtracer expression comparison. **Next (optional):** a demo notebook.
 
-## Multi-patient cohort — ground truth for cohort analysis & personalized medicine (NEW, plan-first)
+## Multi-patient cohort — ground truth for cohort analysis & personalized medicine ✅ DONE (2026-07-03)
+- **DONE** — design `DESIGN_cohort.md`; all pieces shipped:
+  1. **Prerequisite engine fix (comparability by default):** a config-determined `layout_seed`
+     (default `constants.DEFAULT_LAYOUT_SEED = 42`) drives the Selection gene-role layout + shared
+     per-cell-type baseline expression, decoupled from the per-run evolution seed, in BOTH engines
+     (`tumor/tumor.py`, `tumor/models/count.py`). Two same-config runs now share driver identities by
+     construction (Jaccard 1.0) and differ only in evolution; byte-identical to the old plumbing at the
+     default seed (verified: full suite green). `tests/test_cohort.py` covers the guarantee.
+  2. **`iscc.cohort`** package — `Cohort`/`Subgroup`/`PatientResult` (`cohort.py`), patient→batch
+     multiplexing 1:1 & N:1 + pooled scRNA emission (`batch.py`), cohort ground-truth tables
+     (`groundtruth.py`). Subgroups differ by EFFECT scalars (shared landscape); resistance is
+     **subclonal by default** (a seeded pre-existing resistant subclone, selected under therapy) with
+     a truncal option; per-patient private germline markers for demux.
+  3. **`validation/validate_cohort.py`** (+ `cohort_common.py`, `harmony_runner.py`) →
+     `manuscript/figures/validation_cohort.png` + Results subsection `sec:cohort`, `fig:cohort`. The
+     4 benchmarks: recurrence-enablement (shared Jaccard 1.0 vs unshared 0.04), personalized-medicine
+     stratification (therapy differential + single-cell subclone biomarker AUC 1.0), multi-patient
+     integration (shared-state iLISI 1.9→5.3, ARI preserved), demultiplexing (patient-of-origin 1.0 vs
+     chance 0.12). External integration/demux tools wired behind `iscc-harmony`/`iscc-scvi`/`iscc-demux`
+     env guards (clonealign/inferCNV convention); the figure is self-contained.
+  - **Honest finding:** per-gene SNV recurrence enrichment is modest in abstract mode (fitness depends
+    on the COUNT of mutated drivers, so per-gene convergence is weak + passengers hitchhike in sweeps);
+    the real-genome arm model is the sharper substrate. The shared-vs-unshared *enablement* contrast is
+    the strong result there.
+
+<details><summary>original spec</summary>
+
 - **NEXT (after clonealign+inferCNV; own milestone, design-first like F8).** A `Cohort` layer that
   runs a DIFFERENT tumour per patient (own EVOLUTION seed → private clones, private passenger
   mutations, patient-specific CNAs + spatial structure) over a **SHARED, config-determined
@@ -150,8 +176,23 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   (`run_scrna_batches` docstring = the multi-patient case). New pieces: share the ABSTRACT-mode driver
   layout across patients; a `Cohort` wrapper; the shared-vs-private + subgroup/therapy-response ground
   truth bookkeeping. Plan design-first, then handoff.
+</details>
 
-## Operating envelope — parameter→phenotype atlas & built-in QC (NEW 2026-07-03; user "MUST have")
+## Operating envelope — parameter→phenotype atlas & built-in QC ✅ DONE (2026-07-03)
+- **DONE** — design `DESIGN_operating_envelope.md`; the three layers all shipped:
+  1. `analysis/characterize_regimes.py` (+ cached `analysis/characterize_regimes.csv`, 201 rows) —
+     coarse sweep over every axis, all metrics per run.
+  2. `validation/validate_operating_envelope.py` → `manuscript/figures/validation_operating_envelope.png`
+     (phase diagrams + 1-D slices) and the supplementary subsection *"Operating regimes: which
+     parameters yield realistic tumors"* + defaults/valid-ranges table (`sec:envelope`, `tab:envelope`).
+  3. `iscc.tumor.diagnostics` + `GenotypeTumor.diagnose()` (read-only QC, overridable thresholds,
+     actionable hints) + opt-out auto-warn from `isccsim` (`--no-diagnose`). Tests:
+     `tests/test_diagnostics.py`.
+  - Honest findings recorded in the design doc: the well-mixed metric uses per-clone spatial
+     confinement (a naive clone-label Moran's I is confounded because higher dispersal also reduces
+     clone count); fraction-genome-altered **saturates** (viability-capped) rather than running away.
+
+<details><summary>original spec</summary>
 - **Goal (user):** know & REPORT which parameter ranges produce which tumour features, so users don't
   run the simulator and end up with "crappy tumours" — extinct, monoclonal, hypermutated mush,
   well-mixed with no clonal territories, or no microenvironment gradient. Two audiences: (a) reviewers
@@ -180,6 +221,7 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
 - **Links:** feeds the RECOMMENDER (paper 2 — a prior over valid designs); complements CALIBRATION
   (fitting to real data should land you IN the good region; this lets us verify that). Handoff:
   `handoffs/operating_envelope.md`.
+</details>
 
 ## External-simulator adapters (recipe; additive `iscc.integrations` seam)
 - **STARTED** — the `iscc.integrations` seam now exists (added by the PEtracer validation):

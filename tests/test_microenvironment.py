@@ -27,9 +27,13 @@ STEPS = 160
 
 
 def _grow(microenv_params=None, seed=3):
-    t = GenotypeTumor(seed=seed, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
-                      cancer_cell_params=NO_DEATH, deme_params=DEME_PARAMS, spatial_params=SPATIAL,
-                      microenv_params=microenv_params)
+    # Pin layout_seed to the evolution seed so this fixture reproduces the exact tumour it was
+    # calibrated against (the driver/dispersal-gene layout that yields a solid hypoxic-core mass).
+    # After the layout/evolution seed decoupling (DESIGN_cohort.md §1) the layout defaults to a shared
+    # constant; here we want THIS seed's original layout so the spatial-gradient assertions hold.
+    t = GenotypeTumor(seed=seed, layout_seed=seed, genome_params=GENOME_PARAMS,
+                      selection_params=SELECTION_PARAMS, cancer_cell_params=NO_DEATH,
+                      deme_params=DEME_PARAMS, spatial_params=SPATIAL, microenv_params=microenv_params)
     t.grow(n_steps=STEPS, seed=seed)
     return t
 

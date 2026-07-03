@@ -29,7 +29,7 @@ import yaml
 from ..components.selection import Selection
 from ..components.cell import CancerCell, EpithelialCell, StromalCell, ImmuneCell
 from .glandular import bresenham_circumference, get_inside
-from ...constants import normal_names
+from ...constants import normal_names, DEFAULT_LAYOUT_SEED
 
 CELLTYPES = ["cancer", "epithelial", "stromal", "immune"]
 
@@ -39,9 +39,20 @@ class GenotypeTumor:
                  cancer_cell_params=None, deme_params=None, spatial_params=None,
                  epithelial_cell_params=None, stromal_cell_params=None, immune_cell_params=None,
                  genome_mode="abstract", genome_spec=None,
-                 update_mode="exact", tau=1.0, snapshot_every=1, microenv_params=None):
+                 update_mode="exact", tau=1.0, snapshot_every=1, microenv_params=None,
+                 layout_seed=None):
         self.seed = seed
+        # EVOLUTION rng (per-run: spatial seeding; grow() draws its own fresh default_rng(seed+step)).
         self.rng = np.random.default_rng(seed)
+        # GENOME LAYOUT rng (config-determined, SHARED across same-config runs): the gene-role
+        # layout (Selection) and shared per-cell-type baseline expression. Defaulting layout_seed to
+        # DEFAULT_LAYOUT_SEED makes any two same-config runs share their driver identities by
+        # construction (comparability by default) — recurrence / cohort analysis is meaningful — while
+        # they still differ in evolution. See DESIGN_cohort.md §1. Byte-identical to the previous
+        # single-rng plumbing at the default seed 42 (structure_radius=0 never consumes self.rng at
+        # construction, and evolution never reads it).
+        self.layout_seed = DEFAULT_LAYOUT_SEED if layout_seed is None else layout_seed
+        self.layout_rng = np.random.default_rng(self.layout_seed)
         self.type = "genotype"
 
         # Update mode (DESIGN_scalability §7). "exact" = the reference one-birth/death-per-update
@@ -85,6 +96,9 @@ class GenotypeTumor:
             self.tau = cfg.get("tau", tau)
             self.snapshot_every = cfg.get("snapshot_every", snapshot_every)
             microenv_params = cfg.get("microenv_params", microenv_params)
+            if cfg.get("layout_seed") is not None:
+                self.layout_seed = cfg["layout_seed"]
+                self.layout_rng = np.random.default_rng(self.layout_seed)
         # F8 microenvironment-driven expression (DESIGN_features §H): OPTIONAL and OFF by default
         # (absent -> None -> `make_cell_data` output is bit-identical to the base engine). When
         # enabled, a per-deme expression modifier (hypoxia field + cell-cell communication) is
@@ -106,14 +120,15 @@ class GenotypeTumor:
         }
 
         self.selection = Selection(n_segments=self.n_segments, segment_size=self.segment_size,
-                                   segment_sizes=self.segment_sizes, rng=self.rng, **selection_params)
+                                   segment_sizes=self.segment_sizes, rng=self.layout_rng, **selection_params)
         self.n_genes = self.selection.n_genes
         self._cancer_params = cancer_cell_params
 
-        # per-cell-type baseline expression (seeded, shared by all cells of a type)
+        # per-cell-type baseline expression (part of the SHARED landscape -> layout_rng, so a shared
+        # cell state has the same baseline profile across patients; see make_celltype_exps note in tumor.py)
         self.celltype_exps = {}
         for ct in CELLTYPES:
-            exp = self.rng.beta(0.1, 1.0, size=self.n_genes)
+            exp = self.layout_rng.beta(0.1, 1.0, size=self.n_genes)
             exp[self.selection.get_tsgs()] = 0.8
             exp[self.selection.get_oncogenes()] = 0.01
             self.celltype_exps[ct] = exp
@@ -760,6 +775,19 @@ class GenotypeTumor:
 
     def get_gene_data(self, **kwargs):
         return self.selection.get_gene_data(**kwargs)
+
+    # --- operating-envelope QC (read-only; DESIGN_operating_envelope.md) ------
+    def diagnose(self, thresholds=None, verbose=False):
+        """Flag degenerate ("crappy") tumour regimes after growth, with actionable hints.
+
+        Computes phenotype metrics (size, clonal diversity, TMB, clone spatial confinement,
+        fraction-genome-altered, hypoxia core–rim contrast, 1/f fit) and checks each against an
+        overridable threshold: extinct / monoclonal / hypermutated / well-mixed /
+        no-microenvironment-gradient / CNA-runaway / trivial-genome. Returns a ``TumorDiagnosis``.
+        Read-only — it never draws from ``self.rng`` or changes the counts, so it cannot alter
+        simulation output (like the F8 ground truth)."""
+        from ..diagnostics import diagnose
+        return diagnose(self, thresholds=thresholds, verbose=verbose)
 
     # --- output --------------------------------------------------------------
     def write(self, output_path):

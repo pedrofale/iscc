@@ -757,6 +757,156 @@ strategies on a shared evolutionary ground truth.
 \end{figure}
 
 
+\subsection*{Operating regimes: which parameters yield realistic tumors}
+\label{sec:envelope}
+Because a simulator's realism holds only within a range of its parameters, we characterize
+\texttt{iscc}'s \emph{operating envelope} --- the region of parameter space that produces realistic
+tumors --- and report it, in the spirit of the robustness and sensitivity analyses shipped by
+scMultiSim~\cite{li_scmultisim_2025} and CINner~\cite{dinh_cinner_2025}. We swept the key evolutionary
+and spatial knobs around the default configuration and, for each run, computed phenotype metrics that
+identify the \emph{degenerate} regimes a user can fall into: extinction, monoclonal tumors (from too
+few mutations or a runaway selective sweep), hypermutated ``mush'', spatially well-mixed tumors with
+no clonal territories, and tumors with no microenvironment gradient (\Cref{fig:envelope}). The
+boundaries are sharp and interpretable. A tumor goes extinct once the death rate approaches the
+division rate, and a single founder cell carries an appreciable stochastic extinction risk that
+seeding a small cluster removes (\Cref{fig:envelope}D). Clonal diversity collapses to a single clone
+when the mutation supply is too low and grows with it (\Cref{fig:envelope}E), while an excessive
+mutation rate produces a hypermutated tumor in which almost every cell is unique and the neutral
+$1/f$ tail breaks. Copy-number burden rises with the amplification probability but \emph{saturates}
+rather than running away, because the genome-viability caps cull non-viable karyotypes --- an
+honest limit of the model rather than a tunable failure.
+
+Two degenerate regimes are worth emphasizing because they silently break the ground-truth benchmarks
+of \Cref{sec:petracer,sec:multiregion}. When the dispersal rate is large relative to the division
+rate, clones no longer form compact spatial territories but smear across the whole lesion
+(\Cref{fig:envelope}A,F); the lineage--space coupling on which the PEtracer confound and the
+multi-region ``sample tree'' distortion depend then vanishes, so a run in this regime would produce a
+null result for the wrong reason. Likewise, a tumor that is small relative to the oxygen diffusion
+length develops no core--rim hypoxia contrast (\Cref{fig:envelope}C), removing the microenvironment
+gradient that the intrinsic-versus-extrinsic decomposition is meant to expose. Reporting these zones
+lets users --- and reviewers --- see at a glance which settings are safe.
+
+To make this actionable rather than merely documented, \texttt{iscc} ships the same metrics as a
+built-in, read-only quality-control diagnostic (\texttt{tumor.diagnose()}) that runs after growth,
+flags each degenerate regime against an overridable threshold, and prints an actionable hint (for
+example, ``well-mixed: lower \texttt{dispersal\_rate}''; ``monoclonal: raise \texttt{mutation\_rate}'';
+``no O$_2$ gradient: grow a larger tumor''). Like the microenvironment ground truth, the diagnostic
+never draws on the simulation's randomness and does not alter its output. \Cref{tab:envelope}
+summarizes the default value, valid range, and out-of-range failure mode for each knob; these
+defaults place the shipped configuration inside the realistic region of every axis.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{validation_operating_envelope.png}
+  \caption{\textbf{\texttt{iscc}'s operating envelope.} Phenotype metrics over parameter sweeps,
+  with the realistic region (green) and each degenerate regime labelled. (A) mutation rate $\times$
+  dispersal rate: too few mutations give a monoclonal tumor, too much dispersal a well-mixed one.
+  (B) selection strength (driver effect) $\times$ mutation rate: strong selection at low mutation
+  supply drives a monoclonal sweep. (C) tumor size $\times$ oxygen diffusion length: a small tumor or
+  a long diffusion length erases the hypoxia core--rim contrast (no-gradient zone outlined). (D)
+  survival collapses as the death rate approaches the division rate ($0.3$). (E) clonal Shannon
+  diversity rises with the mutation rate from the monoclonal floor. (F) clonal spatial confinement
+  falls toward zero (well-mixed) as dispersal increases --- the regime that breaks the PEtracer and
+  multi-region benchmarks. Dashed lines are the diagnostic's default thresholds.}
+  \label{fig:envelope}
+\end{figure}
+
+\begin{table}[t]
+  \centering
+  \footnotesize
+  \setlength{\tabcolsep}{5pt}
+  \caption{\textbf{Default values, valid ranges, and out-of-range behavior of the main \texttt{iscc}
+  knobs.} Ranges are the realistic region of the operating-envelope sweep (\Cref{fig:envelope});
+  going outside triggers the corresponding \texttt{tumor.diagnose()} flag. Defaults place the shipped
+  configuration inside every range.}
+  \label{tab:envelope}
+  \begin{tabular}{l l l l}
+    \toprule
+    Knob & Default & Valid range & Out of range \\
+    \midrule
+    \texttt{mutation\_rate}        & $0.2$  & $\sim$$0.05$--$2$ & low: monoclonal; high: hypermutated mush \\
+    \texttt{n\_snvs\_per\_allele}  & $0.3$  & $\sim$$0.1$--$3$  & low: no SNV diversity; high: mush \\
+    \texttt{division\_rate}        & $0.3$  & $>$ death rate    & $\le$ death rate: extinction \\
+    \texttt{death\_rate}           & $0.02$ & $\ll$ division rate & $\ge$ division rate: extinction \\
+    \texttt{initial\_cancer\_cells}& $5$    & $\ge 5$           & $1$: $\sim$$7\%$ founder extinction \\
+    \texttt{dispersal\_rate}       & $0.1$  & $\lesssim$ division rate & $\gg$ division: well-mixed, no territories \\
+    \texttt{prop\_driver}          & $0.1$  & $0.05$--$0.3$     & high $\times$ strong effect: selective sweep \\
+    \texttt{driver\_effects}       & $1.1$  & $1.0$--$2$        & $\gg 1$ at low mutation: monoclonal sweep \\
+    \texttt{grid\_size}$\times$\texttt{carrying\_capacity} & $25\times5$ & enough for $\gtrsim$$10^3$ cells & too small: no gradient, few clones \\
+    \texttt{amp\_prob}             & $0.5$  & $0.2$--$0.8$      & high: copy-number-heavy (viability-capped) \\
+    hypoxia $D/k$ vs.\ size        & ---    & diffusion length $<$ tumor & length $\gg$ tumor: no O$_2$ gradient \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+
+\subsection*{\texttt{iscc} provides cohort-level ground truth: shared-vs-private states and the need for personalized medicine}
+\label{sec:cohort}
+The benchmarks so far concern a single tumor, but many of the hardest analysis problems --- batch
+integration, demultiplexing, recurrent-driver detection, patient stratification --- are defined only
+across a \emph{cohort} of patients, where no real dataset can supply the ground truth: which cells came
+from which patient, which cell states are shared across patients versus private to one, which mutations
+recur, and which patients will respond to a therapy. \texttt{iscc} generates this cohort-level ground
+truth by running a different tumor per patient (each with its own evolution seed, giving private
+clones, private passenger mutations, and patient-specific copy-number and spatial structure) over one
+\emph{shared, config-determined} driver landscape. The shared landscape is a prerequisite fix to the
+engine: the abstract genome's gene-role layout (which loci are oncogenes, tumor suppressors, resistance
+genes) and the baseline per-cell-type expression are drawn from a config-determined \emph{layout} seed,
+decoupled from the per-run \emph{evolution} seed. Without this decoupling, two runs of the same
+configuration place their drivers at different loci, so cross-patient recurrence is undefined; with it,
+driver identities are identical across patients by construction while the stochastic evolution stays
+private (\Cref{fig:cohort}A: mean pairwise driver-set Jaccard $=1.0$ with the fix versus $\approx0.04$
+with per-seed layouts). This mirrors, in abstract mode, the fixed shared landscape the real-genome
+mode already provides, and makes the cohort the unit of inference. We surface as ground truth the
+recurrent-versus-private driver split, per-cell patient-of-origin, shared-versus-private cell-state
+labels, and per-patient molecular subtype with its true therapy response --- exactly the
+``simulator-provides-the-truth'' convention of scMultiSim~\cite{li_scmultisim_2025} and
+SISTEM~\cite{weiner_sistem_2025}, extended from one tumor to a cohort. Patients are emitted into
+sequencing batches through a flexible patient-to-batch map --- one patient per batch, or several
+patients multiplexed into a shared lane up to a technical capacity (cell-hashing / genetic-multiplexing
+style) --- by reusing the multi-batch scRNA machinery, so each batch carries both biological (different
+patients) and technical variation.
+
+This cohort ground truth turns four otherwise-unfalsifiable analyses into scorable benchmarks
+(\Cref{fig:cohort}). \emph{Personalized medicine} is the headline: we define two molecular subtypes
+over the same landscape, differing only in a resistance-conferring effect and, for the resistant
+subtype, a \emph{pre-existing subclonal} resistance clone --- the biologically common case, in which
+resistance is a rare minority at baseline rather than clonal. A single therapy then eradicates the
+sensitive tumors and the resistant tumors relapse from the selected subclone (\Cref{fig:cohort}B), a
+differential response with a known answer key; and because \texttt{iscc} carries per-cell truth, the
+responsive subtype is recovered from the baseline molecular profile by the resistant subclone's
+signature (area under the curve $1.0$), a subclone that is a small fraction of cells and hence visible
+only at single-cell resolution --- the actionable minority a bulk assay would miss. \emph{Multi-patient
+integration} (\Cref{fig:cohort}C) exposes the central over/under-correction failure mode: with one
+patient per batch, a naive embedding over-separates the \emph{shared} cell states by patient (low
+integration-LISI), and a batch correction restores cross-patient mixing of shared states while
+preserving the private tumor biology (cell-type adjusted Rand index unchanged) --- scored against the
+shared-versus-private labels, with real Harmony/scVI usable in a dedicated environment. \emph{Demulti\-plexing}
+(\Cref{fig:cohort}D) assigns pooled cells back to their patient-of-origin from private germline variants
+(souporcell/vireo-style) at accuracy far above chance. Finally, \emph{recurrent-driver detection} is
+well-posed only because the landscape is shared: driver genes recur more than private passengers
+(\Cref{fig:cohort}A, inset), though in abstract mode the per-gene enrichment is modest because fitness
+depends on the \emph{count} of mutated drivers rather than their identity --- the real-genome arm model,
+which concentrates selection on specific chromosome arms, is the sharper substrate for that benchmark.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{validation_cohort.png}
+  \caption{\textbf{\texttt{iscc} provides cohort-level ground truth.} Many patients are simulated over
+  one shared driver landscape, pooled into batches, and scored against truth a real cohort cannot give.
+  \textbf{(A)} Cross-patient recurrence is well-posed only under the shared-landscape fix: driver-gene
+  identities are identical across patients (Jaccard $1.0$) versus disjoint under per-seed layouts
+  ($\approx0.04$); drivers recur more than private passengers (inset). \textbf{(B)} Personalized
+  medicine: one therapy eradicates the sensitive subtype and the resistant subtype relapses from a
+  pre-existing subclone; the responsive subtype is recovered from the baseline single-cell profile
+  (inset, AUC $1.0$). \textbf{(C)} Multi-patient integration must mix the shared cell states across
+  patients (raising integration-LISI toward the ideal) without erasing private biology (preserving
+  cell-type ARI). \textbf{(D)} Demultiplexing assigns pooled cells to patient-of-origin from private
+  variants, far above chance.}
+  \label{fig:cohort}
+\end{figure}
+
+
 \subsection*{Outlook: from benchmarking to experimental design}
 \label{sec:outlook}
 Because \texttt{iscc} connects a known evolutionary ground truth to the data an analyst actually

@@ -7,7 +7,11 @@ class Selection(object):
                  driver_effects=1.1, dispersal_effects=1.1, treatment_resistant_effects=1.1, immune_resistant_effects=1.1,
                  selection_mode="gene", s_arm=None, arm_baseline=2.0,
                  max_ploidy=6, max_cn=12, max_nullisomy=2, max_mut_drivers=1000, rng=None, ):
-        # Seeded generator so the driver/resistance layout is reproducible.
+        # Seeded generator so the driver/resistance layout is reproducible. This ``rng`` is used
+        # ONLY for the config-determined gene-role LAYOUT (make_drivers / make_dispersal /
+        # make_treatment_resistant / make_immune_resistant), never for evolution — so the engines
+        # hand it a dedicated LAYOUT rng seeded by a config-determined ``layout_seed`` (shared across
+        # same-config runs), decoupled from the per-run evolution seed. See DESIGN_cohort.md §1.
         self.rng = rng if rng is not None else np.random.default_rng()
         # Fixed about the genome. Segments may have unequal sizes (real-genome mode: size
         # proportional to chromosome-arm length); ``segment_sizes`` overrides the uniform scalar.
