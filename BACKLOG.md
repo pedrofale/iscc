@@ -229,6 +229,29 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   `handoffs/operating_envelope.md`.
 </details>
 
+## Cell-state trajectories & differentiation (R12; plan-first, LATER)
+- **LATER (design-first, like F8; whiteboard stage).** Add a CONTINUOUS cell-state / differentiation
+  axis that EMERGES from the evolving genome (not read off a fixed input tree, unlike
+  scMultiSim/SymSim/PROSSTT/dyngen). Abstraction: cell state = a point `z` in a low-dim space of
+  expression PROGRAMS on a Waddington landscape set by (a) a differentiation hierarchy (baseline +
+  pseudotime), (b) the GENOTYPE (deforms the landscape — block / de-differentiation / new program /
+  plasticity, via a new **differentiation-regulator** gene role in `Selection`), and (c) the
+  microenvironment (reuse the F8 niche modifier). Expression composes multiplicatively:
+  `expr ∝ base · CNA-dosage · exp(Σ z·loading) · niche` — same pattern as CNA dosage + F8.
+- **Three tiers (mirror F8):** v1 readout (draw `z` at materialization; off-by-default, bit-identical);
+  v2 inherited-and-drifting `z` along the lineage (TRUE trajectories + pseudotime + RNA-velocity ground
+  truth + the pseudotime-confound benchmark); v3 state→fitness coupling (shares R8b's engine
+  constraints). Build v1 first; the science is in v2.
+- **Payoff:** a ground-truth trajectory/RNA-velocity benchmark no fixed-tree simulator can produce —
+  and the SAME "structure misleads inference" story as PEtracer / multi-region trees (clonal
+  territories entangle lineage + state + space → when does pseudotime read the true differentiation
+  axis vs get hijacked?). New benchmark-suite member; mechanistic analogue of LARRY clone+state+fate.
+- **Do NOT build** a mechanistic GRN/SDE engine (dyngen/SymSim/scMultiSim turf; GRN/ATAC deferred).
+- **Open decisions before coding** (see doc §7): mechanistic depth, v1-vs-v2 staging, first phenomenon
+  to anchor (EMT is attractive — genotype AND niche), #programs, and the v2/v3 count-engine question
+  (carry per-cell `z` without breaking reproducibility/caching/tau-leaping = R8b). Design doc:
+  `DESIGN_celltrajectory.md`; research framing: `RESEARCH_QUESTIONS.md` R12.
+
 ## External-simulator adapters (recipe; additive `iscc.integrations` seam)
 - **STARTED** — the `iscc.integrations` seam now exists (added by the PEtracer validation):
   `to_newick(tumor)` / `to_lineage_tree(tumor)` (lineage export) + `to_anndata(cell_data)`

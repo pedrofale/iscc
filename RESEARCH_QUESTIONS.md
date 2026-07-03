@@ -222,6 +222,58 @@ operationalizes R3 (sampling), R4 (benchmark transfer), R8 (treatment-schedule t
 
 ---
 
+## Theme 11 — Cell-state dynamics & differentiation trajectories
+
+### R12. How do we model continuous cell state / differentiation trajectories that EMERGE from the evolving genome — rather than being read off a fixed input tree — while staying tractable and multimodally consistent?
+**Why it matters.** iscc's cell states are currently discrete (cell type × clone) plus the F8
+microenvironment expression readout; there is no continuous differentiation axis. Real cells occupy a
+*spectrum* of states set by (a) their position in a differentiation hierarchy (stem → progenitor →
+differentiated — the source of pseudotime) and (b), for cancer cells, mutations that reshape which
+states are reachable (differentiation block, de-differentiation, aberrant programs, plasticity). No
+simulator couples a continuous cell-state trajectory to an EVOLVING, spatially-explicit clonal genome
+under selection: scMultiSim / SymSim / PROSSTT / dyngen all take a differentiation tree (or a GRN) as
+*input* and carry no genome evolution. Trajectory that *emerges from* clonal evolution + microenvironment
+is iscc's white space — and the same non-circularity argument as clonealign applies.
+
+**Framing (the abstraction).** Cell state = a point `z` in a low-dimensional space of expression
+*programs* on a Waddington-style landscape whose attractors/barriers are set by three inputs: the
+differentiation hierarchy (baseline), the genotype (which DEFORMS the landscape), and the
+microenvironment (F8). Empirically supported by the limited set of recurrent expression meta-programs
+across tumours (Gavish & Tirosh, Nature 2023) — a handful of program axes, not a full GRN, suffices.
+
+**Candidate approaches / sub-questions.**
+- *State→expression map.* Program-loading model: `expr_g ∝ … · exp(Σ_k z_k · loading[k,g])`, composing
+  multiplicatively with CNA dosage + the F8 niche modifier (same pattern). How many programs; which to
+  seed from known signatures (cell cycle, EMT)?
+- *Genotype→landscape coupling.* Add a **differentiation-regulator** gene role to `Selection` (beside
+  driver/TSG/dispersal/resistance); a clone's landscape = cell-of-origin baseline deformed by the
+  diff-regulator mutations/CNAs it carries. Four deformation modes: block / de-differentiation / new
+  program / plasticity. What is the minimal parameterisation?
+- *Dynamics tier.* v1 readout (draw `z` at materialization — like F8, off-by-default, bit-identical);
+  v2 inherited-and-drifting `z` along the lineage (true trajectories); v3 state→fitness coupling (stem
+  divides, differentiated doesn't; therapy selects a state). The open engine question for v2/v3 is the
+  same as R8b: feed a per-cell dynamical state into the genotype-count engine WITHOUT breaking
+  reproducibility, the per-genotype expression caching, or tau-leaping.
+- *The confound (the scientific payoff).* Under v2, pseudotime, clone and space become entangled
+  (clonal territories co-locate lineage + state) — the SAME "structure misleads inference" theme as
+  PEtracer and multi-region trees. When does a trajectory method (Slingshot/Monocle/PAGA/CellRank/
+  scVelo) recover the TRUE differentiation axis vs get hijacked by clonal/CNA/spatial structure? iscc
+  knows the true state, the true RNA velocity AND the confounders — a ground-truth trajectory/velocity
+  benchmark no fixed-tree simulator can produce (mechanistic analogue of LARRY clone+state+fate data).
+- *What NOT to build.* Not a mechanistic GRN/SDE engine (dyngen/SymSim/scMultiSim turf; GRN/ATAC already
+  deferred). The latent-program model gets continuous states + pseudotime + velocity at a fraction of the cost.
+
+**Validation.** Emit ground-truth pseudotime/velocity/state + program labels; score trajectory-inference
+recovery vs truth; quantify the confound across the dispersal/territoriality sweep (parallels PEtracer);
+check expression realism (recovered meta-programs resemble the Gavish/Tirosh set).
+
+**Serves:** a continuous cell-state axis for the scRNA/spatial readout; a new benchmark-suite member
+(trajectory + RNA-velocity inference) in the "iscc as a benchmarking substrate" arc; ties to F8
+(niche→program), R8b (state→fitness), and treatment (therapy-driven lineage plasticity/resistance).
+Design-first plan in `DESIGN_celltrajectory.md`. Not in F1–F7 — a substantial new track if promoted.
+
+---
+
 ## How to use this file
 - These are **questions, not scheduled work** — promote one to a DESIGN doc / milestone when we
   commit to building it.
