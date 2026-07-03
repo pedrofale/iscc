@@ -67,12 +67,16 @@ cancer center: a Python package that simulates the whole chain from tumor biolog
 molecular data. \texttt{iscc} grows spatially structured tumors with aberrant genomes under a
 copy-number- and driver-mutation-based selection model, then reproduces the medical and
 laboratory steps that generate data --- biopsy and tissue dissociation --- before applying
-bulk and single-cell DNA and RNA sequencing as well as spot-based spatial transcriptomics,
-down to aligned reads. Because every observation is tied to the ground-truth evolutionary
-history and cell populations of the simulated tumor, \texttt{iscc} provides a common
-benchmarking substrate for methods that reconstruct copy-number evolution, cluster cell states,
-or detect spatial niches, as well as for studying how data-generating choices and treatment
-strategies affect downstream analysis. \texttt{iscc} uses an efficient genotype-level engine
+bulk and single-cell DNA and RNA sequencing as well as spatial transcriptomics, down to aligned
+reads. Expression is shaped by the microenvironment, so that spatially structured programmes such
+as hypoxia arise from the tumor's own geometry. Because every observation is tied to the
+ground-truth evolutionary history, spatial niche and cell populations of the simulated tumor,
+\texttt{iscc} provides a common benchmarking substrate for methods that reconstruct copy-number
+evolution, cluster cell states, or detect spatial niches, as well as for studying how
+data-generating choices and treatment strategies affect downstream analysis. We use this ground
+truth to reveal a lineage--space confound in spatial lineage-tracing analysis --- environmental
+programmes are misclassified as heritable when clones form spatial territories --- and show that
+this failure mode is measurable in real data. \texttt{iscc} uses an efficient genotype-level engine
 that scales to large tumors, its assay parameters can be inferred from real reference datasets,
 and its simulated data reproduce key statistical properties of real bulk, single-cell and
 spatial measurements. The software is available as a command-line tool and a Python library.
@@ -247,9 +251,11 @@ diverse mosaic of local lineages, whereas high dispersal yields fewer clones exp
 spatially coherent patches (clonal sweeps), consistent with~\cite{noble_spatial_2022}.
 
 We further validated the single-nucleotide variants accumulated along the lineages against
-neutral population-genetics theory. Under neutral tumor growth, the bulk variant-allele-frequency
-(VAF) distribution is dominated by rare variants and its cumulative form follows the $1/f$ power
-law $M(f) = (\mu/\beta)(1/f - 1/f_{\max})$~\cite{williams_identification_2016}. Growing neutral
+neutral population-genetics theory, the standard by which spatial tumor-evolution and sequencing
+simulators are checked~\cite{angaroni_jspace_2022, williams_identification_2016}. Under neutral
+tumor growth, the bulk variant-allele-frequency (VAF) distribution is dominated by rare variants
+and its cumulative form follows the $1/f$ power law $M(f) = (\mu/\beta)(1/f -
+1/f_{\max})$~\cite{williams_identification_2016}. Growing neutral
 tumors in \texttt{iscc} (all driver, dispersal and resistance effects set to one, so every
 mutation is a passenger) and reading out the population VAF that a bulk assay would observe, we
 find a rare-variant-dominated spectrum whose cumulative form is well approximated by the neutral
@@ -487,10 +493,11 @@ shipped with \texttt{iscc} are calibrated to these fits, so the software generat
 out of the box; only scale-free, unit-reconciled parameters are transferred as defaults, while
 gene-set- and unit-dependent quantities are re-fit per dataset.
 
-We further verified that this inference works against a real reference genome in a regime
-matched to a published model. Building a reference of simulated tumors grown to several hundred
-cells with $\tau$-leaping and fitting them to the per-arm copy-number landscape of breast cancers
-from PCAWG~\cite{pcawg_2020}, \texttt{iscc} reproduces the real arm-level alteration frequencies
+We further verified that this inference works against a real reference genome, following the
+validation of CINner~\cite{dinh_cinner_2025}, which fits its copy-number-evolution model to the
+real pan-cancer copy-number landscape. Building a reference of simulated tumors grown to several
+hundred cells with $\tau$-leaping and fitting them to the per-arm copy-number landscape of breast
+cancers from PCAWG~\cite{pcawg_2020}, \texttt{iscc} reproduces the real arm-level alteration frequencies
 ($r=0.78$) and, orthogonally, recovers a positive relationship between its inferred per-arm
 selection and an external oncogenic-content score in the spirit of CINner~\cite{dinh_cinner_2025}
 ($\rho=0.32$; \Cref{fig:inference_realgenome}). The $\tau$-leaped reference is statistically
