@@ -79,5 +79,9 @@ for personalized medicine"); flip the BACKLOG cohort item to DONE. Run the full 
 FEASIBILITY: much is plumbed — real-genome shared landscape, and `run_scrna_batches`' "confounded"
 design (different tumours → different batches) is literally the multi-patient case. The genuinely new
 work is the seed decoupling, the `Cohort` wrapper, the patient→batch multiplexing, and the ground-truth
-bookkeeping. Integration/demux tools (scvi-tools, harmonypy) may need install — guard optional deps.
+bookkeeping. External integration/demux tools (scvi-tools/scANVI, harmonypy, vireo/souporcell) MUST
+each go in their OWN dedicated conda env (`iscc-scvi`, `iscc-harmony`, `iscc-demux`) — never install
+them into the core `iscc` env. Follow the clonealign/inferCNV pattern (env-var-overridable interpreter
+path + `<tool>_available()` skip guard + a `subprocess` runner script; data crosses as files); see
+`validation/README_integration.md` ("one dedicated env per external tool") and `integration_common.py`.
 ```

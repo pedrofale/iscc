@@ -30,6 +30,31 @@ iscc            data generation (grow tumour, scDNA + scRNA) + scoring + figures
 scripts and `tests/test_integration.py` skip gracefully when a dedicated env is absent (override the
 interpreters with `ISCC_CLONEALIGN_RSCRIPT` / `ISCC_INFERCNV_PYTHON`).
 
+## Convention — one dedicated env per external tool (applies to ALL validations)
+
+**Any `iscc` validation that shells out to an external tool MUST run that tool in its own dedicated
+`iscc-<tool>` conda env — never install it into the core `iscc` env.** The core env stays limited to
+`iscc` + its scientific stack; heavy or dependency-conflicting tools (R packages, TensorFlow,
+scvi-tools, …) are isolated so a broken or conflicting install can never poison the simulator itself,
+and each benchmark is reproducible from a pinned env.
+
+The pattern for each tool (see `integration_common.py`):
+
+1. A module-level interpreter path, env-var-overridable:
+   `<TOOL> = os.environ.get("ISCC_<TOOL>_PYTHON", "~/miniconda3/envs/iscc-<tool>/bin/python")`
+   (or `.../bin/Rscript`).
+2. A `<tool>_available()` guard so the validation **and its test** SKIP gracefully when the env is absent.
+3. A thin runner script (`<tool>_runner.{py,R}`) executed via `subprocess`; data crosses the env
+   boundary as files (CSV / AnnData) in a temp dir. The core-env script never imports the external tool.
+
+Document each new env's build recipe in the "Building the dedicated envs" section below.
+
+**Current envs:** `iscc-clonealign`, `iscc-infercnv`.
+**Planned (build the same way when the benchmark lands):** cohort/batch integration — `iscc-scvi`
+(scvi-tools / scANVI), `iscc-harmony` (harmonypy); demultiplexing — `iscc-demux` (vireo / souporcell);
+spatial deconvolution — `iscc-cell2location` / `iscc-tangram`. Self-contained validations (pure
+numpy/scipy, e.g. the multi-region NJ trees) need **no** extra env.
+
 ## Building the dedicated envs
 
 ```bash
