@@ -800,6 +800,28 @@ never draws on the simulation's randomness and does not alter its output. \Cref{
 summarizes the default value, valid range, and out-of-range failure mode for each knob; these
 defaults place the shipped configuration inside the realistic region of every axis.
 
+Finally, the operating envelope and the parameter inference of \Cref{sec:inference} close a loop:
+fitting \texttt{iscc} to data should land in the realistic region, and we verify that it does
+(\Cref{fig:calibration}). Auditing the ABC search prior with the diagnostic reveals that it is almost
+entirely inside the good region, and it also caught a founder-extinction bottleneck --- the inference
+base configuration seeded a single founder cell, so a few percent of simulations went silently extinct
+--- which we removed by seeding a small established lesion, after which the prior is fully
+non-degenerate. Running ABC-rf recovery on realistic tumors, every inferred point estimate falls inside
+the reported good ranges and regrows into a non-degenerate tumor. The envelope thus both documents the
+usable region and actively protects the calibration and benchmarks that depend on it.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{validation_calibration_envelope.png}
+  \caption{\textbf{Closing the loop: inferred parameters land in the operating envelope.} (A,~B)
+  ABC-rf recovery of \texttt{mutation\_rate} and \texttt{amp\_prob} on realistic tumors; every inferred
+  estimate (green) falls inside the reported good range (shaded) and regrows into a non-degenerate
+  tumor. (C)~fraction of configurations that are non-degenerate: the ABC search prior is almost
+  entirely in the good region, a founder-extinction leak is removed by seeding an established lesion,
+  and all inferred estimates are non-degenerate.}
+  \label{fig:calibration}
+\end{figure}
+
 \begin{figure}[t]
   \centering
   \includegraphics[width=\textwidth]{validation_operating_envelope.png}

@@ -197,6 +197,15 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   - Honest findings recorded in the design doc: the well-mixed metric uses per-clone spatial
      confinement (a naive clone-label Moran's I is confounded because higher dispersal also reduces
      clone count); fraction-genome-altered **saturates** (viability-capped) rather than running away.
+  - **Realistic size + perf:** documented that size ≈ #steps (exact) / use `update_mode="tau"`;
+     non-failing `small tumour` advisory; and a ~9× count-engine speed-up (skip immune scan when no
+     immune cells; deme occupancy once per substep) — 134k cells in ~20s, byte-identical output.
+  - **Closed the loop** (user, 2026-07-03): `validation/validate_calibration_envelope.py` →
+     `manuscript/figures/validation_calibration_envelope.png` + `sec:envelope`/`fig:calibration`.
+     ABC-rf recovery estimates land 100% inside the good ranges and regrow non-degenerate; the prior
+     audit CAUGHT + fixed a founder-extinction leak in the inference base config
+     (`initial_cancer_cells=5`), taking prior non-degenerate coverage 98%→100%. Tests in
+     `test_diagnostics.py`.
 
 <details><summary>original spec</summary>
 - **Goal (user):** know & REPORT which parameter ranges produce which tumour features, so users don't

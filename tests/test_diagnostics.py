@@ -166,3 +166,36 @@ def test_no_advisory_for_realistic_size():
     t = _grow(steps=900)
     diag = t.diagnose(thresholds={"min_realistic": t.get_cancer_size() - 1})
     assert diag.advisories == []
+
+
+# --- closing the loop: calibration lands in the good region ------------------
+def test_inference_base_config_is_non_degenerate():
+    # The config the inference layer fits from should itself sit inside the operating envelope
+    # (this is what makes "fitting lands you in the good region" hold). The founder-extinction
+    # bottleneck the envelope caught is fixed (initial_cancer_cells = 5), so it no longer goes
+    # extinct, and it is otherwise non-degenerate.
+    from iscc.inference.tumor import default_base_config
+    cfg = default_base_config()
+    assert cfg["deme_params"].get("initial_cancer_cells", 1) >= 5
+    t = GenotypeTumor(genome_params=cfg["genome_params"], selection_params=cfg["selection_params"],
+                      cancer_cell_params=cfg["cancer_cell_params"], deme_params=cfg["deme_params"],
+                      spatial_params=cfg["spatial_params"], seed=0)
+    t.grow(n_steps=800, seed=0)
+    diag = t.diagnose()
+    assert "extinct" not in _flags(diag)
+    assert diag.ok, f"inference base config flagged: {_flags(diag)}"
+
+
+def test_realistic_estimates_are_non_degenerate():
+    # a realistic (mutation_rate, amp_prob) point in the recovery truth range regrows non-degenerate.
+    from iscc.inference.tumor import default_base_config, PARAM_PATHS
+    import copy
+    cfg = copy.deepcopy(default_base_config())
+    for name, val in {"mutation_rate": 0.3, "amp_prob": 0.5, "dispersal_rate": 0.2}.items():
+        sec, key = PARAM_PATHS[name]
+        cfg[sec][key] = val
+    t = GenotypeTumor(genome_params=cfg["genome_params"], selection_params=cfg["selection_params"],
+                      cancer_cell_params=cfg["cancer_cell_params"], deme_params=cfg["deme_params"],
+                      spatial_params=cfg["spatial_params"], seed=1)
+    t.grow(n_steps=800, seed=1)
+    assert t.diagnose().ok
