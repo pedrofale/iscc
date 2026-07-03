@@ -98,19 +98,25 @@ def test_subgroups_assignment_and_response():
     assert rt.loc[0, "therapy_response"] == 1 and rt.loc[1, "therapy_response"] == 0
 
 
-def test_founder_mutations_are_clonal():
-    """`founder_mutations` (a truncal/inherited alteration, e.g. a germline background) is present in
-    the vast majority of cancer cells — the mechanism the per-patient germline demux markers use."""
+def test_germline_mutations_in_all_cell_types():
+    """A `germline_mutations` variant is present in EVERY cell of the patient — the founder cancer
+    cells AND the normal (epithelial/stromal) cells — because germline variants are carried by every
+    cell of an individual, not just the tumour (this is the mechanism the private demux markers use)."""
     marks = [3, 11, 27]
-    subs = [Subgroup("G", founder_mutations=tuple(marks))]
+    subs = [Subgroup("G", germline_mutations=tuple(marks))]
+    spatial = {"grid_size": 9, "structure_radius": 2}     # seeds epithelial/stromal normal cells
     co = Cohort(patient_seeds=[1], genome_params=GENOME, selection_params=SELECTION,
-                cancer_cell_params=CANCER, deme_params=DEME, spatial_params=SPATIAL,
+                cancer_cell_params=CANCER, deme_params=DEME, spatial_params=spatial,
                 grow_steps=120, subgroups=subs).run()
     snv = co.patients[0].cell_data["cell_snv"].values
     ct = co.patients[0].cell_data["cell_type"].iloc[:, 0].astype(str).values
     genos = co.patients[0].tumor.genotypes
-    cancer = np.array([genos[g].type == "cancer" for g in ct])
-    assert (snv[cancer][:, marks] > 0).mean() > 0.9
+    types = np.array([genos[g].type for g in ct])
+    assert (types == "cancer").any() and np.isin(types, ["epithelial", "stromal"]).any()
+    # carried by cancer cells AND by normal cells (germline is in every cell of the individual)
+    assert (snv[types == "cancer"][:, marks] > 0).mean() > 0.9
+    normal = np.isin(types, ["epithelial", "stromal"])
+    assert (snv[normal][:, marks] > 0).all()
 
 
 def test_resistance_EMERGES_and_drives_differential_response():

@@ -121,8 +121,9 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
      (`groundtruth.py`). Subgroups differ by EFFECT scalars over the shared landscape; **resistance is
      NOT seeded — it EMERGES** from mutation + selection (a subtype differs only in
      `treatment_resistant_effects`; standing resistance mutations arise in an untreated burn-in and
-     adjuvant therapy selects them). `founder_mutations` is kept only for inherited/germline truncal
-     backgrounds (the per-patient private demux markers), never for acquired resistance.
+     adjuvant therapy selects them). Inherited `germline_mutations` (+ per-patient private demux markers)
+     are applied to EVERY cell of the patient — tumour AND normal, as real germline variants are — never
+     for acquired resistance.
   3. **`validation/validate_cohort.py`** (+ `cohort_common.py`, `harmony_runner.py`) →
      `manuscript/figures/validation_cohort.png` + Results subsection `sec:cohort`, `fig:cohort`. The
      4 benchmarks: recurrence-enablement (shared Jaccard 1.0 vs unshared 0.04), personalized-medicine

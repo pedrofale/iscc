@@ -46,15 +46,16 @@ class Subgroup:
     therapy they are selected in the high-effect subtype (which relapses) and inert in the low-effect
     subtype (which is eradicated). See :func:`iscc.cohort.cohort` / the personalized-medicine benchmark.
 
-    ``founder_mutations`` (flat gene indices) seed a TRUNCAL, INHERITED alteration into the founder
-    genome (present in every cancer cell) — appropriate for a *germline*/hereditary subtype-defining
-    background (e.g. a germline variant), NOT for modelling acquired resistance (which must emerge).
-    ``therapy_response`` is a free-form ground-truth label (e.g. "sensitive"/"resistant", or a numeric
-    expected response) — the stratification / biomarker answer key.
+    ``germline_mutations`` (flat gene indices) seed an INHERITED germline variant into EVERY cell of the
+    patient — the founder cancer cell AND the normal (epithelial/stromal/immune) cells — since germline
+    variants are present in every cell of an individual, not only the tumour. Appropriate for a
+    hereditary subtype-defining background (e.g. a germline predisposition variant), NOT for modelling
+    acquired resistance (which must emerge). ``therapy_response`` is a free-form ground-truth label
+    (e.g. "sensitive"/"resistant", or a numeric expected response) — the stratification answer key.
     """
     name: str
     selection_delta: dict = field(default_factory=dict)
-    founder_mutations: tuple = ()
+    germline_mutations: tuple = ()
     therapy_response: object = None
 
 
@@ -212,11 +213,11 @@ class Cohort:
                 kwargs[name] = val
         t = GenotypeTumor(**kwargs)
         sub = self._subgroup_by_name[self.subgroup_assignment[patient_idx]]
-        founder_muts = list(sub.founder_mutations)
+        germline = list(sub.germline_mutations)
         if self.germline_markers is not None:
-            founder_muts = founder_muts + list(self.germline_markers[patient_idx])
-        if founder_muts:
-            _apply_founder_mutations(t, founder_muts)
+            germline = germline + list(self.germline_markers[patient_idx])
+        if germline:
+            _apply_germline_mutations(t, germline)
         return t
 
     def grow_patient(self, patient_idx, treatment=None, grow_steps=None):
@@ -259,26 +260,39 @@ class Cohort:
         return self._subgroup_by_name[self.subgroup_assignment[patient_idx]]
 
 
-def _apply_founder_mutations(tumor, gene_indices):
-    """Seed TRUNCAL mutations into the founder genotype BEFORE growth (a subtype-defining clonal
-    driver present in every cancer cell). Sets the mutated bit on one allele of each named flat gene
-    index and refreshes the founder's genome summary, evolutionary parameters, and deme rates. Safe
-    because only the founder exists at this point (no daughters share its genome yet).
+def _apply_germline_mutations(tumor, gene_indices):
+    """Seed inherited GERMLINE variants into EVERY cell of the patient BEFORE growth — the founder
+    cancer genotype AND every normal (epithelial/stromal/immune) genotype present — since a germline
+    variant is carried by every cell of an individual, not just the tumour. This makes ALL of a
+    patient's cells (tumour and normal) share the same private germline background, which is exactly
+    what genetic demultiplexing (souporcell/vireo) uses to assign cells to individuals.
+
+    On the cancer founder the genome summary + fitness are refreshed (in case a variant lands on a
+    driver); on the static normal genotypes only the genome bits are set (they carry no selection and
+    ``get_snvs`` reads the genome directly). Safe because only these representatives exist pre-growth.
     """
-    rep = tumor.genotypes[tumor.founder_id]
     sel = tumor.selection
     offs = np.concatenate([[0], np.cumsum(sel.segment_sizes)]).astype(int)
-    for g in gene_indices:
-        g = int(g)
-        seg = int(np.searchsorted(offs, g, side="right") - 1)
-        pos = g - int(offs[seg])
-        allele = rep.genome[seg]["p"][0]
-        if allele[pos]:
-            continue
-        allele[pos] = True
-        mut_bits = np.zeros(sel.segment_sizes[seg], dtype=bool)
-        mut_bits[pos] = True
-        rep.update_genome_summary_mutation(sel, mut_bits, seg)
-    rep.update_evolutionary_parameters(sel)
-    # the founder's rates changed -> refresh every deme rate so event sampling is correct
+
+    def set_bits(rep, update_summary):
+        for g in gene_indices:
+            g = int(g)
+            seg = int(np.searchsorted(offs, g, side="right") - 1)
+            pos = g - int(offs[seg])
+            allele = rep.genome[seg]["p"][0]
+            if allele[pos]:
+                continue
+            allele[pos] = True
+            if update_summary:
+                mut_bits = np.zeros(sel.segment_sizes[seg], dtype=bool)
+                mut_bits[pos] = True
+                rep.update_genome_summary_mutation(sel, mut_bits, seg)
+
+    founder = tumor.genotypes[tumor.founder_id]
+    set_bits(founder, update_summary=True)
+    founder.update_evolutionary_parameters(sel)
+    for gid, rep in tumor.genotypes.items():
+        if gid != tumor.founder_id and getattr(rep, "type", None) in ("epithelial", "stromal", "immune"):
+            set_bits(rep, update_summary=False)
+    # the founder's rates may have changed -> refresh every deme rate so event sampling stays correct
     tumor.deme_rates = np.array([tumor._deme_rate(i) for i in range(len(tumor.demes))], dtype=float)

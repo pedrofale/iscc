@@ -119,9 +119,11 @@ subtype is defined ONLY by an **effect scalar** (`treatment_resistant_effects`).
 as **neutral standing variation** (resistance is inert without drug). **Adjuvant** therapy then
 **selects** them: in the high-effect (resistant) subtype the standing resistant cells survive and
 **relapse**; in the low-effect (sensitive) subtype the same mutations are inert and the tumour is
-eradicated. The differential response is thus a genuine evolutionary outcome. (`founder_mutations`
-remains only for a truly *inherited/germline* truncal background — e.g. the per-patient private demux
-markers — never for acquired resistance.) **Honest consequence for the biomarker:** at BASELINE the two
+eradicated. The differential response is thus a genuine evolutionary outcome. (Inherited **germline**
+variants — `Subgroup.germline_mutations` and the per-patient private demux markers — are the only
+pre-seeded alterations; they are applied to EVERY cell of the patient, tumour AND normal, as real
+germline variants are, and never model acquired resistance.) **Honest consequence for the biomarker:**
+at BASELINE the two
 subtypes are molecularly indistinguishable (the same standing resistance mutations are present in both;
 only their functional effect differs), so a bulk baseline call is **non-predictive** — a realistic
 precision-oncology point iscc surfaces. Recovery of the responsive subtype comes from the therapy-
