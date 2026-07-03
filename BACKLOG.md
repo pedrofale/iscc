@@ -129,9 +129,11 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
      4 benchmarks: recurrence-enablement (shared Jaccard 1.0 vs unshared 0.04), personalized-medicine
      (emergent differential response; recovery AUC — baseline non-predictive ~0.5, emergent relapse
      signature ~0.8, response readout 1.0), multi-patient integration (shared-state iLISI 1.9→5.3, ARI
-     preserved), demultiplexing (patient-of-origin 1.0 vs chance 0.12). External integration/demux tools
-     wired behind `iscc-harmony`/`iscc-scvi`/`iscc-demux` env guards (clonealign/inferCNV convention);
-     the figure is self-contained.
+     preserved), demultiplexing PER MODALITY — DNA: genetic demux on germline SNPs (all cells, cancer +
+     normal, acc 1.0); RNA: cell hashing (`hashing.py`, HTO/MULTI-seq) with near-perfect singlets and
+     doublets as the failure mode (naive acc falls with doublet rate, doublets detectable). External
+     integration/demux tools wired behind `iscc-harmony`/`iscc-scvi`/`iscc-demux` env guards
+     (clonealign/inferCNV convention); the figure is self-contained.
   - **Honest finding:** per-gene SNV recurrence enrichment is modest in abstract mode (fitness depends
     on the COUNT of mutated drivers, so per-gene convergence is weak + passengers hitchhike in sweeps);
     the real-genome arm model is the sharper substrate. The shared-vs-unshared *enablement* contrast is

@@ -17,7 +17,8 @@ from iscc.tumor.models import GenotypeTumor
 from iscc.constants import DEFAULT_LAYOUT_SEED
 from iscc.cohort import (Cohort, Subgroup, assign_batches, pool_cell_data, run_cohort_batches,
                          concat_cohort_batches, recurrence_table, true_recurrent_drivers,
-                         private_mutation_table, shared_private_labels, subgroup_response_table)
+                         private_mutation_table, shared_private_labels, subgroup_response_table,
+                         emit_cell_hashtags, demux_hashtags)
 
 GENOME = {"n_segments": 5, "segment_size": 40}
 SELECTION = {"prop_driver": 0.12, "prop_dispersal": 0.1, "prop_immune_resistance": 0.1,
@@ -212,3 +213,23 @@ def test_private_and_shared_private_labels():
     # shared axis = coarse cell type; private axis = patient
     assert set(sp["shared_state"]) <= {"cancer", "epithelial", "stromal", "immune"}
     assert set(sp["private_state"]) == set(str(i) for i in range(6))
+
+
+# ============================ RNA-modality demux: cell hashing ==========================
+def test_cell_hashing_singlets_assigned_doublets_detected():
+    """Cell hashing (the RNA-modality demux): each cell's dominant hashtag recovers its patient
+    (near-perfect on singlets), and true doublets score higher on the doublet statistic — the real
+    challenge under cell super-loading."""
+    from sklearn.metrics import roc_auc_score
+    rng = np.random.default_rng(0)
+    truth = np.repeat(np.arange(6), 120)                 # 6 patients, 120 cells each
+    counts, hashtags, is_doublet = emit_cell_hashtags(truth, ambient_frac=0.08, doublet_rate=0.12, seed=1)
+    assert counts.shape == (len(truth), 6)
+    assign, doublet_score = demux_hashtags(counts)
+    pred = hashtags[assign]
+    singlet = ~is_doublet
+    # singlets are assigned to the correct patient by their dominant hashtag
+    assert (pred[singlet] == truth[singlet]).mean() > 0.98
+    # true doublets are detectable (co-dominant second hashtag -> higher doublet score)
+    assert 0 < is_doublet.sum() < len(is_doublet)
+    assert roc_auc_score(is_doublet.astype(int), doublet_score) > 0.9

@@ -17,7 +17,8 @@ import subprocess
 import numpy as np
 import pandas as pd
 
-from iscc.cohort import Cohort, Subgroup, pool_cell_data, run_cohort_batches, concat_cohort_batches
+from iscc.cohort import (Cohort, Subgroup, pool_cell_data, run_cohort_batches, concat_cohort_batches,
+                         emit_cell_hashtags, demux_hashtags)
 from iscc.cohort.groundtruth import _cancer_snv
 from iscc.tumor.models import GenotypeTumor
 from iscc.treatment.chemotherapy import Chemotherapy
@@ -328,27 +329,57 @@ def demux_cohort(n_patients=8, steps=320, n_germline=40):
                   n_germline_markers=n_germline).run()
 
 
-def demux_analysis(cohort, capacity=None, n_cells_per_patient=120):
-    """Pool all patients into one batch (N:1) and assign EVERY pooled cell — cancer AND normal — back to
-    its patient-of-origin from its private germline variants (souporcell/vireo-style). Returns overall
-    accuracy and the per-compartment breakdown (normal cells are demuxable ONLY because germline is
-    carried by every cell of the individual, not just the tumour)."""
+def dna_demux_analysis(cohort, n_cells_per_patient=120):
+    """DNA-MODALITY demux (WGS/WES/scDNA): GENETIC demultiplexing on germline SNPs. DNA assays cover
+    the genome/exome broadly, so germline genotyping is reliable per cell; we pool all patients (N:1)
+    and assign EVERY cell — cancer AND normal — to patient-of-origin by clustering its germline-variant
+    genotype (souporcell/vireo/demuxlet-style). Normal cells are demuxable ONLY because germline is
+    carried by every cell of the individual. Reports overall + per-compartment accuracy."""
     from sklearn.cluster import AgglomerativeClustering
     K = cohort.n_patients
     pooled, meta = pool_cell_data([cohort.patients[p] for p in range(K)],
                                   n_cells_per_patient=n_cells_per_patient)
     types = meta["cell_type"].values
-    v = (pooled["cell_snv"].values > 0).astype(float)           # ALL pooled cells (cancer + normal)
+    v = (pooled["cell_snv"].values > 0).astype(float)           # DNA genotype, ALL cells (cancer+normal)
     truth = meta["patient"].values.astype(int)
     freq = v.mean(0)
     keep = (freq >= 0.01) & (freq <= 0.95)
     pred = AgglomerativeClustering(n_clusters=K).fit_predict(v[:, keep])
     is_cancer = types == "cancer"
     is_normal = np.isin(types, ["epithelial", "stromal", "immune"])
-    out = dict(accuracy=match_accuracy(pred, truth, K),
-               cancer_accuracy=match_accuracy(pred[is_cancer], truth[is_cancer], K) if is_cancer.any() else float("nan"),
-               normal_accuracy=match_accuracy(pred[is_normal], truth[is_normal], K) if is_normal.any() else float("nan"),
-               chance=1.0 / K, n_cells=len(truth), n_cancer=int(is_cancer.sum()), n_normal=int(is_normal.sum()),
-               n_sites=int(keep.sum()), pred=pred, truth=truth,
-               method="private germline clustering (cancer + normal cells)")
-    return out
+    return dict(modality="DNA (germline SNP genetic demux)",
+                accuracy=match_accuracy(pred, truth, K),
+                cancer_accuracy=match_accuracy(pred[is_cancer], truth[is_cancer], K) if is_cancer.any() else float("nan"),
+                normal_accuracy=match_accuracy(pred[is_normal], truth[is_normal], K) if is_normal.any() else float("nan"),
+                chance=1.0 / K, n_cells=len(truth), n_cancer=int(is_cancer.sum()), n_normal=int(is_normal.sum()),
+                truth=truth, meta=meta)
+
+
+def rna_hashing_demux_analysis(cohort, n_cells_per_patient=120, doublet_rates=(0.05, 0.10, 0.20),
+                               ambient_frac=0.08, seed=0):
+    """RNA-MODALITY demux: CELL HASHING. Droplet scRNA can't reliably call germline SNPs (only sparse
+    expressed loci), so pooled scRNA is demultiplexed by a per-sample hashtag oligo (Cell Hashing /
+    MULTI-seq). We take the true patient-of-origin of the pooled cells, emit an HTO readout
+    (:func:`iscc.cohort.emit_cell_hashtags`: own hashtag + ambient soup + doublets), and demux by the
+    dominant hashtag (HTODemux-style). Reports SINGLET assignment accuracy (near-perfect) and DOUBLET
+    detection (the real challenge, since hashing is used with cell super-loading), across doublet rates.
+    """
+    from sklearn.metrics import roc_auc_score
+    K = cohort.n_patients
+    _, meta = pool_cell_data([cohort.patients[p] for p in range(K)],
+                             n_cells_per_patient=n_cells_per_patient)
+    truth = meta["patient"].values.astype(int)
+    rows = []
+    for i, dbl in enumerate(doublet_rates):
+        counts, hashtags, is_doublet = emit_cell_hashtags(truth, ambient_frac=ambient_frac,
+                                                          doublet_rate=dbl, seed=seed + i)
+        assign, doublet_score = demux_hashtags(counts)
+        pred = hashtags[assign]
+        singlet = ~is_doublet
+        singlet_acc = float((pred[singlet] == truth[singlet]).mean()) if singlet.any() else float("nan")
+        naive_acc = float((pred == truth).mean())               # assign everyone, no doublet handling
+        dbl_auc = (float(roc_auc_score(is_doublet.astype(int), doublet_score))
+                   if 0 < is_doublet.sum() < len(is_doublet) else float("nan"))
+        rows.append(dict(doublet_rate=dbl, singlet_accuracy=singlet_acc, naive_accuracy=naive_acc,
+                         doublet_detection_auc=dbl_auc, n_doublets=int(is_doublet.sum())))
+    return dict(modality="RNA (cell hashing / HTO)", n_cells=len(truth), chance=1.0 / K, sweep=rows)

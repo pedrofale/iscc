@@ -15,10 +15,12 @@ from .cohort import Cohort, Subgroup, PatientResult
 from .batch import (assign_batches, pool_cell_data, run_cohort_batches, concat_cohort_batches)
 from .groundtruth import (recurrence_table, true_recurrent_drivers, patient_gene_mutated,
                           private_mutation_table, shared_private_labels, subgroup_response_table)
+from .hashing import emit_cell_hashtags, demux_hashtags
 
 __all__ = [
     "Cohort", "Subgroup", "PatientResult",
     "assign_batches", "pool_cell_data", "run_cohort_batches", "concat_cohort_batches",
     "recurrence_table", "true_recurrent_drivers", "patient_gene_mutated",
     "private_mutation_table", "shared_private_labels", "subgroup_response_table",
+    "emit_cell_hashtags", "demux_hashtags",
 ]

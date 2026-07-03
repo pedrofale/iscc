@@ -23,10 +23,13 @@ Figure (manuscript/figures/validation_cohort.png), the strongest first-pass benc
      the SHARED cell states by patient (low iLISI); a correction restores cross-patient mixing while
      preserving the biology (cell-type ARI) — scored against iscc's shared-vs-private ground truth
      (real Harmony used when the iscc-harmony env is present, else a self-contained baseline).
-  D. DEMULTIPLEXING. N:1 pooling of solid tumours WITH their normal microenvironment -> assign EVERY
-     pooled cell, cancer AND normal, back to patient-of-origin from its private germline variants
-     (souporcell/vireo-style): accuracy vs the true patient label, far above chance, in both
-     compartments (normal cells are demuxable only because germline is carried by every cell).
+  D. DEMULTIPLEXING, per modality. DNA assays (WGS/WES/scDNA) genotype germline SNPs reliably, so N:1
+     pooled DNA is demuxed GENETICALLY (souporcell/vireo/demuxlet) — every cell, cancer AND normal,
+     assigned by its germline genotype. Droplet scRNA cannot call germline SNPs reliably (only sparse
+     expressed loci), so pooled RNA is demuxed by CELL HASHING (a per-sample HTO/MULTI-seq barcode):
+     singlet assignment is near-perfect and the real challenge is DOUBLET detection (hashing is used
+     with cell super-loading) — shown as naive accuracy falling with the doublet rate while the
+     doublets stay detectable.
 
 Self-contained (numpy/scipy/sklearn); external integration/demux tools are optional and isolated in
 their own conda envs. Run:  python -u validation/validate_cohort.py
@@ -87,19 +90,23 @@ def main():
     else:
         print(f"    (iscc-harmony env absent -> self-contained '{ia['method']}' correction only)")
 
-    # ---- D. demultiplexing ------------------------------------------------------------
-    print("\n[D] demultiplexing (N:1 pooling, patient-of-origin) ...")
+    # ---- D. demultiplexing (DNA: genetic / RNA: cell hashing) --------------------------
+    print("\n[D] demultiplexing — DNA (germline SNPs) vs RNA (cell hashing) ...")
     dc = cc.demux_cohort(n_patients=args.demux_patients)
-    da = cc.demux_analysis(dc)
-    print(f"    patient-of-origin accuracy={da['accuracy']:.3f} (chance={da['chance']:.3f}, "
-          f"{da['n_cells']} pooled cells: {da['n_cancer']} cancer + {da['n_normal']} normal)")
-    print(f"      by compartment — cancer={da['cancer_accuracy']:.3f}  normal={da['normal_accuracy']:.3f}")
+    dna = cc.dna_demux_analysis(dc)
+    rna = cc.rna_hashing_demux_analysis(dc)
+    print(f"    DNA genetic demux: accuracy={dna['accuracy']:.3f} "
+          f"(cancer={dna['cancer_accuracy']:.3f} normal={dna['normal_accuracy']:.3f}, chance={dna['chance']:.3f}, "
+          f"{dna['n_cancer']} cancer + {dna['n_normal']} normal)")
+    for r in rna["sweep"]:
+        print(f"    RNA cell hashing @ doublet={r['doublet_rate']:.0%}: singlet acc={r['singlet_accuracy']:.3f}  "
+              f"naive acc={r['naive_accuracy']:.3f}  doublet-detect AUC={r['doublet_detection_auc']:.3f}")
 
-    _figure(args.out, ra, pmres, ia, da)
+    _figure(args.out, ra, pmres, ia, dna, rna)
     print(f"\nsaved figure -> {args.out}")
 
 
-def _figure(out, ra, pm, ia, da):
+def _figure(out, ra, pm, ia, dna, rna):
     fig, ax = plt.subplots(2, 2, figsize=(13, 10))
 
     # A. recurrence enablement -----------------------------------------------------------
@@ -161,17 +168,28 @@ def _figure(out, ra, pm, ia, da):
     c.legend(fontsize=8, loc="upper left")
     c.set_title("C. Integration must MIX shared states across\npatients without erasing private biology")
 
-    # D. demultiplexing (cancer + normal cells) -----------------------------------------
+    # D. demultiplexing — DNA (genetic) vs RNA (cell hashing) ---------------------------
     d = ax[1, 1]
-    vals = [da["chance"], da["cancer_accuracy"], da["normal_accuracy"], da["accuracy"]]
-    d.bar(range(4), vals, color=["#7f8c8d", "#c0392b", "#2980b9", "#27ae60"], width=0.65)
-    d.set_xticks(range(4)); d.set_xticklabels(["chance", "cancer", "normal", "all cells"])
-    d.set_ylabel("patient-of-origin accuracy")
-    d.set_ylim(0, 1.08)
-    for x, v in zip(range(4), vals):
+    rna_dbl = [r["doublet_rate"] for r in rna["sweep"]]
+    rna_singlet = [r["singlet_accuracy"] for r in rna["sweep"]]
+    rna_naive = [r["naive_accuracy"] for r in rna["sweep"]]
+    rna_auc = [r["doublet_detection_auc"] for r in rna["sweep"]]
+    # bar: the two modalities' headline accuracy (DNA all-cell genetic; RNA singlet hashing)
+    d.bar([0, 1, 2], [dna["chance"], dna["accuracy"], rna_singlet[0]],
+          color=["#7f8c8d", "#8e44ad", "#16a085"], width=0.6)
+    for x, v, lab in zip([0, 1, 2], [dna["chance"], dna["accuracy"], rna_singlet[0]],
+                         ["chance", "DNA genetic\n(germline SNP)", "RNA hashing\n(singlet)"]):
         d.text(x, v + 0.02, f"{v:.2f}", ha="center", fontweight="bold", fontsize=9)
-    d.set_title(f"D. Demultiplexing (N:1 pool: {da['n_cancer']} cancer + {da['n_normal']} normal):\n"
-                "assign every cell to patient-of-origin via germline")
+    d.set_xticks([0, 1, 2]); d.set_xticklabels(["chance", "DNA genetic\n(germline SNP)", "RNA hashing\n(singlet)"], fontsize=8)
+    d.set_ylabel("patient-of-origin accuracy"); d.set_ylim(0, 1.12)
+    d.set_title("D. Demultiplexing: DNA uses germline SNPs,\nRNA uses cell hashing (per-modality method)")
+    # inset: the RNA-hashing failure mode is DOUBLETS — naive accuracy falls, but they are detectable
+    di = d.inset_axes([0.60, 0.16, 0.36, 0.42])
+    di.plot(rna_dbl, rna_naive, "o-", color="#c0392b", ms=4, label="naive acc")
+    di.plot(rna_dbl, rna_auc, "s--", color="#2980b9", ms=4, label="doublet AUC")
+    di.set_xlabel("doublet rate", fontsize=7); di.set_ylim(0.5, 1.02)
+    di.tick_params(labelsize=6); di.legend(fontsize=6, loc="lower left")
+    di.set_title("hashing: doublets", fontsize=7)
 
     fig.suptitle("iscc provides cohort-level ground truth: shared-vs-private states, and the need for "
                  "personalized medicine", fontsize=13, fontweight="bold")

@@ -83,7 +83,8 @@ differs. Also: passing distinct explicit `layout_seed`s yields *different* layou
 
 New subpackage `iscc/cohort/` (mirrors `iscc/sample`, `iscc/treatment`):
 `cohort.py` (`Cohort`, `PatientResult`, `Subgroup`), `batch.py` (patient→batch mapping + pooled
-emission), `groundtruth.py` (cohort ground-truth tables), `__init__.py`.
+emission), `groundtruth.py` (cohort ground-truth tables), `hashing.py` (cell-hashing HTO readout +
+demux, the RNA-modality demultiplexer), `__init__.py`.
 
 ### 2.1 `Cohort` — N tumours, one shared landscape
 ```python
@@ -188,9 +189,16 @@ and skipped gracefully (own dedicated envs, clonealign/inferCNV pattern).
    The central over/under-correction failure mode, with no real truth. `iscc-harmony` (harmonypy) /
    `iscc-scvi` (scvi-tools/scANVI) wired behind an `_available()` skip guard.
 
-**Also surfaced (4th panel if cheap):** N:1 **demultiplexing** ground truth (patient-of-origin) with
-a self-contained private-variant baseline (cluster pooled cells by private-SNV genotype → assign to
-patient), accuracy vs the true patient label; `iscc-demux` (vireo/souporcell) seam wired.
+**Demultiplexing — PER MODALITY (the two methods used in practice).** DNA assays (WGS/WES/scDNA) cover
+the genome/exome broadly, so germline SNPs are genotyped reliably per cell → pooled DNA is demuxed
+**genetically** (souporcell/vireo/demuxlet): cluster pooled cells by their germline-variant genotype
+and assign to patient. Because germline is carried by EVERY cell (tumour and normal — see the germline
+mutation model above), all cells demux, cancer and normal alike; `iscc-demux` (vireo) seam wired.
+Droplet **scRNA**, by contrast, only covers sparse expressed loci and cannot genotype germline SNPs
+per cell reliably — so pooled scRNA is demuxed by **cell hashing** (a per-sample HTO/MULTI-seq oligo
+barcode, `iscc.cohort.emit_cell_hashtags` / `demux_hashtags`): each cell gets its own hashtag + an
+ambient soup of all hashtags + a doublet fraction with a second hashtag; singlet assignment is
+near-perfect and the real challenge is **doublet detection** (hashing is used with cell super-loading).
 
 ### External-env convention (follows `validation/README_integration.md`)
 Each external integration/demux tool gets its **own** dedicated conda env — never the core `iscc`
