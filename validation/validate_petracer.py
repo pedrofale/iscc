@@ -24,7 +24,15 @@ Figure (manuscript/figures/validation_petracer.png):
      correlation, both falling as clones intermix;
   D. the RESOLVED case at HIGH dispersal — extrinsic genes drop off the lineage axis.
 
-Run:  python -u validation/validate_petracer.py
+TIER 2 (real data, ``--real``): places iscc's dispersal sweep and the real PEtracer M2 lineage trees
+(reduced by ``validation/data/build_petracer_reference.py``) on ONE lineage-space-coupling axis. The
+ground-truth-free confound signature — corr(I_lineage, I_spatial) across genes — is +0.4–0.5 in the
+real TERRITORIAL trees and ~0 in the real INTERMIXED tree, and iscc's sweep brackets them: the
+confound iscc exposes with ground truth here is measurable in the real data. Falls back to a note
+when no reduced reference is cached. Figure: manuscript/figures/validation_petracer_real.png.
+
+Run:  python -u validation/validate_petracer.py            # Tier 1
+      python -u validation/validate_petracer.py --real     # + Tier 2 (needs built references)
 """
 import argparse
 import os
@@ -154,81 +162,136 @@ def main():
     _figure(args, lo, hi, sweep)
 
     if args.real is not None:
-        compare_real(args, hi[0])          # the intermixed (single-tumour-like) iscc reference
+        compare_real(args)
 
 
 # --------------------------------------------------------------------- Tier 2: real data -------
 def iscc_summary(tumor, depth_cut=3, max_cells=800, seed=0):
-    """The same summary `reduce_petracer` computes, on an iscc tumour: per-gene lineage/spatial
-    autocorrelation, clone-size + tree-depth distributions, clone-territory compactness."""
+    """The same summary `reduce_petracer` computes, on an iscc tumour, so real & iscc are directly
+    comparable: per-gene lineage/spatial autocorrelation, the lineage-space COUPLING scalar
+    (`coord_lineage_autocorr`) + the ground-truth-free CONFOUND signature (`confound_corr` =
+    corr(I_lineage, I_spatial) across genes), clone-size + tree-depth distributions, territory."""
     from iscc.integrations import decompose_lineage_spatial
+    from iscc.integrations.petracer import _moran_all
     dec = decompose_lineage_spatial(tumor, max_cells=max_cells, seed=seed)
     tree = dec.tree
     cd = tumor.cell_data
     clones = cd["cell_type"].reindex(dec.cells).iloc[:, 0].astype(str).values
     clades = np.array([clade_of(tree, c, depth_cut) for c in clones])
     coords = cd["cell_crd"].reindex(dec.cells).values.astype(float)
+    coords = coords + np.random.default_rng(seed).normal(0, 0.15, coords.shape)
     tumour_spread = float(np.sqrt(((coords - coords.mean(0)) ** 2).sum(1).mean()))
     spreads = [np.sqrt(((coords[clades == cl] - coords[clades == cl].mean(0)) ** 2).sum(1).mean())
                for cl in np.unique(clades) if (clades == cl).sum() >= 3]
+    # coord lineage autocorr with the SAME lineage weights the decomposition used
+    present = list(dict.fromkeys(clones.tolist()))
+    gi = {g: i for i, g in enumerate(present)}
+    Dg = tree.distance_matrix(present)
+    cg = np.array([gi[g] for g in clones])
+    Wl = np.exp(-Dg[np.ix_(cg, cg)] / 2.0); np.fill_diagonal(Wl, 0.0)
+    coord_lin = float(np.nanmean(_moran_all(Wl, coords)))
+    m = np.isfinite(dec.I_lineage) & np.isfinite(dec.I_spatial)
+    confound = float(np.corrcoef(dec.I_lineage[m], dec.I_spatial[m])[0, 1])
     return dict(
         I_lineage=dec.I_lineage, I_spatial=dec.I_spatial,
         clone_sizes=pd.Series(clades).value_counts().values.astype(int),
         territory_ratio=float(np.mean(spreads) / tumour_spread) if spreads and tumour_spread > 0 else float("nan"),
+        coord_lineage_autocorr=coord_lin, confound_corr=confound,
         tree_depths=np.array([tree.depth(c) for c in clones], dtype=int),
     )
 
 
-def compare_real(args, iscc_tumor):
-    """Load cached real PEtracer tumour(s) and overlay their summary against iscc's (per tumour —
-    the model is a multi-site metastasis, so we never pool sites). Falls back to a note if absent."""
+def compare_real(args):
+    """Load cached real PEtracer tumours and place iscc on the SAME lineage-space-coupling axis (per
+    tumour — the model is a multi-site metastasis, so we never pool sites). The headline: iscc's
+    dispersal_rate sweep reproduces the real trees' confound signature. Falls back to a note if absent."""
     import sys
     sys.path.insert(0, os.path.join(REPO, "validation", "data"))
     import build_petracer_reference as B
 
-    names = args.real or ["tumor1"]
+    names = args.real or []
+    if not names:                                       # default: any built caches
+        import glob
+        names = [os.path.basename(p)[len(B.REFERENCE_PREFIX):-4]
+                 for p in sorted(glob.glob(os.path.join(REPO, "validation/data",
+                                                        B.REFERENCE_PREFIX + "*.npz")))]
     refs = [(n, B.load_reference(B.reference_path(n))) for n in names]
     present = [(n, r) for n, r in refs if r is not None]
     if not present:
-        _, note = B.fetch_petracer(names[0])
-        print("\n[Tier 2] no cached real PEtracer reference "
-              f"({', '.join('petracer_ref_%s.npz' % n for n in names)}).\n  " + note +
+        _, note = B.fetch_petracer(names[0] if names else "tumor1")
+        print("\n[Tier 2] no cached real PEtracer reference. " + note +
               "\n  -> Tier 1 (self-contained) stands alone; run "
-              "`build_petracer_reference.py --h5ad ... --newick ...` to enable the comparison.")
+              "`build_petracer_reference.py --h5td M2_tumor_tracing.h5td` to enable the comparison.")
         return
 
-    isc = iscc_summary(iscc_tumor)
-    print("\n[Tier 2] real PEtracer vs iscc (per-tumour lineage+spatial summary):")
-    print(f"  {'tumour':12s} {'cells':>6s} {'clones':>6s} {'med I_lin':>9s} {'med I_sp':>9s} {'territory':>9s}")
-    print(f"  {'iscc':12s} {len(isc['tree_depths']):6d} {len(isc['clone_sizes']):6d} "
-          f"{np.median(isc['I_lineage']):9.3f} {np.median(isc['I_spatial']):9.3f} {isc['territory_ratio']:9.2f}")
+    # iscc across dispersal (reuse the sweep values) — place each on the coupling axis
+    print("\n[Tier 2] iscc dispersal sweep vs real PEtracer trees "
+          "(lineage-space coupling → the confound signature):")
+    print(f"  {'source':16s} {'cells':>6s} {'coord-lin-coupling':>18s} {'confound corr(Ilin,Isp)':>24s}")
+    iscc_pts = []
+    for disp in args.sweep:
+        s = iscc_summary(grow(disp, MP, args.steps, args.seed))
+        iscc_pts.append((disp, s))
+        print(f"  {'iscc disp=%.2f' % disp:16s} {len(s['tree_depths']):6d} "
+              f"{s['coord_lineage_autocorr']:>+18.3f} {s['confound_corr']:>+24.3f}")
     for n, r in present:
-        print(f"  {n:12s} {int(r['n_cells']):6d} {int(r['n_clones']):6d} "
-              f"{float(r['median_lineage_autocorr']):9.3f} {float(r['median_spatial_autocorr']):9.3f} "
-              f"{float(r['territory_ratio']):9.2f}")
-    _real_figure(args, isc, present)
+        print(f"  {n:16s} {int(r['n_cells']):6d} {float(r['coord_lineage_autocorr']):>+18.3f} "
+              f"{float(r['confound_corr']):>+24.3f}")
+
+    _real_figure(args, iscc_pts, present)
 
 
-def _real_figure(args, isc, present):
+def _real_figure(args, iscc_pts, present):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    fig, ax = plt.subplots(1, 3, figsize=(15, 4.4))
-    ax[0].hist(isc["I_lineage"], bins=30, density=True, alpha=0.55, color="#2b6fb0", label="iscc")
-    ax[1].hist(isc["I_spatial"], bins=30, density=True, alpha=0.55, color="#2b6fb0", label="iscc")
-    ax[2].hist(np.log10(isc["clone_sizes"]), bins=15, density=True, alpha=0.55, color="#2b6fb0", label="iscc")
+    fig, ax = plt.subplots(1, 3, figsize=(16, 4.6))
+
+    # A. THE HEADLINE — confound signature vs lineage-space coupling, iscc sweep + real trees on one axis
+    ax[0].scatter([s["coord_lineage_autocorr"] for _, s in iscc_pts],
+                  [s["confound_corr"] for _, s in iscc_pts], s=55, color="#2b6fb0",
+                  label="iscc (dispersal sweep)", zorder=2)
+    for disp, s in iscc_pts:
+        ax[0].annotate(f"disp={disp}", (s["coord_lineage_autocorr"], s["confound_corr"]),
+                       fontsize=7, color="#2b6fb0", xytext=(3, 3), textcoords="offset points")
     for n, r in present:
-        ax[0].hist(np.asarray(r["I_lineage"]), bins=30, density=True, histtype="step", lw=1.8, label=n)
-        ax[1].hist(np.asarray(r["I_spatial"]), bins=30, density=True, histtype="step", lw=1.8, label=n)
-        ax[2].hist(np.log10(np.asarray(r["clone_sizes"])), bins=15, density=True, histtype="step", lw=1.8, label=n)
-    ax[0].set(title="A. per-gene lineage autocorrelation", xlabel="Moran's I (lineage)", ylabel="density")
-    ax[1].set(title="B. per-gene spatial autocorrelation", xlabel="Moran's I (spatial)")
-    ax[2].set(title="C. clone-size distribution", xlabel="log10 clone size")
-    for a in ax:
-        a.legend(fontsize=8)
-    fig.suptitle("PEtracer (Tier 2): iscc reproduces the real lineage+spatial regime (per tumour)",
-                 fontsize=12, y=1.02)
+        ax[0].scatter(float(r["coord_lineage_autocorr"]), float(r["confound_corr"]), s=90, marker="*",
+                      color="#d1495b", zorder=3, edgecolors="k", linewidths=0.5)
+        ax[0].annotate(n.replace("M2-1_", "tree "), (float(r["coord_lineage_autocorr"]),
+                       float(r["confound_corr"])), fontsize=7, color="#d1495b",
+                       xytext=(4, -8), textcoords="offset points")
+    ax[0].axhline(0, color="k", lw=0.5, alpha=0.4)
+    ax[0].scatter([], [], s=90, marker="*", color="#d1495b", edgecolors="k",
+                  linewidths=0.5, label="real PEtracer trees")
+    ax[0].set(xlabel="lineage-space coupling  (coord lineage autocorr)",
+              ylabel="confound: corr(I_lineage, I_spatial) across genes",
+              title="A. iscc reproduces the real confound regime\n(territories → spatial genes read "
+                    "as heritable)")
+    ax[0].legend(fontsize=8, loc="upper left")
+
+    # B. per-gene lineage-vs-spatial autocorr for the MOST territorial real tree — the confound cloud
+    terr = max(present, key=lambda nr: float(nr[1]["coord_lineage_autocorr"]))
+    r = terr[1]
+    ax[1].scatter(r["I_spatial"], r["I_lineage"], s=14, alpha=0.6, color="#d1495b")
+    lim = [min(r["I_spatial"].min(), r["I_lineage"].min()), max(r["I_spatial"].max(), r["I_lineage"].max())]
+    ax[1].plot(lim, lim, "k--", lw=1, alpha=0.5)
+    ax[1].set(xlabel="spatial autocorrelation", ylabel="lineage autocorrelation",
+              title=f"B. real {terr[0].replace('M2-1_', 'tree ')} (territorial): spatial genes\n"
+                    f"carry lineage autocorr  (r={float(r['confound_corr']):+.2f})")
+
+    # C. clone-size distributions — real trees vs iscc
+    for disp, s in iscc_pts[:1]:
+        ax[2].hist(np.log10(s["clone_sizes"]), bins=12, density=True, alpha=0.5,
+                   color="#2b6fb0", label=f"iscc (disp={disp})")
+    for n, r in present:
+        ax[2].hist(np.log10(np.asarray(r["clone_sizes"])), bins=12, density=True, histtype="step",
+                   lw=1.8, label=n.replace("M2-1_", "tree "))
+    ax[2].set(xlabel="log10 clade size", ylabel="density", title="C. clade-size distribution")
+    ax[2].legend(fontsize=7)
+
+    fig.suptitle("PEtracer (Tier 2): the lineage-space confound iscc exposed with ground truth is "
+                 "measurable in REAL PEtracer tumours", fontsize=12, y=1.02)
     fig.tight_layout()
     out = os.path.join(REPO, "manuscript/figures/validation_petracer_real.png")
     fig.savefig(out, dpi=150, bbox_inches="tight")

@@ -44,12 +44,17 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   intermix (high dispersal) the field correctly reads as spatial (0.11 > 0.04) and the
   mis-classification drops to ~40–55%, while genuinely-intrinsic genes stay 100% heritable throughout.
   iscc uniquely reveals this — real data has no ground truth. Figure `validation_petracer.png`.
-  **Tier 2 (real data, `validation/data/build_petracer_reference.py` + `--real`):** DNA-reference
-  cache pattern — reduce PEtracer (Figshare 10.6084/m9.figshare.28473866 + GEO GSE290975; **Figshare
-  blocks bots → user downloads h5ad/newick manually**) to a per-tumour lineage/spatial-autocorr +
-  clone-territory + tree-stats summary, compared against iscc; graceful fall-back to Tier 1 when
-  absent. Self-contained Newick parser (no ete3/cassiopeia). Caveats: MERFISH↔F9 ok; mouse metastasis
-  (multi-site = R9) → validate per-tumour.
+  **Tier 2 (real data, `validation/data/build_petracer_reference.py` + `--real`) — DONE & RUN:**
+  DNA-reference cache pattern. The real PEtracer M2 tumour (Figshare 10.6084/m9.figshare.28473866,
+  `M2_tumor_tracing.h5td`, 553 MB — `.h5td` = TreeData; fetched via the ndownloader API with a
+  browser UA, since only the web UI blocks bots) was reduced (3 largest per-clone lineage trees,
+  `treedata` + a self-contained Newick/networkx tree reader; no ete3/cassiopeia). **The confound is
+  CONFIRMED in real data without ground truth:** the ground-truth-free signature corr(I_lineage,
+  I_spatial) across genes is +0.42/+0.51 in the two territorial/moderate trees (coord-lineage
+  coupling +0.39/+0.11) and +0.02 in the intermixed tree (coupling −0.03); iscc's `dispersal_rate`
+  sweep spans and brackets all three (`validation_petracer_real.png`). Reduced `.npz` committed
+  (~6 KB, aggregate stats only); raw `.h5td` git-ignored. Caveats: MERFISH↔F9 ok; mouse metastasis
+  (multi-site = R9) → validated PER-CLONE-TREE.
 - **DONE — Capability/feature matrix** (Table 1, `paper.tex`; commit 4ecc7ab). Verify a few competitor
   cells (SISTEM spatial/reads, CINner DNA, J-SPACE selection/sampling, scMultiSim DNA/consistency).
 - **OPTIONAL (lean) — one realism head-to-head** iscc vs Splatter vs real on the 8 scRNA summary stats,

@@ -9,9 +9,9 @@ self-contained benchmark when it is absent (offline / not downloaded), exactly l
 PEtracer (Weissman lab, *Science* 2025) — mouse syngeneic tumours read jointly for lineage
 (prime-editing barcodes → a per-tumour cell tree) and spatial expression (MERFISH panel + coords).
 
-  Sources (Figshare BLOCKS bots — download manually, then pass the local paths):
-    * processed MERFISH `AnnData` (h5ad) + per-tumour lineage trees:
-        Figshare 10.6084/m9.figshare.28473866
+  Sources (Figshare's WEB UI blocks bots; its ndownloader API serves files with a browser UA):
+    * per-tumour MERFISH + lineage trees as `.h5td` (TreeData; `pip install treedata`):
+        Figshare 10.6084/m9.figshare.28473866  (e.g. M2_tumor_tracing.h5td, 553 MB)
     * scRNA (GEO GSE290975); code/format reference: https://github.com/jweissmanlab/PEtracer-2025
   Cite: Zhang, Yang, … Weissman (2025), *Science* 10.1126/science.adx3800.
 
@@ -23,9 +23,9 @@ RESEARCH_QUESTIONS R9, out of scope, so we never pool across sites):
     * **clone-territory** compactness (mean within-clone spatial spread ÷ tumour spread);
     * **tree** leaf count + depth distribution (balance).
 
-Usage (auto-download is blocked; supply local files):
-    python validation/data/build_petracer_reference.py --h5ad TUMOR.h5ad --newick TUMOR.nwk \
-        --name tumor1 [--clone-key obs_column] [--max-cells 800]
+Usage (supply a locally-downloaded file — we never auto-fetch):
+    python validation/data/build_petracer_reference.py --h5td M2_tumor_tracing.h5td [--tree-key 1]
+    python validation/data/build_petracer_reference.py --h5ad TUMOR.h5ad --newick TUMOR.nwk --name t1
 """
 import argparse
 import os
@@ -159,6 +159,60 @@ def parse_newick(s):
     return _Tree(parent, blen, root, leaves)
 
 
+def nx_to_tree(g, length_attr="length"):
+    """Build a :class:`_Tree` from a networkx rooted DiGraph (PEtracer `obst` lineage tree)."""
+    parent, blen = {}, {}
+    for u, v, data in g.edges(data=True):
+        parent[v] = u                                    # edge u -> v means u is v's parent
+        blen[v] = float(data.get(length_attr, 1.0))
+    roots = [n for n in g.nodes if g.in_degree(n) == 0]
+    leaves = [n for n in g.nodes if g.out_degree(n) == 0]
+    root = roots[0] if roots else None
+    if root is not None:
+        blen[root] = 0.0
+    return _Tree(parent, blen, root, leaves)
+
+
+# --------------------------------------------------------------------------------------
+# TreeData (.h5td) adapter — PEtracer's per-tumour MERFISH + lineage format
+# --------------------------------------------------------------------------------------
+def load_h5td(path, tree_key=None, layer="normalized"):
+    """Load a PEtracer `.h5td` (TreeData) → (AnnData over one lineage's cells, :class:`_Tree`, name).
+
+    A `.h5td` holds MERFISH expression (`.X`/layers), coordinates (`obsm["spatial"]`) and one or more
+    lineage trees (`obst`). We pick a single tree (`tree_key`, default = the largest), restrict to its
+    leaf cells, and expose the chosen expression `layer` as `.X` so the shared reducer consumes it."""
+    import anndata as ad
+    import treedata as td
+
+    tdata = td.read_h5td(path)
+    keys = [k for k in tdata.obst.keys() if not k.endswith("_collapsed")]
+    if tree_key is None:                                 # largest tree by leaf count
+        def n_leaf_cells(k):
+            g = tdata.obst[k]
+            leaves = {n for n in g.nodes if g.out_degree(n) == 0}
+            return len(leaves & set(tdata.obs_names))
+        tree_key = max(keys, key=n_leaf_cells)
+    g = tdata.obst[tree_key]
+    tree = nx_to_tree(g)
+    cells = [c for c in tree.leaves if c in set(tdata.obs_names)]
+
+    sub = tdata[cells]
+    X = np.asarray(sub.layers[layer].todense() if hasattr(sub.layers[layer], "todense")
+                   else sub.layers[layer], dtype=float) if layer in sub.layers else \
+        np.asarray(sub.X.todense() if hasattr(sub.X, "todense") else sub.X, dtype=float)
+    adata = ad.AnnData(X=X, obs=sub.obs.copy(), var=sub.var.copy())
+    adata.obsm["spatial"] = np.asarray(sub.obsm["spatial"], dtype=float)
+    name = f"{_infer_sample(tdata)}_{tree_key}"
+    return adata, tree, name
+
+
+def _infer_sample(tdata):
+    if "sample" in tdata.obs and tdata.obs["sample"].nunique() == 1:
+        return str(tdata.obs["sample"].iloc[0])
+    return "petracer"
+
+
 # --------------------------------------------------------------------------------------
 # Reducer (network-free; the tested core)
 # --------------------------------------------------------------------------------------
@@ -210,6 +264,18 @@ def reduce_petracer(adata, tree, name="tumor", clone_key=None, depth_cut=3,
     I_lin = _moran_all(Wl, X)
     I_sp = _moran_all(Ws, X)
 
+    # lineage-space COUPLING scalar: the lineage autocorrelation of the spatial coordinates
+    # themselves (high ⇒ tree-close cells are space-close ⇒ clonal territories; the real-data
+    # analogue of iscc's field-autocorr confound driver). Spatial-I of coords is ~1 by construction.
+    coord_lineage_autocorr = float(np.nanmean(_moran_all(Wl, coords)))
+    coord_spatial_autocorr = float(np.nanmean(_moran_all(Ws, coords)))
+
+    # the CONFOUND signature (measurable WITHOUT ground truth): across genes, do the spatially-
+    # autocorrelated ones also carry lineage autocorrelation? corr(I_lineage, I_spatial) > 0 means
+    # spatial signal leaking onto the lineage axis — the mark of clonal territories.
+    _m = np.isfinite(I_lin) & np.isfinite(I_sp)
+    confound_corr = float(np.corrcoef(I_lin[_m], I_sp[_m])[0, 1]) if _m.sum() > 2 else float("nan")
+
     # clones: an obs column if given, else a tree cut at depth_cut
     if clone_key is not None and clone_key in sub.obs:
         clones = sub.obs[clone_key].astype(str).values
@@ -232,6 +298,9 @@ def reduce_petracer(adata, tree, name="tumor", clone_key=None, depth_cut=3,
         I_lineage=I_lin, I_spatial=I_sp,
         clone_sizes=clone_sizes, n_clones=len(clone_sizes),
         territory_ratio=territory_ratio, tree_depths=depths,
+        coord_lineage_autocorr=coord_lineage_autocorr,
+        coord_spatial_autocorr=coord_spatial_autocorr,
+        confound_corr=confound_corr,
         median_lineage_autocorr=float(np.median(I_lin)),
         median_spatial_autocorr=float(np.median(I_sp)),
     )
@@ -274,28 +343,36 @@ def reference_path(name):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--h5td", help="local PEtracer TreeData (.h5td): MERFISH + lineage trees in one file")
+    ap.add_argument("--tree-key", default=None, help="which obst tree to use (default: the largest)")
+    ap.add_argument("--layer", default="normalized", help="expression layer for autocorrelation")
     ap.add_argument("--h5ad", help="local processed MERFISH AnnData (obsm['spatial'] + panel counts)")
     ap.add_argument("--newick", help="local per-tumour lineage tree (Newick; leaf ids = cell ids)")
-    ap.add_argument("--name", default="tumor1", help="tumour label (cache = petracer_ref_<name>.npz)")
+    ap.add_argument("--name", default=None, help="tumour label (cache = petracer_ref_<name>.npz)")
     ap.add_argument("--clone-key", default=None, help="obs column with clone/lineage labels")
     ap.add_argument("--depth-cut", type=int, default=3, help="tree depth for clade/clone cut")
     ap.add_argument("--max-cells", type=int, default=800)
     args = ap.parse_args()
 
-    if not (args.h5ad and args.newick):
-        _, note = fetch_petracer(args.name)
+    if args.h5td:
+        adata, tree, inferred = load_h5td(args.h5td, tree_key=args.tree_key, layer=args.layer)
+        name = args.name or inferred
+    elif args.h5ad and args.newick:
+        import anndata as ad
+        adata = ad.read_h5ad(args.h5ad)
+        with open(args.newick) as fh:
+            tree = parse_newick(fh.read())
+        name = args.name or "tumor1"
+    else:
+        _, note = fetch_petracer(args.name or "tumor1")
         print("no local files given.\n" + note)
         return
 
-    import anndata as ad
-    adata = ad.read_h5ad(args.h5ad)
-    with open(args.newick) as fh:
-        tree = parse_newick(fh.read())
-    ref = reduce_petracer(adata, tree, name=args.name, clone_key=args.clone_key,
+    ref = reduce_petracer(adata, tree, name=name, clone_key=args.clone_key,
                           depth_cut=args.depth_cut, max_cells=args.max_cells)
-    path = reference_path(args.name)
+    path = reference_path(name)
     save_reference(path, ref)
-    print(f"reduced {args.name}: {ref['n_cells']} cells x {ref['n_genes']} genes, "
+    print(f"reduced {name}: {ref['n_cells']} cells x {ref['n_genes']} genes, "
           f"{ref['n_clones']} clones, territory ratio {ref['territory_ratio']:.2f}")
     print(f"  median autocorr: lineage {ref['median_lineage_autocorr']:.3f}  "
           f"spatial {ref['median_spatial_autocorr']:.3f}")

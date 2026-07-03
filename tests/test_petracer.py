@@ -199,6 +199,20 @@ class TestTier2Newick:
         assert t.patristic("a", "b") == 2.0
         assert t.clade_at_depth("a", 1) != "a"          # a's depth-1 ancestor is its clade
 
+    def test_nx_to_tree(self):
+        # the PEtracer obst format: a networkx rooted DiGraph with `length` edge weights
+        import networkx as nx
+        g = nx.DiGraph()
+        g.add_edge("r", "i", length=2)
+        g.add_edge("i", "a", length=1)
+        g.add_edge("i", "b", length=1)
+        g.add_edge("r", "c", length=3)
+        t = B.nx_to_tree(g)
+        assert t.root == "r"
+        assert set(t.leaves) == {"a", "b", "c"}
+        assert t.patristic("a", "b") == 2.0            # siblings under i: 1 + 1
+        assert t.patristic("a", "c") == 2 + 1 + 3      # up to r (1+2) then down to c (3)
+
     def test_fetch_is_graceful(self):
         got, note = B.fetch_petracer("tumor1")
         assert got is None and "Figshare" in note
@@ -234,6 +248,15 @@ class TestTier2Reducer:
         # the clade-driven gene is both lineage- and spatially-autocorrelated; noise gene is neither
         assert ref["I_lineage"][0] > 0.3
         assert abs(ref["I_lineage"][2]) < 0.3
+
+    def test_reduce_confound_fields(self):
+        # the two clades sit in two spatial territories -> lineage-space coupling is high and the
+        # (ground-truth-free) confound signature corr(I_lineage, I_spatial) is positive.
+        adata, tree = self._fixture()
+        ref = B.reduce_petracer(adata, tree, name="toy", depth_cut=1)
+        assert ref["coord_lineage_autocorr"] > 0.2       # coords are lineage-autocorrelated
+        assert ref["confound_corr"] > 0.0                # spatial genes carry lineage autocorr
+        assert np.isfinite(ref["coord_spatial_autocorr"])
 
     def test_reduce_rejects_disjoint_ids(self):
         adata, tree = self._fixture()

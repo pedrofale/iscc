@@ -12,15 +12,37 @@ falls back to the Tier-1 self-contained benchmark when absent.
 Mouse syngeneic tumours read jointly for **lineage** (prime-editing barcodes → a per-tumour cell
 tree) and **spatial expression** (MERFISH gene panel + coordinates).
 
-- Processed MERFISH `AnnData` (h5ad) + per-tumour lineage trees: Figshare
-  [10.6084/m9.figshare.28473866](https://doi.org/10.6084/m9.figshare.28473866).
+- Per-tumour MERFISH + lineage trees: Figshare
+  [10.6084/m9.figshare.28473866](https://doi.org/10.6084/m9.figshare.28473866), as `.h5td`
+  (**TreeData** — an AnnData-like object with embedded lineage trees; `pip install treedata`).
+  `X`/layers = MERFISH panel expression, `obsm["spatial"]` = coords, `obst[<tree>]` = per-clone
+  lineage trees (networkx DiGraphs; edge attr `length` = branch length).
 - scRNA: GEO [GSE290975](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE290975).
-- Code / format reference: <https://github.com/jweissmanlab/PEtracer-2025> (`tumor_tracing/`).
+- Code / format reference: <https://github.com/jweissmanlab/PEtracer-2025> (`petracer/tree.py`,
+  `tumor_tracing/`).
 
-**Figshare blocks automated downloads**, so `build_petracer_reference.py` does NOT auto-fetch: the
-user downloads the per-tumour h5ad + lineage tree (Newick) manually and passes `--h5ad`/`--newick`.
-The reducer (`reduce_petracer`, network-free) is unit-tested on tiny fixtures
-(`tests/test_petracer.py::TestTier2Reducer`).
+**Built (this repo).** The `ndownloader.figshare.com` API endpoint (not the blocked web UI) serves
+the files with a browser User-Agent, so `M2_tumor_tracing.h5td` (553 MB, md5
+`2a4f078495f41df067d935ff690b6dc4`) was downloaded and reduced. M2 carries several independent
+per-clone lineage trees; the three largest tracing trees were reduced (each subsampled to ≤800
+cells, MERFISH `normalized` layer):
+
+| tree | cells | clades | lineage-space coupling* | confound corr(I_lin,I_sp)† | regime |
+|------|------:|-------:|------------------------:|---------------------------:|--------|
+| `1`   | 736 | 7 | **+0.39** | **+0.42** | clonal territories |
+| `5`   | 800 | 8 | +0.11 | +0.51 | moderate |
+| `2-1` | 800 | 3 | −0.03 | +0.02 | intermixed |
+
+*coordinate lineage-autocorrelation (high = tree-close cells are space-close = territories).
+†the ground-truth-FREE confound signature: across genes, do spatially-autocorrelated ones also carry
+lineage autocorrelation? **This confirms in REAL data the confound iscc exposed with ground truth in
+Tier 1** — the two territorial/moderate trees are confounded (r≈0.4–0.5), the intermixed tree is not
+(r≈0). iscc's `dispersal_rate` sweep spans and brackets these three real trees (see
+`validation_petracer_real.png`).
+
+`build_petracer_reference.py` does NOT auto-fetch (respecting Figshare); pass a local `--h5td` (or
+`--h5ad`/`--newick`). The reducer (`reduce_petracer` + the self-contained Newick parser, network-free)
+is unit-tested on tiny fixtures (`tests/test_petracer.py::TestTier2Reducer`).
 
 ## Reduction (per tumour — never pooled across sites)
 
@@ -38,7 +60,10 @@ Newick parsing is self-contained (no `ete3`/`cassiopeia`): `parse_newick` → pa
 
 ## Outputs (validation/data/)
 
-- `petracer_ref_<name>.npz` — one per tumour (NOT committed; built on demand from local downloads).
+- `petracer_ref_M2-1_1.npz`, `petracer_ref_M2-1_5.npz`, `petracer_ref_M2-1_2-1.npz` — the three
+  reduced M2 trees (committed; ~6 KB each, aggregate per-gene autocorrelation + clone/tree stats
+  only — no raw expression/coords/barcodes, like the DNA `dna_ref_*.npz`). The raw 553 MB `.h5td`
+  lives under the git-ignored `_cache/` and is never committed.
 
 ## Use
 

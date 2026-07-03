@@ -12,9 +12,8 @@ notebooks/example_out/
 # the package dir `src/iscc/data/` (its new files would be silently untracked) or the committed
 # `validation/data/`.
 /data/
-# transient raw DNA-reference downloads (e.g. the 406 MB Tapestri h5) + caches — never committed
+# transient raw DNA/PEtracer-reference downloads (e.g. the 406 MB Tapestri h5, 553 MB PEtracer
+# .h5td) + caches — never committed. The small reduced .npz summaries ARE committed (aggregate
+# per-gene autocorrelation + clone/tree stats only, ~6 KB each; like the DNA dna_ref_*.npz).
 validation/data/_cache/
 validation/data/**/__pycache__/
-
-# PEtracer Tier-2 caches (built from manually-downloaded Figshare data; not redistributed)
-validation/data/petracer_ref_*.npz
