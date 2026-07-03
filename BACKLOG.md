@@ -96,12 +96,27 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
 
 ## Multi-patient cohort — ground truth for cohort analysis & personalized medicine (NEW, plan-first)
 - **NEXT (after clonealign+inferCNV; own milestone, design-first like F8).** A `Cohort` layer that
-  runs a DIFFERENT tumour per patient (own seed → private clones, private passenger mutations,
-  patient-specific CNAs + spatial structure) over a **SHARED specification** — common driver genes /
-  recurrent oncogenes+TSGs, shared selection landscape + gene panel — so recurrence is meaningful.
-  Emit each patient as a **batch** (biological *and* technical differences). Surface **cohort ground
-  truth**: recurrent-vs-private drivers, per-patient private mutations, true **shared-vs-private
-  cell-state** labels.
+  runs a DIFFERENT tumour per patient (own EVOLUTION seed → private clones, private passenger
+  mutations, patient-specific CNAs + spatial structure) over a **SHARED, config-determined
+  specification** — common driver genes / recurrent oncogenes+TSGs, shared selection landscape + gene
+  panel — so recurrence is meaningful. Emit patients into batches via a **flexible patient→batch
+  mapping** (below). Surface **cohort ground truth**: recurrent-vs-private drivers, per-patient private
+  mutations, patient-of-origin, true **shared-vs-private cell-state** labels.
+- **PREREQUISITE ENGINE FIX — comparability by default (user, 2026-07-03).** Two runs with the SAME
+  config must use the SAME driver genes (else recurrence/cohort analysis is meaningless). Today they
+  do NOT: `Selection.make_drivers()` (`components/selection.py:83`) draws driver/oncogene/TSG
+  POSITIONS from `self.rng`, which is seeded by the RUN seed → different seed = different layout.
+  Fix: DECOUPLE the **layout seed** (config-determined — a fixed default or a `genome_seed`/config
+  hash, shared across patients) from the **evolution seed** (per-run, private). Then any two same-config
+  runs are comparable by construction (same driver identities; different stochastic evolution). This is
+  a foundational fix beyond cohorts — it makes ALL same-config runs comparable. (Real-genome mode
+  already has a fixed shared `genome_spec`, so it's comparable already; this fixes ABSTRACT mode.)
+- **Flexible patient→batch multiplexing (user, 2026-07-03).** The user picks how patients map to
+  sequencing batches: **1:1** (each patient its own batch) OR **N:1** (multiplex/pool several patients
+  into one batch, up to a technical capacity — as done with cell hashing / genetic multiplexing to
+  save cost). This drives the technical batch structure AND unlocks a **demultiplexing benchmark**
+  (assign pooled cells back to patient-of-origin, à la souporcell/demuxlet/vireo — ground truth = the
+  patient label, which real data lacks). Reuses the scRNA "confounded"/multi-batch machinery.
 - **Why it MUST be shown (user, 2026-07-03):** no simulator gives cohort-level ground truth for
   shared-vs-private structure — exactly what real cohorts can never provide. Unlocks flagship
   benchmarks: (1) **multi-patient batch integration** (Harmony/scVI/scANVI/LIGER) — score whether a
