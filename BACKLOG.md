@@ -33,17 +33,23 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   - Already in-paper (count as suite members): **selection/rate inference** (ABC recovery), **sampling/
     experimental-design**, realism-vs-real. Niche/**CCI** inference waits on F8.
   - Manuscript: reframe validation as *"iscc as a benchmarking substrate"* organized as this suite.
-- **NEXT (separate session) — PEtracer validation** (flagship real-data + ground-truth benchmark).
-  Handoff saved: `handoffs/PEtracer_validation.md`. F8 (extrinsic) + F9 (single-cell spatial) + the
-  engine's `genotypes_parents` lineage now make the intrinsic-vs-extrinsic decomposition possible.
-  **Tier 1 (self-contained):** run the Hotspot-style lineage-vs-spatial autocorrelation decomposition
-  on iscc data with a KNOWN split, and **expose the lineage-space CONFOUND** — under clonal
-  territories a purely environmental (hypoxia) signal gets lineage-autocorrelation, so a tree-based
-  method MIS-CLASSIFIES it as heritable; iscc uniquely reveals this (real data can't). Tunable via
-  `dispersal_rate` (territories vs intermixed). **The headline finding.** **Tier 2 (real data):**
-  reduce PEtracer (Figshare 10.6084/m9.figshare.28473866 + GEO GSE290975; DNA-reference cache
-  pattern), compare lineage/spatial-autocorrelation + clone-territory + tree stats. Caveats: MERFISH↔F9
-  ok; mouse metastasis (multi-site = R9) → validate per-tumour. User wants BOTH tiers.
+- **DONE — PEtracer validation** (flagship ground-truth + real-data benchmark). New
+  `iscc.integrations` seam (`to_lineage_tree`/`to_newick`/`to_anndata`/`decompose_lineage_spatial`;
+  19 tests) built on F8 (extrinsic) + F9 (single-cell spatial) + `genotypes_parents` lineage.
+  **Tier 1 (self-contained, `validation/validate_petracer.py`):** the Hotspot-style lineage-vs-spatial
+  autocorrelation decomposition on iscc data with a KNOWN split, EXPOSING the lineage-space CONFOUND.
+  **Headline finding:** under clonal territories (low `dispersal_rate`) the purely-environmental
+  hypoxia field acquires LINEAGE autocorrelation (0.16) that EXCEEDS its spatial autocorrelation
+  (0.03), so a tree-based method mis-classifies **100%** of extrinsic genes as heritable; as clones
+  intermix (high dispersal) the field correctly reads as spatial (0.11 > 0.04) and the
+  mis-classification drops to ~40–55%, while genuinely-intrinsic genes stay 100% heritable throughout.
+  iscc uniquely reveals this — real data has no ground truth. Figure `validation_petracer.png`.
+  **Tier 2 (real data, `validation/data/build_petracer_reference.py` + `--real`):** DNA-reference
+  cache pattern — reduce PEtracer (Figshare 10.6084/m9.figshare.28473866 + GEO GSE290975; **Figshare
+  blocks bots → user downloads h5ad/newick manually**) to a per-tumour lineage/spatial-autocorr +
+  clone-territory + tree-stats summary, compared against iscc; graceful fall-back to Tier 1 when
+  absent. Self-contained Newick parser (no ete3/cassiopeia). Caveats: MERFISH↔F9 ok; mouse metastasis
+  (multi-site = R9) → validate per-tumour.
 - **DONE — Capability/feature matrix** (Table 1, `paper.tex`; commit 4ecc7ab). Verify a few competitor
   cells (SISTEM spatial/reads, CINner DNA, J-SPACE selection/sampling, scMultiSim DNA/consistency).
 - **OPTIONAL (lean) — one realism head-to-head** iscc vs Splatter vs real on the 8 scRNA summary stats,
@@ -69,10 +75,13 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   (`-a scspatial`). Unblocks the PEtracer expression comparison. **Next (optional):** a demo notebook.
 
 ## External-simulator adapters (recipe; additive `iscc.integrations` seam)
-- **LATER** — let iscc be the evolutionary+spatial substrate; export lineage tree (Newick) + AnnData
-  (coords/identity) so external sims (scMultiSim ATAC/GRN, SymSim, simATAC, SRTsim) generate their
-  modality *on iscc's tumor*. Design: `DESIGN_features.md` §I. Honest limit: structure-conditioned,
-  NOT genome-consistent (external tool doesn't see iscc's CNAs/SNVs). Gives ATAC/GRN support without
+- **STARTED** — the `iscc.integrations` seam now exists (added by the PEtracer validation):
+  `to_newick(tumor)` / `to_lineage_tree(tumor)` (lineage export) + `to_anndata(cell_data)`
+  (coords/identity/expression). 19 tests.
+- **LATER** — the per-simulator ADAPTERS (`adapters/scmultisim.py`, …) that feed the export to
+  external sims (scMultiSim ATAC/GRN, SymSim, simATAC, SRTsim) so they generate their modality *on
+  iscc's tumor*. Design: `DESIGN_features.md` §I. Honest limit: structure-conditioned, NOT
+  genome-consistent (external tool doesn't see iscc's CNAs/SNVs). Gives ATAC/GRN support without
   building the native regulatory layer.
 
 ## Pedagogy notebook track (teaching tumor data analysis on iscc data)

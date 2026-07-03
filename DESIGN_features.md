@@ -528,3 +528,9 @@ tradeoff wherever adapters are offered.
 **Deliverable.** An `iscc.integrations` seam: `to_newick(tumor)`, `to_anndata(cell_data)`, and
 adapter stubs (`adapters/scmultisim.py`, …). Low-risk, additive; each adapter is optional and guarded
 on the external package being installed (mirrors the reads.py binary-optional pattern).
+
+**Status — the export helpers are DONE** (added by the PEtracer validation, §H): `iscc.integrations`
+now ships `to_lineage_tree(tumor)` / `to_newick(tumor)` (clone tree from `genotypes_parents`, with
+LCA tree distances) and `to_anndata(cell_data)` (`obsm["spatial"]` + clone/type/microenv `obs`), plus
+`decompose_lineage_spatial(tumor)` (the lineage-vs-spatial autocorrelation decomposition). 19 tests
+(`tests/test_petracer.py`). The per-simulator adapters remain the LATER work.

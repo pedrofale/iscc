@@ -15,3 +15,6 @@ notebooks/example_out/
 # transient raw DNA-reference downloads (e.g. the 406 MB Tapestri h5) + caches — never committed
 validation/data/_cache/
 validation/data/**/__pycache__/
+
+# PEtracer Tier-2 caches (built from manually-downloaded Figshare data; not redistributed)
+validation/data/petracer_ref_*.npz
