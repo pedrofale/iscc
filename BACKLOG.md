@@ -137,6 +137,36 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   layout across patients; a `Cohort` wrapper; the shared-vs-private + subgroup/therapy-response ground
   truth bookkeeping. Plan design-first, then handoff.
 
+## Operating envelope — parameter→phenotype atlas & built-in QC (NEW 2026-07-03; user "MUST have")
+- **Goal (user):** know & REPORT which parameter ranges produce which tumour features, so users don't
+  run the simulator and end up with "crappy tumours" — extinct, monoclonal, hypermutated mush,
+  well-mixed with no clonal territories, or no microenvironment gradient. Two audiences: (a) reviewers
+  — a robustness/sensitivity analysis (standard for simulator papers: scMultiSim, CINner both ship one);
+  (b) users — documented sane defaults + valid ranges + a runtime warning. NB the "well-mixed" and
+  "no-gradient" degenerate zones are exactly the regimes that would silently BREAK the PEtracer and
+  multi-region benchmarks, so this also protects the headline results.
+- **Three deliverable layers (design-first):**
+  1. **Characterization sweep** (`analysis/characterize_regimes.py`): grid over key axes → phenotype
+     metrics per run. AXES (real knobs, `notebooks/example_config.yaml` + `Selection`): `mutation_rate`
+     & `n_snvs_per_allele` (SNV load); `division_rate` vs `death_rate` & `initial_cancer_cells`
+     (survival); `dispersal_rate` (× `division_rate`) (spatial mixing); `prop_driver` × `driver_effects`
+     (selection strength); `grid_size` × `carrying_capacity` (tumour size / #demes); `amp_prob` &
+     `max_cn` (CNA burden); microenv hypoxia `D`/`k`/`s` × tumour size (gradient). METRICS: N cells /
+     P(extinction); clonal Shannon diversity & #subclones; VAF 1/f neutral-tail fit; TMB (muts/cell);
+     positive-selection detectability; Moran's I of clone labels (territories↔mixed);
+     fraction-genome-altered / ploidy; hypoxia core–rim contrast.
+  2. **Reported operating ranges**: a manuscript SUPPLEMENTARY "operating regimes / robustness"
+     section — phase-diagram figure(s) with the realistic region highlighted and the degenerate regimes
+     labelled (extinction / monoclonal-sweep / low-mutation-monoclonal / hypermutated / well-mixed /
+     no-gradient) + a defaults-and-valid-ranges table.
+  3. **Built-in QC diagnostic** (`tumor.diagnose()` / a small report): after growth, flag degenerate
+     output against thresholds (extinct; diversity < X; no spatial structure; no O2 gradient; TMB out of
+     range) with ACTIONABLE hints ("raise `mutation_rate`", "lower `dispersal_rate`", "grow larger").
+     The direct answer to "so users don't end up with crappy tumours."
+- **Links:** feeds the RECOMMENDER (paper 2 — a prior over valid designs); complements CALIBRATION
+  (fitting to real data should land you IN the good region; this lets us verify that). Handoff:
+  `handoffs/operating_envelope.md`.
+
 ## External-simulator adapters (recipe; additive `iscc.integrations` seam)
 - **STARTED** — the `iscc.integrations` seam now exists (added by the PEtracer validation):
   `to_newick(tumor)` / `to_lineage_tree(tumor)` (lineage export) + `to_anndata(cell_data)`
