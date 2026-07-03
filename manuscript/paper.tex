@@ -618,6 +618,53 @@ guide the interpretation of state-of-the-art spatial lineage-tracing experiments
   \label{fig:petracer_real}
 \end{figure}
 
+\subsection*{A ground-truth benchmark: multi-region bulk ``sample trees'' are not phylogenies}
+\label{sec:multiregion}
+The same coupling of lineage and space lets \texttt{iscc} quantify a second, long-argued error.
+Alves, Prieto and Posada observed that a tree built from bulk multi-region tumor samples is not a
+phylogeny: because each region is an \emph{admixture} --- a mixture of clones at different
+proportions rather than an isolated lineage --- a ``sample tree'' drawn from regional mutational or
+variant-allele-frequency (VAF) profiles reflects similarity, not evolutionary history, producing
+spurious parallel mutations, biased divergence times and reversed ordering~\cite{alves_multiregion_2017}.
+Their argument was illustrative; \texttt{iscc} supplies the missing ground-truth answer key, because
+it records the true clone phylogeny (\Cref{sec:petracer}) alongside real spatial admixture (clonal
+territories tuned by the dispersal rate). We grow a solid tumor, take $K$ multi-region biopsies, and
+pool each region into a deep bulk-DNA sample (the admixed regional VAF profile a multi-region study
+measures). From the region$\times$region genetic distances we build the neighbour-joining sample tree
+such a study would draw, and score it against the truth using a metric that needs no matched leaf
+set: the rate of \emph{spurious parallel mutations} --- loci the true lineage shows arose exactly
+once (a single origin, verified by parsimony on the true clone tree) but that the region tree infers
+as two or more independent origins (homoplasy). Restricting the count to truly single-origin loci
+makes it an honest measure of the admixture artifact, excluding genuinely recurrent mutations.
+
+The naive region sample tree invents parallel origins for $\sim$$24\%$ of single-origin mutations,
+and it reverses the true ancestor--descendant ordering of $\sim$$23\%$ of nested mutation pairs
+(\Cref{fig:multiregion}B). Crucially, taking more biopsies does not fix this: as $K$ grows from four
+to ten regions the spurious-parallelism rate does not fall toward zero --- it rises --- because the
+problem is admixture, not sampling density (\Cref{fig:multiregion}C). The error scales with the
+directly measured per-region clone admixture across a dispersal sweep ($r \approx 0.7$;
+\Cref{fig:multiregion}D). Applying the paper's proposed fix --- deconvolving clones per region before
+building the tree, here bounded by \texttt{iscc}'s per-cell clone truth as an oracle deconvolution
+--- collapses the spurious rate to $\sim$$0.4\%$ and recovers $\sim$$93\%$ of the true clone splits,
+even though the resulting clone tree has \emph{more} leaves than the region tree (confirming the
+artifact is admixture, not tree size). As with the lineage--space confound, this is a failure mode
+that real multi-region data cannot diagnose for want of a ground truth, and that \texttt{iscc}
+quantifies because it has one.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{validation_multiregion_phylo.png}
+  \caption{\textbf{Multi-region bulk ``sample trees'' are not phylogenies, quantified against
+  \texttt{iscc}'s ground truth.} (A) a spatial clone map with a multi-region biopsy overlaid: regions
+  straddle clonal territories, so each pooled region is a clone mixture. (B) the naive region sample
+  tree infers $\sim$$24\%$ of truly single-origin mutations as spurious parallel origins; oracle clone
+  deconvolution (the fix) drops this to $\sim$$0.4\%$. (C) more regions does not fix it --- the naive
+  rate does not fall toward zero as $K$ grows, while the deconvolved clone tree stays near zero
+  throughout. (D) the naive error scales with the measured per-region clone admixture across a
+  dispersal sweep and seeds ($r \approx 0.7$).}
+  \label{fig:multiregion}
+\end{figure}
+
 \subsection*{\texttt{iscc} implements conventional and adaptive therapy strategies}
 \label{sec:treatment}
 A central goal in computational oncology is to use detailed molecular profiles of tumors to

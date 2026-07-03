@@ -57,19 +57,24 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   sweep spans and brackets all three (`validation_petracer_real.png`). Reduced `.npz` committed
   (~6 KB, aggregate stats only); raw `.h5td` git-ignored. Caveats: MERFISH↔F9 ok; mouse metastasis
   (multi-site = R9) → validated PER-CLONE-TREE.
-- **NEXT — "Multi-region trees are not phylogenies"** (benchmark-suite member; thematic SIBLING of the
-  PEtracer confound — the "spatial structure misleads inference" cluster). Reproduce + extend Alves,
-  Prieto & Posada, *Multiregional Tumor Trees Are Not Phylogenies* (PMC5549612; Posada = CellCoal
-  author, already cited). Claim: bulk multi-region samples are ADMIXED (each region = a clone mixture),
-  so a "sample tree" from regional bulk VAF/mutation profiles reflects similarity not lineage →
-  spurious parallel mutations, biased divergence, reversed ordering. **iscc is ideal** (TRUE phylogeny
-  via `genotypes_parents`/`to_newick` + REAL spatial admixture via clonal territories + F1 multiregion
-  biopsy) and goes BEYOND their illustrative cases with a quantitative ground-truth sweep: (a) NJ
-  "sample tree" from regional bulk VAF → RF distance / #spurious parallelisms vs the true clone tree;
-  (b) MORE REGIONS DOESN'T FIX IT (admixture, not sampling density, is the problem); (c) sweep admixture
-  via `dispersal_rate` (territories↔intermixed); (d) clonal deconvolution first (Clomial-style) recovers
-  the truth (their fix). Mostly feasible now (multiregion biopsy + `bulkDNA` + `iscc.integrations.to_newick`
-  exist); new: NJ-from-VAF + RF distance (+ optional deconvolution). Fits alongside/after clonealign+inferCNV.
+- **DONE — "Multi-region trees are not phylogenies"** (benchmark-suite member; thematic SIBLING of the
+  PEtracer confound — the "spatial structure misleads inference" cluster). Reproduced + extended Alves,
+  Prieto & Posada, *Multiregional Tumor Trees Are Not Phylogenies* (PMC5549612; `alves_multiregion_2017`,
+  auto-added—verify). New self-contained analysis seam `iscc.integrations.multiregion` (NJ, Fitch
+  parsimony, Robinson–Foulds — numpy-only, no ete3/dendropy): `true_origin_counts` (the ANSWER KEY —
+  per-locus #independent origins via Fitch on the true clone tree pruned to observed clones;
+  single-origin loci are the clean substrate), `region_bulk_profiles` (deep `bulkDNA` per multiregion
+  region = admixed VAF), `oracle_clone_profiles` (per-cell clone truth as oracle deconvolution = the
+  fix's achievable bound), `count_spurious_parallel` (Hamming-NJ tree + Fitch; spurious = truly
+  single-origin yet reconstruction infers ≥2 origins), `multiregion_phylogeny` (high-level: naive vs
+  fix + RF). **Headline numbers** (18k-loci SNV-only tumour, clonal territories, K=8, 3 seeds): naive
+  region sample tree spurious-parallelism rate **~24%** + ordering-reversal **~23%**; oracle clone
+  deconvolution **~0.4%** with **~93%** true-clone-split recall — despite MORE leaves than the region
+  tree (⇒ admixture, not tree size). MORE REGIONS DOESN'T FIX IT (naive rate 9%→29% as K:4→10, never →0;
+  fix stays ~0). Error scales with measured per-region admixture (`dispersal_rate` sweep, corr **~0.7**).
+  `validation/validate_multiregion_phylo.py` (~23s) → `manuscript/figures/validation_multiregion_phylo.png`;
+  `tests/test_multiregion_phylo.py` (10); manuscript §"multi-region bulk sample trees are not phylogenies"
+  beside the PEtracer section (`fig:multiregion`). Full suite 407 green.
 - **DONE — Capability/feature matrix** (Table 1, `paper.tex`; commit 4ecc7ab). Verify a few competitor
   cells (SISTEM spatial/reads, CINner DNA, J-SPACE selection/sampling, scMultiSim DNA/consistency).
 - **OPTIONAL (lean) — one realism head-to-head** iscc vs Splatter vs real on the 8 scRNA summary stats,

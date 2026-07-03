@@ -15,9 +15,20 @@ Additive and low-risk: nothing here changes the engine; each optional external d
 from .lineage import LineageTree, to_lineage_tree, to_newick
 from .anndata import to_anndata
 from .petracer import decompose_lineage_spatial, LineageSpatialDecomposition
+from .multiregion import (
+    true_origin_counts, region_bulk_profiles, oracle_clone_profiles,
+    count_spurious_parallel, multiregion_phylogeny,
+    neighbor_joining, hamming_nj_tree, fitch_length, robinson_foulds,
+    clone_lineage_tree, ordering_reversal_rate,
+)
 
 __all__ = [
     "LineageTree", "to_lineage_tree", "to_newick",
     "to_anndata",
     "decompose_lineage_spatial", "LineageSpatialDecomposition",
+    # multi-region "sample trees are not phylogenies" benchmark
+    "true_origin_counts", "region_bulk_profiles", "oracle_clone_profiles",
+    "count_spurious_parallel", "multiregion_phylogeny",
+    "neighbor_joining", "hamming_nj_tree", "fitch_length", "robinson_foulds",
+    "clone_lineage_tree", "ordering_reversal_rate",
 ]
