@@ -24,15 +24,17 @@ benchmarks** + capability breadth. NOT a KS-distance bake-off vs count sims (Cam
 Pitch: "as scMultiSim provides ground truth for cell-state/regulatory tasks, iscc provides it for the
 full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (their turf; deferred).
 
-- **NOW — the ground-truth benchmark suite** (the load-bearing comparison; run real methods on iscc
-  data, score vs known truth):
+- **NOW (separate session) — the ground-truth benchmark suite** (run real methods on iscc data,
+  score vs known truth). **Active next: `clonealign` + `inferCNV`** (handoff:
+  `handoffs/clonealign_infercnv.md`):
   - **Flagship — `clonealign`** (CNA-dosage DNA↔RNA clone assignment; works today, non-circular). AUC vs true clone.
   - `inferCNV`/`copyKAT` (CNA-from-expression) — correlation vs true per-cell CNA.
   - Multi-batch **integration/correction** on F3 batches (Harmony/scVI) — iLISI/ARI vs known clones/types.
+    *(subsumed by / graduates into the Multi-patient cohort milestone below.)*
   - Cell-type/clone **clustering** — ARI; **spatial deconvolution** (cell2location/Tangram) — per-spot accuracy.
   - Already in-paper (count as suite members): **selection/rate inference** (ABC recovery), **sampling/
-    experimental-design**, realism-vs-real. Niche/**CCI** inference waits on F8.
-  - Manuscript: reframe validation as *"iscc as a benchmarking substrate"* organized as this suite.
+    experimental-design**, realism-vs-real, **PEtracer** (done). Niche/**CCI** inference builds on F8.
+  - Manuscript: validation reframed as *"iscc as a benchmarking substrate"* — DONE (PEtracer + microenv sections).
 - **DONE — PEtracer validation** (flagship ground-truth + real-data benchmark). New
   `iscc.integrations` seam (`to_lineage_tree`/`to_newick`/`to_anndata`/`decompose_lineage_spatial`;
   19 tests) built on F8 (extrinsic) + F9 (single-cell spatial) + `genotypes_parents` lineage.
@@ -78,6 +80,34 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   `cell_crd`, NB/DM, transcriptome-coverage (`panel`/`n_panel_genes`) + data-distribution knobs
   (`IMAGING_PRESETS`), no spot aggregation, coords retained. 14 tests; wired into `isccdata` CLI
   (`-a scspatial`). Unblocks the PEtracer expression comparison. **Next (optional):** a demo notebook.
+
+## Multi-patient cohort — ground truth for cohort analysis & personalized medicine (NEW, plan-first)
+- **NEXT (after clonealign+inferCNV; own milestone, design-first like F8).** A `Cohort` layer that
+  runs a DIFFERENT tumour per patient (own seed → private clones, private passenger mutations,
+  patient-specific CNAs + spatial structure) over a **SHARED specification** — common driver genes /
+  recurrent oncogenes+TSGs, shared selection landscape + gene panel — so recurrence is meaningful.
+  Emit each patient as a **batch** (biological *and* technical differences). Surface **cohort ground
+  truth**: recurrent-vs-private drivers, per-patient private mutations, true **shared-vs-private
+  cell-state** labels.
+- **Why it MUST be shown (user, 2026-07-03):** no simulator gives cohort-level ground truth for
+  shared-vs-private structure — exactly what real cohorts can never provide. Unlocks flagship
+  benchmarks: (1) **multi-patient batch integration** (Harmony/scVI/scANVI/LIGER) — score whether a
+  method aligns SHARED states while preserving PRIVATE ones (the central over/under-correction failure
+  mode, no real ground truth); (2) **recurrence / driver detection** (MutSigCV/dNdScv-style — recover
+  recurrent drivers vs private passengers); (3) shared-vs-private states / cross-patient progression /
+  consensus subtypes.
+- **The personalized-medicine story (user, 2026-07-03):** the cohort is also an illustration of the
+  NEED FOR PERSONALIZED MEDICINE. Make patient **subgroups** (molecular subtypes, e.g. distinct
+  driver/resistance profiles) that respond DIFFERENTLY to therapy — so a treatment benefits one
+  subgroup but not another. Coupled to the existing **treatment module**, this yields ground truth for
+  **patient stratification / treatment-response prediction / biomarker discovery**: which patients
+  benefit from which therapy, with a known answer. "Every tumour is different" made concrete + scorable.
+- **Feasibility (mostly plumbed):** real-genome mode already gives a FIXED shared genome + arm-level
+  selection landscape (loop seeds over one `genome_spec` → shared recurrence + private evolution); the
+  scRNA batch machinery already has the **"confounded" design = different tumours → different batches**
+  (`run_scrna_batches` docstring = the multi-patient case). New pieces: share the ABSTRACT-mode driver
+  layout across patients; a `Cohort` wrapper; the shared-vs-private + subgroup/therapy-response ground
+  truth bookkeeping. Plan design-first, then handoff.
 
 ## External-simulator adapters (recipe; additive `iscc.integrations` seam)
 - **STARTED** — the `iscc.integrations` seam now exists (added by the PEtracer validation):
