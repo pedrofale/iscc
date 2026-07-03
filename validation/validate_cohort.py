@@ -23,8 +23,10 @@ Figure (manuscript/figures/validation_cohort.png), the strongest first-pass benc
      the SHARED cell states by patient (low iLISI); a correction restores cross-patient mixing while
      preserving the biology (cell-type ARI) — scored against iscc's shared-vs-private ground truth
      (real Harmony used when the iscc-harmony env is present, else a self-contained baseline).
-  D. DEMULTIPLEXING. N:1 pooling -> assign pooled cells back to patient-of-origin from their private
-     germline variants (souporcell/vireo-style): accuracy vs the true patient label, far above chance.
+  D. DEMULTIPLEXING. N:1 pooling of solid tumours WITH their normal microenvironment -> assign EVERY
+     pooled cell, cancer AND normal, back to patient-of-origin from its private germline variants
+     (souporcell/vireo-style): accuracy vs the true patient label, far above chance, in both
+     compartments (normal cells are demuxable only because germline is carried by every cell).
 
 Self-contained (numpy/scipy/sklearn); external integration/demux tools are optional and isolated in
 their own conda envs. Run:  python -u validation/validate_cohort.py
@@ -90,7 +92,8 @@ def main():
     dc = cc.demux_cohort(n_patients=args.demux_patients)
     da = cc.demux_analysis(dc)
     print(f"    patient-of-origin accuracy={da['accuracy']:.3f} (chance={da['chance']:.3f}, "
-          f"{da['n_cells']} pooled cells)")
+          f"{da['n_cells']} pooled cells: {da['n_cancer']} cancer + {da['n_normal']} normal)")
+    print(f"      by compartment — cancer={da['cancer_accuracy']:.3f}  normal={da['normal_accuracy']:.3f}")
 
     _figure(args.out, ra, pmres, ia, da)
     print(f"\nsaved figure -> {args.out}")
@@ -158,16 +161,17 @@ def _figure(out, ra, pm, ia, da):
     c.legend(fontsize=8, loc="upper left")
     c.set_title("C. Integration must MIX shared states across\npatients without erasing private biology")
 
-    # D. demultiplexing ------------------------------------------------------------------
+    # D. demultiplexing (cancer + normal cells) -----------------------------------------
     d = ax[1, 1]
-    d.bar([0, 1], [da["chance"], da["accuracy"]], color=["#7f8c8d", "#27ae60"], width=0.6)
-    d.set_xticks([0, 1]); d.set_xticklabels(["chance", "iscc private\nvariants"])
+    vals = [da["chance"], da["cancer_accuracy"], da["normal_accuracy"], da["accuracy"]]
+    d.bar(range(4), vals, color=["#7f8c8d", "#c0392b", "#2980b9", "#27ae60"], width=0.65)
+    d.set_xticks(range(4)); d.set_xticklabels(["chance", "cancer", "normal", "all cells"])
     d.set_ylabel("patient-of-origin accuracy")
     d.set_ylim(0, 1.08)
-    for x, v in zip([0, 1], [da["chance"], da["accuracy"]]):
-        d.text(x, v + 0.02, f"{v:.2f}", ha="center", fontweight="bold")
-    d.set_title(f"D. Demultiplexing (N:1 pool of {da['n_cells']} cells):\n"
-                "assign pooled cells to patient-of-origin")
+    for x, v in zip(range(4), vals):
+        d.text(x, v + 0.02, f"{v:.2f}", ha="center", fontweight="bold", fontsize=9)
+    d.set_title(f"D. Demultiplexing (N:1 pool: {da['n_cancer']} cancer + {da['n_normal']} normal):\n"
+                "assign every cell to patient-of-origin via germline")
 
     fig.suptitle("iscc provides cohort-level ground truth: shared-vs-private states, and the need for "
                  "personalized medicine", fontsize=13, fontweight="bold")

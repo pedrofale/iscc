@@ -307,34 +307,48 @@ def run_harmony(emb, batch_labels, work_dir=None):
 DEMUX_GENOME = {"n_segments": 12, "segment_size": 400}
 DEMUX_SEL = {"prop_driver": 0.03, "prop_dispersal": 0.0, "prop_immune_resistance": 0.0,
              "prop_treatment_resistance": 0.0, "driver_effects": 1.2}
-DEMUX_DEME = {"carrying_capacity": 12, "initial_cancer_cells": 6}
-DEMUX_SPATIAL = {"grid_size": 15, "structure_radius": 0}
+DEMUX_DEME = {"carrying_capacity": 10, "initial_cancer_cells": 6}
+# A REALISTIC pool: a solid tumour with a normal microenvironment (epithelial/stromal ring +
+# infiltrating immune cells) — so the demux operates on cancer AND normal cells, exactly like a real
+# multiplexed single-cell run. Genetic demux (souporcell/vireo) assigns EVERY cell to its individual
+# via germline variants, which iscc now carries in all cell types (tumour and normal).
+DEMUX_SPATIAL = {"grid_size": 17, "structure_radius": 5, "immune_density": 0.5}
 DEMUX_CANCER = {"division_rate": 0.6, "death_rate": 0.05, "max_birth_rate": 0.98,
                 "mutation_rate": 0.7, "dispersal_rate": 0.3}
+DEMUX_IMMUNE = {"division_rate": 0.0, "death_rate": 0.1, "dispersal_rate": 0.1}
 
 
-def demux_cohort(n_patients=8, steps=300, n_germline=40):
-    """All-cancer tumours with per-patient PRIVATE germline markers (the individual background genetic
-    demux exploits) — pooled N:1, the patient-of-origin answer key is the private-variant fingerprint."""
+def demux_cohort(n_patients=8, steps=320, n_germline=40):
+    """Solid tumours WITH a normal compartment (epithelial/stromal + immune), each patient carrying its
+    own PRIVATE germline markers (the individual background genetic demux exploits). Pooled N:1, the
+    patient-of-origin answer key is the private germline fingerprint carried by EVERY cell."""
     return Cohort(patient_seeds=list(range(1, n_patients + 1)), genome_params=DEMUX_GENOME,
                   selection_params=DEMUX_SEL, cancer_cell_params=DEMUX_CANCER, deme_params=DEMUX_DEME,
-                  spatial_params=DEMUX_SPATIAL, grow_steps=steps, n_germline_markers=n_germline).run()
+                  spatial_params=DEMUX_SPATIAL, immune_cell_params=DEMUX_IMMUNE, grow_steps=steps,
+                  n_germline_markers=n_germline).run()
 
 
 def demux_analysis(cohort, capacity=None, n_cells_per_patient=120):
-    """Pool all patients into one batch (N:1) and assign pooled cells back to patient-of-origin from
-    their private-variant genotype (souporcell/vireo-style). Returns accuracy vs the true patient."""
+    """Pool all patients into one batch (N:1) and assign EVERY pooled cell — cancer AND normal — back to
+    its patient-of-origin from its private germline variants (souporcell/vireo-style). Returns overall
+    accuracy and the per-compartment breakdown (normal cells are demuxable ONLY because germline is
+    carried by every cell of the individual, not just the tumour)."""
     from sklearn.cluster import AgglomerativeClustering
     K = cohort.n_patients
     pooled, meta = pool_cell_data([cohort.patients[p] for p in range(K)],
                                   n_cells_per_patient=n_cells_per_patient)
-    cancer = meta["cell_type"].values == "cancer"
-    v = (pooled["cell_snv"].loc[meta.index[cancer]].values > 0).astype(float)
-    truth = meta["patient"].values[cancer].astype(int)
+    types = meta["cell_type"].values
+    v = (pooled["cell_snv"].values > 0).astype(float)           # ALL pooled cells (cancer + normal)
+    truth = meta["patient"].values.astype(int)
     freq = v.mean(0)
     keep = (freq >= 0.01) & (freq <= 0.95)
     pred = AgglomerativeClustering(n_clusters=K).fit_predict(v[:, keep])
-    acc = match_accuracy(pred, truth, K)
-    out = dict(accuracy=acc, chance=1.0 / K, n_cells=int(cancer.sum()), n_sites=int(keep.sum()),
-               pred=pred, truth=truth, method="private-variant clustering (oracle calls)")
+    is_cancer = types == "cancer"
+    is_normal = np.isin(types, ["epithelial", "stromal", "immune"])
+    out = dict(accuracy=match_accuracy(pred, truth, K),
+               cancer_accuracy=match_accuracy(pred[is_cancer], truth[is_cancer], K) if is_cancer.any() else float("nan"),
+               normal_accuracy=match_accuracy(pred[is_normal], truth[is_normal], K) if is_normal.any() else float("nan"),
+               chance=1.0 / K, n_cells=len(truth), n_cancer=int(is_cancer.sum()), n_normal=int(is_normal.sum()),
+               n_sites=int(keep.sum()), pred=pred, truth=truth,
+               method="private germline clustering (cancer + normal cells)")
     return out

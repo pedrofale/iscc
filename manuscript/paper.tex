@@ -888,8 +888,11 @@ patient per batch, a naive embedding over-separates the \emph{shared} cell state
 integration-LISI), and a batch correction restores cross-patient mixing of shared states while
 preserving the private tumor biology (cell-type adjusted Rand index unchanged) --- scored against the
 shared-versus-private labels, with real Harmony/scVI usable in a dedicated environment. \emph{Demulti\-plexing}
-(\Cref{fig:cohort}D) assigns pooled cells back to their patient-of-origin from private germline variants
-(souporcell/vireo-style) at accuracy far above chance. Finally, \emph{recurrent-driver detection} is
+(\Cref{fig:cohort}D) pools solid tumors together with their normal microenvironment and assigns EVERY
+cell --- cancer and normal --- back to its patient-of-origin from its private germline variants
+(souporcell/vireo-style) at accuracy far above chance in both compartments; the normal cells are
+demuxable precisely because \texttt{iscc} carries the germline background in every cell of an
+individual, not only the tumor. Finally, \emph{recurrent-driver detection} is
 well-posed only because the landscape is shared: driver genes recur more than private passengers
 (\Cref{fig:cohort}A, inset), though in abstract mode the per-gene enrichment is modest because fitness
 depends on the \emph{count} of mutated drivers rather than their identity --- the real-genome arm model,
@@ -909,8 +912,9 @@ which concentrates selection on specific chromosome arms, is the sharper substra
   molecularly identical there) but is revealed by the therapy-selected emergent signature and by the
   response itself. \textbf{(C)} Multi-patient integration must mix the shared cell states across
   patients (raising integration-LISI toward the ideal) without erasing private biology (preserving
-  cell-type ARI). \textbf{(D)} Demultiplexing assigns pooled cells to patient-of-origin from private
-  variants, far above chance.}
+  cell-type ARI). \textbf{(D)} Demultiplexing a pool of tumors and their normal microenvironment assigns
+  every cell --- cancer and normal --- to its patient-of-origin from private germline variants, far above
+  chance in both compartments (normal cells demux only because germline is carried by every cell).}
   \label{fig:cohort}
 \end{figure}
 
