@@ -35,6 +35,10 @@ The default engine is the fast genotype-level (count-based) `genotype` model; a 
 $ isccsim --sim-config config.yaml --steps 2000 --random-seed 0 -o sim_out
 ```
 
+The shipped defaults produce a realistic multi-clone tumour. **See `PARAMETERS.md`** for each knob's
+default, valid range, and what going out of range does — plus `tumor.diagnose()`, which flags a
+degenerate tumour after growth and tells you which knob to turn.
+
 This writes (see `SCHEMA.md` for the full layout): `cell_data/` (per-cell ground truth),
 `trace_counts.csv`, `parents.csv`, `genotypes.csv`, `gene_data/`, and `grid.csv` (spatial modes).
 
