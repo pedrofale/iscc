@@ -9,7 +9,7 @@ ground truth.
 
 `iscc` is the rename and expansion of the earlier `tumorevo` package.
 
-📖 **Documentation & tutorials:** https://pedrofale.github.io/tumorevo/ — built from `docs/` with
+📖 **Documentation & tutorials:** https://pedrofale.github.io/iscc/ — built from `docs/` with
 MkDocs Material. Build locally with `pip install -r docs/requirements.txt && mkdocs serve`.
 
 ## Installation

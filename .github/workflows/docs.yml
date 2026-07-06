@@ -4,7 +4,7 @@ name: docs
 # One-time setup in the repo: Settings -> Pages -> Source = "GitHub Actions".
 on:
   push:
-    branches: [main, dev]   # deploys from whichever branch you push docs changes to
+    branches: [main]        # publish the live site only on push to main
     paths:
       - 'docs/**'
       - 'notebooks/**'

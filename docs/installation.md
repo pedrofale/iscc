@@ -9,8 +9,8 @@ pip install iscc          # or: poetry install
 ## From source
 
 ```bash
-git clone https://github.com/pedrofale/tumorevo
-cd tumorevo
+git clone https://github.com/pedrofale/iscc
+cd iscc
 poetry install
 ```
 

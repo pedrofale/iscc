@@ -1,9 +1,9 @@
 site_name: iscc
 site_description: >-
   in silico cancer center — an internally-consistent, multi-modal tumor-evolution data simulator
-site_url: https://pedrofale.github.io/tumorevo/
-repo_url: https://github.com/pedrofale/tumorevo
-repo_name: pedrofale/tumorevo
+site_url: https://pedrofale.github.io/iscc/
+repo_url: https://github.com/pedrofale/iscc
+repo_name: pedrofale/iscc
 edit_uri: edit/dev/docs/
 docs_dir: docs
 
