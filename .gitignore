@@ -8,6 +8,10 @@ notebooks/.ipynb_checkpoints
 notebooks/notebook_example/
 notebooks/example_out/
 .DS_Store
+# built MkDocs documentation site (deployed by CI, never committed)
+/site/
+/_site/
+.cache/
 # root-level scratch/output data ONLY — anchored with a leading slash so it does NOT also catch
 # the package dir `src/iscc/data/` (its new files would be silently untracked) or the committed
 # `validation/data/`.

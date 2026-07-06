@@ -1,0 +1,67 @@
+site_name: iscc
+site_description: >-
+  in silico cancer center — an internally-consistent, multi-modal tumor-evolution data simulator
+site_url: https://pedrofale.github.io/tumorevo/
+repo_url: https://github.com/pedrofale/tumorevo
+repo_name: pedrofale/tumorevo
+edit_uri: edit/dev/docs/
+docs_dir: docs
+
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - toc.follow
+    - search.suggest
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - mkdocs-jupyter:
+      include_source: true
+      execute: false
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Guide:
+      - Parameters & defaults: parameters.md
+      - Output schema: schema.md
+  - Tutorials:
+      - Pipeline walkthrough: tutorials/01_pipeline_walkthrough.ipynb
+      - Tumor growth: tutorials/02_tumor_growth.ipynb
+      - Data overview: tutorials/03_data_overview.ipynb
+      - "Assay — bulk & single-cell DNA": tutorials/assay_dna.ipynb
+      - "Assay — single-cell RNA": tutorials/assay_scrna.ipynb
+      - "Assay — spatial transcriptomics": tutorials/assay_spatial.ipynb
+      - Emitting sequencing reads: tutorials/reads.ipynb
