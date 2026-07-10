@@ -274,6 +274,45 @@ Design-first plan in `DESIGN_celltrajectory.md`. Not in F1–F7 — a substantia
 
 ---
 
+## Theme 12 — Genotype→expression realism (CNA & SNV coupling)
+
+### R13. How should copy number and point mutations map to expression, so the DNA↔RNA integration benchmarks are non-circular and allele/SNV-based tools are testable?
+**Why it matters.** The DNA↔RNA integration tools (clonealign, inferCNV/CopyKAT, Numbat, cardelino,
+PhylEx) all *invert* a genotype→expression relationship; a benchmark is only fair if iscc's forward
+model is not the inverse model the tool assumes. Today it largely is: CNA→expression is ~linear additive
+dosage (`get_exp`, `cell.py`), the SNV→expression effect reuses the *fitness* parameter (entangled, no
+functional classes), alleles are summed (no allele-specific expression / BAF), and genes are
+independent (no co-expression structure). So the benchmarks risk being too easy / partly circular, and
+the allele-based tools (Numbat, CalicoST) cannot be tested at all.
+**Candidate approaches / sub-questions.** (A) per-gene **dosage sensitivity** + saturation (partial
+buffering) so the CN law ≠ the assumption; (B) **allele-specific expression / BAF** by keeping the p/m
+split through to expression (the genome is already allele-resolved); (C) **SNV functional classes**
+(LoF→NMD, missense, splice, silent) decoupled from fitness, incl. the TSG two-hit with CNA loss; (D)
+**co-expression / program** structure (= R12) for realistic covariance. How much is needed for transfer
+(R4)? Where do sensitivities / SNV classes come from (calibrate from real CN–expression pairs; abstract
+role-based vs real-genome annotation)?
+**Serves:** the credibility of the whole DNA↔RNA integration benchmark suite; unlocks allele-based
+(Numbat/CalicoST) and SNV-based (cardelino/PhylEx) tools. Design: `DESIGN_expression.md`. Ties to F8
+(niche), R12 (programs), R10 (allele/focal CNA).
+
+## Theme 13 — Epistasis & evolutionary-dependency structure
+
+### R14. How do we encode epistasis / ordered dependencies in the selection model so cohort progression models have a known network to recover?
+**Why it matters.** Cohort DNA-integration / progression tools (MHN, TreeMHN, CBN/H-CBN, REVOLVER,
+RECAP) recover a network of promoting/inhibiting/ordering dependencies between events. iscc's fitness is
+**additive** (driver *count* in abstract mode; per-arm in real-genome), so the true network is ~empty
+and a benchmark would only measure false-positive rate. To make this a rich benchmark we must plant a
+**known** dependency structure and show the method recovers it.
+**Candidate approaches / sub-questions.** Pairwise epistasis `E_{ij}` (synergy/antagonism); conjunctive
+/ ordered constraints (CBN-style DAG: B beneficial or accessible only after A → temporal order); mutual
+exclusivity / synthetic lethality (negative interactions). Fitness-gating vs accessibility-gating for
+order. Sparsity/topology/magnitudes that are detectable yet realistic. Must stay compatible with the
+genotype-count engine + tau-leaping (interaction is a pure function of a genotype's event set → caches
+per genotype). **Serves:** the DNA cohort-progression benchmark row (MHN/TreeMHN/CBN/REVOLVER); pairs
+with the cohort milestone. Design: `DESIGN_epistasis.md`. Ties to R6 (identifiability), R10 (CNA events).
+
+---
+
 ## How to use this file
 - These are **questions, not scheduled work** — promote one to a DESIGN doc / milestone when we
   commit to building it.

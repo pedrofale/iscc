@@ -238,6 +238,35 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   `handoffs/operating_envelope.md`.
 </details>
 
+## Integration benchmark suite — the paper thesis (tool matrix + two prerequisites)
+- **THESIS (2026-07-06):** iscc = the ground-truth substrate for DATA-INTEGRATION methods at two scales
+  — cross-modal *within* a tumour, and cohort-wide *across* patients (biological patient effects
+  confounded with technical batch effects). Abstract + intro of `paper.tex` redrafted along this arc
+  (UNCOMMITTED, pending review). Positioning: memory `iscc-paper-positioning`.
+- **Tool matrix** (representative, not exhaustive; ✅ done / ◑ partial / ⬜ new):
+  - DNA→RNA clone assignment, CNA dosage: **clonealign** ✅
+  - DNA→RNA clone assignment, SNVs: **cardelino** ⬜ (needs SNV→expr realism, R13)
+  - bulk-DNA + scRNA clone tree: **PhylEx** ⬜
+  - CNA-from-expression: inferCNV/CopyKAT ✅; **Numbat** ⬜ (needs allele-specific expr/ASE, R13)
+  - scRNA→Visium deconvolution: **cell2location, RCTD** ⬜ — FLAGSHIP (paired ref + true per-spot comp;
+    can also test matched-vs-mismatched reference)
+  - cell–cell communication / niche: CellChat / CellPhoneDB / COMMOT ⬜ (F8 ground truth)
+  - scRNA cohort integration: **Harmony, scVI/scANVI** ✅ (+ Scanorama, LIGER; scIB metrics)
+  - multi-sample Visium integration: GraphST / STAligner ⬜ (2D cross-patient; PASTE 3D out of scope, R1)
+  - DNA cohort progression: **MHN, TreeMHN**, CBN/H-CBN, REVOLVER ⬜ (needs epistasis, R14)
+  - pooled demultiplexing: vireo/souporcell (DNA), cell-hashing + scDblFinder (RNA) ✅
+  - subclonal deconvolution (multi-region bulk): PyClone-VI / Pairtree / Clomial ◑ (oracle deconv done)
+- **Two PREREQUISITES that gate whole categories (both design-first, 2026-07-09):**
+  - **Expression realism** — `DESIGN_expression.md` (R13). Make CNA/SNV→expression non-circular and
+    allele-specific (per-gene dosage sensitivity + saturation; ASE/BAF by not summing p/m; SNV
+    functional classes/NMD decoupled from fitness; program covariance = R12). Gates clonealign/inferCNV
+    *fairness*, **Numbat/CalicoST** (ASE), **cardelino/PhylEx** (SNV). Biggest lever for non-circularity.
+  - **Epistasis** — `DESIGN_epistasis.md` (R14). Plant a known dependency network (pairwise / conjunctive
+    order / mutual exclusivity) so **MHN/TreeMHN/CBN/REVOLVER** have a ground-truth network to recover
+    (else the benchmark tests specificity only).
+- **Priority (new work):** deconvolution (cell2location/RCTD, flagship) → Numbat → cardelino/PhylEx →
+  MHN/TreeMHN (after epistasis) → multi-Visium → CCI. Each external tool in its own `iscc-<tool>` env.
+
 ## Cell-state trajectories & differentiation (R12; plan-first, LATER)
 - **LATER (design-first, like F8; whiteboard stage).** Add a CONTINUOUS cell-state / differentiation
   axis that EMERGES from the evolving genome (not read off a fixed input tree, unlike
