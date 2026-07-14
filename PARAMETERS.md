@@ -45,6 +45,14 @@ Defaults are those in `notebooks/example_config.yaml`. Set them under the matchi
 | `dispersal_rate` | 0.1 | **≲ `division_rate`** | ≫ division → well-mixed, **no clonal territories** (silently breaks the PEtracer and multi-region benchmarks) |
 | `structure_radius` / `n_structures` | 5 / 1 | glandular geometry (duct size / count) | — |
 
+!!! warning "Known limitation — `carrying_capacity` does not hard-cap deme occupancy (2026-07-09)"
+    Crowding is a fixed density-dependent *death* rate capped by `maximum_death_rate`, but selection
+    raises clones' division rate up to `max_birth_rate`, so evolved clones outgrow the death cap and
+    demes over-fill (a dense pile rather than a spread tumour) at large scale. `carrying_capacity` is
+    therefore effectively a threshold, not a capacity, in the current engine. Small-grid runs (PEtracer,
+    multi-region) are unaffected; large-scale spatial fidelity and any tumour-size/density realism are.
+    Fix tracked in `DESIGN_crowding.md` / `BACKLOG.md`.
+
 ### Selection — `selection_params`
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|

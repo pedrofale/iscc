@@ -319,6 +319,22 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   monitoring assay can be before the adaptive-vs-continuous advantage collapses. Flagship for the
   recommender paper; modest extension (feed the controller from a simulated assay readout).
 
+## Engine bug — carrying capacity not enforced (NOW; spatial realism)
+- **NOW — `carrying_capacity` does not cap deme occupancy** (diagnosed 2026-07-09, `DESIGN_crowding.md`).
+  Crowding death is a FIXED absolute rate `min(death_rate·K, max_death_rate)` (≤0.5), but selection
+  raises each clone's `division_rate` up to `max_birth_rate` (0.8) — measured mean 0.30→0.78 over 30
+  gens. Once evolved div > death cap, net growth is positive regardless of occupancy → demes overfill
+  without bound (measured ~1,200–4,200 cells/deme at nominal K=10) → tumour is a dense PILE, not a
+  spatial spread. `max_death_rate` clamp defeats logistic/higher-death patches (clamped below evolved div).
+- **Fix (design-first):** (A) density-dependent death RELATIVE to each clone's own division rate, with
+  `max_death_rate ≥ max_birth_rate` (recommended, minimal); or (B) hard occupancy / boundary-driven
+  growth (Waclaw/Noble, most faithful, bigger change). Off-by-default + re-validate (changes all spatial
+  output). **Consequences:** (1) do NOT claim spatial speed vs SISTEM until fixed+measured — the fast
+  "millions of cells in minutes" came from the non-spreading pile; a spatial tumour at that scale is
+  HPC-bound (∝ occupied demes). (2) `carrying_capacity` semantics wrong in `PARAMETERS.md`. (3) add a
+  `diagnose()` "demes over-filling" check. (4) re-check PEtracer/multi-region (small grids; likely OK —
+  territories come from low dispersal, not occupancy).
+
 ## Engine / inference follow-ups
 - **LATER — M3b HPC rerun** — fewer, bigger tumors (~800 × 8000-cell, tau-leaped) for the canonical
   Charm/PCAWG figure; HPC-bound. The flagship real-genome figure.
