@@ -54,9 +54,11 @@ changing crowding changes every spatial output.
 ## Impact (why it matters)
 - **Spatial realism:** with a real cap the tumour spreads (occupied demes ∝ cells/K) → genuine
   territories + boundary-driven growth. Strengthens the spatial-evolution story.
-- **Scalability claims:** the "millions of cells in minutes" numbers came from the non-spreading pile;
-  a genuinely spatial tumour at that scale is the expensive, HPC-bound regime (cost ∝ occupied demes).
-  Do **not** claim a spatial speed advantage over SISTEM until this is fixed and measured.
+- **Scalability claims:** the defensible SISTEM comparison is **well-mixed only** — in the single-deme
+  regime iscc grows 5M cells in **under 3 min** (`occ-demes = 1`; `benchmark_scalability.py --tau-grid 1`),
+  reaching SISTEM's scale (5M in ~20 min); this claim is in the manuscript scalability section. Do
+  **not** claim a *spatial* speed advantage: the "millions of cells in minutes" numbers were the
+  non-spreading pile, and a genuinely spatial tumour at that scale is HPC-bound (cost ∝ occupied demes).
 - **`carrying_capacity` semantics:** the config comment ("cells per deme") is not what the dynamics do.
 - **QC:** add a `tumor.diagnose()` check for *demes over-filling* (mean cells/deme ≫ `carrying_capacity`).
 
