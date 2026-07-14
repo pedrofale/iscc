@@ -34,7 +34,7 @@ SEEDS = range(8)
 STEPS = 1500
 
 GENOME = {"n_segments": 12, "segment_size": 100}
-DEME = {"carrying_capacity": 6}
+DEME = {"carrying_capacity": 6, "initial_cancer_cells": 5}
 SPATIAL = {"grid_size": 30, "structure_radius": 0}
 CANCER = {"division_rate": 0.4, "death_rate": 0.02, "max_birth_rate": 0.98,
           "mutation_rate": 1.0, "dispersal_rate": 0.2}
