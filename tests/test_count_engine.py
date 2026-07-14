@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 
 from conftest import (
-    GENOME_PARAMS, SELECTION_PARAMS, CANCER_CELL_PARAMS,
+    GENOME_PARAMS, SELECTION_PARAMS, CANCER_CELL_PARAMS, N_SEGMENTS, SEGMENT_SIZE,
     EPITHELIAL_CELL_PARAMS, STROMAL_CELL_PARAMS, IMMUNE_CELL_PARAMS, DEME_PARAMS,
 )
 from iscc.tumor.models import GenotypeTumor, GlandularTumor
@@ -94,7 +94,9 @@ def test_well_mixed_disables_crowding():
                       spatial_params={"grid_size": 1, "structure_radius": 0},
                       update_mode="tau", tau=1.0)
     assert t._crowding is False
-    t.grow(n_steps=40, seed=1)
+    # ~18 generations is plenty to blow past any finite per-deme K in one deme; 40 here grew to
+    # ~4e7 cells and OOM'd when grow() materialised the cell x gene matrix (~13 GB).
+    t.grow(n_steps=18, seed=1)
     # one deme, no ceiling -> far more than any finite K would allow
     assert t.get_cancer_size() > 500
 

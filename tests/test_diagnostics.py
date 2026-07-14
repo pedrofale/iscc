@@ -68,8 +68,9 @@ def test_monoclonal_low_mutation_flag():
 
 def test_well_mixed_flag():
     # high dispersal relative to division -> clones smear across the whole lesion (no territories),
-    # the regime that breaks the PEtracer & multi-region benchmarks.
-    diag = _grow(cancer={"dispersal_rate": 8.0}, steps=1200).diagnose()
+    # the regime that breaks the PEtracer & multi-region benchmarks. Needs enough mutation to have
+    # >=2 subclones (else it reads as monoclonal, not mixed) under real per-deme crowding.
+    diag = _grow(cancer={"dispersal_rate": 40.0, "mutation_rate": 2.0}, steps=1200).diagnose()
     assert "well_mixed" in _flags(diag)
     assert diag["clone_confinement"] < 0.1
 
@@ -116,7 +117,12 @@ def test_overfilled_skipped_when_well_mixed():
 
 
 def test_hypermutated_flag():
-    diag = _grow(cancer={"mutation_rate": 5.0, "n_snvs_per_allele": 8.0}, steps=1200).diagnose()
+    # SNV-only + no death: extreme CNA-driven hypermutation now drives lineages non-viable (error
+    # catastrophe) before they establish under real per-deme crowding, so use a survivable SNV
+    # hypermutator grown long enough to saturate TMB.
+    diag = _grow(cancer={"mutation_rate": 0.5, "n_snvs_per_allele": 8.0, "snv_prob": 1.0,
+                         "cnv_prob": 0.0, "death_rate": 0.0},
+                 deme={"initial_cancer_cells": 30}, steps=2500).diagnose()
     assert "hypermutated" in _flags(diag)
 
 
