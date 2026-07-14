@@ -16,14 +16,16 @@ from iscc.treatment.chemotherapy import Chemotherapy
 from iscc.treatment.immunotherapy import Immunotherapy
 
 GENOME = {"n_segments": 6, "segment_size": 100}
-DEME = {"carrying_capacity": 5}
+# Seed an established micro-lesion (initial_cancer_cells) so the founder survives crowding +
+# immune pressure instead of stochastically dying out (DESIGN_crowding.md founder bottleneck).
+DEME = {"carrying_capacity": 5, "initial_cancer_cells": 5}
 CANCER = {"division_rate": 0.4, "death_rate": 0.02, "max_birth_rate": 0.8,
           "mutation_rate": 0.5, "dispersal_rate": 0.2}
 # resistance can evolve so therapy selects for it; no dispersal/immune unless asked
 SEL_TR = {"prop_driver": 0.1, "prop_dispersal": 0.0, "prop_immune_resistance": 0.0,
           "prop_treatment_resistance": 0.05, "driver_effects": 1.1, "dispersal_effects": 1.0,
           "treatment_resistant_effects": 1.2, "immune_resistant_effects": 1.0}
-SEL_IR = {"prop_driver": 0.1, "prop_dispersal": 0.0, "prop_immune_resistance": 0.2,
+SEL_IR = {"prop_driver": 0.1, "prop_dispersal": 0.0, "prop_immune_resistance": 0.3,
           "prop_treatment_resistance": 0.0, "driver_effects": 1.1, "dispersal_effects": 1.0,
           "treatment_resistant_effects": 1.0, "immune_resistant_effects": 1.4}
 # fully sensitive (no resistance can evolve) -> chemo cleanly regresses the tumor
@@ -60,7 +62,9 @@ def test_immune_presence_raises_cancer_death():
     d_none = no_immune._death_rate(fid, center)
     d_immune = with_immune._death_rate(with_immune.founder_id, center)
     assert d_immune > d_none            # immune cells increase cancer death
-    assert d_none == CANCER["death_rate"]  # no immune -> just baseline (not 0, the old bug)
+    # no immune -> baseline death PLUS density-dependent crowding (DESIGN_crowding.md), and
+    # crucially NOT the old degenerate 0 (immortal cancer). Crowding only adds, so d_none >= baseline.
+    assert d_none >= CANCER["death_rate"] > 0
 
 
 def test_immune_resistance_attenuates_killing():
@@ -112,9 +116,14 @@ def test_chemo_suppresses_growth_and_selects_resistance():
 
 # --- immunotherapy (integration) --------------------------------------------
 def test_immunotherapy_reduces_growth():
+    # Under density-dependent crowding (DESIGN_crowding.md) immune cells add to a deme's occupancy
+    # as well as killing, so strong immune pressure now drives most micro-lesions extinct; the
+    # survivors are the lineages that evolved immune resistance. We use a moderate immune density
+    # (so a handful of seeds establish) and many seeds, then check immunotherapy — which strips that
+    # evolved resistance — reduces the survivors' growth.
     treated, control = [], []
-    for seed in (2, 3, 4, 5):
-        t = _build(SEL_IR, seed=seed, immune_density=0.4, prob_kill=0.6)
+    for seed in range(2, 18):
+        t = _build(SEL_IR, seed=seed, immune_density=0.2, prob_kill=0.15)
         t.grow(600, seed=seed)
         if t.get_cancer_size() == 0:
             continue
@@ -123,7 +132,7 @@ def test_immunotherapy_reduces_growth():
                                        effectiveness=0.95, toxicity=0.05))
         treated.append(t.get_cancer_size())
 
-        c = _build(SEL_IR, seed=seed, immune_density=0.4, prob_kill=0.6)
+        c = _build(SEL_IR, seed=seed, immune_density=0.2, prob_kill=0.15)
         c.grow(600, seed=seed)
         c.grow(600, seed=seed + 100)
         control.append(c.get_cancer_size())

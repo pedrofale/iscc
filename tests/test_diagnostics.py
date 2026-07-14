@@ -12,13 +12,14 @@ import numpy as np
 import pytest
 
 from iscc.tumor.models import GenotypeTumor
+from iscc.tumor.diagnostics import DEFAULT_THRESHOLDS
 
 GENOME = {"n_segments": 3, "segment_size": 60}
 SELECTION = {"prop_driver": 0.1, "driver_effects": 1.1}
 CANCER = {"max_birth_rate": 0.8, "division_rate": 0.4, "death_rate": 0.02, "mutation_rate": 0.3,
           "dispersal_rate": 0.1, "snv_prob": 0.5, "cnv_prob": 0.5, "n_snvs_per_allele": 0.4,
           "amp_prob": 0.5}
-DEME = {"carrying_capacity": 4, "initial_cancer_cells": 5, "maximum_death_rate": 0.5}
+DEME = {"carrying_capacity": 4, "initial_cancer_cells": 5, "maximum_death_rate": 1.0}
 SPATIAL = {"grid_size": 16, "structure_radius": 0}
 
 
@@ -77,8 +78,9 @@ def test_no_gradient_flag():
     # hypoxia on but a long O2 diffusion length (large D) on a small tumour -> no core-rim contrast.
     menv = {"hypoxia": {"strength": 1.0, "n_genes": 30, "o2_supply": 0.3, "o2_source": "uniform",
                         "o2_diffusion": 200.0, "o2_consumption": 1.0}}
-    diag = _grow(spatial={"grid_size": 8}, deme={"carrying_capacity": 2}, microenv=menv,
-                 steps=500).diagnose()
+    # small tumour (small grid) with a very long O2 diffusion length -> O2 is ~uniform -> no core-rim
+    # contrast. (Default DEME K=4 + a seeded founder cluster; a K=2 deme can't hold the cluster now.)
+    diag = _grow(spatial={"grid_size": 10}, microenv=menv, steps=500).diagnose()
     assert "no_gradient" in _flags(diag)
 
 
@@ -96,6 +98,21 @@ def test_no_gradient_skipped_when_microenv_off():
     diag = _grow().diagnose()
     ng = [c for c in diag.checks if c.name == "no_gradient"][0]
     assert ng.skipped and ng.ok
+
+
+def test_overfilled_check_passes_when_demes_cap():
+    # DESIGN_crowding.md: with density-dependent death, demes cap near K, so mean cells/deme is close
+    # to carrying_capacity and the over-fill check passes (it FAILED under the old carrying-capacity bug).
+    diag = _grow(steps=900).diagnose()
+    assert "overfilled" not in _flags(diag)
+    assert diag["deme_occupancy"] <= DEFAULT_THRESHOLDS["overfill_mult"] * DEME["carrying_capacity"]
+
+
+def test_overfilled_skipped_when_well_mixed():
+    # the well-mixed regime (carrying_capacity None) has no per-deme ceiling by design -> skipped.
+    diag = _grow(deme={"carrying_capacity": None}, steps=200).diagnose()
+    ov = [c for c in diag.checks if c.name == "overfilled"][0]
+    assert ov.skipped and ov.ok
 
 
 def test_hypermutated_flag():

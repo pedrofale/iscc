@@ -105,10 +105,15 @@ def test_germline_mutations_in_all_cell_types():
     cell of an individual, not just the tumour (this is the mechanism the private demux markers use)."""
     marks = [3, 11, 27]
     subs = [Subgroup("G", germline_mutations=tuple(marks))]
-    spatial = {"grid_size": 9, "structure_radius": 2}     # seeds epithelial/stromal normal cells
+    spatial = {"grid_size": 15, "structure_radius": 5}    # seeds epithelial/stromal normal cells
+    # Grow a solid gland (real per-deme crowding caps demes, so a tiny duct would hold only a few
+    # cancer cells) and keep CNA low: the marks are the germline-INJECTION test, and CNA-driven LOH
+    # could otherwise delete the (single-allele) germline variant in a small tumour's dominant clone.
+    cancer = {**CANCER, "snv_prob": 0.95, "cnv_prob": 0.05}
+    deme = {**DEME, "carrying_capacity": 8}
     co = Cohort(patient_seeds=[1], genome_params=GENOME, selection_params=SELECTION,
-                cancer_cell_params=CANCER, deme_params=DEME, spatial_params=spatial,
-                grow_steps=120, subgroups=subs).run()
+                cancer_cell_params=cancer, deme_params=deme, spatial_params=spatial,
+                grow_steps=300, subgroups=subs).run()
     snv = co.patients[0].cell_data["cell_snv"].values
     ct = co.patients[0].cell_data["cell_type"].iloc[:, 0].astype(str).values
     genos = co.patients[0].tumor.genotypes

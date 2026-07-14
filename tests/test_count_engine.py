@@ -64,6 +64,81 @@ def test_reproducible_same_seed():
     assert fingerprint(3) != fingerprint(4)
 
 
+def test_demes_cap_near_carrying_capacity():
+    # DESIGN_crowding.md (Option A): with density-dependent death the tumour SPREADS across demes and
+    # each deme caps NEAR carrying_capacity, instead of the old bug where evolved clones outran the
+    # absolute death cap and piled 1000s of cells into a few demes.
+    K = 8
+    cancer = {"division_rate": 0.6, "death_rate": 0.02, "max_birth_rate": 0.9,
+              "mutation_rate": 0.3, "dispersal_rate": 0.1}
+    t = GenotypeTumor(seed=2, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
+                      cancer_cell_params=cancer,
+                      deme_params={"carrying_capacity": K, "maximum_death_rate": 1.0,
+                                   "initial_cancer_cells": 5},
+                      spatial_params={"grid_size": 25, "structure_radius": 0},
+                      update_mode="tau", tau=1.0)
+    t.grow(n_steps=60, seed=2)
+    occ = [sum(v for g, v in d.items() if t._is_cancer(g))
+           for d in t.demes if any(t._is_cancer(g) for g in d)]
+    assert len(occ) > 20                        # the tumour SPREAD across many demes (not one pile)
+    assert np.mean(occ) <= 1.5 * K              # mean occupancy caps near K
+    assert max(occ) <= 4 * K                    # no deme is a runaway pile (was 100s-1000s x K)
+
+
+def test_well_mixed_disables_crowding():
+    # carrying_capacity=None -> the well-mixed regime: no per-deme ceiling, so a single deme grows
+    # unbounded (the role the old carrying_capacity=1 hack played; K=1 now caps at ~1 cell).
+    cancer = {**LOW_DEATH, "dispersal_rate": 0.0, "mutation_rate": 0.0}
+    t = GenotypeTumor(seed=1, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
+                      cancer_cell_params=cancer, deme_params={"carrying_capacity": None},
+                      spatial_params={"grid_size": 1, "structure_radius": 0},
+                      update_mode="tau", tau=1.0)
+    assert t._crowding is False
+    t.grow(n_steps=40, seed=1)
+    # one deme, no ceiling -> far more than any finite K would allow
+    assert t.get_cancer_size() > 500
+
+
+def test_engines_agree_on_crowding_death():
+    # The count engine's _death_rate and the cell engine's Deme.get_cancer_death_rate implement the
+    # SAME density-dependent crowding formula (DESIGN_crowding.md), so they must return identical
+    # crowding death for a matched (occupancy, K, division, death, margin) state.
+    from iscc.tumor.components.deme import Deme
+    from iscc.tumor.components.cell import CancerCell
+    K, margin, maxd, div, death = 8, 0.1, 1.0, 0.6, 0.03
+
+    t = GenotypeTumor(seed=1, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
+                      cancer_cell_params={"division_rate": div, "death_rate": death,
+                                          "max_birth_rate": 0.9},
+                      deme_params={"carrying_capacity": K, "maximum_death_rate": maxd,
+                                   "crowding_margin": margin, "initial_cancer_cells": 1},
+                      spatial_params={"grid_size": 1, "structure_radius": 0})
+    fid = t.founder_id
+    # pin the founder's rates so both engines see identical inputs
+    t.genotypes[fid].evolutionary_parameters["division_rate"] = div
+    t.genotypes[fid].evolutionary_parameters["death_rate"] = death
+
+    def cell_deme(n):
+        first = CancerCell(n_segments=N_SEGMENTS, segment_size=SEGMENT_SIZE)
+        first.evolutionary_parameters["division_rate"] = div
+        first.evolutionary_parameters["death_rate"] = death
+        d = Deme(cell=first, carrying_capacity=K, maximum_death_rate=maxd, crowding_margin=margin)
+        for _ in range(n - 1):
+            c = CancerCell(n_segments=N_SEGMENTS, segment_size=SEGMENT_SIZE)
+            c.evolutionary_parameters["division_rate"] = div
+            c.evolutionary_parameters["death_rate"] = death
+            d.add_cell(c)
+        return d
+
+    for n in (1, 4, 8, 16, 24):
+        d_count = t._death_rate(fid, 0, total=n)
+        d_cell = cell_deme(n).get_cancer_death_rate(death, division_rate=div,
+                                                    immune_cell_fraction=0.0, immune_resistance=0.0)
+        assert d_count == pytest.approx(d_cell)
+    # and the shared fixed point: death == division at occupancy K/(1+margin)
+    assert t._death_rate(fid, 0, total=K / (1 + margin)) == pytest.approx(div)
+
+
 def test_statistically_equivalent_to_cell_engine():
     seeds, steps = range(10), 150
     cnt = [_count(s, steps, cancer=LOW_DEATH).get_tumor_size() for s in seeds]

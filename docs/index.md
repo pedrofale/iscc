@@ -1,4 +1,4 @@
-# iscc — in silico cancer center
+# **in silico** cancer center
 
 `iscc` is an internally-consistent, multi-modal **tumor-evolution data simulator**. It grows one
 selection-driven, spatially-structured tumor, optionally treats it, samples it (biopsy /

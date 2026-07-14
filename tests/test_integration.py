@@ -27,15 +27,18 @@ import integration_common as C  # noqa: E402
 # A small, fast, deterministic tumour: a few segments so distinct CNAs accumulate, a normal
 # compartment (structure_radius>0) for the inferCNV reference, grown just long enough for subclones.
 GENOME = {"n_segments": 6, "segment_size": 40}
-SPATIAL = {"grid_size": 14, "structure_radius": 3}
-DEME = {"carrying_capacity": 8, "initial_cancer_cells": 4}
+# Real per-deme crowding (DESIGN_crowding.md) caps demes near K, so the cancer spreads across the
+# gland rather than piling up; grow a larger gland (bigger grid/duct + K + steps) so each clone holds
+# enough cells for scDNA to recover its consensus copy number cleanly.
+SPATIAL = {"grid_size": 18, "structure_radius": 5}
+DEME = {"carrying_capacity": 15, "initial_cancer_cells": 4}
 CANCER = {"division_rate": 0.6, "death_rate": 0.03, "max_birth_rate": 0.98,
           "mutation_rate": 1.2, "dispersal_rate": 0.5}
 
 
 @pytest.fixture(scope="module")
 def tumor():
-    return C.grow_tumor(seed=0, steps=350, genome=GENOME, spatial=SPATIAL, deme=DEME, cancer=CANCER)
+    return C.grow_tumor(seed=0, steps=650, genome=GENOME, spatial=SPATIAL, deme=DEME, cancer=CANCER)
 
 
 @pytest.fixture(scope="module")

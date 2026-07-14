@@ -22,17 +22,21 @@ class TestGlandularTumorInit:
     def test_deme_rates_length(self, glandular_tumor):
         assert len(glandular_tumor.deme_rates) == len(glandular_tumor.deme_list)
 
-    def test_cancer_cell_in_center(self, glandular_tumor):
+    def test_cancer_cells_in_center(self, glandular_tumor):
+        # the founder micro-lesion (initial_cancer_cells, capped by K) is seeded in the centre deme
         center = glandular_tumor.grid_size // 2
         deme = glandular_tumor.grid[center][center]
-        assert deme.types_counts.get("cancer", 0) == 1
+        expected = min(DEME_PARAMS.get("initial_cancer_cells", 1), DEME_PARAMS["carrying_capacity"])
+        assert deme.types_counts.get("cancer", 0) == expected
 
-    def test_total_cancer_cells_is_one_at_init(self, glandular_tumor):
+    def test_total_cancer_cells_at_init(self, glandular_tumor):
         total = sum(
             deme.types_counts.get("cancer", 0)
             for deme in glandular_tumor.deme_list
         )
-        assert total == 1
+        # all founders sit in the centre deme; none elsewhere yet
+        expected = min(DEME_PARAMS.get("initial_cancer_cells", 1), DEME_PARAMS["carrying_capacity"])
+        assert total == expected
 
     def test_get_neighboring_demes_center(self, glandular_tumor):
         center = glandular_tumor.grid_size // 2

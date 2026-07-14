@@ -19,7 +19,9 @@ NEUTRAL_SELECTION = {
 }
 GENOME = {"n_segments": 6, "segment_size": 150}
 CANCER = {**CANCER_CELL_PARAMS, "death_rate": 0.02, "mutation_rate": 1.0, "dispersal_rate": 0.2}
-DEME = {"carrying_capacity": 10}
+# well-mixed (no crowding ceiling): the neutral 1/f SNV spectrum is a population-genetics property
+# that needs an unbounded growing population, not spatial capping (DESIGN_crowding.md well-mixed mode).
+DEME = {"carrying_capacity": None}
 SPATIAL = {"grid_size": 25, "n_structures": 1, "structure_radius": 0}
 
 

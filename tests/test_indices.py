@@ -124,10 +124,12 @@ def test_combination_counts_match_cancer_population():
 
 
 def test_founder_only_population_is_single_clone():
-    # one undivided cancer cell -> one combination (the founder's), D == 1, n == its driver load
+    # one undivided cancer cell -> one combination (the founder's), D == 1, n == its driver load.
+    # Seed a single founder (initial_cancer_cells 1) so the un-grown population is exactly one cell.
     t = GenotypeTumor(
         seed=0, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
-        cancer_cell_params=CANCER, deme_params=DEME_PARAMS, spatial_params=SPATIAL,
+        cancer_cell_params=CANCER, deme_params={**DEME_PARAMS, "initial_cancer_cells": 1},
+        spatial_params=SPATIAL,
     )
     combos = driver_combination_counts(t)
     assert sum(combos.values()) == 1

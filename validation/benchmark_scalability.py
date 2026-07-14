@@ -18,14 +18,16 @@ import numpy as np
 
 from iscc.tumor.models import GenotypeTumor
 
-# Canonical 10x1000 = 10k-gene genome (matches the §1 throughput table). carrying_capacity=1
-# means crowd multiplier == capacity == 1, i.e. NO crowding ceiling -> unbounded growth, which
-# is what we want when measuring the size/time envelope. A low death rate keeps the founder from
-# stochastically dying out so a single run reaches large sizes.
+# Canonical 10x1000 = 10k-gene genome (matches the §1 throughput table). carrying_capacity=None
+# DISABLES crowding (the "well-mixed" regime, DESIGN_crowding.md): no per-deme ceiling -> unbounded
+# growth, which is what we want when measuring the size/time envelope in a single deme (the regime in
+# which single-cell DNA phylogeny simulators like SISTEM are benchmarked). A low death rate keeps the
+# founder from stochastically dying out so a single run reaches large sizes. (With crowding ON,
+# carrying_capacity=1 would now cap a deme at ~1 cell — the old K=1 "no ceiling" hack is gone.)
 GENOME = {"n_segments": 10, "segment_size": 1000}
 SELECTION = {"prop_driver": 0.1, "prop_dispersal": 0.1,
              "prop_immune_resistance": 0.1, "prop_treatment_resistance": 0.1}
-DEME = {"carrying_capacity": 1, "maximum_death_rate": 0.5}
+DEME = {"carrying_capacity": None, "maximum_death_rate": 0.5}
 
 
 def cancer_params(mutation_rate=0.01):

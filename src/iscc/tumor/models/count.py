@@ -180,14 +180,33 @@ class GenotypeTumor:
 
         # grid of demes; each deme is a dict {genotype_id: count}
         self.grid_size = spatial_params["grid_size"]
-        self.carrying_capacity = deme_params.get("carrying_capacity", 1)
-        self.maximum_death_rate = deme_params.get("maximum_death_rate", 0.5)
+        # carrying_capacity is a real per-deme CAP now (DESIGN_crowding.md, Option A): crowding
+        # death rises RELATIVE to each clone's own evolved division rate, so demes cap near K even
+        # for fast-evolved clones. Setting it to None or 0 disables crowding entirely -> the
+        # "well-mixed" regime (unbounded growth in a deme), used by the single-deme SISTEM benchmark.
+        self.carrying_capacity = deme_params.get("carrying_capacity", 10)
+        self._crowding = self.carrying_capacity is not None and self.carrying_capacity > 0
+        # Positive fill/normalisation capacity: used for structure filling, immune seeding and the
+        # microenvironment density fields. Falls back to 1 when crowding is off (no capacity).
+        self._cap = int(self.carrying_capacity) if self._crowding else 1
+        # Firmness of the cap: the crowding slope is steepened by (1 + crowding_margin) so the
+        # per-deme fixed point sits at K/(1+margin) (slightly below K) and the restoring force above
+        # K is firm rather than marginal. 0 recovers the plain fixed-point-at-K form. See _death_rate.
+        self.crowding_margin = deme_params.get("crowding_margin", 0.1)
+        # maximum_death_rate MUST be >= max_birth_rate for the cap to bind: a clone whose division
+        # evolved up to max_birth_rate needs its crowding death to be able to reach (and exceed) that
+        # rate. Default 1.0 (>= the 0.8 max_birth_rate default). A lower value re-opens the overfill bug.
+        self.maximum_death_rate = deme_params.get("maximum_death_rate", 1.0)
         self.structure_radius = spatial_params.get("structure_radius", 0)
         # Number of founder cancer cells to seed (an established micro-lesion). A single founder
         # has P(extinction) ≈ death/division (~7% for the defaults) regardless of carrying
         # capacity, so a one-cell start makes runs/demos randomly cancer-free; seeding a small
         # cluster removes that founder bottleneck. Default 1 preserves prior behaviour.
         self.initial_cancer_cells = deme_params.get("initial_cancer_cells", 1)
+        # Founder cells actually seeded: the requested cluster, capped by K when crowding is on
+        # (can't over-seed a deme past its capacity) and left uncapped in the well-mixed regime.
+        self._n_founder = max(1, min(self.initial_cancer_cells, self._cap)
+                              if self._crowding else self.initial_cancer_cells)
         n_demes = self.grid_size * self.grid_size
         self.demes = [dict() for _ in range(n_demes)]
         self.deme_coords = [(i // self.grid_size, i % self.grid_size) for i in range(n_demes)]
@@ -196,7 +215,7 @@ class GenotypeTumor:
             self._seed_structure()
         else:
             center = (self.grid_size // 2) * self.grid_size + (self.grid_size // 2)
-            self._add(center, self.founder_id, max(1, min(self.initial_cancer_cells, self.carrying_capacity)))
+            self._add(center, self.founder_id, self._n_founder)
 
         # Optional immune microenvironment: seed immune cells in every deme so that
         # cancer growing into them experiences local immune pressure (and so that
@@ -205,7 +224,7 @@ class GenotypeTumor:
         # fraction is not washed out once a deme fills with cancer. Static for now
         # (no division/migration yet).
         self.immune_density = spatial_params.get("immune_density", 0.0)
-        n_immune = int(round(self.immune_density * max(self.carrying_capacity, 1)))
+        n_immune = int(round(self.immune_density * self._cap))
         if n_immune > 0:
             imm = self._normal_genotype("immune")
             for i in range(n_demes):
@@ -248,7 +267,7 @@ class GenotypeTumor:
         epi = self._normal_genotype("epithelial")
         for (r, c) in border:
             if 0 <= r < self.grid_size and 0 <= c < self.grid_size:
-                self._add(r * self.grid_size + c, epi, self.carrying_capacity)
+                self._add(r * self.grid_size + c, epi, self._cap)
         circle = get_inside(border)
         occupied = set(border) | set(circle)
 
@@ -256,14 +275,13 @@ class GenotypeTumor:
         in_border = [(r, c) for (r, c) in in_border if 0 <= r < self.grid_size and 0 <= c < self.grid_size]
         if in_border:
             pos = in_border[int(self.rng.choice(len(in_border)))]
-            self._add(pos[0] * self.grid_size + pos[1], self.founder_id,
-                      max(1, min(self.initial_cancer_cells, self.carrying_capacity)))
+            self._add(pos[0] * self.grid_size + pos[1], self.founder_id, self._n_founder)
 
         stroma = self._normal_genotype("stromal")
         for r in range(self.grid_size):
             for c in range(self.grid_size):
                 if (r, c) not in occupied and not self.demes[r * self.grid_size + c]:
-                    self._add(r * self.grid_size + c, stroma, self.carrying_capacity)
+                    self._add(r * self.grid_size + c, stroma, self._cap)
 
     # --- count bookkeeping ---------------------------------------------------
     def _add(self, deme_idx, gid, n):
@@ -315,8 +333,23 @@ class GenotypeTumor:
         deme = self.demes[deme_idx]
         if total is None:
             total = sum(deme.values())
-        crowd = self.carrying_capacity if total > self.carrying_capacity else 1.0
-        death = min(rep.evolutionary_parameters["death_rate"] * crowd, self.maximum_death_rate)
+        base = rep.evolutionary_parameters["death_rate"]
+        if self._crowding:
+            # Density-dependent death RELATIVE to this clone's OWN (evolved) division rate
+            # (DESIGN_crowding.md, Option A). The crowding slope is the clone's net growth rate
+            # (div - base), steepened by (1 + crowding_margin), so at occupancy == K/(1+margin)
+            # death == div and above it death > div — a true restoring force to the carrying
+            # capacity even for a clone whose division has evolved up to max_birth_rate (the old
+            # step-function `death_rate * K` capped at maximum_death_rate could not, because an
+            # evolved division rate outran the absolute cap). maximum_death_rate must be >=
+            # max_birth_rate (default 1.0) or the clamp below re-opens the overfill bug.
+            div = rep.evolutionary_parameters["division_rate"]
+            slope = max(0.0, div - base) * (1.0 + self.crowding_margin)
+            death = base + slope * (total / self.carrying_capacity)
+        else:
+            # well-mixed regime (carrying_capacity None/0): no crowding ceiling -> unbounded growth.
+            death = base
+        death = min(death, self.maximum_death_rate)
 
         ir = self._tx_immune_resist.get(gid, rep.evolutionary_parameters["immune_resistance"])
         ir = min(max(ir, 0.0), 1.0)
@@ -591,12 +624,12 @@ class GenotypeTumor:
     # microenvironment to FITNESS (hypoxia slowing division, etc.) is deliberately left for later.
     def _deme_density(self):
         """Per-deme occupancy = total cells / carrying capacity (drives O2 consumption)."""
-        cc = max(self.carrying_capacity, 1)
+        cc = self._cap
         return np.array([sum(d.values()) / cc for d in self.demes], dtype=float)
 
     def _emitter_density(self, emitter_type):
         """Per-deme density of a ligand-emitting cell type (e.g. immune)."""
-        cc = max(self.carrying_capacity, 1)
+        cc = self._cap
         out = np.zeros(len(self.demes))
         for i, deme in enumerate(self.demes):
             out[i] = sum(c for gid, c in deme.items()

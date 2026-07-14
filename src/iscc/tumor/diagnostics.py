@@ -30,6 +30,7 @@ DEFAULT_THRESHOLDS = {
     "contrast_min": 0.05,    # hypoxia core-rim contrast below this -> no O2 gradient
     "fga_max": 0.95,         # fraction-genome-altered above this -> CNA runaway
     "min_genes": 100,        # fewer than this many genes -> trivial genome
+    "overfill_mult": 3.0,    # mean cells/occupied-deme above this x carrying_capacity -> demes over-filling
     "vaf_1f_rsq": None,      # reported only (context-dependent under selection); not a hard gate
 }
 
@@ -80,6 +81,7 @@ class TumorDiagnosis:
             f"subclones={m['n_subclones']} TMB={m['tmb']:.1f} ({m['tmb_frac']*100:.0f}% of genome) "
             f"driver_enrich={_fmt(m['driver_enrichment'])} confinement={_fmt(m['clone_confinement'])} "
             f"fga={_fmt(m['fga'])} ploidy={_fmt(m['mean_ploidy'])} "
+            f"cells/deme={_fmt(m.get('deme_occupancy'))} "
             f"hypoxia_contrast={_fmt(m['hypoxia_contrast'])} 1/f_R2={_fmt(m['vaf_1f_rsq'])}")
         for c in self.checks:
             if c.skipped:
@@ -235,6 +237,16 @@ def cna_stats(tumor):
     return float(fga / tot), float(ploidy / tot)
 
 
+def deme_occupancy(tumor):
+    """Mean total cells per OCCUPIED deme — the crowding QC (DESIGN_crowding.md).
+
+    With density-dependent death this should sit near ``carrying_capacity``; a value far above K means
+    the per-deme cap is not binding and cells are piling into a few demes instead of spreading (the
+    old carrying-capacity bug). Returns nan for an empty tumour."""
+    occ = [sum(d.values()) for d in tumor.demes if d]
+    return float(np.mean(occ)) if occ else float("nan")
+
+
 def hypoxia_contrast(tumor, core_frac=0.3, rim_frac=0.3):
     """Core–rim hypoxia contrast: mean hypoxia in inner demes − mean in outer demes.
 
@@ -296,6 +308,7 @@ def diagnose(tumor, thresholds=None, verbose=False):
     confinement = clone_confinement(tumor, subclone_freq=th["subclone_freq"])
     fga, ploidy = cna_stats(tumor)
     contrast = hypoxia_contrast(tumor)
+    occupancy = deme_occupancy(tumor)
     try:
         rsq, _ = neutral_sfs_rsq(population_vaf(tumor)) if n_cancer > 0 else (float("nan"), 0.0)
     except Exception:
@@ -304,7 +317,7 @@ def diagnose(tumor, thresholds=None, verbose=False):
     metrics = dict(n_cancer=n_cancer, n_genes=n_genes, shannon=shannon, n_subclones=n_subclones,
                    tmb=tmb, tmb_frac=tmb_frac, driver_enrichment=enrich,
                    clone_confinement=confinement, fga=fga, mean_ploidy=ploidy,
-                   hypoxia_contrast=contrast, vaf_1f_rsq=rsq)
+                   hypoxia_contrast=contrast, deme_occupancy=occupancy, vaf_1f_rsq=rsq)
 
     checks = []
     advisories = []
@@ -332,7 +345,8 @@ def diagnose(tumor, thresholds=None, verbose=False):
 
     if extinct:
         # everything downstream is undefined on an empty tumour; skip the phenotype checks.
-        for name in ("monoclonal", "low_mutation", "hypermutated", "well_mixed", "cna_runaway"):
+        for name in ("monoclonal", "low_mutation", "hypermutated", "well_mixed", "cna_runaway",
+                     "overfilled"):
             checks.append(Check(name, True, None, None, skipped=True))
         checks.append(Check("no_gradient", True, None, None, skipped=True))
         diag = TumorDiagnosis(metrics, checks, advisories)
@@ -367,6 +381,21 @@ def diagnose(tumor, thresholds=None, verbose=False):
 
     checks.append(Check("cna_runaway", np.isnan(fga) or fga <= th["fga_max"], fga, th["fga_max"],
                         "CNA runaway / saturated genome: lower amp_prob / max_cn"))
+
+    # demes over-filling — the carrying-capacity QC (DESIGN_crowding.md). With density-dependent
+    # death the mean cells/occupied-deme should sit near carrying_capacity; a value far above K means
+    # the cap is not binding (cells piling into a few demes rather than spreading). Skipped in the
+    # well-mixed regime (carrying_capacity None/0), which has no per-deme ceiling by design.
+    K = getattr(tumor, "carrying_capacity", None)
+    crowding_on = getattr(tumor, "_crowding", K is not None and (K or 0) > 0)
+    if crowding_on and K and not np.isnan(occupancy):
+        limit = th["overfill_mult"] * K
+        checks.append(Check("overfilled", occupancy <= limit, occupancy, limit,
+                            "demes over-filling (mean cells/deme >> carrying_capacity): the per-deme "
+                            "cap is not binding -- set maximum_death_rate >= max_birth_rate (see "
+                            "DESIGN_crowding.md)"))
+    else:
+        checks.append(Check("overfilled", True, occupancy, None, skipped=True))
 
     # no microenvironment gradient — only when hypoxia is enabled.
     if np.isnan(contrast):

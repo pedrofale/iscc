@@ -7,9 +7,11 @@ class Deme(object):
     def __init__(
         self,
         cell=None,
-        carrying_capacity=1,
+        carrying_capacity=10,
         initial_death_rate=0.1,
-        maximum_death_rate=0.5,
+        maximum_death_rate=1.0,
+        crowding_margin=0.1,
+        initial_cancer_cells=1,
         tumor=None,
         row=None,
         col=None,
@@ -19,8 +21,16 @@ class Deme(object):
             raise ValueError(
                 "Must initialise Deme with either a Cell or a Tumor object."
             )
+        # carrying_capacity is a real per-deme CAP (DESIGN_crowding.md, Option A). None or 0
+        # disables crowding -> unbounded ("well-mixed") growth in the deme. crowding_margin and
+        # initial_cancer_cells are accepted (they arrive via **deme_params) but only the former is
+        # used here; the latter is consumed by the tumour seeding, not the deme dynamics.
         self.carrying_capacity = carrying_capacity
+        self._crowding = carrying_capacity is not None and carrying_capacity > 0
+        self.crowding_margin = crowding_margin
         self.initial_death_rate = initial_death_rate
+        # maximum_death_rate MUST be >= max_birth_rate so an evolved clone's crowding death can
+        # reach its division rate (default 1.0 >= the 0.8 default max_birth_rate).
         self.maximum_death_rate = maximum_death_rate
         self.tumor = tumor
         self.row = row
@@ -66,9 +76,10 @@ class Deme(object):
 
         if cell.type == 'cancer':
             events = ["death", "division"]
-            rates = [self.get_cancer_death_rate(cell.evolutionary_parameters['death_rate'], 
-                                                immune_cell_fraction=immune_cell_fraction, 
-                                                immune_resistance=cell.evolutionary_parameters['immune_resistance']), 
+            rates = [self.get_cancer_death_rate(cell.evolutionary_parameters['death_rate'],
+                                                division_rate=cell.evolutionary_parameters['division_rate'],
+                                                immune_cell_fraction=immune_cell_fraction,
+                                                immune_resistance=cell.evolutionary_parameters['immune_resistance']),
                     cell.evolutionary_parameters['division_rate']]
             event = rng.choice(events, p=np.array(rates) / np.sum(rates))
         elif cell.type == 'immune':
@@ -142,6 +153,8 @@ class Deme(object):
             self.tumor.deme_rates[target_deme.id] = target_deme.deme_rate
 
     def get_immune_cell_fraction(self):
+        if not self.cells:
+            return 0.0
         return sum([cell.type == 'immune' for cell in self.cells]) / len(self.cells)
 
     def update(self, treat=False, treatment=None, rng=None, subset_size=10, batch_size=1):
@@ -172,23 +185,37 @@ class Deme(object):
             rng = rng.spawn(1)[0]
 
     def get_normal_death_rate(self, cell_death_rate):
-        """Update prob of each cell dieing based on its own 
+        """Update prob of each cell dieing based on its own
         rate, the deme's carrying capacity"""
-        if len(self.cells) <= self.carrying_capacity:
+        if not self._crowding or len(self.cells) <= self.carrying_capacity:
             return min(cell_death_rate, self.maximum_death_rate)
         else:
             return min(cell_death_rate * self.carrying_capacity, self.maximum_death_rate)
         
-    def get_cancer_death_rate(self, cell_death_rate, immune_cell_fraction, immune_resistance):
-        """Cancer death rate = crowding-modulated baseline death PLUS local immune killing.
+    def get_cancer_death_rate(self, cell_death_rate, division_rate, immune_cell_fraction,
+                              immune_resistance):
+        """Cancer death rate = density-dependent baseline death PLUS local immune killing.
+
+        Crowding death is RELATIVE to the cell's OWN (evolved) division rate (DESIGN_crowding.md,
+        Option A) — the same formula as the count engine's ``_death_rate``, so the two engines
+        agree: the crowding slope is the cell's net growth rate ``(division - death)`` steepened by
+        ``(1 + crowding_margin)``, so at occupancy ``K/(1+margin)`` death == division and above it
+        death > division (a true restoring force to the carrying capacity, for any evolved division
+        rate). The old ``death_rate * K`` step, capped at ``maximum_death_rate``, could not cap a
+        clone whose division had evolved past that absolute cap. ``carrying_capacity`` None/0
+        disables crowding (well-mixed / unbounded growth).
 
         Immune killing is *additive* contact pressure: more local immune cells raise the
         death rate, attenuated by the cell's immune resistance. (The previous formula
         `death * immune_fraction ** immune_resistance` was degenerate: it could only ever
         lower the death rate, and an immune-free deme gave 0**r = 0, i.e. immortal cancer.)
         """
-        crowd = self.carrying_capacity if len(self.cells) > self.carrying_capacity else 1.0
-        death = min(cell_death_rate * crowd, self.maximum_death_rate)
+        if self._crowding:
+            slope = max(0.0, division_rate - cell_death_rate) * (1.0 + self.crowding_margin)
+            death = cell_death_rate + slope * (len(self.cells) / self.carrying_capacity)
+        else:
+            death = cell_death_rate
+        death = min(death, self.maximum_death_rate)
         if immune_cell_fraction > 0:
             kills = [c.prob_kill for c in self.cells if c.type == 'immune']
             prob_kill = float(np.mean(kills)) if kills else 0.0

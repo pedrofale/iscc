@@ -35,23 +35,25 @@ Defaults are those in `notebooks/example_config.yaml`. Set them under the matchi
 |---|---|---|---|
 | `division_rate` | 0.3 | **> `death_rate`** | ≤ death → extinction |
 | `death_rate` | 0.02 | **≪ `division_rate`** | ≥ division → extinction |
-| `initial_cancer_cells` | 5 | ≥ 5 | 1 → ~7% founder extinction (stochastic loss of a single seeded cell) |
-| `maximum_death_rate` | 0.5 | 0.3–0.8 | caps crowding death; very low → no density regulation |
+| `initial_cancer_cells` | 5 | ≥ 5 | 1 → founder extinction (a lone founder is prone to stochastic loss, and density-dependent crowding death raises that risk at small `carrying_capacity`) |
+| `maximum_death_rate` | 1.0 | **≥ `max_birth_rate`** (0.8) | caps crowding death; **below `max_birth_rate` re-opens the over-fill bug** (evolved clones outrun the cap) |
 
 ### Spatial structure — `spatial_params` + `deme_params` + `cell_params.cancer`
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|
-| `grid_size` × `carrying_capacity` | 25 × 5 | enough for ≳ 10³ cancer cells | too small → no O₂ gradient, too few clones |
+| `carrying_capacity` | 10 | a real **per-deme cap** (cells/deme); `None` or `0` → **well-mixed** (no ceiling, unbounded growth) | too small (1–3) → a lone founder is prone to extinction (crowding ramps from occupancy 0) |
+| `grid_size` × `carrying_capacity` | 50 × 10 | the tumour caps at ~`grid_size² × carrying_capacity`; size the grid **above** the target so it can spread (≳ 10⁴ demes for a 10⁵-cell tumour) | too small → no room to spread / no O₂ gradient / too few clones |
 | `dispersal_rate` | 0.1 | **≲ `division_rate`** | ≫ division → well-mixed, **no clonal territories** (silently breaks the PEtracer and multi-region benchmarks) |
-| `structure_radius` / `n_structures` | 5 / 1 | glandular geometry (duct size / count) | — |
+| `structure_radius` / `n_structures` | 20 / 1 | glandular geometry (duct size / count); the cancer founds inside and spreads across the gland | — |
 
-!!! warning "Known limitation — `carrying_capacity` does not hard-cap deme occupancy (2026-07-09)"
-    Crowding is a fixed density-dependent *death* rate capped by `maximum_death_rate`, but selection
-    raises clones' division rate up to `max_birth_rate`, so evolved clones outgrow the death cap and
-    demes over-fill (a dense pile rather than a spread tumour) at large scale. `carrying_capacity` is
-    therefore effectively a threshold, not a capacity, in the current engine. Small-grid runs (PEtracer,
-    multi-region) are unaffected; large-scale spatial fidelity and any tumour-size/density realism are.
-    Fix tracked in `DESIGN_crowding.md` / `BACKLOG.md`.
+!!! note "`carrying_capacity` is a real per-deme cap (density-dependent crowding, 2026-07-14)"
+    Crowding death rises **relative to each clone's own (evolved) division rate**
+    (`death = death_rate + (division_rate − death_rate)·(1 + crowding_margin)·occupancy/K`, clamped at
+    `maximum_death_rate`), so a deme's occupancy caps near `carrying_capacity` even for clones whose
+    division has evolved up to `max_birth_rate`, and the tumour **spreads** (occupied demes ∝ cells/K)
+    instead of piling into a few demes. This needs `maximum_death_rate ≥ max_birth_rate` (default 1.0).
+    Set `carrying_capacity: None` (or `0`) to disable crowding entirely — the **well-mixed** regime used
+    for single-deme, unbounded-growth benchmarks. See `DESIGN_crowding.md`.
 
 ### Selection — `selection_params`
 | Knob | Default | Valid range | Outside the range |
@@ -104,6 +106,7 @@ tumor.diagnose(thresholds={"shannon_min": 1.0})
 | **monoclonal** | clonal Shannon diversity (< 0.5) | no-mutation → raise `mutation_rate` / `n_snvs_per_allele`; sweep → lower `driver_effects` / `prop_driver` |
 | **hypermutated mush** | fraction of genome mutated / cell (> 0.5) | lower `mutation_rate` / `n_snvs_per_allele` |
 | **well-mixed** | clone spatial confinement, ≥ 2 subclones (< 0.1) | lower `dispersal_rate` relative to `division_rate` |
+| **demes over-filling** | mean cells/occupied-deme vs `carrying_capacity` (> 3×K) | raise `maximum_death_rate` to ≥ `max_birth_rate` (crowding cap not binding); skipped in the well-mixed regime |
 | **no O₂ gradient** | hypoxia core–rim contrast (< 0.05) | grow a larger tumour, raise consumption `k`, or lower diffusion `D` |
 | **CNA runaway** | fraction-genome-altered (> 0.95) | lower `amp_prob` / copy-number event rate |
 | **trivial genome** | gene count (< 100) | raise `n_segments` × `segment_size` |

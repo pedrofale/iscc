@@ -12,7 +12,9 @@ from iscc.validation import (segment_copy_numbers, segment_driver_content,
                              cna_amplification_signature)
 
 GENOME = {"n_segments": 12, "segment_size": 50}
-DEME = {"carrying_capacity": 5}
+# well-mixed (no crowding ceiling): this test isolates the CNA *selection* signature in a growing
+# population and is not about spatial capping, so grow unbounded (DESIGN_crowding.md well-mixed mode).
+DEME = {"carrying_capacity": None}
 SPATIAL = {"grid_size": 19, "structure_radius": 0}
 # snv_prob is held low so this test isolates the *CNA* selection signature (oncogene
 # amplification / TSG deletion). With the genome-wide, ploidy-scaled SNV model

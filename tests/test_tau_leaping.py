@@ -18,9 +18,12 @@ SPATIAL = {"grid_size": 21, "n_structures": 1, "structure_radius": 0}
 LOW_DEATH = {**CANCER_CELL_PARAMS, "death_rate": 0.05}
 
 
+# carrying_capacity=None -> well-mixed (no crowding ceiling): these engine-mechanics checks want
+# unbounded growth in a deme, the role the old carrying_capacity=1 "no ceiling" hack used to play
+# (K=1 now caps a deme at ~1 cell). test_carrying_capacity_bounds_growth passes a finite K explicitly.
 def _tau(seed, gens, cancer=LOW_DEATH, deme=None, tau=1.0, snapshot_every=1):
     t = GenotypeTumor(seed=seed, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
-                      cancer_cell_params=cancer, deme_params=deme or {"carrying_capacity": 1},
+                      cancer_cell_params=cancer, deme_params=deme or {"carrying_capacity": None},
                       spatial_params=SPATIAL, update_mode="tau", tau=tau,
                       snapshot_every=snapshot_every)
     t.grow(n_steps=gens, seed=seed)
@@ -29,7 +32,7 @@ def _tau(seed, gens, cancer=LOW_DEATH, deme=None, tau=1.0, snapshot_every=1):
 
 def _grow_to(mode, seed, target=1500, cap=100000, cancer=LOW_DEATH):
     t = GenotypeTumor(seed=seed, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
-                      cancer_cell_params=cancer, deme_params={"carrying_capacity": 1},
+                      cancer_cell_params=cancer, deme_params={"carrying_capacity": None},
                       spatial_params=SPATIAL, update_mode=mode, tau=1.0)
     rng = np.random.default_rng(seed) if mode == "tau" else t.rng
     for _ in range(cap):
@@ -80,28 +83,30 @@ def test_traces_real_time_axis_and_muller():
 
 
 def test_carrying_capacity_bounds_growth():
-    # with a finite carrying capacity the elevated crowded death rate (which saturates at
-    # maximum_death_rate) must hold the population near capacity instead of growing unboundedly
-    # -- i.e. tau-leaping must not overshoot and blow up. We use a clonal founder (mutation_rate
-    # 0, so no fitter driver clones whose division can exceed maximum_death_rate and legitimately
-    # escape the cap) on a 1x1 grid, division == maximum_death_rate at the crowded equilibrium.
-    cap = 200
+    # Density-dependent crowding (DESIGN_crowding.md, Option A) holds a deme NEAR its carrying
+    # capacity instead of growing unboundedly: death rises RELATIVE to the clone's own division
+    # rate, so at occupancy K/(1+margin) death == division (a restoring fixed point) even for a
+    # clone whose division has evolved up to max_birth_rate. tau-leaping must track that fixed
+    # point without overshooting. Clonal founder (mutation_rate 0) on a 1x1 grid so the whole
+    # tumour is one deme's occupancy.
+    cap, margin = 200, 0.1
     bounded = {**LOW_DEATH, "division_rate": 0.5, "max_birth_rate": 0.5,
                "dispersal_rate": 0.0, "mutation_rate": 0.0}
     t = GenotypeTumor(seed=1, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
                       cancer_cell_params=bounded, deme_params={"carrying_capacity": cap,
-                      "maximum_death_rate": 0.5}, spatial_params={"grid_size": 1,
-                      "n_structures": 1, "structure_radius": 0}, update_mode="tau", tau=1.0)
-    t.grow(n_steps=80, seed=1)
-    # equilibrium sits where division == crowded death; it must stay within a small multiple of
-    # capacity, not explode exponentially.
-    assert 0 < t.get_cancer_size() < 4 * cap
+                      "maximum_death_rate": 1.0, "crowding_margin": margin, "initial_cancer_cells": 5},
+                      spatial_params={"grid_size": 1, "n_structures": 1, "structure_radius": 0},
+                      update_mode="tau", tau=1.0)
+    t.grow(n_steps=120, seed=1)
+    # equilibrium sits at the fixed point K/(1+margin); it must settle NEAR capacity, not explode.
+    size = t.get_cancer_size()
+    assert 0.6 * cap < size < 1.3 * cap
 
 
 def test_exact_mode_untouched():
     # default mode is still "exact"; the new params don't change it.
     t = GenotypeTumor(seed=1, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
-                      cancer_cell_params=LOW_DEATH, deme_params={"carrying_capacity": 1},
+                      cancer_cell_params=LOW_DEATH, deme_params={"carrying_capacity": None},
                       spatial_params=SPATIAL)
     assert t.update_mode == "exact"
     t.grow(n_steps=50, seed=1)

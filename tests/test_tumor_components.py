@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from conftest import N_GENES, N_SEGMENTS, SEGMENT_SIZE, SELECTION_PARAMS
+from conftest import N_GENES, N_SEGMENTS, SEGMENT_SIZE, SELECTION_PARAMS, DEME_PARAMS
 
 
 # ---------------------------------------------------------------------------
@@ -132,9 +132,11 @@ class TestCell:
 
 class TestDeme:
     def test_center_deme_has_cancer_cell(self, glandular_tumor):
+        # the founder micro-lesion (initial_cancer_cells, capped by K) is seeded in the centre deme
         center = glandular_tumor.grid_size // 2
         deme = glandular_tumor.grid[center][center]
-        assert deme.types_counts["cancer"] == 1
+        expected = min(DEME_PARAMS.get("initial_cancer_cells", 1), DEME_PARAMS["carrying_capacity"])
+        assert deme.types_counts["cancer"] == expected
 
     def test_add_cell_increments_counts(self, glandular_tumor):
         from iscc.tumor.components.cell import CancerCell

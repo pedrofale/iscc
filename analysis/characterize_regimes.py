@@ -37,8 +37,8 @@ BASELINE = dict(
     cancer_cell_params=dict(max_birth_rate=0.8, division_rate=0.3, death_rate=0.02,
                             mutation_rate=0.2, dispersal_rate=0.1, snv_prob=0.5, cnv_prob=0.5,
                             n_snvs_per_allele=0.3, amp_prob=0.5),
-    deme_params=dict(carrying_capacity=5, initial_cancer_cells=5, initial_death_rate=0.1,
-                     maximum_death_rate=0.5),
+    deme_params=dict(carrying_capacity=10, initial_cancer_cells=5, initial_death_rate=0.1,
+                     maximum_death_rate=1.0),
     spatial_params=dict(grid_size=22, structure_radius=0),
     microenv_params=None,
 )

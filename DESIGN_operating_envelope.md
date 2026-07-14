@@ -40,11 +40,12 @@ defaults + valid ranges + `tumor.diagnose()`).
 |---|---|---|---|
 | `mutation_rate` | `cell_params.cancer` | `mut_prob = mutation_rate/(mutation_rate+dispersal_rate)` in `update` | too low → monoclonal (no clones); too high → hypermutated mush |
 | `n_snvs_per_allele` | `cell_params.cancer` | Poisson mean new SNVs per allele in `mutate` | too low → no SNV diversity; too high → mush |
-| `division_rate` vs `death_rate` | `cell_params.cancer` | event rate `count*(div+death)`, death share `death/(div+death)`; crowding multiplies death by `carrying_capacity` when a deme is full (`_death_rate`) | `death ≥ div` → extinction |
+| `division_rate` vs `death_rate` | `cell_params.cancer` | event rate `count*(div+death)`, death share `death/(div+death)`; density-dependent crowding raises death toward `div` as occupancy → `carrying_capacity` (`_death_rate`, DESIGN_crowding.md) | `death ≥ div` → extinction |
 | `initial_cancer_cells` | `deme_params` | founder seed count (`_add`) | `1` → ~`death/div` founder-extinction prob |
 | `dispersal_rate` | `cell_params.cancer` | dispersal vs mutation branch; disperse places a daughter in a neighbour deme | too high vs `division_rate` → well-mixed (no territories) |
 | `prop_driver` × `driver_effects` | `selection_params` | `Selection.update_division_rate` (CINner oncogene/TSG fitness) | too high → selective sweep (monoclonal) |
-| `grid_size` × `carrying_capacity` | `spatial_params`/`deme_params` | number of demes × cells per deme = max tumour size | too small → tumour too small for a gradient / few clones |
+| `grid_size` × `carrying_capacity` | `spatial_params`/`deme_params` | number of demes × cells per deme = max tumour size (`carrying_capacity` is a real per-deme cap; `None`/`0` → well-mixed/unbounded) | too small → tumour too small for a gradient / few clones |
+| `maximum_death_rate` | `deme_params` | clamps crowding death (`_death_rate`) | **below `max_birth_rate` → demes over-fill** (crowding cap not binding) |
 | `amp_prob` × `max_cn` | `cell_params.cancer` / `selection` | CNA amplification vs deletion; viability caps `highest_cn ≤ max_cn` | too high → CNA runaway / saturated FGA |
 | `n_segments` × `segment_size` | `genome_params` | `n_genes = Σ segment_size`; the SNV/CNA substrate | too small → trivial genome (nothing to fit) |
 | hypoxia `o2_diffusion` `D`, `o2_consumption` `k`, `o2_supply` `s` × tumour size | `microenv_params.hypoxia` | `_o2_field` steady-state O2; hypoxia = 1−O2 | diffusion length ≫ tumour, or tumour too small → no core–rim gradient |
@@ -91,6 +92,7 @@ not the merely unusual) and were sanity-checked against the sweep CSV.
 | `hypermutated` | `tmb_frac > tmb_frac_max` | `tmb_frac_max = 0.5` | *lower mutation_rate / n_snvs_per_allele* |
 | `low_mutation` | `tmb < tmb_min` | `tmb_min = 1.0` | *raise mutation_rate / n_snvs_per_allele* |
 | `well_mixed` | `n_subclones ≥ 2` and `clone_confinement < confinement_min` | `confinement_min = 0.1` | *lower dispersal_rate (relative to division_rate)* — **breaks PEtracer + multi-region demos** |
+| `overfilled` | crowding on and `deme_occupancy > overfill_mult × carrying_capacity` | `overfill_mult = 3.0` | *set `maximum_death_rate ≥ max_birth_rate`* — the per-deme cap is not binding (DESIGN_crowding.md); skipped in the well-mixed regime |
 | `no_gradient` | microenv on and `hypoxia_contrast < contrast_min` | `contrast_min = 0.05` | *grow a larger tumour or raise o2_consumption k / lower o2_diffusion D* |
 | `cna_runaway` | `fga > fga_max` | `fga_max = 0.95` | *lower amp_prob / max_cn* |
 | `trivial_genome` | `n_genes < min_genes` | `min_genes = 100` | *raise n_segments / segment_size* |
@@ -104,9 +106,11 @@ Users expect to grow tumours to a realistic size — **at least ~10³, up to ~10
 both **structured** (`structure_radius > 0`, a glandular duct) and **unstructured**
 (`structure_radius = 0`) simulations. Two levers control this:
 
-- **Capacity.** The soft ceiling is `grid_size² × carrying_capacity` (crowding death switches on once
-  a deme exceeds `carrying_capacity`). The shipped `grid_size = 25`, `carrying_capacity = 5` holds
-  ~3×10³; scale either up (e.g. `grid_size = 40`, `carrying_capacity = 10` → ~10⁴) for bigger tumours.
+- **Capacity.** The ceiling is `grid_size² × carrying_capacity`, and `carrying_capacity` is now a real
+  per-deme cap (density-dependent crowding, DESIGN_crowding.md): demes cap near K and the tumour
+  spreads, so size the grid **above** the target to leave room to spread. The shipped
+  `grid_size = 50`, `carrying_capacity = 10` fills the gland to ~10⁴ cancer cells; set
+  `carrying_capacity = None`/`0` for the well-mixed (unbounded, single-deme) regime.
 - **Time / engine.** In the **exact** engine each step is one birth/death event, so tumour size grows
   roughly **one cell per step** — reaching thousands needs thousands of steps (default config: ~710
   cells at 1000 steps, **2174 at 3000**, 4440 at 6000; unstructured reaches ~2280 similarly). For

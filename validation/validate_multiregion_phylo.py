@@ -47,13 +47,15 @@ from iscc import integrations as ig
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # A solid tumour with ~15-25 sizeable clones over spatial territories. Large genome (18k loci) keeps
-# the per-allele infinite-sites model sparse, so most loci are single-origin (a clean answer key);
-# low carrying capacity spreads clones into spatial territories a biopsy disk can straddle.
+# the per-allele infinite-sites model sparse, so most loci are single-origin (a clean answer key).
+# With real per-deme crowding (DESIGN_crowding.md) demes cap near K and the tumour spreads by
+# dispersal, so we seed a founder cluster (a lone founder goes extinct) and use a moderate K and more
+# steps so clones tile the lattice into spatial territories a biopsy disk can straddle.
 GENOME = {"n_segments": 60, "segment_size": 300}
 SELECTION = {"prop_driver": 0.05, "prop_dispersal": 0.1}
-DEME = {"carrying_capacity": 4}
+DEME = {"carrying_capacity": 12, "initial_cancer_cells": 5}
 SPATIAL = {"grid_size": 40, "structure_radius": 0}
-STEPS = 600
+STEPS = 700
 
 
 def grow(dispersal, seed):

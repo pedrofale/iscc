@@ -80,8 +80,11 @@ def test_event_rates_thread_through_config():
 # --- A.2: summary statistics ------------------------------------------------
 def _grown_tumor(seed=0, amp_prob=0.5, steps=300):
     cancer = {**CANCER, "mutation_rate": 0.5, "amp_prob": amp_prob}
+    # well-mixed (no crowding ceiling) + seeded cluster: these exercise the CNA/SNV summary-stat
+    # functions on a grown population, not spatial capping (DESIGN_crowding.md well-mixed mode).
     t = GenotypeTumor(genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
-                      cancer_cell_params=cancer, deme_params={"carrying_capacity": 6},
+                      cancer_cell_params=cancer,
+                      deme_params={"carrying_capacity": None, "initial_cancer_cells": 5},
                       spatial_params=SPATIAL, seed=seed)
     t.grow(n_steps=steps, seed=seed)
     return t

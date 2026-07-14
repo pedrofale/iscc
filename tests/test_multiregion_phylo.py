@@ -25,11 +25,14 @@ from iscc.integrations import multiregion as mr
 # (clean single-origin answer key); low dispersal + capacity gives spatial clone territories.
 GENOME = {"n_segments": 20, "segment_size": 80}
 SELECTION = {"prop_driver": 0.05, "prop_dispersal": 0.1}
-DEME = {"carrying_capacity": 4}
-SPATIAL = {"grid_size": 24, "structure_radius": 0}
+# Real per-deme crowding (DESIGN_crowding.md): seed a founder cluster (or a low-dispersal tumour goes
+# extinct), and grow longer at a slightly higher K so the tumour spreads across enough demes to build
+# the ~15-25 sizeable clonal territories a multi-region biopsy straddles.
+DEME = {"carrying_capacity": 15, "initial_cancer_cells": 5}
+SPATIAL = {"grid_size": 20, "structure_radius": 0}
 CANCER = {"division_rate": 0.6, "death_rate": 0.05, "max_birth_rate": 0.9, "mutation_rate": 0.15,
-          "dispersal_rate": 0.03, "snv_prob": 1.0, "cnv_prob": 0.0, "n_snvs_per_allele": 1.0}
-STEPS = 250
+          "dispersal_rate": 0.1, "snv_prob": 1.0, "cnv_prob": 0.0, "n_snvs_per_allele": 1.0}
+STEPS = 700
 SEED = 7
 
 

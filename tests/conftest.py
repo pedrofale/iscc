@@ -25,7 +25,10 @@ CANCER_CELL_PARAMS = {
 EPITHELIAL_CELL_PARAMS = {"division_rate": 0.0, "death_rate": 0.1}
 STROMAL_CELL_PARAMS = {"division_rate": 0.0, "death_rate": 0.1}
 IMMUNE_CELL_PARAMS = {"division_rate": 0.0, "death_rate": 0.1, "dispersal_rate": 0.1}
-DEME_PARAMS = {"carrying_capacity": 2}
+# Density-dependent crowding (DESIGN_crowding.md) makes a lone founder in a small-K deme prone to
+# extinction (crowding death ramps up from occupancy 0), so seed an established micro-lesion and use
+# a K well above 1 — the same guidance the shipped configs follow.
+DEME_PARAMS = {"carrying_capacity": 8, "initial_cancer_cells": 5}
 
 
 @pytest.fixture

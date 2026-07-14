@@ -1,14 +1,14 @@
 mode: 'glandular'
 
 spatial_params:
-  grid_size: 50
+  grid_size: 25
   n_structures: 1
   structure_radius: 5
-  
+
 deme_params:
-  carrying_capacity: 1
+  carrying_capacity: 5        # real per-deme cap now (DESIGN_crowding.md); K=1 would go extinct
   initial_death_rate: 0.1
-  maximum_death_rate: 0.5  
+  maximum_death_rate: 1.0     # >= max_birth_rate (0.8) so evolved clones' crowding death binds the cap
 
 genome_params:
   n_segments: 10

@@ -1,10 +1,13 @@
-# DESIGN — carrying-capacity / crowding is not enforced (engine bug + fix) [design-first]
+# DESIGN — carrying-capacity / crowding is not enforced (engine bug + fix) [DONE]
 
-Status: **diagnosed 2026-07-09, fix not yet built.** A real engine bug found while measuring iscc's
-spatial scaling vs SISTEM: `carrying_capacity` does not actually cap a deme's occupancy, so at scale
-the tumour is a **dense pile in a few demes** rather than a spatially spread tumour. This undermines the
-spatial-structure realism and any spatial-scalability comparison. Companion: `PARAMETERS.md` (caveat),
-`BACKLOG.md`, the operating-envelope docs (a QC check).
+Status: **DONE 2026-07-14 (Option A shipped, all results re-baselined).** A real engine bug found while
+measuring iscc's spatial scaling vs SISTEM: `carrying_capacity` did not actually cap a deme's
+occupancy, so at scale the tumour was a **dense pile in a few demes** rather than a spatially spread
+tumour. Fixed by making crowding death density-dependent **relative to each clone's own evolved
+division rate** (Option A), with `maximum_death_rate` raised to ≥ `max_birth_rate`. See
+**§ Implemented (2026-07-14)** at the bottom for the final formula, the well-mixed option, and the
+re-validation outcomes. Companion: `PARAMETERS.md`, `BACKLOG.md`, `DESIGN_operating_envelope.md`
+(the over-fill QC check).
 
 ## Symptom (measured)
 Grow a tumour on a large grid (K=10, grid 400²=160k demes). At millions of cells the tumour occupies
@@ -80,3 +83,52 @@ tumour is hours (HPC-bound), which is the honest scaling story.
 ## Validation when built
 Demes cap near K (mean cells/deme ≈ K); occupied demes ∝ cells/K; boundary-driven growth (rim divides,
 interior static); PEtracer/multi-region confounds still reproduce; add the `diagnose()` over-fill check.
+
+## Implemented (2026-07-14) — Option A shipped
+**Final formula** (both engines: `count.py::_death_rate` and `components/deme.py::get_cancer_death_rate`,
+verified identical by `test_engines_agree_on_crowding_death`):
+```
+slope = max(0, division_rate(clone) − death_rate) · (1 + crowding_margin)      # crowding_margin default 0.1
+death = death_rate + slope · (occupancy / carrying_capacity)                    # occupancy = total cells in deme
+death = min(death, maximum_death_rate)                                          # maximum_death_rate default 1.0 (≥ max_birth_rate)
+# then the existing immune + treatment terms are added on top, unchanged
+```
+Death rises **relative to the clone's own evolved division rate**, so the per-deme fixed point sits at
+`occupancy = K/(1+margin)` (death == division there) and death > division above it — a restoring force to
+the cap for **any** evolved division rate. The small `crowding_margin` (0.1) steepens the slope so the cap
+is firm rather than marginally stable exactly at K, and puts the mean occupancy just below K. The
+`maximum_death_rate` clamp is now **≥ `max_birth_rate`** (default raised 0.5 → **1.0**) so the clamp can
+never sit below an evolved clone's division rate (which re-opened the bug).
+
+**Well-mixed option (preserves the SISTEM benchmark).** `carrying_capacity = None` (or `0`) sets
+`self._crowding = False` → no crowding term → **unbounded growth** in a deme. This is the explicit
+replacement for the old `carrying_capacity = 1` "no ceiling" hack (which now genuinely caps a deme at
+~1 cell). `benchmark_scalability.py` uses `carrying_capacity=None`; the single-deme SISTEM claim
+**re-measured 2026-07-14: ~5M cells in ~2.5 min** (`--tau-grid 1`, mut 0.01) — still under 3 minutes.
+
+**Founder seeding.** Because crowding death ramps up from occupancy 0, a lone founder in a small-K deme
+is extinction-prone; both engines now seed `initial_cancer_cells` identical founder clones (capped by K),
+and the cell engine mirrors this (`GlandularTumor._seed_founders`).
+
+**Re-tuned shipped defaults.** `notebooks/example_config.yaml` → grid 50, K 10, `structure_radius` 20,
+`maximum_death_rate` 1.0: grown with tau it fills the gland to **~10,300 cancer cells across ~1,260 demes,
+mean 8.2 cells/deme**, `diagnose()` passes (not extinct, clonal diversity present, not over-filling).
+`tumorconfigs/{glandular,mixed}.yaml` → K 5 (K=1 would now go extinct), `maximum_death_rate` 1.0.
+Inference configs → `maximum_death_rate` 1.0.
+
+**Measured cap** (Option A, K=10 grid 25, tau): mean **~8** cells/deme, no runaway pile (was
+1,200–4,200/deme broken); tumour spreads (occupied demes ∝ cells/K).
+
+**Re-validation outcomes.**
+- Full `pytest` suite green (growth-dependent fixtures deliberately re-baselined; added
+  `test_demes_cap_near_carrying_capacity`, `test_well_mixed_disables_crowding`,
+  `test_engines_agree_on_crowding_death`).
+- **PEtracer confound HOLDS** (`validate_petracer.py`): extrinsic genes mis-called heritable **100%** at
+  low dispersal (clonal territories) → **32%** at high dispersal (resolved); clean monotonic sweep.
+- **Multi-region spurious parallelism HOLDS** (`validate_multiregion_phylo.py`): naive region-tree
+  spurious rate **0.219** vs deconvolved **0.004**; "more regions doesn't fix it"; admixture-correlated.
+- **Operating envelope** phase diagrams regenerated (`validate_operating_envelope.py`); added the
+  `diagnose()` **over-fill** check (mean cells/deme ≫ K) — now a passing check across the map.
+
+**QC.** `tumor.diagnose()` gained a `deme_occupancy` metric and an `overfilled` check (fails if mean
+cells/occupied-deme > 3×K; skipped in the well-mixed regime) — see `DESIGN_operating_envelope.md`.

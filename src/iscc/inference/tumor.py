@@ -57,7 +57,7 @@ def default_base_config():
         # P(extinction) ~ death/division, so ~5-8% of reference/target sims would silently go
         # extinct and yield all-NaN summaries. The operating-envelope QC (tumor.diagnose) flagged
         # this founder bottleneck; seeding a small cluster keeps inference sims inside the good region.
-        deme_params={"carrying_capacity": 8, "maximum_death_rate": 0.5, "initial_cancer_cells": 5},
+        deme_params={"carrying_capacity": 8, "maximum_death_rate": 1.0, "initial_cancer_cells": 5},
         spatial_params={"grid_size": 14, "structure_radius": 0, "immune_density": 0.0},
     )
 

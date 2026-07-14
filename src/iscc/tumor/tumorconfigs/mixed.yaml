@@ -1,9 +1,9 @@
 mode: 'mixed'
 
 deme_params:
-  carrying_capacity: 1
+  carrying_capacity: 5        # real per-deme cap now (DESIGN_crowding.md)
   initial_death_rate: 0.1
-  maximum_death_rate: 0.5  
+  maximum_death_rate: 1.0     # >= max_birth_rate (0.8) so crowding death binds the cap
 
 cell_params:
   genome_params:

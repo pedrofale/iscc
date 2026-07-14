@@ -30,13 +30,16 @@ SELECTION = {"prop_driver": 0.1, "prop_dispersal": 0.1, "prop_immune_resistance"
              "prop_treatment_resistance": 0.1}
 CANCER = {"division_rate": 0.6, "death_rate": 0.03, "max_birth_rate": 0.9, "mutation_rate": 0.5,
           "dispersal_rate": 0.35}
-DEME = {"carrying_capacity": 6}
+# Seed a founder cluster + a grown mass: with real per-deme crowding (DESIGN_crowding.md) demes cap
+# near K and the tumour spreads, so a solid, cancer-dense mass (perfused O2 source -> hypoxic core)
+# needs more steps than the old overfilling pile.
+DEME = {"carrying_capacity": 8, "initial_cancer_cells": 5}
 SPATIAL = {"grid_size": 26, "structure_radius": 0, "immune_density": 0.0}
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--steps", type=int, default=320)
+    ap.add_argument("--steps", type=int, default=550)
     ap.add_argument("--seed", type=int, default=3)
     ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_microenvironment.png"))
     args = ap.parse_args()

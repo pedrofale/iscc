@@ -28,12 +28,16 @@ import build_petracer_reference as B  # noqa: E402  (Tier-2 reducer + Newick par
 GENOME = {"n_segments": 4, "segment_size": 25}
 SELECTION = {"prop_driver": 0.1, "prop_dispersal": 0.1, "prop_immune_resistance": 0.1,
              "prop_treatment_resistance": 0.1}
-DEME = {"carrying_capacity": 8}
+DEME = {"carrying_capacity": 20, "initial_cancer_cells": 5}
 SPATIAL = {"grid_size": 16, "structure_radius": 0}
 MP = {"hypoxia": {"strength": 2.5, "n_genes": 20, "o2_consumption": 1.5, "o2_supply": 0.5,
                   "o2_source": "perfused"},
       "cci": {"strength": 1.5, "n_target_genes": 20, "emitter_type": "cancer", "lengthscale": 2.5}}
-STEPS = 170
+# With real per-deme crowding (DESIGN_crowding.md) a low-dispersal tumour SPREADS one deme at a time
+# and caps near K instead of overfilling, so the territories carry fewer cells; we raise K and the
+# step count so each clonal territory holds enough cells for the lineage-vs-space signal to stabilise
+# (small capped tumours make the field autocorrelation noisy).
+STEPS = 800
 SEED = 3
 
 

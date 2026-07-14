@@ -36,6 +36,9 @@ REGIMES = [
     ("monoclonal", "monoclonal", "#d94801"),
     ("low_mutation", "monoclonal", "#d94801"),
     ("well_mixed", "well-mixed", "#6a51a3"),
+    # carrying-capacity QC (DESIGN_crowding.md): demes over-filling. With density-dependent death
+    # this should never fire (demes cap near K) — its absence across the map IS the fix's evidence.
+    ("overfilled", "over-filling", "#252525"),
 ]
 GOOD = ("realistic", "#31a354")
 
@@ -69,7 +72,10 @@ def _contrast_grid(sizes, Ds, n_steps, seed=0):
     C = np.full((len(Ds), len(sizes)), np.nan)
     for iy, D in enumerate(Ds):
         for ix, g in enumerate(sizes):
-            over = {"spatial_params": {"grid_size": g}, "deme_params": {"carrying_capacity": 3},
+            # carrying_capacity 10 (the shipped default): with real crowding (DESIGN_crowding.md) a
+            # deme caps near K and the tumour spreads, so a small-K mass no longer forms a solid
+            # hypoxic core — it needs enough cells across enough demes, with an oxygenated margin.
+            over = {"spatial_params": {"grid_size": g}, "deme_params": {"carrying_capacity": 10},
                     "microenv_params": cr._hypoxia(D)}
             t = cr._build(over)
             t.grow(n_steps=n_steps, seed=seed)

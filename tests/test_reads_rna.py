@@ -91,7 +91,7 @@ def _grow_tumor(seed=1, steps=500):
     C = {"division_rate": 0.4, "death_rate": 0.02, "max_birth_rate": 0.95,
          "mutation_rate": 0.6, "dispersal_rate": 0.2, "snv_prob": 0.7, "cnv_prob": 0.3}
     t = GenotypeTumor(seed=seed, genome_params=GENOME, selection_params=SEL,
-                      cancer_cell_params=C, deme_params={"carrying_capacity": 6},
+                      cancer_cell_params=C, deme_params={"carrying_capacity": None},  # well-mixed: cross-modality read checks need a grown population, not spatial capping
                       spatial_params={"grid_size": 14, "structure_radius": 0})
     t.grow(steps, seed=seed)
     return t

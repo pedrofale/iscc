@@ -1,17 +1,21 @@
-# Small tumor used by the example notebooks (fast to simulate).
-# Uses the genotype-level (count-based) engine by default.
+# Example tumor used by the iscc notebooks: a glandular duct that a cancer founds inside and
+# spreads across, capping near carrying_capacity per deme (real crowding — DESIGN_crowding.md).
+# Uses the genotype-level (count-based) engine by default. Grid x capacity is sized so the gland
+# holds a usable-size tumor (~10^4 cancer cells): the ~pi*20^2 ~= 1250 interior demes x K=10.
+# Grow with the exact engine for a few hundred steps for a quick small lesion, or update_mode="tau"
+# (~100 generations) to fill the gland to usable size for sampling/assays.
 mode: 'genotype'
 
 spatial_params:
-  grid_size: 25
+  grid_size: 50
   n_structures: 1
-  structure_radius: 5   # epithelial duct; cancer founds inside and grows/invades
+  structure_radius: 20   # epithelial duct; cancer founds inside and spreads across the gland interior
 
 deme_params:
-  carrying_capacity: 5        # cells per deme (gland sub-unit); >1 so the lesion can grow
+  carrying_capacity: 10       # cells per deme (gland sub-unit) — a real per-deme cap now
   initial_cancer_cells: 5     # seed an established micro-lesion, not 1 cell (avoids ~7% founder extinction)
   initial_death_rate: 0.1
-  maximum_death_rate: 0.5
+  maximum_death_rate: 1.0     # >= max_birth_rate (0.8) so evolved clones' crowding death can bind the cap
 
 genome_params:
   n_segments: 5

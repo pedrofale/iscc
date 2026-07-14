@@ -48,7 +48,10 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GENOME = {"n_segments": 10, "segment_size": 100}
 SELECTION = {"prop_driver": 0.1, "prop_dispersal": 0.1, "prop_immune_resistance": 0.1,
              "prop_treatment_resistance": 0.1}
-DEME = {"carrying_capacity": 10}
+# With real per-deme crowding (DESIGN_crowding.md) a low-dispersal tumour caps near K and spreads one
+# deme at a time, so we raise K (more cells per clonal territory) and seed a founder cluster so the
+# lineage-vs-space signal is stable rather than dominated by small-sample noise.
+DEME = {"carrying_capacity": 20, "initial_cancer_cells": 5}
 SPATIAL = {"grid_size": 22, "structure_radius": 0}
 MP = {
     "hypoxia": {"strength": 2.5, "n_genes": 60, "o2_consumption": 1.5, "o2_supply": 0.5,
@@ -99,7 +102,7 @@ def clade_of(tree, clone, depth_cut):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--steps", type=int, default=380)
+    ap.add_argument("--steps", type=int, default=800)
     ap.add_argument("--seed", type=int, default=3)
     ap.add_argument("--low", type=float, default=0.05, help="low dispersal (clonal territories)")
     ap.add_argument("--high", type=float, default=0.6, help="high dispersal (intermixed clones)")

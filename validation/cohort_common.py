@@ -313,13 +313,15 @@ DEMUX_DEME = {"carrying_capacity": 10, "initial_cancer_cells": 6}
 # infiltrating immune cells) — so the demux operates on cancer AND normal cells, exactly like a real
 # multiplexed single-cell run. Genetic demux (souporcell/vireo) assigns EVERY cell to its individual
 # via germline variants, which iscc now carries in all cell types (tumour and normal).
-DEMUX_SPATIAL = {"grid_size": 17, "structure_radius": 5, "immune_density": 0.5}
+# immune_density is kept modest: with density-dependent crowding (DESIGN_crowding.md) immune cells
+# add to a deme's occupancy as well as killing, so a dense immune field would drive the cancer extinct.
+DEMUX_SPATIAL = {"grid_size": 17, "structure_radius": 5, "immune_density": 0.2}
 DEMUX_CANCER = {"division_rate": 0.6, "death_rate": 0.05, "max_birth_rate": 0.98,
                 "mutation_rate": 0.7, "dispersal_rate": 0.3}
 DEMUX_IMMUNE = {"division_rate": 0.0, "death_rate": 0.1, "dispersal_rate": 0.1}
 
 
-def demux_cohort(n_patients=8, steps=320, n_germline=40):
+def demux_cohort(n_patients=8, steps=450, n_germline=40):
     """Solid tumours WITH a normal compartment (epithelial/stromal + immune), each patient carrying its
     own PRIVATE germline markers (the individual background genetic demux exploits). Pooled N:1, the
     patient-of-origin answer key is the private germline fingerprint carried by EVERY cell."""

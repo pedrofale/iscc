@@ -23,7 +23,10 @@ MP = {
     "hypoxia": {"strength": 0.8, "n_genes": 40, "o2_consumption": 1.5, "o2_supply": 0.3},
     "cci": {"strength": 0.6, "n_target_genes": 40, "emitter_type": "cancer", "lengthscale": 2.5},
 }
-STEPS = 160
+# Real per-deme crowding (DESIGN_crowding.md) caps demes near K and makes a NO_DEATH tumour spread
+# by dispersal rather than pile up, so it needs more steps to occupy enough demes for the hypoxia
+# FIELD to develop a stable spatial gradient (core–rim contrast + spatial autocorrelation).
+STEPS = 400
 
 
 def _grow(microenv_params=None, seed=3):

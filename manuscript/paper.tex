@@ -59,27 +59,29 @@
 
 \begin{abstract}
 Cancer is an evolutionary process that generates diverse cell states and complex tumor
-microenvironments. Computational methods to profile these states from bulk, single-cell and
-spatial sequencing data are typically developed and benchmarked on either real patient data,
-which lacks reliable ground truth, or on simplistic simulations that ignore the biological
-process by which tumor heterogeneity arises. We introduce \texttt{iscc}, an \textit{in silico}
-cancer center: a Python package that simulates the whole chain from tumor biology to observed
-molecular data. \texttt{iscc} grows spatially structured tumors with aberrant genomes under a
-copy-number- and driver-mutation-based selection model, then reproduces the medical and
-laboratory steps that generate data --- biopsy and tissue dissociation --- before applying
-bulk and single-cell DNA and RNA sequencing as well as spatial transcriptomics, down to aligned
-reads. Expression is shaped by the microenvironment, so that spatially structured programmes such
-as hypoxia arise from the tumor's own geometry. Because every observation is tied to the
-ground-truth evolutionary history, spatial niche and cell populations of the simulated tumor,
-\texttt{iscc} provides a common benchmarking substrate for methods that reconstruct copy-number
-evolution, cluster cell states, or detect spatial niches, as well as for studying how
-data-generating choices and treatment strategies affect downstream analysis. We use this ground
-truth to reveal a lineage--space confound in spatial lineage-tracing analysis --- environmental
-programmes are misclassified as heritable when clones form spatial territories --- and show that
-this failure mode is measurable in real data. \texttt{iscc} uses an efficient genotype-level engine
-that scales to large tumors, its assay parameters can be inferred from real reference datasets,
-and its simulated data reproduce key statistical properties of real bulk, single-cell and
-spatial measurements. The software is available as a command-line tool and a Python library.
+microenvironments. Computational methods to profile this heterogeneity from bulk, single-cell and
+spatial sequencing data are typically developed and benchmarked either on real patient data, which
+lacks reliable ground truth, or on statistical simulations that ignore the biological process by
+which the heterogeneity arises. We introduce \texttt{iscc}, an \textit{in silico} cancer center: a
+Python package that grows spatially structured tumors as a selection-driven, agent-based
+evolutionary process --- aberrant genomes shaped by copy-number and driver-mutation selection ---
+and carries one such tumor through the medical and laboratory steps that generate data (biopsy,
+tissue dissociation) into bulk and single-cell DNA and RNA sequencing and spatial transcriptomics,
+down to aligned reads, optionally under therapy. Expression is shaped by the microenvironment, so
+that spatially structured programmes such as hypoxia emerge from the tumor's own geometry. Because
+every observation is tied to the tumor's ground-truth evolutionary history, spatial niche and cell
+populations, \texttt{iscc} is designed as a substrate for benchmarking \emph{data-integration}
+methods --- central to tumor-evolution studies yet impossible to validate on real data --- at two
+scales: integrating DNA, RNA and spatial measurements of the same tumor, and integrating many
+patients across a cohort while separating biological patient variation from the technical batch
+effects with which it is confounded. Using this ground truth we expose failure modes that real data
+cannot reveal, including environmental programmes misclassified as heritable when clones form
+spatial territories --- a lineage--space confound we also confirm in real data --- and spurious
+parallel evolution inferred from multi-region ``sample trees''. \texttt{iscc} uses an efficient
+genotype-level engine that scales to large tumors, its assay parameters can be inferred from real
+reference datasets, and its simulated data reproduce key statistical properties of real bulk,
+single-cell and spatial measurements. The software is available as a command-line tool and a Python
+library.
 \end{abstract}
 
 
@@ -106,8 +108,9 @@ underlying tissue that grows and is sampled. On the DNA side, coalescent and bra
 simulators such as CellCoal~\cite{posada_cellcoal_2020} and CNAsim~\cite{weiner_cnasim_2023}
 produce single-cell sequencing data along a tumor phylogeny, and recent agent-based DNA-seq
 simulators such as SISTEM~\cite{weiner_sistem_2025} add genotype-driven selection and multi-site
-metastasis; these, however, remain single-modality and rely on manual parameterization rather
-than inference of model parameters from real data. Recent tools also begin to couple
+metastasis, capturing clonal dynamics and tree topologies that selection produces and that
+fixed-topology or neutral birth--death models miss; these, however, remain single-modality and
+rely on manual parameterization rather than inference of model parameters from real data. Recent tools also begin to couple
 copy-number alterations with transcriptomics for spatial data~\cite{xu_stcnasim_2024}, and
 multi-modal single-cell simulators such as scMultiSim~\cite{li_scmultisim_2025} generate
 expression, chromatin and spatial data with gene-regulatory and cell--cell-interaction
@@ -126,7 +129,12 @@ tumor~\cite{campbell_clonealign_2019}: generating each modality independently --
 expression model onto a separately simulated copy-number profile --- yields cross-modal
 correspondences that are either trivially aligned or biologically arbitrary, and in the worst
 case circular, because the assumed copy-number-to-expression relationship is exactly what such
-integration methods set out to infer. Furthermore, by not tying simulated data to a growth
+integration methods set out to infer. This gap has a second, cohort-scale face: analyses that
+pool many patients --- recurrent-driver detection, shared-versus-private cell states, patient
+stratification --- must integrate patients whose biological differences are confounded with the
+technical batch effects of how their samples were sequenced, yet no simulator supplies the joint
+patient-and-batch ground truth needed to test whether an integration method removes the batch
+effect without erasing the biology. Furthermore, by not tying simulated data to a growth
 model that can be acted upon through therapy, the interplay between data analysis and treatment
 decision-making has been largely ignored.
 
@@ -140,9 +148,14 @@ that it relates cell phenotype to the evolutionary process and only translates p
 gene-expression profile at the data-generation step, so that simulated transcriptomes
 correspond to interacting, spatially organized cell types rather than abstract or independent
 cell groups. Because all data are anchored to a known evolutionary history and cell-population
-structure, \texttt{iscc} can be used to benchmark methods for profiling intra-tumor
-heterogeneity in a standardized manner --- including methods that integrate DNA, RNA and
-spatial measurements, for which a consistent cross-modal ground truth is otherwise unavailable.
+structure, \texttt{iscc} serves as a ground-truth substrate for benchmarking data-integration
+methods at two scales: \emph{across modalities} within a tumor --- linking a clone's copy number
+to its expression to its spatial niche --- and \emph{across patients} within a cohort --- aligning
+shared biology while separating it from the confounded batch effects of sequencing. Because this
+cross-modal and cross-patient structure emerges from the evolutionary and microenvironmental
+process rather than being imposed, these benchmarks are non-circular; and because the whole tumor
+can be acted upon through therapy, \texttt{iscc} also connects data analysis to treatment
+decision-making.
 
 \begin{table}[t]
   \centering
@@ -330,6 +343,13 @@ deviation a mild over-counting of rare clones that vanishes as the leap size dec
 ratio $\tau/\text{exact}$ falling from $1.16$ at $\tau=1$ toward $1$ as $\tau\to0$). The speed-up
 grows with tumor size --- negligible at a few hundred cells but $\sim$$6\times$ at $4000$ cells ---
 so the approximation is enabled where it matters and the exact update is retained for small tumors.
+In the well-mixed (single-deme) regime --- the setting in which single-cell DNA-sequencing phylogeny
+simulators are usually benchmarked --- \texttt{iscc} grows a five-million-cell tumor in under three
+minutes on a laptop, reaching the scale demonstrated by the agent-based DNA-seq simulator
+SISTEM~\cite{weiner_sistem_2025} (five million cells in roughly twenty minutes). In this regime the
+cost is governed by the number of distinct genotypes and generations rather than the cell count; in a
+spatially structured tumor, where cells occupy many demes, per-step cost instead scales with the number
+of occupied demes, so spatially resolved tumors of that size are correspondingly more expensive.
 
 \begin{figure}[t]
   \centering

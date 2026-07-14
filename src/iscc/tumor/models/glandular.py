@@ -90,11 +90,31 @@ class GlandularTumor(Tumor):
         # Initialize cell positions
         center = int(self.grid_size / 2)
         if self.structure_radius <= 0:
-            # Put cancer cell in center deme    
-            self.grid[center][center].add_cell(self.cancer_cell) 
-            self.grid[center][center].deme_rate = self.cancer_cell.evolutionary_parameters['death_rate'] + self.cancer_cell.evolutionary_parameters['division_rate']
+            # Seed an established micro-lesion in the centre deme (see _seed_founders).
+            self._seed_founders(self.grid[center][center])
         else:
-            self.make_structure(center)                
+            self.make_structure(center)
+
+    def _seed_founders(self, deme):
+        """Seed the founder cancer clone into a deme as ``initial_cancer_cells`` identical cells.
+
+        Density-dependent crowding (DESIGN_crowding.md) makes a single founder prone to stochastic
+        extinction (crowding death ramps up from occupancy 0), so — mirroring the count engine — we
+        seed a small cluster, capped by the deme's carrying capacity. The extra founders are clones
+        of ``self.cancer_cell`` (same genotype, no mutation)."""
+        n = int(self.deme_params.get("initial_cancer_cells", 1))
+        cap = deme.carrying_capacity
+        if getattr(deme, "_crowding", cap is not None) and cap:
+            n = min(n, int(cap))
+        n = max(1, n)
+        dr = (self.cancer_cell.evolutionary_parameters['death_rate']
+              + self.cancer_cell.evolutionary_parameters['division_rate'])
+        deme.add_cell(self.cancer_cell)
+        deme.deme_rate = dr
+        for _ in range(n - 1):
+            clone = self.cancer_cell.divide()          # same genotype (no mutation on plain divide)
+            deme.add_cell(clone, genotype_id=self.cancer_cell.genotype_id)
+            deme.deme_rate += dr
 
         self.deme_rates = []
         for i, deme in enumerate(self.deme_list):
@@ -130,10 +150,9 @@ class GlandularTumor(Tumor):
             in_border = bresenham_circumference(center, center, self.structure_radius-1)                        
             structure_in_borders.append(in_border)
             if s_idx == 0:
-                # add a cancer cell inside the border
+                # seed the founder micro-lesion inside the border
                 pos = self.rng.choice(len(in_border))
-                self.grid[in_border[pos][0]][in_border[pos][1]].add_cell(self.cancer_cell)
-                self.grid[in_border[pos][0]][in_border[pos][1]].deme_rate = self.cancer_cell.evolutionary_parameters['death_rate'] + self.cancer_cell.evolutionary_parameters['division_rate']
+                self._seed_founders(self.grid[in_border[pos][0]][in_border[pos][1]])
 
         # add healthy stromal cells outside of border.
         # structure_borders / structure_circles are lists of per-structure point lists;
