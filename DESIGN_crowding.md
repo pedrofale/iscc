@@ -66,6 +66,15 @@ and territories come from *low dispersal* keeping clones spatially coherent (a r
 independent of the density bug). **Re-check** those small-scale runs after the fix. Not fatal, but the
 density/`carrying_capacity`/size-realism aspects and all large-scale spatial fidelity need the fix.
 
+## Prototype validation (2026-07-14) — Option A confirmed
+A scratch prototype of Option A (density-dependent death `base + (division_rate(clone) − base)·(N/K)`,
+with `maximum_death_rate = 3.0 ≥ max_birth_rate`) on the spatial config (grid 400², K=10, dispersal 0.1):
+demes **cap near K** (mean **8.9**, max ~20 cells/deme, vs 1,200–4,200 broken) and the tumour **spreads**
+(occupied demes ∝ cells/K: **15,346 demes at 137k cells**, vs ~900 broken). This confirms the death-based
+fix works once death is relative to the clone's evolved division rate and the clamp is raised. It also
+pins the true spatial cost: **~137k cells in 150 s (~900 cells/s, decreasing)** — a spatial 5M-cell
+tumour is hours (HPC-bound), which is the honest scaling story.
+
 ## Validation when built
 Demes cap near K (mean cells/deme ≈ K); occupied demes ∝ cells/K; boundary-driven growth (rim divides,
 interior static); PEtracer/multi-region confounds still reproduce; add the `diagnose()` over-fill check.
