@@ -334,6 +334,10 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   HPC-bound (∝ occupied demes). (2) `carrying_capacity` semantics wrong in `PARAMETERS.md`. (3) add a
   `diagnose()` "demes over-filling" check. (4) re-check PEtracer/multi-region (small grids; likely OK —
   territories come from low dispersal, not occupancy).
+- **NEXT (own session) — implement Option A + re-baseline all affected results:** handoff
+  `handoffs/crowding_fix.md` (fix both engines, raise default `maximum_death_rate`, preserve the
+  well-mixed/single-deme regime, re-validate PEtracer/multi-region/operating-envelope + full suite,
+  sweep the claims/docs). Prototype already validated (demes cap at ~8.9/K=10; tumour spreads).
 
 ## Engine / inference follow-ups
 - **LATER — M3b HPC rerun** — fewer, bigger tumors (~800 × 8000-cell, tau-leaped) for the canonical
