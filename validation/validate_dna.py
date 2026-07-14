@@ -46,7 +46,7 @@ sys.path.insert(0, os.path.join(REPO, "validation", "data"))
 import build_dna_reference as B  # noqa: E402  (reducer + cache loader)
 
 GENOME = {"n_segments": 24, "segment_size": 40}            # ~960 loci
-DEME = {"carrying_capacity": 8}
+DEME = {"carrying_capacity": 8, "initial_cancer_cells": 5}
 SPATIAL = {"grid_size": 28, "structure_radius": 0}
 CANCER = {"division_rate": 0.4, "death_rate": 0.02, "max_birth_rate": 0.95,
           "mutation_rate": 0.8, "dispersal_rate": 0.2}

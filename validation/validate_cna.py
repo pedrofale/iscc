@@ -26,10 +26,15 @@ SEEDS = range(8)
 STEPS = 1500
 
 GENOME = {"n_segments": 16, "segment_size": 60}
-DEME = {"carrying_capacity": 6}
+# well-mixed (no crowding ceiling): this validation isolates the CNA *selection* signature (oncogene-
+# rich segments amplified under selection), which needs an unbounded growing population with many
+# generations of selection, not spatial capping (DESIGN_crowding.md well-mixed mode; cf. test_cna).
+DEME = {"carrying_capacity": None}
 SPATIAL = {"grid_size": 25, "structure_radius": 0}
+# CNA-heavy events (cnv_prob 0.8) so the copy-number selection signature is measurable — this
+# validation is about CNA, so most mutating events should be copy-number changes.
 CANCER = {"division_rate": 0.4, "death_rate": 0.02, "max_birth_rate": 0.95,
-          "mutation_rate": 0.7, "dispersal_rate": 0.2}
+          "mutation_rate": 0.7, "dispersal_rate": 0.2, "snv_prob": 0.2, "cnv_prob": 0.8}
 
 
 def _selection(driver_effects):
@@ -47,7 +52,7 @@ def _grow(driver_effects, seed):
 
 
 def main():
-    regimes = {"neutral": 1.0, "selection": 1.5}
+    regimes = {"neutral": 1.0, "selection": 1.6}
     results = {}
     print(f"{'regime':>10} | {'corr(CN, net-onc)':>17} | {'slope':>8} | n_seg")
     for name, eff in regimes.items():

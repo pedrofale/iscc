@@ -32,7 +32,7 @@ CANCER = {"division_rate": 0.5, "death_rate": 0.02, "max_birth_rate": 0.95,
 SELECTION = {"prop_driver": 0.2, "prop_dispersal": 0.3,
              "prop_immune_resistance": 0.1, "prop_treatment_resistance": 0.1}
 SPATIAL = {"grid_size": 28, "structure_radius": 5, "immune_density": 0.2}
-DEME = {"carrying_capacity": 10}
+DEME = {"carrying_capacity": 10, "initial_cancer_cells": 5}
 
 
 def build_mixed_tumor(seed, steps):
@@ -54,7 +54,7 @@ def build_cancer_tumor(seed, steps):
     t = GenotypeTumor(
         seed=seed, genome_params=GENOME,
         cancer_cell_params={**CANCER, "mutation_rate": 0.5, "dispersal_rate": 0.45},
-        deme_params={"carrying_capacity": 4},
+        deme_params={"carrying_capacity": 4, "initial_cancer_cells": 5},
         spatial_params={"grid_size": 50, "structure_radius": 0, "immune_density": 0.0},
         selection_params=SELECTION)
     t.grow(steps, seed=seed)

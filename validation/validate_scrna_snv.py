@@ -36,7 +36,7 @@ def grow(seed=1, steps=700):
     cancer = {"division_rate": 0.4, "death_rate": 0.02, "max_birth_rate": 0.95,
               "mutation_rate": 0.6, "dispersal_rate": 0.2, "snv_prob": 0.7, "cnv_prob": 0.3}
     t = GenotypeTumor(seed=seed, genome_params=genome, selection_params=sel,
-                      cancer_cell_params=cancer, deme_params={"carrying_capacity": 8},
+                      cancer_cell_params=cancer, deme_params={"carrying_capacity": 8, "initial_cancer_cells": 5},
                       spatial_params={"grid_size": 20, "structure_radius": 0})
     t.grow(steps, seed=seed)
     return t

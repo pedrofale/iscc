@@ -28,7 +28,9 @@ BURN_IN = 300
 TREAT = 900
 
 GENOME = {"n_segments": 6, "segment_size": 100}
-DEME = {"carrying_capacity": 3}
+# K>=~6: with density-dependent crowding (DESIGN_crowding.md) the death ramp is steep at very small
+# K, so K=3 would drive even the untreated tumour extinct; K=8 gives a persistent tumour to treat.
+DEME = {"carrying_capacity": 8, "initial_cancer_cells": 5}
 SPATIAL = {"grid_size": 15, "n_structures": 1, "structure_radius": 0}
 # fully sensitive tumor so the therapy response is clean
 SELECTION = {"prop_driver": 0.1, "prop_dispersal": 0.0, "prop_immune_resistance": 0.0,
