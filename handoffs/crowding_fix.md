@@ -40,9 +40,22 @@ IMPLEMENTATION
 2. **Mirror engine:** the count engine's `_death_rate` docstring says it mirrors the cell-level
    `Deme.get_cancer_death_rate`. Find and fix that too (cell-level/glandular engine) so both engines
    stay consistent; add/keep a test that they agree.
-3. **Default config:** raise `maximum_death_rate` to ≥ `max_birth_rate` (e.g. 1.0) in the shipped configs
-   (`notebooks/example_config.yaml`, `src/iscc/tumor/tumorconfigs/{glandular,mixed}.yaml`) and any
-   validation/benchmark configs, else the clamp still defeats the fix.
+3. **RE-TUNE AND VERIFY THE SHIPPED DEFAULT CONFIGS** (`notebooks/example_config.yaml`,
+   `src/iscc/tumor/tumorconfigs/{glandular,mixed}.yaml`, + validation/benchmark configs). Raising
+   `maximum_death_rate` ≥ `max_birth_rate` (e.g. 1.0) is necessary but NOT sufficient. The current
+   defaults (grid 25, K 5) were tuned to the OLD overfilling behaviour and will now behave differently:
+   after the fix a tumour is bounded by `grid_size² × carrying_capacity`, and its spatial structure
+   (clonal territories) forms as it SPREADS. So re-choose the defaults so the shipped configs generate a
+   REASONABLE SPATIALLY STRUCTURED tumour — tune `grid_size`, `carrying_capacity`, `dispersal_rate`
+   (relative to `division_rate`) and step count together. Targets:
+     - demes cap near K (mean cells/deme ≈ K, not a saturated blob);
+     - the tumour SPREADS into multiple clonal territories (not well-mixed, not a single deme);
+     - a usable size (~10⁴–10⁵ cells for sampling/assays — NOT the HPC-bound spatial millions);
+     - `tumor.diagnose()` PASSES (clonal diversity present; spatial confinement indicates territories,
+       i.e. NOT flagged well-mixed; not extinct; O₂ gradient if microenv on).
+   Document the chosen defaults and the reasoning. NB grid must be sized for the target: at K=10 a
+   ~10⁵-cell tumour needs ~10⁴ demes (grid ~100²), and it should not saturate the whole grid (leave room
+   to spread).
 4. **PRESERVE the well-mixed regime (critical).** Today `carrying_capacity=1` is a hack meaning "no
    crowding ceiling → unbounded growth" (used by the single-deme SISTEM benchmark). After the fix,
    K=1 would cap a deme at 1 cell — WRONG. Provide an explicit way to disable crowding (e.g.
@@ -64,7 +77,11 @@ RE-VALIDATE (the bulk of the work — every spatial output changes)
     well-mixed / grid×K axes will shift), and ADD a `tumor.diagnose()` "demes over-filling" check
     (mean cells/deme ≫ carrying_capacity) — now demes SHOULD cap, so this becomes a passing check.
   * Cohort + microenvironment figures if spatial-density-dependent — re-run, confirm.
-- Confirm the tumour now SPREADS: mean cells/deme ≈ K, occupied demes ∝ cells/K (a quick spatial run).
+- **GATING CHECK — the shipped DEFAULT config generates a good spatially-structured tumour** (the
+  user's explicit requirement): grow the shipped `example_config.yaml`, confirm demes cap near K, the
+  tumour spreads into clonal territories (a `plot_grid`/Muller/confinement check), reaches a usable
+  size, and `diagnose()` passes. A fix that leaves the default config producing a blob, a well-mixed
+  mush, or a tiny/degenerate tumour is NOT done. This gates the whole change.
 
 UPDATE CLAIMS / DOCS
 - `PARAMETERS.md`: remove the "Known limitation" caveat box; fix `carrying_capacity` semantics ("cells
