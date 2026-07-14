@@ -1,10 +1,10 @@
 # DESIGN — epistasis / evolutionary-dependency structure in selection [design-first; NOT built]
 
-Status: **whiteboard / design-first** (started 2026-07-09). Companion to `RESEARCH_QUESTIONS.md` R14,
-the multi-patient cohort milestone (`DESIGN_cohort.md`, done), `DESIGN_expression.md` (the data-side
-sibling). Motivated by the **DNA cohort-integration** row of the benchmark suite: cohort progression
-models need a *known dependency network* to recover, which iscc's additive selection does not provide.
-Nothing here is built yet.
+Status: **PLANNED FOR PAPER 1 — build now** (decision 2026-07-14; R14 is no longer deferred). Design
+written, not yet built. Companion to `RESEARCH_QUESTIONS.md` R14, the multi-patient cohort milestone
+(`DESIGN_cohort.md`, done), `DESIGN_expression.md` (R13, the data-side sibling — also paper 1 now).
+Motivated by the **DNA cohort-integration** row of the benchmark suite: cohort progression models need a
+*known dependency network* to recover, which iscc's additive selection does not provide.
 
 ## 1. Why (the gap)
 

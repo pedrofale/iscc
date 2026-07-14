@@ -256,14 +256,18 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   - DNA cohort progression: **MHN, TreeMHN**, CBN/H-CBN, REVOLVER ⬜ (needs epistasis, R14)
   - pooled demultiplexing: vireo/souporcell (DNA), cell-hashing + scDblFinder (RNA) ✅
   - subclonal deconvolution (multi-region bulk): PyClone-VI / Pairtree / Clomial ◑ (oracle deconv done)
-- **Two PREREQUISITES that gate whole categories (both design-first, 2026-07-09):**
-  - **Expression realism** — `DESIGN_expression.md` (R13). Make CNA/SNV→expression non-circular and
-    allele-specific (per-gene dosage sensitivity + saturation; ASE/BAF by not summing p/m; SNV
-    functional classes/NMD decoupled from fitness; program covariance = R12). Gates clonealign/inferCNV
-    *fairness*, **Numbat/CalicoST** (ASE), **cardelino/PhylEx** (SNV). Biggest lever for non-circularity.
-  - **Epistasis** — `DESIGN_epistasis.md` (R14). Plant a known dependency network (pairwise / conjunctive
-    order / mutual exclusivity) so **MHN/TreeMHN/CBN/REVOLVER** have a ground-truth network to recover
-    (else the benchmark tests specificity only).
+- **Two PREREQUISITES — NOW IN PAPER 1 (decision 2026-07-14), design-first, not built:**
+  - **Expression realism** — `DESIGN_expression.md` (R13). **Expression is modelled as GENE PROGRAMS**
+    (the backbone) with two gene-level genotype overlays: dosage (CNA, contiguous) and cis-SNV
+    (gene-level). Genotype couples at 3 levels — program activity (driver→program = R12 deformation),
+    dosage, single-gene cis. **programs ⟂ CNAs** (functional/scattered vs positional/contiguous) is what
+    makes the benchmarks non-circular. **R12 and R13 SHARE one program/`z` implementation** (R12 = `z`
+    dynamics, R13 = `z`→counts + overlays) → the program layer is on the paper-1 critical path. Gates
+    clonealign/inferCNV *fairness*, **Numbat/CalicoST** (ASE), **cardelino/PhylEx** (SNV). Hard engine
+    prerequisite: **stop summing the `p`/`m` alleles** (ASE/BAF), shared with R10.
+  - **Epistasis** — `DESIGN_epistasis.md` (R14, **paper 1 now**). Plant a known dependency network
+    (pairwise / conjunctive order / mutual exclusivity) so **MHN/TreeMHN/CBN/REVOLVER** have a
+    ground-truth network to recover (else the benchmark tests specificity only).
 - **Priority (new work):** deconvolution (cell2location/RCTD, flagship) → Numbat → cardelino/PhylEx →
   MHN/TreeMHN (after epistasis) → multi-Visium → CCI. Each external tool in its own `iscc-<tool>` env.
 

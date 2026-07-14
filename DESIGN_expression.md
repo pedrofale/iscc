@@ -1,11 +1,17 @@
 # DESIGN — genotype→expression realism (CNA & SNV coupling) [design-first; NOT built]
 
-Status: **whiteboard / design-first** (started 2026-07-09). Companion to `RESEARCH_QUESTIONS.md` R13,
-`DESIGN_celltrajectory.md` (R12, the co-expression/program layer), `DESIGN_features.md` §H (F8, niche
-layer), `DESIGN_epistasis.md` (the selection-side sibling). Motivated by the data-integration
-benchmark thesis: the credibility of the DNA↔RNA integration benchmarks rests on the CNA/SNV→expression
-coupling being **realistic and non-circular**, not the simple dosage law the tools themselves assume.
-Nothing here is built yet.
+Status: **PLANNED FOR PAPER 1 — build now** (decision 2026-07-14; R13 is no longer deferred). Design
+written, not yet built. Companion to `RESEARCH_QUESTIONS.md` R13, `DESIGN_celltrajectory.md` (R12),
+`DESIGN_features.md` §H (F8, niche layer), `DESIGN_epistasis.md` (R14, the selection-side sibling — also
+paper 1 now). Motivated by the data-integration benchmark thesis: the DNA↔RNA integration benchmarks are
+only credible if iscc's CNA/SNV→expression coupling is **realistic and non-circular**, not the simple
+dosage law the tools themselves assume.
+
+**KEY DESIGN DECISION (2026-07-14): expression is modelled as GENE PROGRAMS, and R12 and R13 share ONE
+implementation.** The per-cell program-activity vector `z` is the same object as R12's "cell state":
+R12 owns how `z` *moves* (differentiation hierarchy + genotype landscape deformation + niche), R13 owns
+how `z` *becomes counts* plus the gene-level dosage/SNV overlays. Build the program layer once; both
+features use it. See §3.
 
 ## 1. Why this matters (the non-circularity argument, sharpened)
 
@@ -33,7 +39,34 @@ per-(deme,gid) modifier from F8):
   exactly the signal Numbat and CalicoST rely on.
 - **Niche (F8):** a per-deme×gene multiplier adds spatial program structure (done).
 
-## 3. The three coupling axes to make realistic
+## 3. Expression = a program backbone + two gene-level genotype overlays
+
+**Programs are the backbone.** A cell's expression state is a vector of activities `z = (z_1,…,z_K)`
+over a small set of gene PROGRAMS — the recurrent meta-programs (cell cycle, hypoxia, EMT, stress,
+stemness…; Gavish & Tirosh, Nature 2023). Expression is `base · exp(Σ_k z_k·loading[k,g])`; the
+`loading` matrix says which genes each program moves. This is the co-expression / covariance structure
+that deconvolution and integration methods actually depend on, and it **replaces the current
+unrealistic independent-per-gene draws**. This `z` **is R12's cell state** (shared implementation).
+
+**The genotype couples to expression at THREE separable levels** — keeping them separate is the whole game:
+
+1. **Program activity** (program-level, per-CLONE): driver/regulator mutations shift *which* programs a
+   cell expresses (an EMT-driver raises the EMT program; de-differentiation raises stemness). This is
+   R12's landscape deformation, phrased here as "the genotype biases the `z` distribution."
+2. **Gene dosage** (gene-level, **contiguous**): a CNA raises/lowers the genes *on that segment* — axis A.
+3. **Single-gene cis** (gene-level): a LoF/NMD/splice SNV changes *that gene's* allele-specific
+   expression — axis B.
+
+**The load-bearing insight — programs ⟂ CNAs.** Programs are functional gene sets **scattered** across
+the genome; CNAs are **contiguous** genomic segments. That orthogonality is exactly what makes the
+integration benchmarks non-circular and non-trivial: inferCNV/Numbat must recover the *contiguous* dosage
+signal against the program-structured background (running-window smoothing); clonealign must map clones
+by dosage *despite* program variation (programs = the confounder); cell2location/RCTD must separate cell
+types (= program combinations) from clones (= CNA). Variance splits naturally: **between-clone**
+structure = genotype (dosage + program-bias, shared within a clone); **within-clone** heterogeneity =
+the per-cell stochastic `z` — i.e. the shared-vs-private structure the cohort/integration benchmarks score.
+
+The three pieces in detail (C = the backbone; A, B = the gene-level overlays):
 
 ### A. CNA → expression: dosage realism
 - **Per-gene dosage sensitivity** `s_g ∈ [0,1]`: 0 = fully buffered/compensated, 1 = full linear
@@ -93,7 +126,11 @@ Composes cleanly with the existing CNA dosage, F8 niche modifier (done), and the
    with R10 (focal/allele CNA).
 3. **v3 — SNV functional classes:** decouple expression effect from fitness `mut_effect`; add
    LoF/NMD/missense/splice/silent + the TSG two-hit (unlocks cardelino/PhylEx realism).
-4. **v4 — program covariance:** the R12 program-loading layer for realistic multivariate structure.
+4. **program backbone (shared with R12 — foundational, not strictly last):** the program-loading layer
+   (`z` + a `loading` dictionary) IS R12's cell-state model — build it jointly with R12. It provides the
+   co-expression structure *and* the program-activity coupling point (level 1 above); the dosage (v1),
+   ASE (v2) and SNV (v3) overlays sit on top of it. Order v1→v3 by cheapest-benchmark-win; the program
+   backbone can proceed in parallel as the R12 build.
 
 ## 7. Open decisions
 - Distribution/prior for per-gene dosage sensitivity `s_g` (calibrate from real CN–expression pairs?).
@@ -104,8 +141,14 @@ Composes cleanly with the existing CNA dosage, F8 niche modifier (done), and the
   engine caching + tau-leaping (the F8 discipline).
 
 ## 8. Relation to other threads
-F8 (niche programs — done) · R12/`DESIGN_celltrajectory.md` (program covariance = axis C) · R10 (focal /
-allele-resolved CNA — shared prerequisite for ASE) · `DESIGN_epistasis.md` (selection-side sibling) ·
-R8b (microenvironment→fitness). Honest note: **this is the single biggest lever for making the DNA↔RNA
-integration benchmarks credible** — without it a reviewer can say "your forward model is the tool's
-assumption."
+**R12 and R13 SHARE the program/`z` implementation** — one program dictionary + one per-cell `z` sampler.
+R12 = the *dynamics* of `z` (hierarchy + genotype landscape deformation + niche); R13 = `z`→counts + the
+dosage/SNV overlays. F8 (niche → program activity — done) · R10 (focal / allele-resolved CNA — shares the
+"stop summing p/m alleles" prerequisite with R13's ASE) · `DESIGN_epistasis.md` (R14, selection-side
+sibling, also paper 1) · R8b (microenvironment→fitness).
+
+**The one hard engine prerequisite:** the genome must stop **summing the `p`/`m` alleles** at the
+expression (and read) level, so dosage and cis-SNV effects can be per-allele and ASE/BAF is emitted —
+this is what Numbat/CalicoST/cardelino need and is the single highest-leverage change across the suite.
+Honest note: **this doc is the biggest lever for making the DNA↔RNA integration benchmarks credible** —
+without it a reviewer can say "your forward model is the tool's own assumption."

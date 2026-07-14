@@ -1,9 +1,17 @@
 # DESIGN — cell-state trajectories & differentiation (design-first; NOT yet built)
 
-Status: **whiteboard / design-first** (started 2026-07-03). Companion to `RESEARCH_QUESTIONS.md` R12,
-`DESIGN_features.md` (F8 = the precedent this mirrors), memory `iscc-cell-trajectory-project.md`.
-Nothing here is implemented yet — this captures the plan so we can pick it up and decide the open
-questions (§7) before coding. Do it design-first, exactly like F8.
+Status: **design-first; the program layer is now PAPER-1 work** (decision 2026-07-14). Companion to
+`RESEARCH_QUESTIONS.md` R12, `DESIGN_features.md` (F8 = the precedent this mirrors), memory
+`iscc-cell-trajectory-project.md`. Nothing here is implemented yet — this captures the plan; decide the
+open questions (§7) before coding. Do it design-first, exactly like F8.
+
+**SHARED WITH R13 (`DESIGN_expression.md`, decision 2026-07-14).** The program-loading model in this doc
+(the per-cell program-activity vector `z` and its gene `loading` matrix) **is R13's expression backbone**
+— one implementation serves both features. This doc (R12) owns how `z` *moves* — the differentiation
+hierarchy, the genotype landscape-deformation, and the F8 niche coupling. R13 owns how `z` *becomes
+counts* (the multiplicative expression map) and the gene-level dosage/SNV overlays layered on top. Because
+R13 is now paper-1 work, **the program/`z` layer is on the paper-1 critical path** (the trajectory/RNA-
+velocity *dynamics* of `z`, v2+, can still follow later). Build the `z` + `loading` machinery once.
 
 ## 1. Motivation
 
