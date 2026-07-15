@@ -101,6 +101,21 @@ Fitness gains `exp(Σᵢ βᵢxᵢ + Σᵢ<ⱼ Eᵢⱼxᵢxⱼ)` as a multiplier
 | `prop_synergy` | 0.5 | 0–1 | P(`E>0`); the rest are antagonistic |
 | `mutual_exclusivity_strength` | 0.0 | 2–8 when used | magnitude of the strongly-negative (synthetic-lethal) edges |
 | `n_exclusive_pairs` | 0 | ≤ pairs left after the interaction edges | how many such edges |
+| `mutual_exclusivity_lethal` | `True` | `True` \| `False` | **`True` is required for exclusivity to mean anything** — see below. `False` leaves only the soft `E` effect |
+| `lethal_death_rate` | 1.0 | ≥ `max_birth_rate` | death rate of a synthetic-lethal genotype |
+
+**Trap — a strongly negative `E` does NOT produce mutual exclusivity on its own.** It only suppresses
+the *division* rate, and the crowding law uses `slope = max(0, division − death_rate)`: a clone that
+has stopped dividing therefore takes **no density-dependent death at all**, is never purged, and still
+reads as co-occurring — the opposite of the signal you meant to plant. `mutual_exclusivity_lethal`
+(default on) gives the combination `lethal_death_rate` so it is actually removed.
+
+**And even then, exclusivity is not recoverable by MHN from a cross-sectional matrix in the regimes we
+can simulate** — because that matrix is **patient-level** ("did this patient acquire event *i*
+anywhere?") while `E` is **genotype-level** (it fires only in a cell carrying both). Measured: 59.5% of
+patients read as co-occurring for MHN, but only 14.7% have any clone carrying both — **75% of MHN's
+co-occurrences are two events sitting in different subclones, where `E` never fired.** That confound
+(bulk co-occurrence ≠ same-cell co-occurrence) is real biology, and is exactly why TreeMHN exists.
 
 **Trap — the fitness clamp silently eats `E`.** Division rate is `baseline × fitness`, capped at
 `max_birth_rate`. With `driver_effects > 1` and many drivers the additive term already pins clones at

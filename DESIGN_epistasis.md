@@ -67,6 +67,32 @@ So the benchmark's real finding is *which observable* carries *which* planted st
 because iscc knows the answer, and because the empty-`E` control separates recovery from a tool's
 false-positive rate.
 
+**The deepest finding — a LEVEL MISMATCH between the planted truth and MHN's input.** MHN's matrix is
+**patient-level** ("did this patient acquire event `i` anywhere?"); iscc's `E` is **genotype-level**
+(it fires only in a cell carrying both). Measured over 120 patients: 59.5% read as co-occurring for
+MHN, but only 14.7% have any clone carrying both — so **75% of MHN's co-occurring patients have the
+two events in DIFFERENT subclones, where `E` never fired at all**. Its input is mostly noise with
+respect to the planted mechanism. This is not an iscc artefact: it is the intra-tumour-heterogeneity
+confound that MOTIVATES TreeMHN (bulk co-occurrence ≠ same-cell co-occurrence), and iscc can put a
+number on it — a benchmark real data cannot run. It belongs beside the PEtracer lineage-vs-space and
+multi-region sample-tree confounds.
+
+**Mutual exclusivity: the knob was a NO-OP, now fixed but still not recoverable.** A strongly negative
+`E` only suppresses division, and the crowding law's `slope = max(0, div − death)` then exempts the
+non-dividing clone from density death entirely — it persists and still reads as co-occurring.
+`mutual_exclusivity_lethal` (default on) now gives the combination `lethal_death_rate`. That makes the
+knob do what it says, but it does NOT make exclusivity recoverable: killing a *clone* barely moves a
+*patient-level* co-occurrence that is 75% parallel subclones.
+
+**REFUTED hypothesis (recorded so it is not retried blind):** we predicted that pruning the mutation
+tree to DETECTABLE clones (`min_clone_freq`) would reintroduce the frequency channel into TreeMHN's
+topology, since clone size would decide which tips survive. Tested at `min_clone_freq=0.02` on 12
+FRESH network draws (the only threshold with usable power): planted rank 3.58 vs empty-E control 3.33,
+both at chance, paired Wilcoxon **p = 0.78 — not supported**. Pruning decides *which* tips survive, but
+a surviving big clone and a surviving small one are still ONE node each, so the trie discards size
+regardless; and at that threshold the trees collapse to ~2.5 nodes over 23/40 patients. An earlier
+apparent effect (2.80 vs 3.80) came from choosing the threshold after seeing five — do not re-cite it.
+
 **Known limitation (in the paper):** the cohort tumours are ~130 cells, so a clone arising late has
 little time to expand and the frequency signal never fully develops. The absolute recovery rates are a
 **floor for this regime**, not an estimate for real cohorts; the mechanism (frequency carries the

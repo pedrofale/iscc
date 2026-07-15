@@ -618,3 +618,48 @@ def test_treemhn_export_raises_when_no_patient_has_events():
     t = _grown(steps=5, epistasis_params={"n_events": 4, "event_size": 1})
     with pytest.raises(ValueError, match="no mutation trees"):
         to_treemhn_trees([t])
+
+
+# ============================ synthetic lethality (mutual exclusivity) ============================
+def test_exclusive_pair_is_lethal_and_actually_removes_the_clone():
+    """A strongly negative E is NOT enough to make a pair mutually exclusive, and that is the whole
+    reason this knob exists.
+
+    Negative E only suppresses the DIVISION rate, and the crowding law (count.py `_death_rate`) uses
+    slope = max(0, div - death_rate): a clone that has stopped dividing therefore takes NO
+    density-dependent death at all and is never purged -- it persists as a small clone and the pair
+    still reads as co-occurring, the exact opposite of the DISCOVER/MEGSA signal it is meant to plant.
+    Synthetic lethality gives the combination `lethal_death_rate` instead, so it is removed.
+    """
+    ep = {**EPI, "n_interactions": 0, "n_exclusive_pairs": 1,
+          "mutual_exclusivity_strength": 8.0, "mutual_exclusivity_lethal": True}
+    sel = Selection(n_segments=5, segment_size=40, rng=np.random.default_rng(DEFAULT_LAYOUT_SEED),
+                    layout_seed=DEFAULT_LAYOUT_SEED, epistasis_params=ep, **SELECTION)
+    net = sel.epistasis
+    (i, j) = net.true_exclusive_pairs()[0]
+    assert net.is_lethal(events_to_bits([i, j])) is True          # both -> lethal
+    assert net.is_lethal(events_to_bits([i])) is False            # one alone -> fine
+    assert net.is_lethal(0) is False
+    # and it reaches the death rate the engine reads
+    assert sel.update_death_rate({}, 0.02, event_bits=events_to_bits([i, j])) == net.lethal_death_rate
+    assert sel.update_death_rate({}, 0.02, event_bits=events_to_bits([i])) == 0.02
+
+
+def test_lethality_can_be_turned_off_leaving_the_soft_fitness_effect():
+    ep = {**EPI, "n_interactions": 0, "n_exclusive_pairs": 1,
+          "mutual_exclusivity_strength": 8.0, "mutual_exclusivity_lethal": False}
+    sel = Selection(n_segments=5, segment_size=40, rng=np.random.default_rng(DEFAULT_LAYOUT_SEED),
+                    layout_seed=DEFAULT_LAYOUT_SEED, epistasis_params=ep, **SELECTION)
+    net = sel.epistasis
+    (i, j) = net.true_exclusive_pairs()[0]
+    assert net.is_lethal(events_to_bits([i, j])) is False
+    assert sel.update_death_rate({}, 0.02, event_bits=events_to_bits([i, j])) == 0.02
+    # the strongly-negative E is still there; it just no longer kills
+    assert net.E[i, j] == -8.0
+
+
+def test_death_rate_is_untouched_when_epistasis_is_off():
+    """The death path is newly routed through selection; it must be inert by default."""
+    t = _tumor()
+    assert t.selection.update_death_rate({}, 0.02, event_bits=0) == 0.02
+    assert t.selection.epistasis is None

@@ -85,6 +85,15 @@ EPISTASIS_DEFAULTS = dict(
     prop_synergy=0.5,            # P(E[i, j] > 0); the rest are antagonistic (E < 0)
     mutual_exclusivity_strength=0.0,  # magnitude of the strongly-negative exclusive edges
     n_exclusive_pairs=0,         # how many such edges (drawn from pairs not already interacting)
+    # Synthetic lethality must KILL, not merely stop division. A strongly negative E only suppresses
+    # the division rate, and the crowding law (count.py _death_rate) uses slope = max(0, div - death):
+    # a clone that has STOPPED dividing therefore takes NO density-dependent death at all, is never
+    # purged, and stays "present" forever -- so exclusivity would be invisible in every observable,
+    # which is the opposite of the DISCOVER/MEGSA signal it is meant to plant. With this on, a
+    # genotype carrying BOTH events of a planted exclusive pair takes `lethal_death_rate` instead of
+    # its baseline death, so the combination is actually removed from the population.
+    mutual_exclusivity_lethal=True,
+    lethal_death_rate=1.0,       # death rate of a synthetic-lethal genotype (>= max_birth_rate)
 )
 
 DEPENDENCY_DEFAULTS = dict(
@@ -174,6 +183,8 @@ class EpistasisNetwork:
         # Drawn from pairs NOT already carrying an interaction, so the two signals stay distinct in
         # the answer key (self.exclusive_pairs).
         self.exclusive_pairs = []
+        self.lethal = bool(ep["mutual_exclusivity_lethal"])
+        self.lethal_death_rate = float(ep["lethal_death_rate"])
         n_excl = int(ep["n_exclusive_pairs"])
         mex = float(ep["mutual_exclusivity_strength"])
         if n_excl > 0 and mex > 0:
@@ -295,6 +306,21 @@ class EpistasisNetwork:
         if not event_bits:
             return 1.0
         return float(np.exp(self.log_fitness(event_bits)))
+
+    def is_lethal(self, event_bits):
+        """True when the genotype carries BOTH events of a planted synthetic-lethal pair.
+
+        Read by ``Selection.update_death_rate``. Without this, ``mutual_exclusivity_strength`` is a
+        no-op for every observable: negative E suppresses division, and a non-dividing clone is
+        exempt from crowding death (its slope is max(0, div - death) == 0), so it persists and the
+        pair still reads as co-occurring. Exclusivity has to remove cells to be exclusivity.
+        """
+        if not self.lethal or not self.exclusive_pairs or not event_bits:
+            return False
+        for (i, j) in self.exclusive_pairs:
+            if (event_bits >> i & 1) and (event_bits >> j & 1):
+                return True
+        return False
 
     # ------------------------------------------------------------------ accessibility gating
     def blocked_events(self, event_bits):

@@ -209,7 +209,13 @@ class Selection(object):
             return 0
         return 1        
 
-    def update_death_rate(self, genome_summary, param, **kwargs):
+    def update_death_rate(self, genome_summary, param, event_bits=0, **kwargs):
+        # Synthetic lethality (R14): a genotype carrying both events of a planted mutually-exclusive
+        # pair is REMOVED, not merely slowed. Suppressing its division alone would not purge it --
+        # the density-death slope is max(0, div - death), so a clone that has stopped dividing takes
+        # no crowding death and simply persists. Off unless exclusive pairs are configured.
+        if self.epistasis is not None and self.epistasis.is_lethal(event_bits):
+            return self.epistasis.lethal_death_rate
         return param
 
     def _rel_fitness(self, n_wt, n_mut, ploidy, n_total, wt_effect, mut_effect):

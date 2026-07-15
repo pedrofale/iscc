@@ -125,7 +125,11 @@ class Cell(object):
             self.baseline_rates['division_rate'] * selection.update_division_rate(
                 gs, event_bits=self.event_bits),
             self.max_birth_rate)
-        self.evolutionary_parameters['death_rate'] = self.baseline_rates['death_rate']
+        # Routed through selection so the epistasis layer can make a synthetic-lethal combination
+        # actually lethal. Returns `param` unchanged when epistasis is off / no exclusive pairs, so
+        # the death path is bit-identical to before.
+        self.evolutionary_parameters['death_rate'] = selection.update_death_rate(
+            gs, self.baseline_rates['death_rate'], event_bits=self.event_bits)
         self.evolutionary_parameters['dispersal_rate'] = min(
             self.baseline_rates['dispersal_rate'] * selection.update_dispersal_rate(gs), 1.0)
         self.evolutionary_parameters['immune_resistance'] = max(
