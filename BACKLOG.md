@@ -260,11 +260,30 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
     `iscc-mhn` / `iscc-treemhn` envs is what remains.
   - pooled demultiplexing: vireo/souporcell (DNA), cell-hashing + scDblFinder (RNA) ✅
   - subclonal deconvolution (multi-region bulk): PyClone-VI / Pairtree / Clomial ◑ (oracle deconv done)
-  - **gene-program / GEP inference: `scDEF` ⬜ FLAGSHIP** (+ cNMF comparator, Hotspot optional) — ground
-    truth = the true `loading` matrix + per-cell `z` (needs the R13 program layer). Scored across a
-    **SNV/CNA-burden sweep**; hypothesis: contiguous CNA dosage induces *positional* pseudo-programs that
-    factor models absorb ⇒ recovery degrades with FGA (a sibling of the PEtracer confound). Handoff:
-    `handoffs/expression_programs.md`.
+  - **DONE — gene-program / GEP inference: `scDEF` FLAGSHIP + `cNMF` comparator** (Hotspot still
+    optional). The REAL tools in dedicated `iscc-scdef` / `iscc-cnmf` envs, scored against the true
+    `loading` + per-cell `z` (R13's `program_truth`) across the SNV/CNA-burden sweep.
+    `validation/validate_programs.py` (+ `programs_common.py`, `scdef_runner.py`, `cnmf_runner.py`)
+    → `manuscript/figures/validation_programs.png`; manuscript §"copy-number burden manufactures
+    spurious expression programs", beside PEtracer + multi-region in the *structure misleads
+    inference* arc.
+    **The hypothesis was only HALF right, and the honest half is the more interesting one** (3 seeds):
+    true-program recovery is largely ROBUST to CNA burden — over FGA 0→0.55, scDEF's loading cosine
+    only 0.74→0.69 and cNMF's 0.51→0.40 — so "recovery degrades with FGA" is weak (cNMF) to absent
+    (scDEF). What CNA burden does instead is **manufacture spurious positionally-clustered factors**:
+    matched factors stay at the scattered null (0.20–0.22) at every burden while SPURIOUS ones climb
+    to **0.76** (cNMF) / **0.37** (scDEF) vs a null 95th pct of 0.28, and cNMF invents more of them
+    (7→9 of 12). The **SNV sweep is the control that makes it attributable to CONTIGUITY**: flat
+    recovery, statistic never leaves the null. So the mechanism is *invention of artefacts*, not
+    destruction of signal — a genuine PEtracer sibling.
+    **Caveats:** the diagnostic detects POSITION not artefact (the `program_genomic_scatter=0` control
+    makes correctly-matched factors score 0.37/0.42 too — a flag for review, not a verdict); magnitude
+    depends on the per-gene dosage buffering `s_g`. **Unplanned:** scDEF wins on loadings + fewer/cleaner
+    spurious factors, but cNMF recovers per-cell ACTIVITIES far better (r≈0.80 vs 0.44).
+    **OPEN:** `iscc-scdef` is not version-pinned (editable install of `~/projects/scDEF`, reports 0.4.8
+    while the checkout says 0.6.1, and scDEF was mid-revision) — see the warning in
+    `validation/README_integration.md`; and `ferreira_scdef_2024`'s venue/DOI are deliberately blank
+    (unpublished). Both need a human decision before submission.
 - **Two PREREQUISITES — NOW IN PAPER 1 (decision 2026-07-14), design-first, not built. Handoffs ready:
   `handoffs/expression_programs.md` (R13) and `handoffs/epistasis.md` (R14).**
   - **Expression realism** — `DESIGN_expression.md` (R13) ✅ **DONE 2026-07-15**. Expression is now a
@@ -302,9 +321,17 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
       vs 1/5 for the empty-E control (mean rank 1.4 vs 2.0 of 6 pairs). Suggestive, NOT significant
       (Fisher p=0.21, n=5 draws). Note the control's own rank 2.0 ≫ chance 3.5 = a real false-positive
       tendency — without the empty-E arm this would have looked like recovery.
-    * **TreeMHN** (mutation trees, retains clone sizes) does **NOT** beat chance here (rank 3.6 vs
-      chance 3.5, both arms) — we PREDICTED the opposite. Read as a power limit, not a property of the
-      method: our trees average 2.5 events over 36 patients; TreeMHN targets cohorts ~10x larger.
+    * **TreeMHN** does NOT beat chance on pairwise `E` (rank 3.4 vs chance 3.5) — but NOT for want of
+      data, and NOT because "trees retain clone sizes" (they do **not**: `input_tree_df` accepts ONLY
+      Patient_ID/Tree_ID/Node_ID/Mutation_ID/Parent_ID and rejects anything else; its `weights` is a
+      per-TREE weight for tree uncertainty). **TreeMHN's gain over MHN is event ORDER, not frequency**,
+      and fitness epistasis produces NO order — only frequency. Its extra information is orthogonal to
+      the planted signal. **Falsifiable prediction, tested and CONFIRMED:** give the same two tools an
+      ORDER signal (accessibility-gated DAG) and TreeMHN wins decisively — TreeMHN rank **1.80**
+      (top-1 0.6) vs MHN **4.00** (top-1 0.0, worse than chance) vs floor 5.40. The single draw where
+      TreeMHN fails is the one where 1/40 patients carried the gated event (no signal to read).
+      **So: each tool recovers exactly the signal its input encodes.** That 2x2 (tool x signal-type)
+      is the benchmark's real result.
     Conjunctive constraints under **accessibility** gating are recovered perfectly (1.00, true AND
     reconstructed trees) though at low power (~8 child-carrying lineages/draw); the same DAG under
     **fitness** gating leaves no trace (conjunction 0.14).
