@@ -18,9 +18,12 @@ THE FINDING — **the observable, not the cohort size, is what decides recovery.
         in a tumour (recurrent mutation), so "is it present?" is already yes at E=0 and saturates:
         the column carries almost no information about E.
       * The signal lives in **clone frequency**, and it is large: raising E expands the carrying
-        clones from a few percent of the tumour towards a majority (panel B). Any observable that
-        keeps frequency — a detection threshold on cancer-cell fraction, or the mutation TREES
-        TreeMHN consumes (which carry `n_cells`) — can in principle see it.
+        clones from a few percent of the tumour towards a majority (panel B). Recovering it needs an
+        observable that KEEPS frequency — e.g. a detection threshold on cancer-cell fraction.
+        **Neither MHN nor TreeMHN is such an observable.** TreeMHN reads mutation-tree TOPOLOGY, so
+        what it adds over MHN is event ORDER, not frequency; it never sees clone sizes. Fitness
+        epistasis produces no order, so TreeMHN's advantage is orthogonal to it — and panel D
+        confirms the prediction by giving both tools an ORDER signal, on which TreeMHN duly wins.
 
     The ordered/conjunctive constraints are a separate axis, decided by `gating_mode`:
     **accessibility** gating acts on the mutation process itself, survives into every observable, and
@@ -293,8 +296,12 @@ def sweep_threshold(thresholds, strength=1.5, n=40, reps=3):
 
 
 def compare_tools(strength=1.5, n=40, reps=3):
-    """Panel D (left) — MHN (binary presence) vs TreeMHN (trees, which keep clone sizes) on the SAME
-    cohorts, plus the built-in co-occurrence floor."""
+    """Panel D (left) — MHN (binary presence) vs TreeMHN (mutation trees) on the SAME cohorts, plus
+    the built-in co-occurrence floor, for the FREQUENCY signal (pairwise E).
+
+    TreeMHN's gain over MHN is event ORDER, NOT frequency (it never sees clone sizes — see
+    `compare_tools_order`), so neither is expected to recover a frequency-only signal.
+    """
     rows = []
     for rep in range(reps):
         ls = DEFAULT_LAYOUT_SEED + rep
@@ -321,6 +328,55 @@ def compare_tools(strength=1.5, n=40, reps=3):
     return pd.DataFrame(rows)
 
 
+def compare_tools_order(n=40, reps=5):
+    """Panel D (right) — the SAME two tools on an ORDER signal instead of a frequency one.
+
+    This is the control that identifies WHY TreeMHN fails on pairwise E, and it is the crux of the
+    benchmark. The two tools consume different projections of the same cohort:
+
+        MHN     <- binary event presence : discards ORDER and FREQUENCY
+        TreeMHN <- mutation-tree topology: keeps ORDER, discards FREQUENCY
+                   (`input_tree_df` accepts ONLY Patient_ID/Tree_ID/Node_ID/Mutation_ID/Parent_ID
+                    and rejects any other column -- it never sees clone sizes; its `weights` argument
+                    is a per-TREE weight for tree uncertainty, not a clone size.)
+
+    So TreeMHN's extra information over MHN is ORDER. Fitness epistasis produces a FREQUENCY signal
+    and no order, which predicts TreeMHN cannot beat MHN on it -- structurally, not for want of data.
+    The prediction is falsifiable: on an ACCESSIBILITY-gated DAG, which produces a genuine order
+    signal, TreeMHN should WIN. That is what this measures.
+
+    Uses ``event_size=8``, not the panel-B/C value of 2: a gated child needs its parent first, and at
+    event_size=2 it essentially never arises (0-2 of 40 patients), which tests nothing. Watch the
+    printed child-carrying patient count -- it is this panel's power.
+    """
+    rows = []
+    n_pairs = N_EVENTS * (N_EVENTS - 1) // 2
+    for rep in range(reps):
+        dp = dict(n_constraints=1, dag_depth=2, dag_branching=1, gating_mode="accessibility")
+        ts = run_cohort(n, dict(epi(), event_size=8), dp, seed0=1 + rep * 500,
+                        layout_seed=DEFAULT_LAYOUT_SEED + rep)
+        if len(ts) < 4:
+            continue
+        dag = ts[0].selection.epistasis.true_dag_edges()
+        if not dag:
+            continue
+        parent, child = dag[0]
+        X = ig.to_mhn_matrix(ts)
+        n_child = int(X.values[:, child].sum())
+        thetas = {"co-occurrence\n(floor)": ig.cooccurrence_scores(X.values),
+                  "MHN\n(binary presence)": run_mhn(X),
+                  "TreeMHN\n(mutation trees)": run_treemhn(ig.to_treemhn_trees(ts))}
+        for tool, th in thetas.items():
+            if th is None:
+                continue
+            edges = theta_to_edges(np.asarray(th), k=n_pairs)
+            rank = next((r for r, (i, j, _) in enumerate(edges, 1)
+                         if {min(i, j), max(i, j)} == {min(parent, child), max(parent, child)}), None)
+            rows.append(dict(tool=tool, rep=rep, rank=rank, found=int(rank == 1),
+                             n_child_patients=n_child, n_pairs=n_pairs))
+    return pd.DataFrame(rows)
+
+
 def sweep_gating(n=40, reps=3):
     """Panel D (right) — the two axes a dependency DAG admits (the CONJUNCTION "B requires A" and the
     ORDER "A precedes B") under each gating mode, from true vs reconstructed trees."""
@@ -328,7 +384,11 @@ def sweep_gating(n=40, reps=3):
     for mode in ("accessibility", "fitness"):
         for rep in range(reps):
             dp = dict(n_constraints=2, dag_depth=2, dag_branching=1, gating_mode=mode)
-            tumors = run_cohort(n, epi(), dp, seed0=1 + rep * 500,
+            # event_size=8, not the panel-B/C value of 2: a gated child needs its parent first, so at
+            # event_size=2 it arises in 0-2 of 40 patients and this panel measures nothing. The two
+            # halves of the benchmark genuinely need different alphabets -- B/C need events rare
+            # enough not to saturate presence, D needs them common enough to reach the gated child.
+            tumors = run_cohort(n, dict(epi(), event_size=8), dp, seed0=1 + rep * 500,
                                 layout_seed=DEFAULT_LAYOUT_SEED + rep)
             if len(tumors) < 4:
                 continue
@@ -344,7 +404,7 @@ def sweep_gating(n=40, reps=3):
 
 
 # =============================================================================== figure
-def make_figure(net, strength_df, thr_df, tool_df, gate_df, out):
+def make_figure(net, strength_df, thr_df, tool_df, order_df, gate_df, out):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -403,33 +463,30 @@ def make_figure(net, strength_df, thr_df, tool_df, gate_df, out):
     axC.set_title("C. The OBSERVABLE decides recovery\n"
                   "(real MHN, same tumours, only the detection threshold varies)")
 
-    # -- D: tools
-    if not tool_df.empty:
-        tools = list(dict.fromkeys(tool_df["tool"]))
-        x = np.arange(len(tools)); w = 0.35
-        for k, arm in enumerate(["planted E", "empty E (control)"]):
-            m, e = [], []
-            for t in tools:
-                d = tool_df[(tool_df.tool == t) & (tool_df.arm == arm)]["rank"].dropna()
-                m.append(d.mean() if len(d) else np.nan)
-                e.append(d.std() if len(d) else 0.0)
-            axD.bar(x + (k - 0.5) * w, m, w, yerr=np.nan_to_num(e), capsize=3, label=arm)
+    # -- D: the SAME tools on a FREQUENCY signal vs an ORDER signal (the crux)
+    if not tool_df.empty and not order_df.empty:
+        tools = [t for t in dict.fromkeys(tool_df["tool"])]
         n_pairs = int(tool_df["n_pairs"].iloc[0])
+        x = np.arange(len(tools)); w = 0.35
+        freq = [tool_df[(tool_df.tool == t) & (tool_df.arm == "planted E")]["rank"].dropna().mean()
+                for t in tools]
+        order = [order_df[order_df.tool == t]["rank"].dropna().mean() for t in tools]
+        fe = [tool_df[(tool_df.tool == t) & (tool_df.arm == "planted E")]["rank"].dropna().std()
+              for t in tools]
+        oe = [order_df[order_df.tool == t]["rank"].dropna().std() for t in tools]
+        axD.bar(x - w / 2, freq, w, yerr=np.nan_to_num(fe), capsize=3,
+                label="FREQUENCY signal (pairwise $E$)")
+        axD.bar(x + w / 2, order, w, yerr=np.nan_to_num(oe), capsize=3,
+                label="ORDER signal (accessibility DAG)")
         axD.axhline((n_pairs + 1) / 2, color="grey", ls=":", lw=1)
-        axD.text(len(tools) - 0.5, (n_pairs + 1) / 2 + 0.06, "chance rank", ha="right",
+        axD.text(len(tools) - 0.45, (n_pairs + 1) / 2 - 0.15, "chance", ha="right",
                  fontsize=8, color="grey")
         axD.set_xticks(x); axD.set_xticklabels(tools, fontsize=8)
-        axD.set_ylabel(f"rank of the planted (E0,E1) pair\n(1 = strongest of {n_pairs}; lower is better)")
+        axD.set_ylabel(f"rank of the planted pair\n(1 = strongest of {n_pairs}; lower is better)")
         axD.invert_yaxis()
-        axD.legend(fontsize=8)
-        sub = ""
-        if not gate_df.empty:
-            acc = gate_df[(gate_df.gating == "accessibility") & (gate_df.arm == "true trees")]
-            fit = gate_df[(gate_df.gating == "fitness") & (gate_df.arm == "true trees")]
-            if len(acc) and len(fit):
-                sub = (f"\nDAG 'B requires A': accessibility {acc['constraint_satisfaction'].mean():.2f}"
-                       f" vs fitness {fit['constraint_satisfaction'].mean():.2f} gating")
-        axD.set_title("D. Real tools on the same cohort: binary presence vs trees" + sub)
+        axD.legend(fontsize=8, loc="lower left")
+        axD.set_title("D. TreeMHN wins on ORDER, not on FREQUENCY\n"
+                      "(its edge over MHN is order; fitness epistasis makes none)")
 
     fig.tight_layout()
     fig.savefig(out, dpi=150, bbox_inches="tight")
@@ -469,6 +526,12 @@ def main():
     if not tool_df.empty:
         print(tool_df.groupby(["tool", "arm"])[["found", "rank"]].mean().round(2).to_string())
 
+    print("\n== D. the SAME tools on an ORDER signal (accessibility DAG) ==")
+    print("   (this is the control that explains WHY TreeMHN fails on pairwise E)")
+    order_df = compare_tools_order(n=args.n, reps=args.reps)
+    if not order_df.empty:
+        print(order_df.groupby("tool")[["rank", "found", "n_child_patients"]].mean().round(2).to_string())
+
     print("\n== D. gating: order / conjunction recovery ==")
     gate_df = sweep_gating(n=args.n, reps=args.reps)
     if not gate_df.empty:
@@ -477,7 +540,7 @@ def main():
         ].mean().round(2).to_string())
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    make_figure(net, strength_df, thr_df, tool_df, gate_df, args.out)
+    make_figure(net, strength_df, thr_df, tool_df, order_df, gate_df, args.out)
 
     # ------------------------------------------------------------------ headline
     print("\n================ headline ================")
@@ -493,6 +556,22 @@ def main():
         print(f"           P(the pair ever arose) moves {pl:.2f} -> {ph:.2f} -- E does NOT change it "
               f"(that is a mutation property).")
         print("=> the signal is real and large, and it lives in clone FREQUENCY, not in event presence.")
+    if not tool_df.empty and not order_df.empty:
+        def rk(df, tool, **q):
+            d = df[df.tool == tool]
+            for k, v in q.items():
+                d = d[d[k] == v]
+            return d["rank"].dropna().mean()
+        n_pairs = int(tool_df["n_pairs"].iloc[0])
+        print(f"\nWHICH TOOL SEES WHICH SIGNAL (mean rank of the planted pair of {n_pairs}; "
+              f"chance {(n_pairs + 1) / 2}):")
+        for tool in dict.fromkeys(tool_df["tool"]):
+            f = rk(tool_df, tool, arm="planted E")
+            o = rk(order_df, tool)
+            print(f"   {tool.replace(chr(10), ' '):28s}  frequency signal {f:.2f}   order signal {o:.2f}")
+        print("=> TreeMHN's advantage over MHN is ORDER, and it delivers on an order signal. Fitness")
+        print("   epistasis produces no order -- only frequency, which NEITHER tool consumes")
+        print("   (TreeMHN's input_tree_df takes topology ONLY; it never sees clone sizes).")
     if not gate_df.empty:
         for mode in ("accessibility", "fitness"):
             d = gate_df[(gate_df.gating == mode) & (gate_df.arm == "true trees")]

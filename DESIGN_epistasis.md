@@ -40,9 +40,25 @@ carrying a combination grow — while MHN/CBN model the **rate of event acquisit
   draws vs 1/5 for the empty-`E` control (mean rank 1.4 vs 2.0 of 6). **Suggestive, not significant**
   (Fisher p=0.21, n=5). The control's rank 2.0 ≫ chance 3.5 is a real **false-positive tendency** —
   without the empty-`E` arm it would have looked like recovery. That arm is why the control exists.
-* **Real TreeMHN** (trees, retains clone sizes) does **not** beat chance (rank 3.6 vs chance 3.5, both
-  arms) — **we predicted the opposite**. Most likely a power limit, not a property of the method: our
-  trees average 2.5 events over 36 patients, and TreeMHN targets cohorts ~10x larger.
+* **Real TreeMHN** does **not** beat chance on pairwise `E` (rank 3.4 vs chance 3.5) — and the reason
+  is structural, not power. **TreeMHN never sees clone sizes**: `input_tree_df` accepts ONLY
+  Patient_ID/Tree_ID/Node_ID/Mutation_ID/Parent_ID and errors on any other column (`weights` is a
+  per-TREE weight for tree uncertainty). Its gain over MHN is **event ORDER**; fitness epistasis
+  produces **no order**, only frequency — so its extra information is orthogonal to the planted signal.
+  **Prediction, tested and confirmed:** on an ORDER signal (accessibility-gated DAG) TreeMHN wins
+  decisively — rank **1.80** (top-1 0.6) vs MHN **4.00** (below chance) vs the co-occurrence floor 5.40.
+
+**The 2x2 is the real result — each tool recovers exactly the signal its input encodes:**
+
+| observable a tool consumes | FREQUENCY signal (pairwise `E`) | ORDER signal (accessibility DAG) |
+|---|---|---|
+| co-occurrence floor (presence) | 4.20 | 5.40 |
+| **MHN** — binary presence | 1.60 *(control 2.00 → mostly false-positive tendency)* | 4.00 |
+| **TreeMHN** — tree topology (order, NOT sizes) | 3.40 ≈ chance | **1.80** |
+
+(mean rank of the planted pair among 6; chance 3.5; lower is better; 5 network draws.) Recovering
+fitness epistasis needs a **frequency-aware** observable, which NEITHER tool consumes — that is the
+gap this benchmark identifies.
 * **Conjunctive constraints** under **accessibility** gating are recovered **perfectly** (1.00, true
   and reconstructed trees), though at low power (~8 child-carrying lineages/draw); the identical DAG
   under **fitness** gating leaves **no trace** (conjunction holds in 0.14 of lineages).

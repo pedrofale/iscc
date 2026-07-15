@@ -1083,37 +1083,29 @@ arises many times independently within one tumor, so it is already present at $E
 saturates. What selection changes is how much of the tumor those lineages occupy, which is precisely
 what a presence call discards.
 
-Running the tools themselves is what disciplines this claim. Real MHN, fitted to that binary matrix,
-does retain some signal: it ranks the planted pair first in 4 of 5 network draws versus 1 of 5 for an
-empty-$E$ control (mean rank 1.4 versus 2.0 of six pairs), though with five draws this is suggestive
-rather than significant (Fisher $p = 0.21$), and the control's own rank of 2.0 --- well above the
-chance value of 3.5 --- shows a substantial false-positive tendency that a benchmark without an
-empty-network arm would have mistaken for recovery. TreeMHN, which consumes the mutation trees and
-therefore retains clone sizes, does \emph{not} beat chance here (rank 3.6 for both planted and empty
-$E$); we expected the opposite, and read it as a power limit rather than a property of the method,
-since our trees average only 2.5 events over 36 patients whereas TreeMHN is designed for cohorts an
-order of magnitude larger. Sweeping the detection threshold on cancer-cell fraction
-(\Cref{fig:epistasis}C) shows why the regime is hard: at zero threshold the observable is saturated
-and at a high one it is empty, with only a narrow window between. These numbers are a floor for this
-regime, not an estimate for real cohorts --- our tumors are $\approx$130 cells, small enough that a
-clone arising late has little time to expand, so much of the frequency signal never develops. The
-mechanism (\Cref{fig:epistasis}B) is structural and should survive scaling; the recovery rates should
-not be extrapolated.
-
-Ordered constraints behave differently, and the distinction is the \emph{gating mode} --- a modelling
-choice we make explicit because the two are different generative stories. Under \emph{accessibility}
-gating (event $B$ cannot arise until $A$ is present; the CBN story) the constraint acts on the
-mutation process itself, survives into every observable, and is recovered perfectly in every network
-draw, from true and reconstructed trees alike. Under \emph{fitness} gating ($B$ arises freely but is
-inert until $A$; closer to what MHN assumes) the identical planted DAG leaves essentially no
-recoverable trace: the conjunction holds in only a small minority of lineages, and the apparent
-ordering merely reports which event is intrinsically faster, because event acquisition rates are
-themselves heterogeneous --- an emergent consequence of the copy-number landscape, since
-single-nucleotide variants are drawn per allele and a module on an amplified segment is hit more
-often. The practical reading is not that these methods are poor: it is that fitness epistasis and
-acquisition-rate epistasis are different objects, that cross-sectional event presence is the wrong
-observable for the former, and that a benchmark must state which generative story it planted. Only a
-simulator that knows the answer can make that distinction visible.
+Running the tools themselves is what disciplines this claim, and it also identifies precisely which
+signal each one can see. The two consume different projections of the same cohort: MHN reads binary
+event presence, discarding both order and frequency, whereas TreeMHN reads mutation-tree topology,
+which retains the order in which events arose along each lineage but --- contrary to a natural
+expectation --- still not clone sizes, since its input is the tree alone. TreeMHN's advantage over
+MHN is therefore \emph{order}, and fitness epistasis generates no order: it changes how large the
+carrying clones grow, leaving the sequence of events untouched. The prediction is that TreeMHN cannot
+beat MHN on pairwise $E$ for structural reasons rather than want of data, and that it should win
+decisively once the planted signal \emph{is} an order. Both hold (\Cref{fig:epistasis}D). On pairwise
+$E$, TreeMHN sits at chance (mean rank 3.4 of six pairs, chance 3.5) while MHN reaches 1.6 --- but
+MHN's empty-$E$ control itself ranks the pair 2.0, far above chance, so most of that is a
+false-positive tendency an untested benchmark would have mistaken for recovery (4 of 5 draws versus 1
+of 5, Fisher $p = 0.21$). On an accessibility-gated dependency, which is a genuine order signal, the
+ordering reverses and sharpens: TreeMHN attains mean rank 1.8 and recovers the planted edge outright
+in 3 of 5 draws, while MHN falls to 4.0 --- below chance --- and the co-occurrence floor to 5.4. The
+one draw in which TreeMHN fails is the one in which a single patient carried the gated event, i.e.
+where there was no signal to read. Sweeping the detection threshold on cancer-cell fraction
+(\Cref{fig:epistasis}C) shows why the frequency route is hard in this regime: at zero threshold the
+observable is saturated and at a high one it is empty, with only a narrow window between. These
+numbers are a floor rather than an estimate for real cohorts --- our tumors are $\approx$130 cells,
+small enough that a clone arising late has little time to expand, so much of the frequency signal
+never develops --- but the mechanism (\Cref{fig:epistasis}B) and the tool--signal correspondence
+(\Cref{fig:epistasis}D) are structural and should survive scaling.
 
 \begin{figure}[tbp]
   \centering
@@ -1128,12 +1120,12 @@ simulator that knows the answer can make that distinction visible.
   clamp at $\log(b_{\max}/b_0)$ truncates the response. \textbf{(C)} Real MHN edge recovery versus
   the detection threshold applied to cancer-cell fraction, against the empty-network false-positive
   control; grey bands mark thresholds at which the observable is degenerate (a column with no
-  variance --- saturated at low threshold, empty at high). \textbf{(D)} The real tools on the same
-  cohorts: MHN (binary presence) versus TreeMHN (mutation trees, which retain clone sizes) versus the
-  co-occurrence floor. Ordered constraints under the two gating modes are scored on the two axes they
-  admit (``$B$ requires $A$'' and ``$A$ precedes $B$''): accessibility gating acts on the mutation
-  process and is recovered perfectly, whereas fitness gating leaves the same planted DAG with no
-  recoverable trace.}
+  variance --- saturated at low threshold, empty at high). \textbf{(D)} The same tools on the two
+  kinds of planted signal, scored as the rank of the planted pair among all pairs (lower is better;
+  chance is 3.5 of six). MHN reads binary presence, TreeMHN reads mutation-tree topology; the latter
+  adds \emph{order}, not frequency. Fitness epistasis produces frequency without order and neither
+  tool recovers it, whereas an accessibility-gated dependency produces order and TreeMHN recovers it
+  decisively --- the tool's advantage materializes exactly on the signal its input encodes.}
   \label{fig:epistasis}
 \end{figure}
 
@@ -1197,8 +1189,9 @@ the realized per-lineage event order --- with events acquired in the same divisi
 since no order between them exists --- are exposed as the answer key. Two observables are exported
 from the same cohort: the binary patients $\times$ events matrix MHN consumes, in which an event is
 called when its cancer-cell fraction (summed across all carrying clones, as a variant-allele-frequency
-call would) exceeds a detection threshold; and the per-patient mutation trees TreeMHN consumes, which
-retain clone sizes. MHN and TreeMHN are run at their published defaults in dedicated environments, and
+call would) exceeds a detection threshold; and the per-patient mutation trees TreeMHN consumes, whose
+topology encodes the order in which events arose but not clone sizes (its input accepts the tree
+alone). MHN and TreeMHN are run at their published defaults in dedicated environments, and
 because their $\Theta$ is a rate modifier rather than a fitness coefficient we score recovered
 \emph{edges} (symmetrized over the two directions, since $E$ is symmetric) rather than values.
 

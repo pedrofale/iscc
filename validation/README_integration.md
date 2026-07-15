@@ -153,11 +153,29 @@ the two directions — iscc's `E` is symmetric and defines no direction), never 
 
 ### Reading the result before you run it
 
-The finding is that **the observable decides recovery**, not the cohort size. iscc's `E` acts on
-fitness (how large the carrying clones grow); a binary "event present" matrix is saturated by
-**recurrent mutation** (a favoured combination arises many times independently, so it is already
-present at `E=0`) and discards the frequency the signal lives in. Conjunctive constraints under
-`gating_mode: accessibility` act on the mutation process and are recovered perfectly.
+**Each tool recovers exactly the signal its input encodes.** iscc's `E` acts on fitness (how large the
+carrying clones grow); a binary "event present" matrix is saturated by **recurrent mutation** (a
+favoured combination arises many times independently, so it is already present at `E=0`) and discards
+the frequency the signal lives in.
+
+**TreeMHN does NOT read clone sizes** — a natural assumption, and wrong: `input_tree_df` accepts only
+`Patient_ID`/`Tree_ID`/`Node_ID`/`Mutation_ID`/`Parent_ID` and errors on any other column (`weights`
+is a per-TREE weight for tree uncertainty). What it adds over MHN is **event ORDER**. Fitness
+epistasis produces no order, so TreeMHN is structurally blind to it — and wins decisively once the
+planted signal IS an order:
+
+| | FREQUENCY signal (pairwise `E`) | ORDER signal (accessibility DAG) |
+|---|---|---|
+| co-occurrence floor | 4.20 | 5.40 |
+| MHN (presence) | 1.60 (control 2.00 — largely false positives) | 4.00 |
+| TreeMHN (tree topology) | 3.40 ≈ chance | **1.80** |
+
+(mean rank of the planted pair of 6; chance 3.5; lower is better.) Recovering fitness epistasis needs
+a frequency-aware observable, which neither tool consumes.
+
+Note the two halves need **different event alphabets**: `event_size=2` keeps binary presence from
+saturating (panels B/C), but a gated child then reaches only 0–2 of 40 patients, so the DAG panels use
+`event_size=8`. Always check the printed child-carrying patient count before reading panel D.
 
 **Caveat:** the cohort tumours are ~130 cells — a clone arising late has no time to expand, so the
 absolute recovery rates are a floor for this regime, not an estimate for real cohorts.

@@ -137,8 +137,13 @@ def to_mutation_tree(tumor, min_clone_freq=0.0):
 
     ``min_clone_freq`` prunes clones below a fraction of the tumour — a CLONE-level filter, which is
     the right notion here (a tip too small to resolve), unlike the per-EVENT detection threshold that
-    ``to_mhn_matrix`` applies. Unlike the binary cross-sectional matrix, this export KEEPS the clone
-    sizes (``n_cells``), which is where the fitness-epistasis signal lives.
+    ``to_mhn_matrix`` applies.
+
+    ``n_cells`` is emitted for the caller's own analysis, but note that **TreeMHN does not read it**:
+    its ``input_tree_df`` accepts ONLY ``Patient_ID``/``Tree_ID``/``Node_ID``/``Mutation_ID``/
+    ``Parent_ID`` and errors on any other column (its ``weights`` argument is a per-TREE weight for
+    tree uncertainty, not a clone size). So what this export gives a tree-based method over the binary
+    matrix is **event ORDER**, not frequency — which is exactly what it can and cannot recover.
 
     Follows TreeMHN's own input convention exactly (its README): the root is ``Node_ID = 1`` with
     ``Mutation_ID = 0`` and is **its own parent** (``Parent_ID = 1``) — not 0, which its
