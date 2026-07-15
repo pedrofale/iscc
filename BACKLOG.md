@@ -284,6 +284,28 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
     while the checkout says 0.6.1, and scDEF was mid-revision) — see the warning in
     `validation/README_integration.md`; and `ferreira_scdef_2024`'s venue/DOI are deliberately blank
     (unpublished). Both need a human decision before submission.
+  - **DONE (with a caveat) — cohort-level: shared vs patient-specific programs** (§4.3,
+    `validation/validate_programs_cohort.py` → `manuscript/figures/validation_programs_cohort.png`).
+    Cohort now forwards `expression_params` + `microenv_params` (it forwarded NEITHER — F8 was
+    unreachable through the cohort layer too). Truth: patients SHARE the program dictionary (layout
+    stream) but have PRIVATE CNA landscapes. **A CNA-driven factor is real biology that is not a
+    program** — which flips §4.2's verdict on the same positional statistic (nuisance there,
+    signal-to-preserve here). **Result (6 patients, 24 factors):** pooled/demux, scDEF finds 5
+    patient-specific factors at positional clustering 0.74 (null 0.24) = genuine CNA biology, plus the
+    best shared recovery (0.68). One-batch-per-patient: factors double to 11 while clustering collapses
+    to 0.37 (batch masquerading as patient biology). `batch_key` prunes back to 6 and restores mixing,
+    but survivors sit AT the null (0.28) and `cna_retention` never recovers (0.44 → 0.27 → 0.27).
+    ⇒ **demultiplexing preserves patient-specific biology that no batch correction recovers.**
+    Data-level, tool-independent: corr(CN dev, expr dev) 0.49 pooled → 0.26 confounded.
+    **CAVEAT — DO NOT PUT THIS FIGURE IN THE PAPER AS-IS:** every arm is **n=1** (one cohort, one batch
+    draw, one tool fit; `build_cohort` hardcodes `patient_seeds=1..N`, `run_tool` uses `seed=0`, and
+    `emit()`'s `seed` arg is DEAD — never threaded to `run_cohort_batches`). The arms are *paired* on
+    one cohort, which is the right structure, but there is no spread, so small gaps
+    (`shared_recovery` 0.68/0.67/0.65) are almost certainly noise while the large ones
+    (`cna_retention`, clustering) are only *probably* real. The quick-vs-full swing
+    (`n_patient_specific` 0 → 5) proves these statistics are configuration-sensitive. **To promote:**
+    thread a rep seed through those three places, loop, report mean ± sd (~15 fits + 3 cohort growths,
+    ≈30 min). A manuscript subsection is also NOT yet written for this one. Deferred by user 2026-07-15.
 - **Two PREREQUISITES — NOW IN PAPER 1 (decision 2026-07-14), design-first, not built. Handoffs ready:
   `handoffs/expression_programs.md` (R13) and `handoffs/epistasis.md` (R14).**
   - **Expression realism** — `DESIGN_expression.md` (R13) ✅ **DONE 2026-07-15**. Expression is now a
