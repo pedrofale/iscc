@@ -126,8 +126,12 @@ def counts_anndata(tumor, seed=0, depth=20000, max_cells=600):
     return a, Z
 
 
-def run_tool(tool, adata, k, seed=0, n_epoch=300, n_iter=20):
-    """Run scDEF or cNMF in its own env; returns the loadings/activities dict, or None if absent."""
+def run_tool(tool, adata, k, seed=0, n_epoch=300, n_iter=20, batch_key=None):
+    """Run scDEF or cNMF in its own env; returns the loadings/activities dict, or None if absent.
+
+    `batch_key` (scDEF only) names an `adata.obs` column and switches on scDEF's OWN batch-correction
+    path — the honest way to test correction, rather than pre-correcting the counts by hand.
+    """
     py = SCDEF_PYTHON if tool == "scdef" else CNMF_PYTHON
     if not os.path.exists(py):
         return None
@@ -136,8 +140,12 @@ def run_tool(tool, adata, k, seed=0, n_epoch=300, n_iter=20):
         in_h5ad, out_npz = os.path.join(d, "in.h5ad"), os.path.join(d, "out.npz")
         adata.write_h5ad(in_h5ad)
         extra = str(n_epoch) if tool == "scdef" else str(n_iter)
-        proc = subprocess.run([py, runner, in_h5ad, out_npz, str(k), extra, str(seed)],
-                              capture_output=True, text=True)
+        cmd = [py, runner, in_h5ad, out_npz, str(k), extra, str(seed)]
+        if tool == "scdef":
+            cmd.append(batch_key or "none")
+        elif batch_key is not None:
+            raise ValueError("cNMF has no batch-correction path; batch_key is scDEF-only")
+        proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0 or not os.path.exists(out_npz):
             raise RuntimeError(f"{tool} runner failed:\n{proc.stdout[-2000:]}\n{proc.stderr[-2000:]}")
         d_npz = np.load(out_npz, allow_pickle=True)

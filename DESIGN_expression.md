@@ -234,6 +234,62 @@ it *knows* the true `loading` matrix and per-cell `z`.
 - **Controls:** `program_genomic_scatter` low ⇒ a deliberately CNA-mimicking program (can tools separate
   it?); burden ≈ 0 ⇒ recovery should be near-ceiling (sanity).
 
+## 4.3 Validation — shared vs patient-specific programs across a COHORT (user ask 2026-07-15)
+
+**The question:** run a program-inference tool over MANY patients. Does it separate the programs that
+are **shared** across patients from the structure that is **patient-specific**? And what happens when
+the patients sit on **different batches**, so the technical effect is confounded with the biology?
+
+**Why iscc can ask it.** The cohort layer already gives shared landscape + private evolution, and R13
+puts the program dictionary on the LAYOUT stream. So the truth has three tiers, and iscc knows which
+is which:
+
+| tier | what it is | genomic signature | shared? |
+|---|---|---|---|
+| **program** | the K dictionary programs — identical `loading` in every patient (layout stream) | **scattered** genome-wide | SHARED by construction |
+| **patient CNA** | each patient's private CNA landscape → dosage shifts every gene on an altered segment | **CONTIGUOUS** | PRIVATE (private evolution) |
+| **batch** | the F3 per-gene technical factor | **scattered**, random | per-BATCH |
+
+**The key conceptual point (and the user's framing):** a CNA-driven expression factor is **real
+biology that happens not to be a program**. This flips the R13 §4.2 verdict on the *same* statistic:
+
+* In §4.2 (one tumour, "recover the programs") a positionally-clustered factor is a **nuisance** — a
+  copy-number event wearing a program's label, and it inflates the spurious count.
+* Here (a cohort, "what is shared vs private") that same positionally-clustered, patient-specific
+  factor is **signal that must be PRESERVED** — it is exactly the patient-specific biology a
+  batch-correction step must not delete.
+
+Same diagnostic, opposite verdict, depending on the question being asked. Worth stating explicitly,
+because it is the thing a practitioner gets wrong.
+
+**Two batch designs** (both already in `iscc.cohort.batch`):
+* **A — pooled / demultiplexed** (`mapping="multiplex", capacity=N`): every patient in ONE batch. The
+  technical effect is common to all, so anything patient-specific is unambiguously biology.
+* **B — one batch per patient** (`mapping="one_to_one"`): batch is **perfectly confounded** with
+  patient. Nothing in the data distinguishes "this patient's CNA raised these genes" from "this lane
+  ran hot", because they have the same support.
+
+**Arms:** (1) A uncorrected — the ceiling, no confound; (2) B uncorrected — the technical effect
+inflates apparent patient-specificity, so batch masquerades as biology; (3) B corrected — batch
+correction removes the technical effect **and**, necessarily, the genuine patient-specific CNA signal.
+
+**Metrics vs truth:**
+* `shared_recovery` — Hungarian-matched loading cosine against the true (shared) dictionary.
+* `cna_retention` — per patient, the best |corr| between an inferred factor's loading and that
+  patient's per-gene log-CN deviation from the cohort mean. Does the patient's real CNA biology
+  survive into the factors?
+* `patient_mixing` — iLISI-style mixing of patients in factor-activity space.
+* the §4.2 **positional statistic** on patient-specific factors: contiguous ⇒ CNA (biology),
+  scattered ⇒ batch (technical). In design B this is, in principle, the ONLY thing that can tell them
+  apart — a testable claim.
+
+**Hypothesis (to test, not to assume):** in design B, correction trades `patient_mixing` for
+`cna_retention` — you cannot remove the batch without removing the biology, because they are the same
+subspace. Design A breaks the confound and keeps both. If correction turns out to preserve
+`cna_retention` in B, that is a reportable negative and would mean the tool is exploiting the
+contiguity structure (or that the batch effect is too weak to bite) — check the effect sizes before
+believing it.
+
 ## 5. What each benchmark needs (traceability)
 
 | Tool | Needs from this doc |

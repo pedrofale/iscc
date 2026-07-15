@@ -277,6 +277,56 @@ def test_dosage_sensitivity_is_bounded():
     assert s.min() >= 0.0 and s.max() <= 1.0
 
 
+# --------------------------------------------------------------- 5b. the COHORT layer (§4.3)
+def _cohort(n=3, steps=3000, **kw):
+    from iscc.cohort import Cohort
+    return Cohort(patient_seeds=list(range(1, n + 1)), genome_params=GENOME,
+                  selection_params=SELECTION, cancer_cell_params=CANCER, deme_params=DEME,
+                  spatial_params=SPATIAL, grow_steps=steps, **kw).run()
+
+
+def test_cohort_forwards_expression_params():
+    co = _cohort(expression_params=EXPRESSION_PARAMS)
+    for pr in co.patients:
+        assert pr.tumor.programs is not None
+        assert "cell_program" in pr.tumor.cell_data
+
+
+def test_cohort_without_expression_params_is_unchanged():
+    co = _cohort()
+    for pr in co.patients:
+        assert pr.tumor.programs is None
+        assert "cell_program" not in pr.tumor.cell_data
+
+
+def test_cohort_shares_programs_but_not_cnas():
+    """The ground truth the cohort program benchmark rests on (DESIGN_expression.md §4.3): patients
+    SHARE the program dictionary (it is a property of the genome, drawn from the layout stream) while
+    their CNA landscapes are PRIVATE (private evolution) — so 'shared program' vs 'patient-specific
+    biology' is a known split, not an assumption."""
+    co = _cohort(n=3, steps=6000, expression_params=EXPRESSION_PARAMS)
+    ts = [pr.tumor for pr in co.patients]
+    # SHARED: dictionary, s_g, gene roles
+    for t in ts[1:]:
+        np.testing.assert_allclose(ts[0].programs.dictionary.loading, t.programs.dictionary.loading)
+        np.testing.assert_allclose(ts[0].programs.dosage_sensitivity, t.programs.dosage_sensitivity)
+        np.testing.assert_array_equal(ts[0].selection.get_oncogenes(), t.selection.get_oncogenes())
+    # PRIVATE: the per-patient copy-number profile must actually differ
+    cn = [t.cell_data["cell_cnv"].values.mean(0) for t in ts]
+    assert any(not np.allclose(cn[0], c) for c in cn[1:]), "patients must have private CNA landscapes"
+
+
+def test_cohort_forwards_microenv_params():
+    """Sibling gap closed at the same time: F8 was never reachable through the cohort layer either."""
+    mp = {"hypoxia": {"n_genes": 8, "strength": 0.5}}
+    co = _cohort(n=2, expression_params=None, microenv_params=mp)
+    for pr in co.patients:
+        assert len(pr.tumor._hypoxia_genes) > 0
+    # and the niche programme is SHARED across patients (the layout stream), as F8's fix requires
+    np.testing.assert_array_equal(co.patients[0].tumor._hypoxia_genes,
+                                  co.patients[1].tumor._hypoxia_genes)
+
+
 # --------------------------------------------------------------- 6. the diagnose() check
 def _clone_is_state(t):
     d = t.diagnose()

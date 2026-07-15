@@ -15,7 +15,12 @@ What we pull out of the fitted model (all posterior means, `scDEF.pmeans`):
     benchmark ask whether scDEF's inferred hierarchy LEVEL matches the true program granularity,
     which is the thing scDEF offers over a flat factor model like cNMF.
 
-Usage:  python scdef_runner.py <in.h5ad> <out.npz> [n_factors] [n_epoch] [seed]
+`batch_key` (optional) hands scDEF its OWN batch-correction path: the column of `adata.obs` holding
+the batch label, which scDEF models internally. That is what a practitioner would actually do, and it
+is the honest way to test batch correction here — hand-rolling a log-space centering and exponentiating
+back to counts mangles the matrix a Poisson-gamma model expects (negatives clip to zero).
+
+Usage:  python scdef_runner.py <in.h5ad> <out.npz> [n_factors] [n_epoch] [seed] [batch_key]
 """
 import sys
 import warnings
@@ -32,13 +37,19 @@ def main():
     n_factors = int(sys.argv[3]) if len(sys.argv) > 3 else 10
     n_epoch = int(sys.argv[4]) if len(sys.argv) > 4 else 200
     seed = int(sys.argv[5]) if len(sys.argv) > 5 else 0
+    batch_key = sys.argv[6] if len(sys.argv) > 6 and sys.argv[6] not in ("", "none") else None
 
     adata = ad.read_h5ad(in_h5ad)
     # scDEF wants raw counts; the validation script writes them in X (and, defensively, `counts`).
     if "counts" not in adata.layers:
         adata.layers["counts"] = adata.X.copy()
 
-    model = scdef.scDEF(adata, counts_layer="counts", n_factors=n_factors, seed=seed)
+    kw = {}
+    if batch_key is not None:
+        if batch_key not in adata.obs:
+            raise RuntimeError(f"batch_key {batch_key!r} not in adata.obs ({list(adata.obs)})")
+        kw["batch_key"] = batch_key
+    model = scdef.scDEF(adata, counts_layer="counts", n_factors=n_factors, seed=seed, **kw)
     model.fit(n_epoch=n_epoch)
 
     pm = model.pmeans

@@ -101,7 +101,8 @@ class Cohort:
                  subgroups=None, subgroup_assignment=None, layout_seed=DEFAULT_LAYOUT_SEED,
                  grow_steps=400, update_mode="exact", tau=1.0, snapshot_every=1,
                  immune_cell_params=None, epithelial_cell_params=None, stromal_cell_params=None,
-                 n_germline_markers=0, germline_seed=98765):
+                 n_germline_markers=0, germline_seed=98765,
+                 expression_params=None, microenv_params=None):
         self.patient_seeds = list(patient_seeds)
         self.n_patients = len(self.patient_seeds)
         self.genome_params = genome_params or {}
@@ -113,6 +114,14 @@ class Cohort:
         self.epithelial_cell_params = epithelial_cell_params
         self.stromal_cell_params = stromal_cell_params
         self.layout_seed = layout_seed
+        # Optional readout layers, forwarded to every patient's tumour. Both are properties of the
+        # SHARED landscape at the layout seed, so a cohort built with `expression_params` gives every
+        # patient the SAME program dictionary / niche gene sets while their evolution (and hence which
+        # programs each patient's clones actually drive, and which CNAs they carry) stays private.
+        # That shared-dictionary/private-activity split is the ground truth the cohort-level
+        # program benchmark scores against (DESIGN_expression.md §4.3).
+        self.expression_params = expression_params
+        self.microenv_params = microenv_params
         self.grow_steps = grow_steps
         self.update_mode = update_mode
         self.tau = tau
@@ -209,7 +218,9 @@ class Cohort:
         )
         for name, val in (("immune_cell_params", self.immune_cell_params),
                           ("epithelial_cell_params", self.epithelial_cell_params),
-                          ("stromal_cell_params", self.stromal_cell_params)):
+                          ("stromal_cell_params", self.stromal_cell_params),
+                          ("expression_params", self.expression_params),
+                          ("microenv_params", self.microenv_params)):
             if val is not None:
                 kwargs[name] = val
         t = GenotypeTumor(**kwargs)
