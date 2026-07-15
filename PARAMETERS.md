@@ -128,12 +128,27 @@ can recover:
 
 `validation/validate_epistasis.py` measures the consequence, and it is stark: under **accessibility**
 gating the constraint is recovered perfectly (`B requires A` and the ordering, 1.00 in every network
-draw), while under **fitness** gating the same planted DAG leaves essentially **no recoverable trace**
-(the conjunction holds in ~23% of lineages, and the apparent "order" just reports which event is
-intrinsically faster). The same script shows that pairwise `E` — which acts on fitness — is recovered
-at **chance** by a cross-sectional method regardless of cohort size or how hard it is planted, because
-"which events did this patient ever acquire" is blind to how large a clone grew. State which gating
-mode you used; the two are not interchangeable.
+draw, from true and reconstructed trees), while under **fitness** gating the same planted DAG leaves
+essentially **no recoverable trace** (the conjunction holds in a small minority of lineages, and the
+apparent "order" just reports which event is intrinsically faster). State which gating mode you used;
+the two are not interchangeable.
+
+#### The observable matters more than the cohort size
+
+Pairwise `E` acts on **fitness** — how large the carrying clones grow — not on the **rate** at which
+events arise (which is what MHN/CBN model). Two practical consequences when you design a benchmark
+with `epistasis_params`:
+
+- **Binary "event present" is saturated, and it is recurrent mutation that saturates it.** A favoured
+  combination arises many times independently in one tumour, so it is already present at `E = 0`;
+  raising `E` changes how much of the tumour its lineages occupy, which a presence call throws away.
+  Sweep `min_freq` (a per-event **cancer-cell fraction** threshold, aggregated across clones — not a
+  per-clone size filter) and check the column marginals: all-zero or all-one columns carry no
+  information and no method can recover anything from them.
+- **Tumour size is the binding constraint, not patient count.** A clone arising late has little time
+  to expand, so in small tumours the frequency signal never develops. Adding patients does not fix
+  this. If recovery looks flat, check the observable's marginals before concluding anything about the
+  method.
 
 ### Gene programs / expression realism (R13, optional; **off by default**) — `expression_params`
 

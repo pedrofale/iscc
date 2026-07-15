@@ -49,7 +49,7 @@ The pattern for each tool (see `integration_common.py`):
 
 Document each new env's build recipe in the "Building the dedicated envs" section below.
 
-**Current envs:** `iscc-clonealign`, `iscc-infercnv`, `iscc-scdef`, `iscc-cnmf`.
+**Current envs:** `iscc-clonealign`, `iscc-infercnv`, `iscc-scdef`, `iscc-cnmf`, `iscc-mhn`, `iscc-treemhn`.
 **Planned (build the same way when the benchmark lands):** cohort/batch integration — `iscc-scvi`
 (scvi-tools / scANVI), `iscc-harmony` (harmonypy); demultiplexing — `iscc-demux` (vireo / souporcell);
 spatial deconvolution — `iscc-cell2location` / `iscc-tangram`. Self-contained validations (pure
@@ -132,29 +132,72 @@ python -u validation/validate_epistasis.py     # -> manuscript/figures/validatio
 ## Cohort progression models (MHN / TreeMHN / CBN / REVOLVER) — R14
 
 `validate_epistasis.py` plants a known event×event network (`DESIGN_epistasis.md`) and scores recovery
-against it. It runs **core-env-only today**: the "method" is the built-in pairwise log-odds baseline
-(`iscc.integrations.cooccurrence_scores` — the DISCOVER/MEGSA statistic), so the figure renders without
-R. That baseline is the **floor of the benchmark, not a stand-in for MHN**: it cannot separate a direct
-interaction from one induced through a shared ancestor, which is exactly what MHN's regularized fit is
-built to remove.
+against it with the **real tools**, each in its own env. `iscc.integrations.progression` is the seam:
+it emits each tool's input shape and scores any tool's output.
 
-Wiring the real tools in is deliberately cheap, because the seam already exists —
-`iscc.integrations.progression` emits each tool's input shape and scores any tool's output:
-
-| tool | env | input (already emitted) | scored with |
+| tool | env | input | scored with |
 |---|---|---|---|
-| MHN | `iscc-mhn` | `to_mhn_matrix(tumors)` — patients × events binary | `score_edges` (vs the planted `E`) |
-| TreeMHN | `iscc-treemhn` | `to_treemhn_trees(tumors)` — per-patient mutation trees (`Patient_ID`, `Node_ID`, `Mutation_ID`, `Parent_ID`) | `score_edges` + `score_order` |
-| CBN / H-CBN | `iscc-cbn` | `to_cbn_poset(tumors)` | `score_order` (the conjunction) |
-| REVOLVER | `iscc-revolver` | `to_treemhn_trees(tumors)` | `score_edges` + `score_order` |
+| **MHN** (Schill et al. 2020) ✅ | `iscc-mhn` | `to_mhn_matrix(tumors, min_freq=…)` — patients × events binary | `score_edges` vs the planted `E` |
+| **TreeMHN** (Luo et al. 2023) ✅ | `iscc-treemhn` | `to_treemhn_trees(tumors)` — per-patient mutation trees | `score_edges` + `score_order` |
+| CBN / H-CBN ⬜ | `iscc-cbn` | `to_cbn_poset(tumors)` | `score_order` (the conjunction) |
+| REVOLVER ⬜ | `iscc-revolver` | `to_treemhn_trees(tumors)` | `score_edges` + `score_order` |
 
-Follow the one-env-per-tool convention above: add `<TOOL> = os.environ.get("ISCC_<TOOL>_RSCRIPT", ...)`,
-a `<tool>_available()` skip guard, and a thin `<tool>_runner.R` that reads the emitted CSV and writes
-back an edge/order list.
+The built-in co-occurrence log-odds (`cooccurrence_scores`, the DISCOVER/MEGSA statistic) is kept as
+the **floor** — it cannot separate a direct interaction from one induced through a shared ancestor,
+which is exactly what MHN's regularized fit removes. The script SKIPS any tool whose env is absent
+(override with `ISCC_MHN_PYTHON` / `ISCC_TREEMHN_RSCRIPT`) and always renders the floor.
 
-**Read the result carefully before running anything.** The benchmark's finding is that iscc's pairwise
-`E` acts on *fitness* while MHN/CBN model the *rate of acquisition*, so a cross-sectional matrix is
-near-blind to it — recovery sits at chance for any cohort size or interaction strength, while
-conjunctive constraints under `gating_mode: accessibility` are recovered perfectly. A real MHN run is
-expected to reproduce that contrast, not overturn it; if it does overturn it, that is the interesting
-result and worth chasing.
+`Theta` is **not** `E`: MHN/TreeMHN estimate a *rate* modifier, iscc plants a *fitness/selection*
+coefficient. The benchmark therefore scores recovered **edges** (symmetrised by the larger |Theta| of
+the two directions — iscc's `E` is symmetric and defines no direction), never values.
+
+### Reading the result before you run it
+
+The finding is that **the observable decides recovery**, not the cohort size. iscc's `E` acts on
+fitness (how large the carrying clones grow); a binary "event present" matrix is saturated by
+**recurrent mutation** (a favoured combination arises many times independently, so it is already
+present at `E=0`) and discards the frequency the signal lives in. Conjunctive constraints under
+`gating_mode: accessibility` act on the mutation process and are recovered perfectly.
+
+**Caveat:** the cohort tumours are ~130 cells — a clone arising late has no time to expand, so the
+absolute recovery rates are a floor for this regime, not an estimate for real cohorts.
+
+**Detection semantics matter** (this was a real bug): `min_freq` in `to_mhn_matrix` is a per-**event
+cancer-cell fraction** threshold aggregated ACROSS clones (`event_cell_fractions`), *not* a per-clone
+size filter. Filtering clones and OR-ing them calls a 60%-cell-fraction event ABSENT whenever its
+carriers are dozens of small lineages — which is precisely what a favoured combination looks like.
+`min_clone_freq` (in `clone_events` / `to_mutation_tree`) is the genuinely clone-level filter, for
+pruning tree tips.
+
+```bash
+# --- MHN (Python) ---
+conda create -y -n iscc-mhn -c conda-forge python=3.11
+~/miniconda3/envs/iscc-mhn/bin/pip install mhn        # spang-lab/LearnMHN; pulls numpy/pandas/scipy
+
+# --- TreeMHN (R + Rcpp/OpenMP) ---
+conda create -y -n iscc-treemhn -c conda-forge r-base=4.3 r-remotes r-matrix r-rcpp \
+  r-rcpparmadillo r-igraph r-dplyr r-tidyr r-ggplot2 r-reshape2 r-mass
+# TreeMHN's own deps, which install_github does NOT resolve on conda-forge R:
+conda install -y -n iscc-treemhn -c conda-forge r-gtools r-diagrammer r-ggm r-ggpubr r-mnormt
+# it has compiled code, so the env needs a toolchain:
+conda install -y -n iscc-treemhn -c conda-forge compilers make
+cat > ~/miniconda3/envs/iscc-treemhn/lib/R/etc/Makevars.site <<'MV'
+CC=$(ls ~/miniconda3/envs/iscc-treemhn/bin/*-clang | head -1)
+CXX=$(ls ~/miniconda3/envs/iscc-treemhn/bin/*-clang++ | head -1)
+CXX11=$CXX
+CXX14=$CXX
+CXX17=$CXX
+MV
+# Two upstream patches are needed (both filed under "known install quirks" below):
+git clone https://github.com/cbg-ethz/TreeMHN.git && cd TreeMHN
+#  1. src/Makevars hardcodes -lstdc++fs (a GCC-only shim); clang/libc++ ships std::filesystem:
+printf 'CXX_STD = CXX17\nPKG_CXXFLAGS = -fopenmp $(SHLIB_OPENMP_CXXFLAGS)\nPKG_LIBS = -lgomp $(SHLIB_OPENMP_CFLAGS) $(LAPACK_LIBS) $(BLAS_LIBS) $(FLIBS)\n' > src/Makevars
+#  2. build CLEAN -- a stale object tree silently yields a .dylib without the Rcpp symbols
+#     ("object '_TreeMHN_get_augmented_trees' not found" at runtime):
+~/miniconda3/envs/iscc-treemhn/bin/R CMD INSTALL --preclean --clean .
+```
+
+!!! note "TreeMHN input convention"
+    Its README: the root node is **its own parent** (`Node_ID = 1`, `Mutation_ID = 0`,
+    `Parent_ID = 1`). `Parent_ID = 0` makes `sort_one_tree_df` fail. `to_mutation_tree` emits the
+    correct convention; `tests/test_epistasis.py` pins it.

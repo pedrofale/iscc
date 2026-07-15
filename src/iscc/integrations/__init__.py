@@ -19,8 +19,8 @@ from .lineage import LineageTree, to_lineage_tree, to_newick
 from .anndata import to_anndata
 from .petracer import decompose_lineage_spatial, LineageSpatialDecomposition
 from .progression import (
-    to_mhn_matrix, to_mutation_tree, to_treemhn_trees, to_cbn_poset,
-    clone_events, patient_event_vector, cooccurrence_scores, top_edges,
+    to_mhn_matrix, to_cell_fraction_matrix, to_mutation_tree, to_treemhn_trees, to_cbn_poset,
+    clone_events, event_cell_fractions, patient_event_vector, cooccurrence_scores, top_edges,
     score_edges, score_order, score_exclusivity,
 )
 from .multiregion import (
@@ -35,8 +35,9 @@ __all__ = [
     "to_anndata",
     "decompose_lineage_spatial", "LineageSpatialDecomposition",
     # cohort progression models (MHN/TreeMHN/CBN/REVOLVER) vs the planted epistasis network
-    "to_mhn_matrix", "to_mutation_tree", "to_treemhn_trees", "to_cbn_poset",
-    "clone_events", "patient_event_vector", "cooccurrence_scores", "top_edges",
+    "to_mhn_matrix", "to_cell_fraction_matrix", "to_mutation_tree", "to_treemhn_trees",
+    "to_cbn_poset", "clone_events", "event_cell_fractions", "patient_event_vector",
+    "cooccurrence_scores", "top_edges",
     "score_edges", "score_order", "score_exclusivity",
     # multi-region "sample trees are not phylogenies" benchmark
     "true_origin_counts", "region_bulk_profiles", "oracle_clone_profiles",

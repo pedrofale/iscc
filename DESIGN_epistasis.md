@@ -25,14 +25,44 @@ scoring seam `iscc.integrations.progression` · tests `tests/test_epistasis.py` 
   (`event_groups`). Flattening them would rank events by the segment their module sits in — a
   property of the layout, not of the evolution — and silently corrupt every ordering ground truth.
 
-**The headline result is NEGATIVE, and it is the useful one** (§5, measured in `validate_epistasis.py`):
-pairwise `E` acts on **fitness** (clone size) while MHN/CBN model the **rate of event acquisition**; a
-cross-sectional event-presence matrix cannot distinguish them, so `E` is recovered at **chance**
-regardless of cohort size (10→80 patients) or interaction strength (0.25→2.0). Conjunctive constraints
-under **accessibility** gating are recovered **perfectly** (1.00 in every network draw, true and
-reconstructed trees); the identical DAG under **fitness** gating leaves **no recoverable trace**. So
-the benchmark's real finding is *which* planted structure these tools can see — visible only because
-iscc knows the answer.
+**The headline: the OBSERVABLE decides recovery** (§5, measured in `validate_epistasis.py` with the
+REAL MHN and TreeMHN, each in its own env). Pairwise `E` acts on **fitness** — how large the clones
+carrying a combination grow — while MHN/CBN model the **rate of event acquisition**.
+
+* **The mechanism is large and verified** (paired sweep, only `E` differs): `E` 0→1.5 expands the
+  clones carrying the pair **3.5% → 42%** of the tumour (12x), plateauing at 59% once `|E|` exceeds
+  the fitness clamp `log(b_max/b_0)`. P(the pair ever *arose*) barely moves (0.03→0.09) — that is a
+  mutation property, and `E` does not touch it.
+* **Binary "event present" registers almost none of it**, because **recurrent mutation saturates
+  presence**: the combination arises many times independently, so it is already present at `E=0`;
+  selection changes only how much of the tumour it occupies, which a presence call discards.
+* **Real MHN** (binary presence) still retains some signal: planted pair ranked 1st in 4/5 network
+  draws vs 1/5 for the empty-`E` control (mean rank 1.4 vs 2.0 of 6). **Suggestive, not significant**
+  (Fisher p=0.21, n=5). The control's rank 2.0 ≫ chance 3.5 is a real **false-positive tendency** —
+  without the empty-`E` arm it would have looked like recovery. That arm is why the control exists.
+* **Real TreeMHN** (trees, retains clone sizes) does **not** beat chance (rank 3.6 vs chance 3.5, both
+  arms) — **we predicted the opposite**. Most likely a power limit, not a property of the method: our
+  trees average 2.5 events over 36 patients, and TreeMHN targets cohorts ~10x larger.
+* **Conjunctive constraints** under **accessibility** gating are recovered **perfectly** (1.00, true
+  and reconstructed trees), though at low power (~8 child-carrying lineages/draw); the identical DAG
+  under **fitness** gating leaves **no trace** (conjunction holds in 0.14 of lineages).
+
+So the benchmark's real finding is *which observable* carries *which* planted structure — visible only
+because iscc knows the answer, and because the empty-`E` control separates recovery from a tool's
+false-positive rate.
+
+**Known limitation (in the paper):** the cohort tumours are ~130 cells, so a clone arising late has
+little time to expand and the frequency signal never fully develops. The absolute recovery rates are a
+**floor for this regime**, not an estimate for real cohorts; the mechanism (frequency carries the
+signal, presence does not) is structural and should generalise. Scaling to ~10⁴-cell tumours via
+tau-leaping is the natural next step.
+
+**Retracted 2026-07-15 (was wrong in the first commit):** an earlier version claimed `E` is
+"recovered at chance regardless of cohort size". That was an artifact of a **bug** — `min_freq`
+filtered CLONES by size and then OR'd their events, so an event carried by dozens of small lineages
+(exactly what a favoured combination looks like) was called ABSENT — compounded by sweeping cohort
+size when the binding axis was the observable. Detection is now a per-event **cancer-cell fraction**
+threshold (`event_cell_fractions`), with a regression test. Do not re-cite the retracted numbers.
 
 ## 1. Why (the gap)
 

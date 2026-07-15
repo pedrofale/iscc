@@ -13,6 +13,7 @@ Covers:
     empty-network control recovers ~nothing (the false-positive sanity check).
 """
 import numpy as np
+import pandas as pd
 import pytest
 
 from iscc.tumor.models import GenotypeTumor
@@ -20,9 +21,9 @@ from iscc.tumor.components.selection import Selection
 from iscc.tumor.components.epistasis import EpistasisNetwork, bits_to_events, events_to_bits
 from iscc.constants import DEFAULT_LAYOUT_SEED, LAYOUT_OFFSET_EPISTASIS
 from iscc.cohort import Cohort
-from iscc.integrations import (to_mhn_matrix, to_mutation_tree, to_treemhn_trees,
-                               cooccurrence_scores, top_edges, score_edges, score_order,
-                               score_exclusivity)
+from iscc.integrations import (to_mhn_matrix, to_cell_fraction_matrix, to_mutation_tree,
+                               to_treemhn_trees, event_cell_fractions, cooccurrence_scores,
+                               top_edges, score_edges, score_order, score_exclusivity)
 
 # prop_driver is high so the small test genome still has enough drivers to carve event modules from
 GENOME = {"n_segments": 5, "segment_size": 40}
@@ -355,7 +356,8 @@ def test_mutation_tree_is_a_valid_rooted_trie():
     t = _grown(epistasis_params=EPI)
     tree = to_mutation_tree(t)
     root = tree.iloc[0]
-    assert root["Mutation_ID"] == 0 and root["Parent_ID"] == 0   # TreeMHN convention
+    # TreeMHN's convention (its README): root is Node_ID 1, Mutation_ID 0, and its OWN parent.
+    assert root["Node_ID"] == 1 and root["Mutation_ID"] == 0 and root["Parent_ID"] == 1
     assert tree["Node_ID"].is_unique
     nodes = set(tree["Node_ID"])
     for _, row in tree.iloc[1:].iterrows():
@@ -369,9 +371,47 @@ def test_treemhn_trees_cover_every_patient():
     assert sorted(trees["Patient_ID"].unique()) == [1, 2, 3, 4]
 
 
-def test_min_freq_drops_rare_clones():
+def test_min_clone_freq_prunes_tree_tips():
     t = _grown(epistasis_params=EPI)
-    assert len(to_mutation_tree(t, min_freq=0.5)) <= len(to_mutation_tree(t, min_freq=0.0))
+    assert len(to_mutation_tree(t, min_clone_freq=0.5)) <= len(to_mutation_tree(t, min_clone_freq=0.0))
+
+
+def test_event_detection_aggregates_cell_fraction_across_clones():
+    """The detection threshold is a per-EVENT cancer-cell fraction, NOT a per-clone size filter.
+
+    This is a regression test for a real bug: filtering CLONES by size and then OR-ing their events
+    calls an event undetected whenever its carriers are many small lineages -- which is exactly what
+    a favoured combination looks like, since it arises repeatedly. A 60%-cell-fraction event spread
+    over 30 clones of 2% each was being reported as ABSENT, silently zeroing the benchmark.
+    """
+    t = _grown(epistasis_params=EPI)
+    net = t.selection.epistasis
+    tbl = t.event_table()
+    total = tbl["n_cells"].sum()
+
+    frac = event_cell_fractions(t)
+    assert frac.shape == (net.n_events,)
+    for e in range(net.n_events):
+        carried = tbl["events"].apply(lambda ev: e in ev)
+        assert frac[e] == pytest.approx(tbl.loc[carried, "n_cells"].sum() / total)
+        # the aggregate MUST be >= the largest single carrying clone: that is the whole point
+        if carried.any():
+            assert frac[e] >= tbl.loc[carried, "n_cells"].max() / total - 1e-12
+
+    # and the binary vector thresholds THAT quantity
+    for mf in (0.0, 0.1, 0.5):
+        vec = to_mhn_matrix([t], min_freq=mf).values[0]
+        expected = (frac > 0).astype(int) if mf == 0 else (frac >= mf).astype(int)
+        assert np.array_equal(vec, expected)
+
+
+def test_cell_fraction_matrix_is_the_continuous_observable():
+    tumors = _cohort_tumors(_cohort(n=4))
+    F = to_cell_fraction_matrix(tumors)
+    assert F.shape == (4, EPI["n_events"])
+    assert ((F.values >= 0) & (F.values <= 1)).all()
+    # binary presence is exactly the >0 indicator of it
+    assert np.array_equal(to_mhn_matrix(tumors).values, (F.values > 0).astype(int))
 
 
 def test_score_edges_precision_recall():
@@ -510,3 +550,71 @@ def test_bit_helpers_round_trip():
     assert bits_to_events(events_to_bits([0, 3, 7]), 8) == [0, 3, 7]
     assert events_to_bits([]) == 0
     assert bits_to_events(0, 4) == []
+
+
+# ============================ the REAL tools (own envs; skip if absent) ============================
+# Follows the repo's one-env-per-tool convention (validation/README_integration.md): the tool runs in
+# `iscc-mhn` / `iscc-treemhn` via subprocess and is SKIPPED when that env is absent. These are
+# POSITIVE CONTROLS on the seam -- they assert the export format is one the tool actually accepts and
+# that it recovers a signal iscc planted directly in the tool's OWN input. They deliberately do NOT
+# assert recovery from a grown tumour: whether the cross-sectional observable carries the signal at
+# all is the open question the validation measures, not something to bake into the suite.
+import sys
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1] / "validation"))
+
+
+def _ve():
+    import validate_epistasis as ve
+    return ve
+
+
+@pytest.mark.skipif(not _ve().mhn_available(), reason="iscc-mhn env not installed")
+def test_real_mhn_accepts_our_matrix_and_finds_a_planted_coupling():
+    ve = _ve()
+    rng = np.random.default_rng(0)
+    n = 150
+    a = rng.random(n) < 0.5
+    X = pd.DataFrame({
+        "E0": a.astype(int),
+        "E1": np.where(a, rng.random(n) < 0.9, rng.random(n) < 0.1).astype(int),   # E0 -> E1
+        "E2": (rng.random(n) < 0.5).astype(int),
+        "E3": (rng.random(n) < 0.5).astype(int),
+    }, index=[f"P{i}" for i in range(n)])
+    theta = ve.run_mhn(X)
+    assert theta is not None and theta.shape == (4, 4)
+    top = ve.theta_to_edges(theta, k=1)
+    assert {top[0][0], top[0][1]} == {0, 1}, f"MHN missed the planted coupling: {top}"
+
+
+@pytest.mark.skipif(not _ve().treemhn_available(), reason="iscc-treemhn env not installed")
+def test_real_treemhn_accepts_our_tree_export():
+    """The export contract: TreeMHN's input_tree_df must accept `to_mutation_tree`'s frame as-is
+    (root = Node_ID 1, Mutation_ID 0, its OWN parent -- Parent_ID 0 makes its sorter fail)."""
+    ve = _ve()
+    tumors = _cohort_tumors(_cohort(n=6, steps=150))
+    trees = to_treemhn_trees(tumors)
+    assert set(["Patient_ID", "Tree_ID", "Node_ID", "Mutation_ID", "Parent_ID"]) <= set(trees.columns)
+    roots = trees[trees["Mutation_ID"] == 0]
+    assert (roots["Parent_ID"] == roots["Node_ID"]).all()      # root is its own parent
+    theta = ve.run_treemhn(trees)
+    assert theta is not None
+    assert theta.shape == (EPI["n_events"], EPI["n_events"])
+
+
+def test_treemhn_export_drops_event_free_patients():
+    """A patient with no events is a root-only tree, which TreeMHN rejects outright
+    ("Tree with ID n does not contain edges from the root"). Regression test: they are dropped and
+    the survivors renumbered contiguously (TreeMHN indexes patients by position)."""
+    tumors = _cohort_tumors(_cohort(n=6, steps=200))
+    trees = to_treemhn_trees(tumors)
+    for pid, g in trees.groupby("Patient_ID"):
+        assert len(g) >= 2, f"patient {pid} exported with no edges"
+        assert (g["Mutation_ID"] == 0).sum() == 1              # exactly one root
+    ids = sorted(trees["Patient_ID"].unique())
+    assert ids == list(range(1, len(ids) + 1)), "patient IDs must be contiguous from 1"
+
+
+def test_treemhn_export_raises_when_no_patient_has_events():
+    t = _grown(steps=5, epistasis_params={"n_events": 4, "event_size": 1})
+    with pytest.raises(ValueError, match="no mutation trees"):
+        to_treemhn_trees([t])

@@ -290,15 +290,34 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
     `tumor.epistasis_ground_truth()` / `tumor.event_table()`; benchmark in
     `validation/validate_epistasis.py` → `manuscript/figures/validation_epistasis.png`; Results
     section `sec:epistasis`.
-    **Honest headline (a NEGATIVE result, and the interesting one):** iscc's `E` acts on FITNESS
-    (clone size) while MHN/CBN model the RATE of event ACQUISITION, and a cross-sectional
-    event-presence matrix cannot tell them apart — so pairwise `E` is recovered at CHANCE regardless
-    of cohort size (10→80) or interaction strength (0.25→2.0). Conjunctive constraints under
-    **accessibility** gating are recovered perfectly (1.00 in every network draw, true AND
-    reconstructed trees); the same DAG under **fitness** gating leaves no trace (conjunction holds in
-    ~23% of lineages; apparent order swings 0.07–0.85 across draws, tracking which event is
-    intrinsically faster). Next: run the REAL MHN/TreeMHN in their own envs against this same answer
-    key — the seam and metrics are already in place.
+    **Headline: the OBSERVABLE decides recovery.** `E` acts on FITNESS (how large the carrying clones
+    grow) while MHN/CBN model the RATE of event ACQUISITION. Paired sweep (only `E` differs): `E` 0→1.5
+    expands the clones carrying the pair **3.5% → 42%** of the tumour (12x), plateauing at 59% past the
+    fitness clamp `log(b_max/b_0)`; P(the pair ever AROSE) barely moves (0.03→0.09 — a mutation
+    property). But a BINARY "event present" matrix registers almost none of that, because RECURRENT
+    MUTATION saturates presence (the combination arises many times independently, so it is already
+    present at `E=0`; selection changes only how much of the tumour it occupies, which presence discards).
+    **Real tools, each in its own env** (`iscc-mhn`, `iscc-treemhn`; both pass positive controls):
+    * **MHN** (binary presence) retains SOME signal — ranks the planted pair 1st in 4/5 network draws
+      vs 1/5 for the empty-E control (mean rank 1.4 vs 2.0 of 6 pairs). Suggestive, NOT significant
+      (Fisher p=0.21, n=5 draws). Note the control's own rank 2.0 ≫ chance 3.5 = a real false-positive
+      tendency — without the empty-E arm this would have looked like recovery.
+    * **TreeMHN** (mutation trees, retains clone sizes) does **NOT** beat chance here (rank 3.6 vs
+      chance 3.5, both arms) — we PREDICTED the opposite. Read as a power limit, not a property of the
+      method: our trees average 2.5 events over 36 patients; TreeMHN targets cohorts ~10x larger.
+    Conjunctive constraints under **accessibility** gating are recovered perfectly (1.00, true AND
+    reconstructed trees) though at low power (~8 child-carrying lineages/draw); the same DAG under
+    **fitness** gating leaves no trace (conjunction 0.14).
+    **Known limitation, stated in the paper:** the cohort tumours are ~130 cells, so a clone arising
+    late has no time to expand and the frequency signal never fully develops — the absolute recovery
+    numbers are a FLOOR for this regime, not an estimate for real cohorts. Scaling the benchmark
+    (tau-leaping, ~10⁴-cell tumours) is the obvious next step and is what would test whether the
+    frequency observable recovers `E` once selection has room to act.
+    **Corrected 2026-07-15 (was wrong in the first commit):** the earlier claim "recovered at chance
+    regardless of cohort size" was an artifact of (a) a bug — `min_freq` filtered CLONES by size then
+    OR'd them, so an event carried by dozens of small lineages was called ABSENT (now a per-event
+    cell-fraction threshold, `event_cell_fractions`; regression test added), and (b) sweeping cohort
+    size when the binding axis was the observable. Do not re-cite the retracted numbers.
 - **Priority (new work):** deconvolution (cell2location/RCTD, flagship) → Numbat → cardelino/PhylEx →
   MHN/TreeMHN (after epistasis) → multi-Visium → CCI. Each external tool in its own `iscc-<tool>` env.
 - **QUEUED — "cash in R13": handoff `handoffs/deconvolution_numbat.md`** (BLOCKED until R13 lands). Runs

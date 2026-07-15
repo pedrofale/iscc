@@ -27,8 +27,15 @@ import pandas as pd
 
 
 # ------------------------------------------------------------------ export: cross-sectional (MHN)
-def clone_events(tumor, min_freq=0.0):
-    """Per-clone event tuples with their cell counts, for clones above ``min_freq`` of the tumour."""
+def clone_events(tumor, min_clone_freq=0.0):
+    """Per-clone event tuples with their cell counts.
+
+    ``min_clone_freq`` drops clones smaller than this fraction of the tumour — a CLONE-level filter
+    (useful for tree exports, where a tiny clone is a tip you may not have resolved). It is NOT a
+    detection threshold for an EVENT: an event carried by fifty 1%-clones is at 50% cell fraction and
+    trivially detectable, yet no clone clears a 10% clone filter. Use ``event_cell_fractions`` for
+    event detection.
+    """
     net = tumor.selection.epistasis
     if net is None:
         raise ValueError("tumour has no epistasis network; nothing to export "
@@ -37,33 +44,62 @@ def clone_events(tumor, min_freq=0.0):
     if tbl.empty:
         return tbl
     total = tbl["n_cells"].sum()
-    if min_freq > 0 and total > 0:
-        tbl = tbl[tbl["n_cells"] / total >= min_freq]
+    if min_clone_freq > 0 and total > 0:
+        tbl = tbl[tbl["n_cells"] / total >= min_clone_freq]
     return tbl
 
 
-def patient_event_vector(tumor, min_freq=0.0, n_events=None):
-    """Binary event vector for ONE patient: 1 where any surviving clone carries the event.
+def event_cell_fractions(tumor, n_events=None):
+    """Per-event fraction of cancer CELLS carrying it, summed ACROSS clones.
 
-    ``min_freq`` is the detection floor — a clone below this fraction of the tumour is treated as
-    undetected, which is what a real bulk/single-cell assay would do. It matters: at ``min_freq=0``
-    every event ever acquired by any surviving cell is "observed", which is more than any real
-    cohort study sees.
+    This is the quantity a real assay measures (a variant's cancer-cell fraction / VAF), and it is
+    the observable that actually carries the selection signal: iscc's ``E`` acts on how large the
+    carrying clones grow, and clones carrying a favoured combination expand. Aggregating across
+    clones is essential — a favoured combination typically arises MANY times independently, so its
+    cells are spread over dozens of small lineages rather than concentrated in one big one.
+    """
+    net = tumor.selection.epistasis
+    if net is None:
+        raise ValueError("tumour has no epistasis network; nothing to export "
+                         "(set selection_params['epistasis_params'])")
+    n = n_events if n_events is not None else net.n_events
+    tbl = tumor.event_table()
+    frac = np.zeros(n)
+    if tbl.empty:
+        return frac
+    total = tbl["n_cells"].sum()
+    if total <= 0:
+        return frac
+    for events, cnt in zip(tbl["events"], tbl["n_cells"]):
+        for e in events:
+            frac[e] += cnt
+    return frac / total
+
+
+def patient_event_vector(tumor, min_freq=0.0, n_events=None):
+    """Binary event vector for ONE patient: 1 where the event's CELL FRACTION >= ``min_freq``.
+
+    ``min_freq`` is the detection floor of the assay, applied to the event's cancer-cell fraction
+    (see :func:`event_cell_fractions`) — not to any single clone's size. At ``min_freq=0`` every
+    event ever acquired by any surviving cell counts as observed, which is both more than a real
+    study sees AND, in a mutation-rich regime, **saturated**: a recurrent event is present in almost
+    every patient regardless of selection, so the column carries no signal. Sweep this threshold
+    rather than assuming it (see validation/validate_epistasis.py).
     """
     net = tumor.selection.epistasis
     n = n_events if n_events is not None else net.n_events
-    vec = np.zeros(n, dtype=int)
-    tbl = clone_events(tumor, min_freq=min_freq)
-    for events in tbl.get("events", []):
-        for e in events:
-            vec[e] = 1
-    return vec
+    frac = event_cell_fractions(tumor, n_events=n)
+    if min_freq <= 0:
+        return (frac > 0).astype(int)
+    return (frac >= min_freq).astype(int)
 
 
 def to_mhn_matrix(tumors, min_freq=0.0):
     """Patients x events binary DataFrame — MHN's (and DISCOVER/MEGSA's) input.
 
     ``tumors`` is any iterable of grown tumours sharing one network (i.e. one ``Cohort``).
+    ``min_freq`` is the per-event cancer-cell-fraction detection floor; see
+    :func:`patient_event_vector`.
     """
     tumors = list(tumors)
     if not tumors:
@@ -74,8 +110,24 @@ def to_mhn_matrix(tumors, min_freq=0.0):
                         index=[f"P{i}" for i in range(len(tumors))])
 
 
+def to_cell_fraction_matrix(tumors):
+    """Patients x events CONTINUOUS cancer-cell-fraction matrix — the frequency-aware observable.
+
+    The binary matrix above is what MHN consumes; this is what the selection signal actually lives
+    in. Keeping both makes the comparison in validate_epistasis.py possible: same tumours, same
+    network, two observables.
+    """
+    tumors = list(tumors)
+    if not tumors:
+        raise ValueError("no tumours given")
+    net = tumors[0].selection.epistasis
+    rows = [event_cell_fractions(t, n_events=net.n_events) for t in tumors]
+    return pd.DataFrame(rows, columns=net.event_names(),
+                        index=[f"P{i}" for i in range(len(tumors))])
+
+
 # ------------------------------------------------------------------ export: mutation trees (TreeMHN)
-def to_mutation_tree(tumor, min_freq=0.0):
+def to_mutation_tree(tumor, min_clone_freq=0.0):
     """The patient's **mutation tree** as a trie over the realised event orders.
 
     Each surviving clone contributes the path ``event_order`` from the root; shared prefixes are
@@ -83,10 +135,19 @@ def to_mutation_tree(tumor, min_freq=0.0):
     TreeMHN's / REVOLVER's input. The root is ``Mutation_ID = 0`` (the normal genotype) and events
     are numbered ``1..n_events`` (TreeMHN's convention: 0 is reserved for the root).
 
+    ``min_clone_freq`` prunes clones below a fraction of the tumour — a CLONE-level filter, which is
+    the right notion here (a tip too small to resolve), unlike the per-EVENT detection threshold that
+    ``to_mhn_matrix`` applies. Unlike the binary cross-sectional matrix, this export KEEPS the clone
+    sizes (``n_cells``), which is where the fitness-epistasis signal lives.
+
+    Follows TreeMHN's own input convention exactly (its README): the root is ``Node_ID = 1`` with
+    ``Mutation_ID = 0`` and is **its own parent** (``Parent_ID = 1``) — not 0, which its
+    ``sort_one_tree_df`` cannot resolve.
+
     Returns a DataFrame with ``Node_ID``, ``Mutation_ID``, ``Parent_ID``, ``n_cells``.
     """
-    tbl = clone_events(tumor, min_freq=min_freq)
-    nodes = [dict(Node_ID=1, Mutation_ID=0, Parent_ID=0, n_cells=0)]  # root
+    tbl = clone_events(tumor, min_clone_freq=min_clone_freq)
+    nodes = [dict(Node_ID=1, Mutation_ID=0, Parent_ID=1, n_cells=0)]  # root: its own parent (TreeMHN)
     children = {}  # (parent Node_ID, mutation) -> Node_ID
     for _, row in tbl.iterrows():
         parent_node = 1
@@ -104,16 +165,35 @@ def to_mutation_tree(tumor, min_freq=0.0):
     return pd.DataFrame(nodes)
 
 
-def to_treemhn_trees(tumors, min_freq=0.0):
+def to_treemhn_trees(tumors, min_clone_freq=0.0, drop_empty=True):
     """Every patient's mutation tree in one tidy frame (a ``Patient_ID`` column added) — the shape
-    TreeMHN's R ``input_tree`` list is built from."""
+    TreeMHN's R ``input_tree`` list is built from.
+
+    A patient that acquired NO event yields a tree with only the root and no edges, which TreeMHN
+    rejects outright ("Tree with ID n does not contain edges from the root"). Such a patient carries
+    no ordering information, so with ``drop_empty`` (the default) it is omitted and the remaining
+    patients are RENUMBERED contiguously from 1 — TreeMHN indexes patients by position, so a gap in
+    the IDs is not safe to leave behind. Set ``drop_empty=False`` to keep them and handle it yourself.
+
+    Note this makes the tree export's patient set potentially SMALLER than the cross-sectional
+    matrix's; when comparing the two observables, compare on the tumours each actually saw.
+    """
     frames = []
-    for i, t in enumerate(tumors):
-        df = to_mutation_tree(t, min_freq=min_freq)
+    for t in tumors:
+        df = to_mutation_tree(t, min_clone_freq=min_clone_freq)
+        if drop_empty and len(df) < 2:      # root only: no events, nothing for TreeMHN to read
+            continue
+        frames.append(df)
+    if not frames:
+        raise ValueError("no patient acquired any event, so there are no mutation trees to export; "
+                         "raise event_size / mutation_rate / grow_steps")
+    out = []
+    for i, df in enumerate(frames):
+        df = df.copy()
         df.insert(0, "Patient_ID", i + 1)
         df.insert(1, "Tree_ID", i + 1)
-        frames.append(df)
-    return pd.concat(frames, ignore_index=True)
+        out.append(df)
+    return pd.concat(out, ignore_index=True)
 
 
 def to_cbn_poset(tumors, min_freq=0.0):

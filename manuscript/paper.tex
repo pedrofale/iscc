@@ -992,42 +992,72 @@ the engine is bit-identical to the additive model. Crucially the network is draw
 premise that makes pooling patients to fit one model well-posed at all --- while their evolution stays
 private.
 
-Planting the answer key turns a specificity check into a real benchmark, and the result is a negative
-one that we think is the more useful outcome (\Cref{fig:epistasis}). Pairwise epistasis $E$ acts on
-\emph{fitness}: it decides how large a clone grows. MHN and CBN instead model the \emph{rate at which
-events are acquired}. A cross-sectional ``which events did this patient ever acquire'' matrix cannot
-distinguish the two, because an event is equally present whether its clone reached 1\% or 60\% of the
-tumor. Consequently the planted $E$ is recovered at chance, and neither pooling more patients
-(\Cref{fig:epistasis}B) nor planting the interaction harder (\Cref{fig:epistasis}C) helps: the limit is
-the observable, not the effect size or the sample size. Ordered constraints behave differently, and the
-distinction is the \emph{gating mode} --- a modelling choice we make explicit because the two are
-different generative stories. Under \emph{accessibility} gating (event $B$ cannot arise until $A$ is
-present; the CBN story) the constraint acts on the mutation process itself, and is recovered perfectly
-in every network draw, from true and reconstructed trees alike. Under \emph{fitness} gating ($B$ arises
-freely but is inert until $A$; closer to what MHN assumes) the identical planted DAG leaves essentially
-no recoverable trace: the conjunction holds in only $\approx$23\% of lineages, and the apparent ordering
-merely reports which event is intrinsically faster --- swinging from 0.07 to 0.85 across network draws
---- because event acquisition rates are themselves heterogeneous, an emergent consequence of the
-copy-number landscape (single-nucleotide variants are drawn per allele, so a module on an amplified
-segment is hit more often). The practical reading is not that these methods are poor, but that
-cross-sectional event presence is the wrong observable for fitness epistasis, and that a benchmark must
-state which generative story it planted. Only a simulator that knows the answer can make that
-distinction visible.
+Planting the answer key turns a specificity check into a real benchmark, and what it exposes is that
+the \emph{observable} is what decides recoverability (\Cref{fig:epistasis}). Pairwise epistasis $E$
+acts on \emph{fitness}: it changes how large the clones carrying a combination grow, not the rate at
+which the events arise. In a paired design in which only $E$ differs, that effect is large and
+monotone --- raising $E$ from $0$ to $1.5$ expands the clones carrying the favoured pair from 3.5\% to
+42\% of the tumor (a 12-fold gain), plateauing at 59\% once the planted strength exceeds the
+division-rate cap $\log(b_{\max}/b_0)$, beyond which selection has no headroom to express it
+(\Cref{fig:epistasis}B). The probability that the pair ever \emph{arose} barely moves (0.03 to 0.09),
+as expected: that is a property of mutation, not of selection. Yet a binary ``which events did this
+patient ever acquire'' matrix --- what MHN consumes --- registers almost none of the 12-fold effect,
+and the reason is recurrent mutation rather than clone size \emph{per se}: a favoured combination
+arises many times independently within one tumor, so it is already present at $E=0$ and the column
+saturates. What selection changes is how much of the tumor those lineages occupy, which is precisely
+what a presence call discards.
+
+Running the tools themselves is what disciplines this claim. Real MHN, fitted to that binary matrix,
+does retain some signal: it ranks the planted pair first in 4 of 5 network draws versus 1 of 5 for an
+empty-$E$ control (mean rank 1.4 versus 2.0 of six pairs), though with five draws this is suggestive
+rather than significant (Fisher $p = 0.21$), and the control's own rank of 2.0 --- well above the
+chance value of 3.5 --- shows a substantial false-positive tendency that a benchmark without an
+empty-network arm would have mistaken for recovery. TreeMHN, which consumes the mutation trees and
+therefore retains clone sizes, does \emph{not} beat chance here (rank 3.6 for both planted and empty
+$E$); we expected the opposite, and read it as a power limit rather than a property of the method,
+since our trees average only 2.5 events over 36 patients whereas TreeMHN is designed for cohorts an
+order of magnitude larger. Sweeping the detection threshold on cancer-cell fraction
+(\Cref{fig:epistasis}C) shows why the regime is hard: at zero threshold the observable is saturated
+and at a high one it is empty, with only a narrow window between. These numbers are a floor for this
+regime, not an estimate for real cohorts --- our tumors are $\approx$130 cells, small enough that a
+clone arising late has little time to expand, so much of the frequency signal never develops. The
+mechanism (\Cref{fig:epistasis}B) is structural and should survive scaling; the recovery rates should
+not be extrapolated.
+
+Ordered constraints behave differently, and the distinction is the \emph{gating mode} --- a modelling
+choice we make explicit because the two are different generative stories. Under \emph{accessibility}
+gating (event $B$ cannot arise until $A$ is present; the CBN story) the constraint acts on the
+mutation process itself, survives into every observable, and is recovered perfectly in every network
+draw, from true and reconstructed trees alike. Under \emph{fitness} gating ($B$ arises freely but is
+inert until $A$; closer to what MHN assumes) the identical planted DAG leaves essentially no
+recoverable trace: the conjunction holds in only a small minority of lineages, and the apparent
+ordering merely reports which event is intrinsically faster, because event acquisition rates are
+themselves heterogeneous --- an emergent consequence of the copy-number landscape, since
+single-nucleotide variants are drawn per allele and a module on an amplified segment is hit more
+often. The practical reading is not that these methods are poor: it is that fitness epistasis and
+acquisition-rate epistasis are different objects, that cross-sectional event presence is the wrong
+observable for the former, and that a benchmark must state which generative story it planted. Only a
+simulator that knows the answer can make that distinction visible.
 
 \begin{figure}[tbp]
   \centering
   \includegraphics[width=\textwidth]{validation_epistasis.png}
   \caption{\textbf{Which planted evolutionary dependencies can cohort progression models recover?}
   A known network is planted in selection and a cohort is grown over it (shared network, private
-  evolution); recovery is scored against the answer key. \textbf{(A)} The planted interaction matrix
-  $E$ and conjunctive DAG. \textbf{(B)} Edge recall for pairwise epistasis versus cohort size, at two
-  detection thresholds, against the empty-network false-positive control: recall sits at chance and
-  does not improve with more patients, because a cross-sectional event-presence matrix is blind to how
-  large a clone grew. \textbf{(C)} Nor does planting the interaction more strongly help --- the
-  observable, not the effect size, is the limit. \textbf{(D)} Ordered constraints under the two gating
-  modes, scored on the two axes they admit (``$B$ requires $A$'' and ``$A$ precedes $B$''), from true
-  versus reconstructed trees. Accessibility gating acts on the mutation process and is recovered
-  perfectly; fitness gating leaves the same planted DAG with no recoverable trace.}
+  evolution); recovery is scored against the answer key with the real tools, each in its own
+  environment. \textbf{(A)} The planted interaction matrix $E$. \textbf{(B)} The mechanism, as a
+  paired comparison in which only $E$ differs: the planted interaction strongly and monotonically
+  expands the clones carrying the pair (given it arose --- the selection effect), while the
+  probability that the pair ever arose is unchanged (a mutation property), and the division-rate
+  clamp at $\log(b_{\max}/b_0)$ truncates the response. \textbf{(C)} Real MHN edge recovery versus
+  the detection threshold applied to cancer-cell fraction, against the empty-network false-positive
+  control; grey bands mark thresholds at which the observable is degenerate (a column with no
+  variance --- saturated at low threshold, empty at high). \textbf{(D)} The real tools on the same
+  cohorts: MHN (binary presence) versus TreeMHN (mutation trees, which retain clone sizes) versus the
+  co-occurrence floor. Ordered constraints under the two gating modes are scored on the two axes they
+  admit (``$B$ requires $A$'' and ``$A$ precedes $B$''): accessibility gating acts on the mutation
+  process and is recovered perfectly, whereas fitness gating leaves the same planted DAG with no
+  recoverable trace.}
   \label{fig:epistasis}
 \end{figure}
 
@@ -1088,7 +1118,13 @@ $\tau$-leaping updates. The network is drawn from a dedicated sub-stream of the 
 network (and so that changing the network does not perturb the gene-role layout); an explicit distinct
 layout seed draws an independent network for replicate studies. The true $E$, DAG, exclusive pairs and
 the realized per-lineage event order --- with events acquired in the same division recorded as tied,
-since no order between them exists --- are exposed as the answer key.
+since no order between them exists --- are exposed as the answer key. Two observables are exported
+from the same cohort: the binary patients $\times$ events matrix MHN consumes, in which an event is
+called when its cancer-cell fraction (summed across all carrying clones, as a variant-allele-frequency
+call would) exceeds a detection threshold; and the per-patient mutation trees TreeMHN consumes, which
+retain clone sizes. MHN and TreeMHN are run at their published defaults in dedicated environments, and
+because their $\Theta$ is a rate modifier rather than a fitness coefficient we score recovered
+\emph{edges} (symmetrized over the two directions, since $E$ is symmetric) rather than values.
 
 \subsection*{The \texttt{treatment} module}
 This module includes chemotherapy, targeted therapy and immunotherapy. Each treatment is applied
