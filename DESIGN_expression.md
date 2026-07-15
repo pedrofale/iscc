@@ -108,6 +108,73 @@ exp_g     = exp_{g,p} + exp_{g,m}        # and BAF_g = exp_{g,p} / exp_g  (the A
 
 Composes cleanly with the existing CNA dosage, F8 niche modifier (done), and the R12 program term.
 
+### 4.1 Parameter surface (exposed knobs)
+
+All of these are user-facing config (`PARAMETERS.md` + `tumor.diagnose()` once built). Ground truth for
+every one is surfaced (`program_truth`: `loading` matrix, per-cell `z`, gene→program map, `s_g`, SNV classes).
+
+**Program dictionary — `program_params`** (the `loading` matrix, K × G):
+| Knob | What it controls |
+|---|---|
+| `n_programs` (K) | how many gene programs exist |
+| `n_genes_per_program` | genes each program loads on (int or a distribution) |
+| `program_overlap` | how much programs SHARE genes (expected fraction of a program's genes also in another; 0 = disjoint modules, high = entangled) |
+| `loading_strength` (mean/sd) | effect size — the log-fold a program imposes on its genes |
+| `loading_sparsity` | within-program loading shape (uniform vs heavy-tailed: a few strong markers + many weak) — real programs are heavy-tailed |
+| **`program_genomic_scatter`** | whether a program's genes are drawn **scattered genome-wide (default, realistic)** or positionally clustered. **This knob operationalises programs ⟂ CNAs** — set it low to build a program that *mimics* a CNA and test whether tools can tell them apart |
+| `program_signs` | up-only vs bidirectional (up- and down-genes) |
+| `seeded_programs` | optionally anchor some programs to known signatures (cell cycle, EMT, and the existing F8 hypoxia program) so they're interpretable |
+
+**Per-cell activity — `activity_params`** (the `z` sampler; shared with R12):
+| Knob | What it controls |
+|---|---|
+| `n_active_programs_per_cell` | activity sparsity (how many programs are on in a cell) |
+| `activity_dist` + `activity_mean`/`activity_sd` | the distribution of `z` |
+| `activity_noise` | **within-clone** spread of `z` → within-clone heterogeneity (vs between-clone genotype structure) |
+| `celltype_program_bias` | baseline program activity per cell type (normal vs cancer) |
+
+**Genotype→program coupling (level 1)** — the R12 landscape deformation:
+| Knob | What it controls |
+|---|---|
+| `prop_program_regulator` | fraction of driver genes that are program regulators |
+| `program_bias_strength` | how strongly a regulator mutation shifts `z` for its target program |
+| `n_programs_per_regulator` | how many programs a regulator touches |
+
+**Dosage (axis A) — `dosage_params`:** `dosage_sensitivity_mean`/`_sd` (the per-gene `s_g` distribution),
+`dosage_saturation` (CN at which the response flattens), `allele_specific` (bool → emit per-allele
+expression + BAF).
+
+**SNV effects (axis B) — `snv_effect_params`:** class probabilities `p_lof` (→NMD) / `p_missense` /
+`p_splice` / `p_silent`; `nmd_strength` (expression retained on the NMD allele); **`snv_expression_effect`
+kept SEPARATE from the fitness `mut_effect`** (they're one knob today).
+
+**Sweep knobs (already exist)** — used by the validation below: SNV burden (`mutation_rate`,
+`n_snvs_per_allele`), CNA burden (`cnv_prob`, `amp_prob` → fraction-genome-altered).
+
+## 4.2 Validation — program recovery vs genotype burden (the scDEF benchmark)
+
+**The question:** can a gene-program / factor-inference tool recover the true programs from iscc's scRNA
+counts, and **how does that degrade as SNV/CNA burden rises?** iscc is uniquely able to ask this because
+it *knows* the true `loading` matrix and per-cell `z`.
+
+- **Flagship tool: scDEF** (hierarchical Bayesian factor model → gene signatures + hierarchical cell
+  states). **Comparator: cNMF** (the field-standard consensus-NMF GEP method); optionally Hotspot
+  (`detomaso_hotspot_2021`, already in the bib) for modules. Each in its own env (`iscc-scdef`, `iscc-cnmf`).
+- **Metrics vs ground truth:** per-true-program best-matching inferred factor (Hungarian matching) scored
+  by gene-set **Jaccard/AUPRC** and loading **cosine similarity**; **activity recovery** = correlation of
+  inferred factor activity vs true `z_k`; **#spurious factors** (matching no true program).
+- **The sweep (the point):** low → high **SNV burden** and low → high **CNA burden**, measuring recovery.
+- **The hypothesis worth testing (and a likely headline):** because CNAs are **contiguous**, a high CNA
+  burden induces *positional* co-expression — genes co-vary because they share a copy-number segment, not
+  a function. A factor model can absorb this as **spurious "programs"**, so true-program recovery should
+  degrade with fraction-genome-altered. The **diagnostic that distinguishes artefact from biology** is
+  exactly the orthogonality: are a factor's genes **positionally clustered** (CNA artefact) or **scattered**
+  (real program)? If this reproduces, it is a direct sibling of the PEtracer lineage–space confound —
+  *genotype structure confounds expression-program inference* — and belongs in the same "structure misleads
+  inference" arc. Report honestly if the effect is weak.
+- **Controls:** `program_genomic_scatter` low ⇒ a deliberately CNA-mimicking program (can tools separate
+  it?); burden ≈ 0 ⇒ recovery should be near-ceiling (sanity).
+
 ## 5. What each benchmark needs (traceability)
 
 | Tool | Needs from this doc |
@@ -116,6 +183,7 @@ Composes cleanly with the existing CNA dosage, F8 niche modifier (done), and the
 | **Numbat, CalicoST, STARCH** | **allele-specific CN + ASE / BAF in RNA** (axis A + emit alleles) |
 | **cardelino, PhylEx** | **SNV→expression** functional classes + ASE (axis B); SNVs callable in RNA (F7b, have) |
 | cell2location/RCTD, scVI/Harmony | **co-expression / program covariance** (axis C = R12) |
+| **scDEF** (flagship), cNMF, Hotspot | the **program layer itself** — true `loading` + per-cell `z` as ground truth, scored across the SNV/CNA-burden sweep (§4.2) |
 
 ## 6. Staged plan (when promoted)
 

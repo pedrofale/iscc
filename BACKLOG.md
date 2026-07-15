@@ -256,7 +256,13 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   - DNA cohort progression: **MHN, TreeMHN**, CBN/H-CBN, REVOLVER ⬜ (needs epistasis, R14)
   - pooled demultiplexing: vireo/souporcell (DNA), cell-hashing + scDblFinder (RNA) ✅
   - subclonal deconvolution (multi-region bulk): PyClone-VI / Pairtree / Clomial ◑ (oracle deconv done)
-- **Two PREREQUISITES — NOW IN PAPER 1 (decision 2026-07-14), design-first, not built:**
+  - **gene-program / GEP inference: `scDEF` ⬜ FLAGSHIP** (+ cNMF comparator, Hotspot optional) — ground
+    truth = the true `loading` matrix + per-cell `z` (needs the R13 program layer). Scored across a
+    **SNV/CNA-burden sweep**; hypothesis: contiguous CNA dosage induces *positional* pseudo-programs that
+    factor models absorb ⇒ recovery degrades with FGA (a sibling of the PEtracer confound). Handoff:
+    `handoffs/expression_programs.md`.
+- **Two PREREQUISITES — NOW IN PAPER 1 (decision 2026-07-14), design-first, not built. Handoffs ready:
+  `handoffs/expression_programs.md` (R13) and `handoffs/epistasis.md` (R14).**
   - **Expression realism** — `DESIGN_expression.md` (R13). **Expression is modelled as GENE PROGRAMS**
     (the backbone) with two gene-level genotype overlays: dosage (CNA, contiguous) and cis-SNV
     (gene-level). Genotype couples at 3 levels — program activity (driver→program = R12 deformation),
