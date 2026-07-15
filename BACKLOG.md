@@ -267,14 +267,22 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
     `handoffs/expression_programs.md`.
 - **Two PREREQUISITES — NOW IN PAPER 1 (decision 2026-07-14), design-first, not built. Handoffs ready:
   `handoffs/expression_programs.md` (R13) and `handoffs/epistasis.md` (R14).**
-  - **Expression realism** — `DESIGN_expression.md` (R13). **Expression is modelled as GENE PROGRAMS**
-    (the backbone) with two gene-level genotype overlays: dosage (CNA, contiguous) and cis-SNV
-    (gene-level). Genotype couples at 3 levels — program activity (driver→program = R12 deformation),
-    dosage, single-gene cis. **programs ⟂ CNAs** (functional/scattered vs positional/contiguous) is what
-    makes the benchmarks non-circular. **R12 and R13 SHARE one program/`z` implementation** (R12 = `z`
-    dynamics, R13 = `z`→counts + overlays) → the program layer is on the paper-1 critical path. Gates
-    clonealign/inferCNV *fairness*, **Numbat/CalicoST** (ASE), **cardelino/PhylEx** (SNV). Hard engine
-    prerequisite: **stop summing the `p`/`m` alleles** (ASE/BAF), shared with R10.
+  - **Expression realism** — `DESIGN_expression.md` (R13) ✅ **DONE 2026-07-15**. Expression is now a
+    GENE-PROGRAM backbone (`iscc/tumor/programs.py`: `ProgramDictionary` + the per-cell `z` sampler —
+    **the shared R12 cell-state model, built once**) with the gene-level overlays on top: per-gene
+    dosage sensitivity `s_g` + saturation (axis A), allele-resolved expression + **BAF in RNA**
+    (`cell_exp_p`/`cell_exp_m`/`cell_rna_baf` — the `p`/`m` alleles are no longer summed; unlocks
+    Numbat/CalicoST), and per-SNV functional classes LoF→NMD / missense / splice / silent with the
+    expression effect **decoupled from the fitness `mut_effect`** (unlocks cardelino/PhylEx). All three
+    genotype→program routes of §3.1 are wired: **route 1 (phenotype-mediated, the default)** reads the
+    evolved per-clone phenotype, so CINner drivers — and R14's epistasis multiplier — reach the
+    programs by construction; route 2 (direct regulators, no fitness change); route 3 (niche→program,
+    generalising F8). Off by default and **readout-only** (growth is byte-identical on/off — pinned by
+    `test_programs.py`); the landscape draws from the layout stream so programs are **comparable across
+    patients**. Ground truth on `tumor.program_truth`; `expression_params` documented in
+    `PARAMETERS.md`; `diagnose()` gained a `clone_is_state` check. Suite 490→511.
+    - **Benchmark** (`validation/validate_programs.py`, envs `iscc-scdef` + `iscc-cnmf`): see the
+      program-recovery item above.
   - **Epistasis** — `DESIGN_epistasis.md` (R14, **paper 1**) ✅ **DONE**. Pairwise `E`, a conjunctive
     dependency DAG (`fitness` | `accessibility` gating) and mutual exclusivity are plantable in
     `Selection` (off by default → bit-identical; cached per event set → tau-leap safe), drawn from the
@@ -374,16 +382,17 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   gained a "demes over-filling" check (now passing). (4) PEtracer confound (100%→32%) and multi-region
   spurious parallelism (0.219 vs 0.004) both re-confirmed after re-baselining; figures regenerated.
 
-## Engine bug — F8 gene programs are not comparable across patients (NEXT; small)
-- **F8's program designation uses the RUN seed, not the layout seed.** `prog_rng =
-  np.random.default_rng(self.seed + 9973)` (`count.py:142`) ⇒ `_hypoxia_genes` / `_cci_target_genes`
-  DIFFER between patients in a cohort, so "the hypoxia program" isn't comparable across tumours. F8
-  predates the cohort's `layout_seed` decoupling and was never migrated (the dedicated-stream intent was
-  right; the seed source is wrong). **Fix:** draw them from a `layout_seed`-derived sub-stream (see
-  `layout_rng`, `count.py:43-55`). Changes which arbitrary genes are hypoxia-responsive ⇒ regenerate the
-  F8/PEtracer figures (results should be statistically unchanged) + re-check `test_microenvironment.py`.
-  **Folded into `handoffs/expression_programs.md`** (R13 builds the general program layer and must use the
-  layout stream anyway) — do it there, or standalone if R13 slips.
+## Engine bug — F8 gene programs are not comparable across patients (DONE 2026-07-15; with R13)
+- **DONE — F8's program designation now draws from the LAYOUT stream.** `prog_rng` was
+  `default_rng(self.seed + 9973)` — the per-run EVOLUTION seed — so `_hypoxia_genes` /
+  `_cci_target_genes` DIFFERED between patients in a cohort and "the hypoxia program" was not
+  comparable across tumours (F8 predated the cohort's `layout_seed` decoupling and was never migrated;
+  the dedicated-stream intent was right, the seed source was wrong). Now
+  `default_rng(layout_seed + LAYOUT_OFFSET_F8_PROGRAMS)` (`constants.py` registry), so two patients
+  sharing a config share their niche programs exactly as they already share their oncogenes.
+  Pinned by `test_programs.py::test_f8_niche_programs_are_layout_seeded`. **The full suite stayed
+  green with no test changes** — `test_microenvironment.py`'s assertions are statistical, not pinned
+  to particular gene indices — confirming the "results statistically unchanged" expectation.
 - **General rule (user, 2026-07-15):** anything that is a property of the GENOME/landscape (gene→program
   map, `loading`, dosage sensitivities `s_g`, the epistasis network) comes from the **layout stream**;
   event-level draws stay on the run seed. Use **independent sub-streams per component**

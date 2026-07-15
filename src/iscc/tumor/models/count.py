@@ -30,7 +30,8 @@ from ..components.selection import Selection
 from ..components.epistasis import bits_to_events
 from ..components.cell import CancerCell, EpithelialCell, StromalCell, ImmuneCell
 from .glandular import bresenham_circumference, get_inside
-from ...constants import normal_names, DEFAULT_LAYOUT_SEED
+from ..programs import ProgramModel
+from ...constants import normal_names, DEFAULT_LAYOUT_SEED, LAYOUT_OFFSET_F8_PROGRAMS
 
 CELLTYPES = ["cancer", "epithelial", "stromal", "immune"]
 
@@ -41,7 +42,7 @@ class GenotypeTumor:
                  epithelial_cell_params=None, stromal_cell_params=None, immune_cell_params=None,
                  genome_mode="abstract", genome_spec=None,
                  update_mode="exact", tau=1.0, snapshot_every=1, microenv_params=None,
-                 layout_seed=None):
+                 layout_seed=None, expression_params=None):
         self.seed = seed
         # EVOLUTION rng (per-run: spatial seeding; grow() draws its own fresh default_rng(seed+step)).
         self.rng = np.random.default_rng(seed)
@@ -97,6 +98,7 @@ class GenotypeTumor:
             self.tau = cfg.get("tau", tau)
             self.snapshot_every = cfg.get("snapshot_every", snapshot_every)
             microenv_params = cfg.get("microenv_params", microenv_params)
+            expression_params = cfg.get("expression_params", expression_params)
             if cfg.get("layout_seed") is not None:
                 self.layout_seed = cfg["layout_seed"]
                 self.layout_rng = np.random.default_rng(self.layout_seed)
@@ -107,6 +109,14 @@ class GenotypeTumor:
         # F8 on or off at the same seed (the modifier draws from a dedicated rng). Fitness-coupling
         # of the microenvironment (hypoxia slowing division, etc.) is a FUTURE EXTENSION.
         self.microenv_params = microenv_params
+        # R13 gene-program expression (DESIGN_expression.md): OPTIONAL and OFF by default, on exactly
+        # the F8 discipline — absent -> None -> `make_cell_data` is bit-identical to the base engine,
+        # and GROWTH never reads it at all, so a tumour is byte-identical with the program layer on or
+        # off at a given seed. Programs are a READOUT: the genotype and the niche drive them, they
+        # never feed back into fitness (that loop is R8b/R12-v3). Built after `self.selection` below,
+        # since the model needs the gene count. See `iscc.tumor.programs`.
+        self.expression_params = expression_params
+        self.programs = None
 
         self.genome_params = genome_params
         self.n_segments = genome_params["n_segments"]
@@ -129,6 +139,16 @@ class GenotypeTumor:
         self.n_genes = self.selection.n_genes
         self._cancer_params = cancer_cell_params
 
+        # R13 program layer. The dictionary (gene->program map, `loading`, regulators, `s_g`) is part
+        # of the SHARED landscape and so draws from `layout_seed`'s program sub-stream — two patients
+        # with the same config get the SAME programs, exactly as they already get the same oncogenes.
+        # The per-cell `z` and each SNV's functional class are per-RUN events and draw from `seed`.
+        if self.expression_params is not None:
+            self.programs = ProgramModel(
+                n_genes=self.n_genes, segment_sizes=self.selection.segment_sizes,
+                layout_seed=self.layout_seed, run_seed=self.seed,
+                expression_params=self.expression_params)
+
         # per-cell-type baseline expression (part of the SHARED landscape -> layout_rng, so a shared
         # cell state has the same baseline profile across patients; see make_celltype_exps note in tumor.py)
         self.celltype_exps = {}
@@ -141,10 +161,16 @@ class GenotypeTumor:
         # F8 program designation: pick the hypoxia-responsive and CCI-receptor-target gene sets
         # (the ground-truth cell-extrinsic modules). A DEDICATED rng (not self.rng) keeps the
         # growth trajectory byte-identical whether F8 is on or off at a given seed.
+        # WHICH genes respond to hypoxia is a property of the GENOME, not of a run, so the stream is
+        # the LAYOUT one: two patients in a cohort must share their niche programs exactly as they
+        # share their oncogenes. (This previously read `self.seed + 9973` — the per-run EVOLUTION
+        # seed — which silently gave every patient a different hypoxia programme; F8 predates
+        # `layout_seed` and was never migrated. The dedicated-stream intent was right, the seed
+        # source was wrong.)
         self._hypoxia_genes = np.array([], dtype=int)
         self._cci_target_genes = np.array([], dtype=int)
         if self.microenv_params:
-            prog_rng = np.random.default_rng(self.seed + 9973)
+            prog_rng = np.random.default_rng(self.layout_seed + LAYOUT_OFFSET_F8_PROGRAMS)
             hyp = ((self.microenv_params.get("hypoxia") or {}) if isinstance(self.microenv_params, dict) else {})
             cci = ((self.microenv_params.get("cci") or {}) if isinstance(self.microenv_params, dict) else {})
             n_hyp = int(hyp.get("n_genes", 0))
@@ -725,16 +751,41 @@ class GenotypeTumor:
                                     self.selection.get_immune_resistant(),
                                     self.selection.get_treatment_resistant())
         snv_cache, cnv_cache, exp_cache, evo_cache = {}, {}, {}, {}
+        # R13: per-genotype allele-resolved expression + the per-clone program drive (routes 1+2).
+        # Both are per-CLONE, so they belong in this cache; the per-CELL `z` is drawn later.
+        exp_p_cache, exp_m_cache, drive_cache = {}, {}, {}
+        P = self.programs
         for gid in self.genotypes_counts:
             rep = self.genotypes[gid]
             snv = rep.get_snvs()
             snv_cache[gid] = snv
             cnv_cache[gid] = rep.get_cnvs()
-            if rep.type == "cancer":
-                rep.baseline_exp = self.celltype_exps["cancer"]
-                exp_cache[gid] = rep.get_exp(self.selection.mut_effects)
+            if P is None:
+                # legacy path — untouched, so output is bit-identical when the layer is off
+                if rep.type == "cancer":
+                    rep.baseline_exp = self.celltype_exps["cancer"]
+                    exp_cache[gid] = rep.get_exp(self.selection.mut_effects)
+                else:
+                    exp_cache[gid] = self.celltype_exps[rep.type]
             else:
-                exp_cache[gid] = self.celltype_exps[rep.type]
+                rep.baseline_exp = self.celltype_exps[rep.type]
+                if rep.type == "cancer":
+                    ep, em = rep.get_exp_alleles(dosage_sensitivity=P.dosage_sensitivity,
+                                                 snv_exp_effect=P.snv_exp_effect,
+                                                 dosage_saturation=P.dosage_saturation)
+                    # Route 1 reads the EVOLVED per-clone phenotype, so whatever moved fitness —
+                    # CINner drivers, and now R14's epistasis multiplier — propagates into the
+                    # programs by construction. Route 2 reads the clone's SNV VAFs.
+                    drive_cache[gid] = P.clone_drive(rep.evolutionary_parameters,
+                                                     rep.baseline_rates, snv)
+                else:
+                    # Normal cells are diploid and unmutated: a flat allele split, no genotype drive.
+                    half = self.celltype_exps[rep.type] / 2.0
+                    ep, em = half.copy(), half.copy()
+                    drive_cache[gid] = np.zeros(P.n_programs)
+                drive_cache[gid] = drive_cache[gid] + P.celltype_bias(rep.type)
+                exp_p_cache[gid], exp_m_cache[gid] = ep, em
+                exp_cache[gid] = ep + em
             # per-genotype evolutionary parameters + unique-mutated-driver tallies
             evo = dict(rep.evolutionary_parameters)
             evo["n_mut_onc"] = int((snv[onc_idx] > 0).sum())
@@ -749,7 +800,16 @@ class GenotypeTumor:
         deme_mod = self._microenv_deme_mod()
         mod_exp_cache = {}
 
+        # R13 route 3 — niche -> program: the F8 fields drive per-deme program activity, generalising
+        # F8's hard-wired hypoxia/CCI gene sets (which still apply via `deme_mod`; the two routes
+        # compose, see DESIGN_expression.md §3.1).
+        niche_drive = None
+        if P is not None and getattr(self, "microenv_truth", None) is not None:
+            niche_drive = P.niche_drive({"hypoxia": self.microenv_truth["hypoxia"],
+                                         "cci": self.microenv_truth["cci"]})
+
         rows_snv, rows_cnv, rows_exp, rows_evo, crd, types, demes_col, names = [], [], [], [], [], [], [], []
+        rows_exp_p, rows_exp_m, rows_drive = [], [], []
         i = 0
         for deme_idx, deme in enumerate(self.demes):
             r, c = self.deme_coords[deme_idx]
@@ -761,11 +821,34 @@ class GenotypeTumor:
                     if exp_row is None:
                         exp_row = exp_cache[gid] * deme_mod[deme_idx]
                         mod_exp_cache[(deme_idx, gid)] = exp_row
+                if P is not None:
+                    mod_row = 1.0 if deme_mod is None else deme_mod[deme_idx]
+                    ep_row, em_row = exp_p_cache[gid] * mod_row, exp_m_cache[gid] * mod_row
+                    drive_row = drive_cache[gid]
+                    if niche_drive is not None:
+                        drive_row = drive_row + niche_drive[deme_idx]
                 for _ in range(deme[gid]):
                     rows_snv.append(snv_cache[gid]); rows_cnv.append(cnv_cache[gid])
                     rows_exp.append(exp_row); rows_evo.append(evo_cache[gid])
                     crd.append((r, c)); types.append(gid); demes_col.append(deme_idx)
                     names.append(f"{cell_prefix}{i}"); i += 1
+                    if P is not None:
+                        rows_exp_p.append(ep_row); rows_exp_m.append(em_row)
+                        rows_drive.append(drive_row)
+
+        # R13: apply the per-CELL program activity. `z` is per-cell (cycling is a cell state, not a
+        # clone constant) while the genotype drive is per-clone — so the drive sets each clone's MEAN
+        # and `activity_noise` supplies the within-clone spread. One matmul over all cells keeps this
+        # affordable despite breaking the per-(deme, genotype) expression sharing.
+        Z = None
+        if P is not None and rows_exp_p:
+            drive = np.asarray(rows_drive, dtype=float)
+            Z = P.sample_z(drive, P.activity_rng())
+            prog_mult = P.gene_multiplier(Z)                      # (n_cells, n_genes)
+            ep = np.asarray(rows_exp_p) * prog_mult
+            em = np.asarray(rows_exp_m) * prog_mult
+            rows_exp_p, rows_exp_m = ep, em
+            rows_exp = ep + em
 
         idx = pd.Index(names)
         empty = np.empty((0, self.n_genes))
@@ -773,7 +856,8 @@ class GenotypeTumor:
             cell_evo=pd.DataFrame(rows_evo, index=idx),
             cell_snv=pd.DataFrame(np.array(rows_snv) if rows_snv else empty, index=idx, columns=gene_names),
             cell_cnv=pd.DataFrame(np.array(rows_cnv) if rows_cnv else empty, index=idx, columns=gene_names),
-            cell_exp=pd.DataFrame(np.array(rows_exp) if rows_exp else empty, index=idx, columns=gene_names),
+            # NB `len(...)`, not truthiness: with the program layer on, `rows_exp` is an ndarray.
+            cell_exp=pd.DataFrame(np.array(rows_exp) if len(rows_exp) else empty, index=idx, columns=gene_names),
             cell_crd=pd.DataFrame(crd if crd else np.empty((0, 2)), index=idx, columns=["row", "col"]).astype(int),
             cell_type=pd.DataFrame(types, index=idx, columns=["cell_id"]),
             cell_deme=pd.DataFrame(demes_col, index=idx, columns=["deme_id"]),
@@ -805,6 +889,26 @@ class GenotypeTumor:
             self.cell_data["cell_microenv"] = pd.DataFrame(
                 {"hypoxia_level": hyp[dcol] if dcol.size else np.array([]),
                  "cci_level": cci[dcol] if dcol.size else np.array([])}, index=idx)
+
+        # R13: the allele layers + the RNA BAF, and the per-cell program activity. Only added when
+        # the program layer is on, so the base schema is unchanged.
+        if P is not None:
+            if P.allele_specific:
+                ep = np.asarray(rows_exp_p) if len(rows_exp_p) else empty
+                em = np.asarray(rows_exp_m) if len(rows_exp_m) else empty
+                tot = ep + em
+                # BAF in RNA: the fraction of a gene's expression coming from the `p` homolog. 0.5 at
+                # a balanced diploid locus; an allelic imbalance (an amplified or lost homolog, or an
+                # NMD SNV in cis) pushes it away from 0.5. This is the layer Numbat / CalicoST read,
+                # and it is exactly what summing p+m in `get_exp` used to destroy.
+                baf = np.divide(ep, tot, out=np.full_like(tot, 0.5, dtype=float), where=tot > 0)
+                self.cell_data["cell_exp_p"] = pd.DataFrame(ep, index=idx, columns=gene_names)
+                self.cell_data["cell_exp_m"] = pd.DataFrame(em, index=idx, columns=gene_names)
+                self.cell_data["cell_rna_baf"] = pd.DataFrame(baf, index=idx, columns=gene_names)
+            if Z is not None and P.n_programs:
+                self.cell_data["cell_program"] = pd.DataFrame(
+                    Z, index=idx, columns=list(P.dictionary.program_names))
+            self.program_truth = P.truth()
         return self.cell_data
 
     # --- plotting (shared, engine-agnostic) ----------------------------------

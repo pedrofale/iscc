@@ -31,6 +31,8 @@ DEFAULT_THRESHOLDS = {
     "fga_max": 0.95,         # fraction-genome-altered above this -> CNA runaway
     "min_genes": 100,        # fewer than this many genes -> trivial genome
     "overfill_mult": 3.0,    # mean cells/occupied-deme above this x carrying_capacity -> demes over-filling
+    "within_clone_frac_min": 0.05,  # within-clone share of program-activity variance below this ->
+                                    # clone == expression state (R13; skipped when programs are off)
     "vaf_1f_rsq": None,      # reported only (context-dependent under selection); not a hard gate
 }
 
@@ -286,6 +288,38 @@ def hypoxia_contrast(tumor, core_frac=0.3, rim_frac=0.3):
 
 
 # --- diagnosis ---------------------------------------------------------------
+def program_within_clone_frac(tumor):
+    """Share of program-activity variance that is WITHIN clones rather than between them (R13).
+
+    The degenerate regime this catches is `z` collapsing to the per-clone drive, which needs ALL of
+    `activity_sd = 0`, `activity_noise = 0` and no activation mask (`n_active_programs_per_cell >=
+    n_programs`) — any one of the three supplies per-cell spread on its own. In that corner every
+    cell of a clone is transcriptionally identical, so **clone == expression state**. Clone-vs-state
+    clustering then becomes trivially easy and the integration benchmarks report a recovery that says
+    nothing about a real tumour, where a clone contains cycling and non-cycling cells alike.
+
+    Returns nan when the program layer is off or there is nothing to decompose.
+    """
+    cd = getattr(tumor, "cell_data", None)
+    if not cd or "cell_program" not in cd:
+        return float("nan")
+    Z = np.asarray(cd["cell_program"].values, dtype=float)
+    labels = np.asarray(cd["cell_type"]["cell_id"].values)
+    if Z.size == 0 or Z.shape[1] == 0:
+        return float("nan")
+    total = Z.var(axis=0).sum()
+    if not np.isfinite(total) or total <= 0:
+        return float("nan")
+    # within-clone variance = mean over clones of each clone's own variance, weighted by size
+    within = 0.0
+    n = len(labels)
+    for g in np.unique(labels):
+        m = labels == g
+        if m.sum() > 1:
+            within += (m.sum() / n) * Z[m].var(axis=0).sum()
+    return float(within / total)
+
+
 def diagnose(tumor, thresholds=None, verbose=False):
     """Compute phenotype metrics and flag degenerate regimes. See DESIGN_operating_envelope.md.
 
@@ -314,10 +348,13 @@ def diagnose(tumor, thresholds=None, verbose=False):
     except Exception:
         rsq = float("nan")
 
+    within_frac = program_within_clone_frac(tumor)
+
     metrics = dict(n_cancer=n_cancer, n_genes=n_genes, shannon=shannon, n_subclones=n_subclones,
                    tmb=tmb, tmb_frac=tmb_frac, driver_enrichment=enrich,
                    clone_confinement=confinement, fga=fga, mean_ploidy=ploidy,
-                   hypoxia_contrast=contrast, deme_occupancy=occupancy, vaf_1f_rsq=rsq)
+                   hypoxia_contrast=contrast, deme_occupancy=occupancy, vaf_1f_rsq=rsq,
+                   program_within_clone_frac=within_frac)
 
     checks = []
     advisories = []
@@ -346,7 +383,7 @@ def diagnose(tumor, thresholds=None, verbose=False):
     if extinct:
         # everything downstream is undefined on an empty tumour; skip the phenotype checks.
         for name in ("monoclonal", "low_mutation", "hypermutated", "well_mixed", "cna_runaway",
-                     "overfilled"):
+                     "overfilled", "clone_is_state"):
             checks.append(Check(name, True, None, None, skipped=True))
         checks.append(Check("no_gradient", True, None, None, skipped=True))
         diag = TumorDiagnosis(metrics, checks, advisories)
@@ -381,6 +418,20 @@ def diagnose(tumor, thresholds=None, verbose=False):
 
     checks.append(Check("cna_runaway", np.isnan(fga) or fga <= th["fga_max"], fga, th["fga_max"],
                         "CNA runaway / saturated genome: lower amp_prob / max_cn"))
+
+    # clone == expression state (R13) — only meaningful when the program layer is on.
+    if not np.isnan(within_frac):
+        checks.append(Check(
+            "clone_is_state", within_frac >= th["within_clone_frac_min"], within_frac,
+            th["within_clone_frac_min"],
+            "no within-clone expression heterogeneity (clone == cell state): raise activity_noise "
+            "or activity_sd, or set n_active_programs_per_cell < n_programs -- each supplies "
+            "per-cell spread, and with all three off `z` collapses to the per-clone drive, making "
+            "clone-vs-state clustering trivially easy and the integration/program benchmarks "
+            "meaningless"))
+    else:
+        checks.append(Check("clone_is_state", True, within_frac, th["within_clone_frac_min"],
+                            skipped=True))
 
     # demes over-filling — the carrying-capacity QC (DESIGN_crowding.md). With density-dependent
     # death the mean cells/occupied-deme should sit near carrying_capacity; a value far above K means

@@ -135,6 +135,80 @@ at **chance** by a cross-sectional method regardless of cohort size or how hard 
 "which events did this patient ever acquire" is blind to how large a clone grew. State which gating
 mode you used; the two are not interchangeable.
 
+### Gene programs / expression realism (R13, optional; **off by default**) — `expression_params`
+
+By default expression is the legacy model: genes are **independent** draws, a CNA adds ~1×baseline per
+copy (**linear dosage**), the SNV effect **reuses the fitness knob**, and the `p`/`m` alleles are
+**summed**. That is approximately the law the DNA↔RNA tools (clonealign, inferCNV, Numbat, cardelino)
+*invert*, so benchmarking them against it is partly circular. `expression_params` replaces all four.
+With it absent the engine is **unchanged**, and growth never reads it either way — programs are a
+**readout**, never fitness (that loop is R8b/R12-v3). See `DESIGN_expression.md`,
+`validation/validate_programs.py`.
+
+```
+exp_{g,a} = base_{type,g}/2 · exp(Σ_k z_k·loading_{k,g}) · dosage(CN_{g,a}; s_g) · snv(class_{g,a}) · niche_g
+```
+
+**Comparability:** the program dictionary, regulators and `s_g` are properties of the **genome**, so
+they come from `layout_seed` (its own sub-stream) — two patients sharing a config get the **same
+programs**, exactly as they already get the same oncogenes. Per-cell `z` and each SNV's class are
+per-**run** draws off `seed`. Ground truth is surfaced on `tumor.program_truth` (+ `cell_program`,
+`cell_exp_p`/`cell_exp_m`/`cell_rna_baf`).
+
+!!! warning "The allele path uses a different expression SCALE"
+    Legacy `get_exp` returns `base·(1+copies)` (wild-type diploid → **3×base**) while normal cells
+    bypass it at **1×base**. With `expression_params` on, cancer and normal sit on **one** scale
+    (wild-type diploid → `base` for both), which is what a malignant-vs-reference comparison needs.
+    Only applies when the layer is on, so nothing existing re-baselines.
+
+#### `program_params` — the dictionary (K × G `loading` matrix)
+| Knob | Default | Valid range | Outside the range |
+|---|---|---|---|
+| `n_programs` (K) | 8 | 5–30 | too few → no co-expression structure to recover; too many → each is tiny/unidentifiable |
+| `n_genes_per_program` | 30 | ~1–10% of the genome (int, or `[lo, hi]`) | too few → below a factor model's detection limit; too many → programs overlap into one blob |
+| `program_overlap` | 0.1 | 0–0.5 | 0 → disjoint modules (unrealistically easy); high → entangled, tools cannot separate them |
+| `loading_strength` | `{mean: 1.0, sd: 0.3}` | mean ~0.3–2 (log-fold) | ≪1 → programs vanish under Poisson noise; ≫2 → implausible fold-changes |
+| `loading_sparsity` | 1.0 | 0–2 (σ of a mean-1 lognormal) | 0 → every gene loads equally (unreal); high → one marker gene carries the program |
+| **`program_genomic_scatter`** | 1.0 | 0–1 | **the programs ⟂ CNAs knob.** 1 = scattered genome-wide (functional, realistic); **0 = a contiguous block that MIMICS a CNA** — the deliberate control for "can the tool tell a program from a copy-number segment?" |
+| `program_signs` | `up` | `up` \| `bidirectional` | `bidirectional` gives each program up- AND down-genes (more realistic) |
+| `seeded_programs` | `[proliferation, emt, hypoxia, drug_resistance, immune_evasion]` | any names | anchors programs so the phenotype/niche maps can address them **by name**; extras are unnamed background |
+
+#### `activity_params` — the per-cell `z` sampler (shared with R12)
+| Knob | Default | Valid range | Outside the range |
+|---|---|---|---|
+| `n_active_programs_per_cell` | all | 1–K | activity sparsity; ≥K → every program on in every cell |
+| `activity_dist` | `lognormal` | `lognormal` \| `normal` \| `gamma` | `normal` allows negative activity (a program can be repressed) |
+| `activity_mean` / `activity_sd` | 1.0 / 0.5 | mean ~0.5–2 | moment-matched to the chosen dist |
+| `activity_noise` | 0.0 | 0–1 | **within-clone** spread. 0 → every cell of a clone is transcriptionally identical (clone == state, benchmark trivially easy); high → drowns the between-clone signal |
+| `celltype_program_bias` | `{}` | per-type scalar or K-vector | baseline activity per cell type (normal vs cancer) |
+
+#### Genotype → program coupling — `coupling_params` (the three routes of §3.1)
+| Knob | Route | Default | Valid range | Outside the range |
+|---|---|---|---|---|
+| `phenotype_program_map` | **1** | `division_rate→proliferation`, `dispersal_rate→emt`, `treatment_resistance→drug_resistance`, `immune_resistance→immune_evasion` | any phenotype→program names | **the default coupling.** Reuses the existing role→phenotype map, so the chain is mutation → CINner fitness (incl. R14 epistasis) → phenotype → program → expression |
+| `phenotype_program_strength` | **1** | 0.5 | 0–2 | **0 ⇒ route 1 off** (fitness and expression decoupled); high → fitter clones become trivially separable in RNA, a *non-dosage* clone leak that confounds clonealign/inferCNV and can make scDEF conflate "proliferation" with "clone" |
+| `prop_program_regulator` | 2 | 0.0 | 0–0.1 | fraction of genes that shift `z` with **no** fitness change (R12 plasticity). Keep **sparse**: high → every clone is its own expression state |
+| `program_bias_strength` | 2 | 0.5 | 0–2 | how hard a mutated regulator shifts its program (graded by VAF) |
+| `n_programs_per_regulator` | 2 | 1 | 1–3 | how many programs one regulator touches |
+| `niche_program_map` / `niche_program_strength` | 3 | none / 1.0 | field→program names | generalises F8: `{hypoxia: hypoxia}` makes the O₂ field drive the hypoxia **program**. Composes with F8's own gene-level modifier |
+
+#### `dosage_params` — axis A (CNA → expression)
+| Knob | Default | Valid range | Outside the range |
+|---|---|---|---|
+| `dosage_sensitivity_mean` / `_sd` | 0.7 / 0.25 | mean 0–1, clipped per gene | per-gene `s_g`: **1 = full linear dosage** (exactly the law the tools assume — circular); **0 = fully buffered** (copy number invisible in RNA, inferCNV/clonealign have nothing to find). Intermediate is the realistic case and the confounder that makes those benchmarks fair |
+| `dosage_saturation` | none | 4–12 (**total** CN) | CN beyond which expression stops rising (real amplicons saturate); absent → unbounded linear |
+| `allele_specific` | `false` | bool | `true` → emit `cell_exp_p`/`cell_exp_m` + **`cell_rna_baf`** (the BAF in RNA that Numbat/CalicoST need). A deleted haplotype is silent regardless of `s_g` |
+
+#### `snv_effect_params` — axis B (SNV → expression), **separate from the fitness `mut_effect`**
+| Knob | Default | Valid range | Outside the range |
+|---|---|---|---|
+| `p_silent` / `p_missense` / `p_splice` / `p_lof` | 0.55 / 0.30 / 0.05 / 0.10 | normalised to 1 | class drawn per site (infinite-sites ⇒ one class per site, shared by every clone carrying it) |
+| `nmd_strength` | 0.2 | 0–1 | expression **retained** on a LoF allele (nonsense-mediated decay). With a CNA loss of the other homolog this gives a biallelic **two-hit** TSG for free |
+| `snv_expression_effect` | 0.5 | 0–2 | the splice-class expression shift. **Kept separate from the fitness effect** — they were one knob before R13, which entangled "advantageous" with "over-expressed" |
+
+Silent and missense leave mRNA abundance alone (a missense changes protein *activity*, not
+abundance — which is exactly why it is invisible to expression-based clone assignment).
+
 ### Microenvironment (F8, optional; off by default) — `microenv_params`
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|
@@ -171,6 +245,7 @@ tumor.diagnose(thresholds={"shannon_min": 1.0})
 | **demes over-filling** | mean cells/occupied-deme vs `carrying_capacity` (> 3×K) | raise `maximum_death_rate` to ≥ `max_birth_rate` (crowding cap not binding); skipped in the well-mixed regime |
 | **no O₂ gradient** | hypoxia core–rim contrast (< 0.05) | grow a larger tumour, raise consumption `k`, or lower diffusion `D` |
 | **CNA runaway** | fraction-genome-altered (> 0.95) | lower `amp_prob` / copy-number event rate |
+| **clone == cell state** (R13; skipped when programs are off) | within-clone share of program-activity variance (< 0.05) | raise `activity_noise` / `activity_sd`, or set `n_active_programs_per_cell` < `n_programs` — with all three off `z` collapses to the per-clone drive |
 | **trivial genome** | gene count (< 100) | raise `n_segments` × `segment_size` |
 
 Thresholds are deliberately lenient — they flag the clearly broken, not the merely unusual — and every

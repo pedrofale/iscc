@@ -299,6 +299,71 @@ class Cell(object):
             exp[self._seg_offsets[seg]:self._seg_offsets[seg + 1]] = seg_exp
         return exp
 
+    def get_exp_alleles(self, dosage_sensitivity=None, snv_exp_effect=None, dosage_saturation=None):
+        """Allele-resolved expression: return ``(exp_p, exp_m)`` instead of their sum.
+
+        This is R13's hard engine prerequisite (DESIGN_expression.md §2, §6-v2). The legacy
+        :meth:`get_exp` SUMS the ``p``/``m`` haplotypes, which throws away the B-allele frequency in
+        RNA — precisely the signal Numbat / CalicoST / cardelino invert. Keeping the two layers
+        separate emits a BAF (``exp_p / (exp_p + exp_m)``) and lets dosage and cis-SNV effects act
+        per allele, so a TSG with an NMD SNV on one homolog and a CNA loss of the other comes out
+        biallelically silenced *by construction* rather than by a special case.
+
+        Composition per haplotype ``a`` (baseline = ONE copy per haplotype, so a wild-type diploid
+        gene returns base/2 + base/2 = base):
+
+            exp_{g,a} = (base_g / 2) · dosage(c_a; s_g) · snv_effect_a
+
+        * ``dosage(c; s_g) = 1 + s_g·(min(c, sat) - 1)`` — per-gene dosage SENSITIVITY. s_g = 1 is
+          full linear dosage (the law inferCNV/clonealign assume); s_g = 0 is a fully buffered gene
+          whose copy number is invisible in RNA. Most genes sit in between, and that partial,
+          per-gene buffering is the confounder that makes those benchmarks a fair test rather than a
+          tautology. ``c == 0`` short-circuits to zero: no buffering rescues an absent gene.
+        * ``snv_effect_a`` averages each copy's per-site effect over that haplotype's copies, so the
+          effect is graded by how many copies actually carry the mutation.
+
+        All three arguments default to None = disabled (identity), so this reduces to a plain
+        allele-split dosage model when the R13 overlays are off.
+
+        NOTE this is deliberately NOT the scale of :meth:`get_exp`, which returns base·(1 + copies)
+        (a wild-type diploid gene -> 3·base) while normal cells bypass it entirely and sit at 1·base.
+        The allele path puts cancer and normal on ONE scale (wild-type diploid -> base for both),
+        which is what a malignant-vs-reference comparison (inferCNV) needs. It only ever applies when
+        `expression_params` is set, so nothing existing re-baselines.
+        """
+        exp_p = np.zeros(self.n_genes)
+        exp_m = np.zeros(self.n_genes)
+        # `dosage_saturation` is quoted in TOTAL copy number (what users think in); a haplotype
+        # carries half of it.
+        sat_allele = None if dosage_saturation is None else max(float(dosage_saturation) / 2.0, 0.0)
+
+        for seg in range(self.n_segments):
+            lo, hi = self._seg_offsets[seg], self._seg_offsets[seg + 1]
+            half_base = self.baseline_exp[lo:hi] / 2.0
+            s_g = None if dosage_sensitivity is None else np.asarray(dosage_sensitivity[lo:hi])
+            eff_g = None if snv_exp_effect is None else np.asarray(snv_exp_effect[lo:hi])
+
+            for hap, out in (("p", exp_p), ("m", exp_m)):
+                copies = self.genome[seg][hap]
+                c = len(copies)
+                if c == 0:
+                    continue                      # nullisomic haplotype contributes nothing
+                if s_g is None:
+                    dosage = float(c)             # no sensitivity model -> plain linear dosage
+                else:
+                    c_eff = c if sat_allele is None else min(c, sat_allele)
+                    dosage = np.maximum(1.0 + s_g * (c_eff - 1.0), 0.0)
+
+                if eff_g is None:
+                    snv_factor = 1.0
+                else:
+                    # mean over this haplotype's copies of (effect where mutated, else 1)
+                    bits = np.asarray(copies, dtype=bool)                 # (c, seg_size)
+                    snv_factor = np.where(bits, eff_g[None, :], 1.0).mean(axis=0)
+
+                out[lo:hi] = half_base * dosage * snv_factor
+        return exp_p, exp_m
+
     def expresses(self, coordinates, seg_mut_effects, thres=0.5):
         # coordinates: tuple (seg, pos)
         seg, pos = coordinates # unpack

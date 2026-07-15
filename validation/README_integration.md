@@ -49,7 +49,7 @@ The pattern for each tool (see `integration_common.py`):
 
 Document each new env's build recipe in the "Building the dedicated envs" section below.
 
-**Current envs:** `iscc-clonealign`, `iscc-infercnv`.
+**Current envs:** `iscc-clonealign`, `iscc-infercnv`, `iscc-scdef`, `iscc-cnmf`.
 **Planned (build the same way when the benchmark lands):** cohort/batch integration — `iscc-scvi`
 (scvi-tools / scANVI), `iscc-harmony` (harmonypy); demultiplexing — `iscc-demux` (vireo / souporcell);
 spatial deconvolution — `iscc-cell2location` / `iscc-tangram`. Self-contained validations (pure
@@ -77,8 +77,49 @@ RETICULATE_PYTHON=~/miniconda3/envs/iscc-clonealign/bin/python \
   -e 'remotes::install_github("kieranrcampbell/clonealign", upgrade="never", dependencies=FALSE)'
 ```
 
+```bash
+# --- cNMF (Python) — the flat GEP comparator for the R13 program benchmark ---
+conda create -y -n iscc-cnmf -c conda-forge python=3.10
+~/miniconda3/envs/iscc-cnmf/bin/pip install cnmf          # pulls scanpy/anndata/scikit-learn
+
+# --- scDEF (Python + jax) — the flagship program-inference tool ---
+# Built by cloning an existing working scDEF env (fastest reliable route on this machine):
+conda create -y -n iscc-scdef --clone scdef
+# From scratch instead:
+#   conda create -y -n iscc-scdef -c conda-forge python=3.10
+#   ~/miniconda3/envs/iscc-scdef/bin/pip install scdef
+```
+
+!!! warning "`iscc-scdef` is NOT pinned — resolve before submission"
+    The cloned env installs scDEF **editable**, pointing at the working checkout at
+    `~/projects/scDEF/src`. Three consequences, all bad for a reproducible benchmark:
+
+    * `scdef.__version__` and the dist metadata report **0.4.8**, while the checkout's
+      `pyproject.toml` declares **0.6.1** — so the version a paper would record is not the code that
+      ran.
+    * Editing that checkout silently changes iscc's benchmark numbers.
+    * scDEF was under review while this benchmark was written, and its authors' response letter notes
+      that they *"identified issues with the initial version of our model… fixed these problems, and
+      re-ran all the analyses"* — so 0.4.8 vs 0.6.1 may straddle a model fix.
+
+    Before publishing, decide which scDEF is the benchmark target and pin it
+    (`pip install scdef==<version>` into a fresh `iscc-scdef`), then record that version in the
+    manuscript. Override the interpreter meanwhile with `ISCC_SCDEF_PYTHON`.
+
 `clonealign_runner.R` points `reticulate` at its own env's Python (where `tensorflow` /
 `tensorflow_probability` live), so no extra configuration is needed.
+
+### Gene programs (scDEF / cNMF) — R13
+
+`validate_programs.py` (+ `programs_common.py`, `scdef_runner.py`, `cnmf_runner.py`) scores program
+recovery against iscc's true `loading` / per-cell `z` across an SNV/CNA-burden sweep. Both tools are
+optional — the script prints `SKIPPING (env absent)` and carries on. Override the interpreters with
+`ISCC_SCDEF_PYTHON` / `ISCC_CNMF_PYTHON`.
+
+```bash
+~/miniconda3/envs/iscc/bin/python validation/validate_programs.py --quick   # smoke test
+~/miniconda3/envs/iscc/bin/python validation/validate_programs.py --reps 3  # the paper figure
+```
 
 ## Running
 
