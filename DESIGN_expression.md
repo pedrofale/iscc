@@ -66,6 +66,51 @@ types (= program combinations) from clones (= CNA). Variance splits naturally: *
 structure = genotype (dosage + program-bias, shared within a clone); **within-clone** heterogeneity =
 the per-cell stochastic `z` — i.e. the shared-vs-private structure the cohort/integration benchmarks score.
 
+### 3.1 How mutations drive program activity (coupling level 1) — three routes
+
+*Answers "does a mutation that raises division rate also raise a specific program?" — **yes, via route 1**.*
+
+**Route 1 — phenotype-mediated (the DEFAULT).** iscc **already** computes a per-clone phenotype vector
+from the genotype via `Selection`'s role→phenotype map (`update_division_rate`, `update_dispersal_rate`,
+`update_immune_resistance`, `update_treatment_resistance`). Map each phenotype to a program and drive that
+program's activity from it. The causal chain becomes **mutation → (existing CINner fitness) → phenotype →
+program → expression** — mutations act *through* programs, which is the biology, and it needs **no new
+gene-tagging machinery**:
+
+| Phenotype (exists, per-clone) | ← gene role (exists) | → Program |
+|---|---|---|
+| `division_rate` | oncogene / TSG (driver) | proliferation / cell cycle |
+| `dispersal_rate` | dispersal genes | EMT / motility |
+| `treatment_resistance` | TR genes | drug resistance / efflux |
+| `immune_resistance` | IR genes | immune evasion |
+| (F8 hypoxia field — niche, not genotype) | — | hypoxia program (already built) |
+
+**Route 2 — direct program regulators (no fitness change).** A tagged subset of drivers shifts a program's
+activity *without* changing fitness — R12's plasticity cases (differentiation block, de-differentiation, an
+aberrant program switched on). This is what `prop_program_regulator` / `program_bias_strength` /
+`n_programs_per_regulator` are for.
+
+**Route 3 — niche → program.** F8 (hypoxia / CCI fields → program activity). Already built; generalise so
+any program can be tagged niche-responsive.
+
+**Mechanics (all routes):**
+- **Per-clone mean + per-cell noise.** A phenotype is per-clone, so it sets the *mean/probability* of its
+  program across that clone's cells; `activity_noise` supplies within-clone heterogeneity. Mechanistically
+  right — cycling is a per-cell state, not a clone constant.
+- **READOUT-ONLY, no feedback (v1).** phenotype → program → expression, never back into fitness.
+  Program→fitness is an eco-evolutionary loop (R8b / R12-v3); keep the F8 discipline.
+- **Keep the map SPARSE / graded.** Passengers and most drivers must be transcriptionally silent — else
+  every clone is its own expression state and clone-vs-state clustering becomes trivially easy.
+- Monotone, normalised map (program activity ∝ phenotype relative to its wild-type baseline).
+
+**Consequence — a deliberate fitness↔expression coupling (realistic; a new confound to MEASURE).** Fitter
+clones become transcriptionally distinct (high cell-cycle), so **clone identity leaks into expression via a
+NON-DOSAGE route**. This is real (proliferation is readable — Ki67 / cell-cycle scores) and it makes the
+benchmarks harder and fairer: a genuine confounder for clonealign/inferCNV, and for scDEF the proliferation
+program will *correlate with clonal structure* (a factor model may conflate "proliferation program" with
+"clone") — the same confound family as §4.2. It also makes the cohort's resistance story mechanistic:
+`treatment_resistance` → resistance program gives resistance a real RNA readout.
+
 The three pieces in detail (C = the backbone; A, B = the gene-level overlays):
 
 ### A. CNA → expression: dosage realism
@@ -144,12 +189,15 @@ oncogene/TSG layout. NB **F8 currently violates this** (`prog_rng = default_rng(
 | `activity_noise` | **within-clone** spread of `z` → within-clone heterogeneity (vs between-clone genotype structure) |
 | `celltype_program_bias` | baseline program activity per cell type (normal vs cancer) |
 
-**Genotype→program coupling (level 1)** — the R12 landscape deformation:
-| Knob | What it controls |
-|---|---|
-| `prop_program_regulator` | fraction of driver genes that are program regulators |
-| `program_bias_strength` | how strongly a regulator mutation shifts `z` for its target program |
-| `n_programs_per_regulator` | how many programs a regulator touches |
+**Genotype→program coupling (level 1)** — the three routes of §3.1:
+| Knob | Route | What it controls |
+|---|---|---|
+| `phenotype_program_map` | **1** | which evolved phenotype drives which program (`division_rate`→proliferation, `dispersal_rate`→EMT, `treatment_resistance`→resistance, `immune_resistance`→immune-evasion). The DEFAULT coupling — reuses the existing role→phenotype map |
+| `phenotype_program_strength` | **1** | how strongly a phenotype drives its program (0 ⇒ route 1 off; fitness and expression decoupled) |
+| `prop_program_regulator` | 2 | fraction of driver genes that are *direct* program regulators (shift `z` with **no** fitness change — R12 plasticity) |
+| `program_bias_strength` | 2 | how strongly a regulator mutation shifts `z` for its target program |
+| `n_programs_per_regulator` | 2 | how many programs a regulator touches |
+| `niche_program_map` / strength | 3 | which programs are niche-responsive (generalises F8's hypoxia/CCI) |
 
 **Dosage (axis A) — `dosage_params`:** `dosage_sensitivity_mean`/`_sd` (the per-gene `s_g` distribution),
 `dosage_saturation` (CN at which the response flattens), `allele_specific` (bool → emit per-allele

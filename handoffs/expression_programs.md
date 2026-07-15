@@ -28,8 +28,34 @@ and genes are INDEPENDENT (no co-expression). R13 fixes all four.
 === THE ARCHITECTURE (DESIGN_expression.md §3-§4) ===
 expr_{g,a} = base[type,g] · exp(Σ_k z_k·loading[k,g]) · dosage(CN_{g,a}; s_g) · cis_snv(class_{g,a}) · niche_g
   - PROGRAM layer (backbone): per-cell activity `z` over K programs; `loading` = gene×program matrix.
-  - Genotype couples at THREE separable levels: (1) program activity (driver→program bias), (2) gene
-    dosage (CNA — CONTIGUOUS), (3) single-gene cis SNV (allele-specific).
+  - Genotype couples at THREE separable levels: (1) program activity, (2) gene dosage (CNA —
+    CONTIGUOUS), (3) single-gene cis SNV (allele-specific).
+
+=== HOW MUTATIONS DRIVE PROGRAM ACTIVITY — three routes (DESIGN_expression.md §3.1) ===
+Do NOT tag programs onto a random subset of drivers and call it done — that would make fitness and
+expression independent, which is wrong. Use:
+- **Route 1 — phenotype-mediated (the DEFAULT; nearly free).** `Selection` ALREADY computes a per-clone
+  phenotype vector from the genotype (`update_division_rate`, `update_dispersal_rate`,
+  `update_immune_resistance`, `update_treatment_resistance`). Drive a program from each:
+  `division_rate`→proliferation/cell-cycle, `dispersal_rate`→EMT/motility,
+  `treatment_resistance`→drug-resistance, `immune_resistance`→immune-evasion. So the chain is
+  **mutation → (existing CINner fitness) → phenotype → program → expression**: a mutation that raises
+  division rate DOES raise the proliferation program, by construction, with no new gene tagging.
+  Knobs: `phenotype_program_map`, `phenotype_program_strength` (0 ⇒ route 1 off).
+- **Route 2 — direct program regulators (no fitness change):** a tagged driver subset shifts `z` without
+  touching fitness — R12's plasticity cases (differentiation block, de-differentiation, aberrant program).
+  Knobs: `prop_program_regulator`, `program_bias_strength`, `n_programs_per_regulator`.
+- **Route 3 — niche→program:** F8's hypoxia/CCI, already built; generalise so any program can be tagged
+  niche-responsive. Knobs: `niche_program_map`/strength.
+- **Mechanics:** phenotype is PER-CLONE ⇒ it sets the program's MEAN across that clone's cells, with
+  `activity_noise` giving within-clone spread (cycling is a per-cell state). **READOUT-ONLY — programs
+  must NEVER feed back into fitness** (that loop is R8b/R12-v3; keep the F8 discipline). Keep the map
+  **sparse/graded**: passengers and most drivers stay transcriptionally silent, else every clone becomes
+  its own expression state and clone-vs-state clustering is trivially easy.
+- **Consequence to expect and MEASURE:** route 1 deliberately couples fitness↔expression, so clone
+  identity leaks into expression via a NON-DOSAGE route. Realistic (proliferation is readable), and it
+  adds a genuine confounder for clonealign/inferCNV; for scDEF the proliferation program will correlate
+  with clonal structure (tools may conflate "proliferation program" with "clone"). Report it, don't hide it.
   - **programs ⟂ CNAs** (functional/scattered vs positional/contiguous) is what keeps the benchmarks
     non-circular — preserve it.
 - **SHARED WITH R12** (`DESIGN_celltrajectory.md`): the `z` + `loading` machinery IS R12's cell-state
@@ -44,7 +70,9 @@ expr_{g,a} = base[type,g] · exp(Σ_k z_k·loading[k,g]) · dosage(CN_{g,a}; s_g
   `seeded_programs` (anchor cell-cycle/EMT/the existing F8 hypoxia program).
 - `activity_params`: `n_active_programs_per_cell`, `activity_dist`/`activity_mean`/`activity_sd`,
   `activity_noise` (within-clone spread), `celltype_program_bias`.
-- genotype→program: `prop_program_regulator`, `program_bias_strength`, `n_programs_per_regulator`.
+- genotype→program (the three routes above): `phenotype_program_map` + `phenotype_program_strength`
+  (route 1, the default); `prop_program_regulator`, `program_bias_strength`, `n_programs_per_regulator`
+  (route 2); `niche_program_map`/strength (route 3).
 - `dosage_params`: `dosage_sensitivity_mean`/`_sd` (per-gene s_g), `dosage_saturation`, `allele_specific`.
 - `snv_effect_params`: `p_lof`(→NMD)/`p_missense`/`p_splice`/`p_silent`, `nmd_strength`, and
   `snv_expression_effect` kept SEPARATE from the fitness `mut_effect`.
