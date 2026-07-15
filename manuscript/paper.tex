@@ -743,6 +743,82 @@ quantifies because it has one.
   \label{fig:multiregion}
 \end{figure}
 
+\subsection*{A ground-truth benchmark: copy-number burden manufactures spurious expression
+``programs''}
+\label{sec:programs}
+The two preceding confounds are spatial. A third is genomic, and it reaches the other major class of
+single-cell method: gene-program (or gene-expression-program) inference, in which a factor model
+decomposes an expression matrix into recurrent programs --- cell cycle, hypoxia, EMT, stress --- and
+their per-cell activities~\cite{gavish_hallmarks_2023}. Asking whether such a decomposition is
+\emph{correct} requires knowing the true programs, which no real dataset provides. \texttt{iscc}
+models expression as exactly this object (\Cref{sec:methods_expression}): a per-cell activity vector
+$z$ over $K$ programs with a known gene$\times$program loading matrix, multiplied by per-gene copy
+dosage, cis-SNV effects and the niche field. Both the loadings and the per-cell $z$ are recorded, so
+an inferred factor can be matched to the program that generated it.
+
+The load-bearing property is an orthogonality: programs are \emph{functional} gene sets scattered
+across the genome, whereas copy-number alterations are \emph{contiguous} segments. This makes the
+benchmark non-circular --- \texttt{iscc}'s forward model is not the law these tools invert --- and it
+motivates a specific hypothesis. Because a CNA moves every gene on a segment together, a high
+copy-number burden should induce \emph{positional} co-expression: genes co-varying because they share
+a segment, not a function. A factor model has no notion of genome position and could absorb this as a
+program. We test this by sweeping copy-number burden (fraction of the genome altered, FGA) and, as a
+control axis, SNV burden, scoring the recovery of the true programs by \textbf{scDEF}, a hierarchical
+Bayesian factor model~\cite{ferreira_scdef_2024}, against \textbf{cNMF}, the field-standard consensus
+NMF method~\cite{kotliar_cnmf_2019}. Each true program is Hungarian-matched to its best inferred
+factor by loading cosine; a factor resembling \emph{no} true program is counted as spurious.
+
+The result is more specific than the hypothesis, and it splits in two. Recovery of the true programs
+is largely \emph{robust} to copy-number burden: as FGA rises from $0$ to $0.55$, scDEF's mean loading
+cosine falls only from $0.74$ to $0.69$ and cNMF's from $0.51$ to $0.40$ (\Cref{fig:programs}B). The
+real programs survive. What copy-number burden does instead is \emph{manufacture additional factors
+that are pure positional artifact}. The diagnostic that separates the two is the orthogonality
+itself: for each factor we measure the largest fraction of its top-loaded genes falling in a single
+genomic segment, against the null expected of a genuinely scattered gene set ($0.20$; $95$th
+percentile $0.28$). At zero burden every factor of both tools sits at that null. As FGA rises, each
+tool's \emph{matched} factors stay at the null ($0.20$--$0.22$ throughout, i.e.\ they remain real,
+scattered programs) while its \emph{spurious} factors climb far above it --- to $0.76$ for cNMF and
+$0.37$ for scDEF (\Cref{fig:programs}D). cNMF also invents more of them as burden grows (seven to
+nine of twelve fitted factors; \Cref{fig:programs}E). At high FGA, three-quarters of a spurious cNMF
+factor's signature genes are neighbours on one segment: it is a copy-number event wearing the label
+of a biological program, and nothing in the tool's output marks it as such.
+
+The SNV sweep is the control that makes this attributable to contiguity rather than to mutation
+burden in general. Across a four-fold range of SNV burden at zero FGA, recovery is flat for both
+tools ($0.71$--$0.74$ scDEF; $0.48$--$0.51$ cNMF) and the positional statistic never leaves the null
+($0.19$--$0.23$; \Cref{fig:programs}C,D). Scattered mutations, however many, do not create positional
+pseudo-programs; contiguous ones do. The two tools also trade off in an interesting way: scDEF
+recovers the loadings better and invents fewer and cleaner spurious factors, whereas cNMF recovers
+the per-cell \emph{activities} substantially better ($r \approx 0.80$ vs $0.44$ at zero burden).
+
+Two caveats are worth stating. First, the diagnostic detects \emph{position}, not artifact. Setting
+\texttt{program\_genomic\_scatter} to zero builds a deliberately CNA-mimicking program --- genuinely
+contiguous, with no CNAs present --- and its correctly matched factors then score $0.37$ (scDEF) and
+$0.42$ (cNMF), above the scattered null (\Cref{fig:programs}A2). A truly positional program is
+indistinguishable, by this statistic, from an absorbed CNA; the statistic is a flag for review, not a
+verdict. Second, the effect is measured on \texttt{iscc}'s counts, and its magnitude will depend on
+how strongly dosage propagates to expression, which \texttt{iscc} deliberately buffers per gene.
+Within those limits the finding is the same shape as the two confounds above --- genomic structure
+misleading an inference method that has no way to see it --- and it is only visible because the
+generating programs are known.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{validation_programs.png}
+  \caption{\textbf{Copy-number burden does not destroy true expression programs --- it manufactures
+  spurious, positionally clustered ones.} (A1) the ground-truth loading matrix: programs are
+  functional gene sets scattered genome-wide (red lines: segment boundaries), orthogonal to the
+  contiguous segments a CNA moves. (A2) the control: \texttt{program\_genomic\_scatter}$=0$ builds a
+  program that mimics a CNA. (B) true-program recovery degrades only mildly with fraction-genome-
+  altered (solid: loading cosine; dashed: per-cell activity correlation). (C) the control axis: SNV
+  burden leaves recovery flat, so the effect is due to \emph{contiguity}, not mutation burden. (D)
+  the diagnostic: the largest fraction of a factor's top genes in one segment. Matched factors of
+  both tools stay at the scattered null (dotted) at every burden; spurious factors rise far above it
+  as FGA grows ($0.76$ cNMF, $0.37$ scDEF), revealing them as absorbed copy-number events. (E) cNMF
+  invents more spurious factors as burden rises; scDEF does not. Three replicate seeds per point.}
+  \label{fig:programs}
+\end{figure}
+
 \subsection*{\texttt{iscc} implements conventional and adaptive therapy strategies}
 \label{sec:treatment}
 A central goal in computational oncology is to use detailed molecular profiles of tumors to
@@ -1125,6 +1201,47 @@ call would) exceeds a detection threshold; and the per-patient mutation trees Tr
 retain clone sizes. MHN and TreeMHN are run at their published defaults in dedicated environments, and
 because their $\Theta$ is a rate modifier rather than a fitness coefficient we score recovered
 \emph{edges} (symmetrized over the two directions, since $E$ is symmetric) rather than values.
+
+\subsection*{Gene-program expression}
+\label{sec:methods_expression}
+Expression is modelled as a program backbone with two gene-level genotype overlays. Each cell carries
+an activity vector $z$ over $K$ programs, and a program's effect on a gene is given by a
+gene$\times$program loading matrix, so that for allele $a$ of gene $g$
+\begin{equation*}
+\mathrm{exp}_{g,a} = \frac{\mathrm{base}_{t,g}}{2}\cdot
+  \exp\!\Big(\textstyle\sum_k z_k\,\mathrm{loading}_{k,g}\Big)\cdot
+  \mathrm{dosage}(\mathrm{CN}_{g,a};s_g)\cdot \mathrm{snv}(\mathrm{class}_{g,a})\cdot \mathrm{niche}_g ,
+\end{equation*}
+with total expression $\mathrm{exp}_g=\mathrm{exp}_{g,p}+\mathrm{exp}_{g,m}$ and the RNA B-allele
+frequency $\mathrm{exp}_{g,p}/\mathrm{exp}_g$. Keeping the two homologs separate, rather than summing
+them, is what makes allele-specific expression and the RNA BAF available at all --- the signal
+allele-aware integration methods depend on. Program genes are drawn scattered genome-wide by default
+(\texttt{program\_genomic\_scatter}), which is the orthogonality to contiguous copy-number segments
+that \Cref{sec:programs} exploits; setting it to zero builds a deliberately CNA-mimicking program.
+
+Copy number reaches expression through a per-gene dosage sensitivity $s_g\in[0,1]$ ---
+$\mathrm{dosage}=1+s_g(\mathrm{CN}-1)$, optionally saturating, and identically zero for a deleted
+homolog --- so the copy-number-to-expression law is only \emph{approximately} the linear one that
+dosage-based integration methods assume, and per-gene buffering is a genuine confounder rather than a
+tautology. Single-nucleotide variants are assigned a functional class per site (silent, missense,
+splice, or loss-of-function subject to nonsense-mediated decay), and their expression effect is
+parameterized \emph{separately} from their fitness effect; a loss-of-function variant on one homolog
+combined with copy loss of the other yields biallelic silencing without a special case.
+
+The genotype couples to programs at three separable levels. By default the coupling is
+phenotype-mediated: each evolved per-clone phenotype drives one program (division rate
+$\rightarrow$ proliferation, dispersal $\rightarrow$ EMT, treatment resistance $\rightarrow$ drug
+resistance, immune resistance $\rightarrow$ immune evasion), so a mutation raises a program through
+the fitness model already in place, and clone identity reaches expression by a route that is not
+dosage. A sparse tagged subset of genes may instead shift $z$ with no fitness change, and niche fields
+may drive designated programs. Programs are a readout only: they never feed back into fitness, so
+growth is unchanged whether the layer is on or off. A phenotype is a property of a clone and therefore
+sets a program's \emph{mean} across that clone's cells, while per-cell activity supplies within-clone
+heterogeneity; \texttt{tumor.diagnose()} flags the degenerate regime in which that spread vanishes and
+a clone becomes its own expression state. The program dictionary, the regulator assignment and $s_g$
+are properties of the genome and are drawn from the configuration-determined layout stream (in
+independent sub-streams), so patients sharing a configuration share their programs exactly as they
+share their driver landscape, while per-cell activity and each variant's class are per-run draws.
 
 \subsection*{The \texttt{treatment} module}
 This module includes chemotherapy, targeted therapy and immunotherapy. Each treatment is applied
