@@ -71,6 +71,10 @@ class Deme(object):
             self.tumor.register_birth(cell.genotype_id)
 
     def sample_event(self, cell, immune_cell_fraction=0., rng=None):
+        # BACKSTOP, not the primary rule: non-viable daughters are now rejected at birth in
+        # apply_event, so no live cancer cell should ever reach this check. Kept as a cheap guard
+        # against any future path that makes a living cell non-viable without going through
+        # Cell.mutate.
         if cell.evolutionary_parameters['viability'] == 0:
             return "death"
 
@@ -119,8 +123,20 @@ class Deme(object):
                 if mutate:
                     # mutate() returns True only if it actually created a new genotype; a
                     # saturated allele (infinite-sites exhausted) is a no-op, in which case
-                    # the daughter keeps the parent's genotype.
+                    # the daughter keeps the parent's genotype (and so stays viable).
                     if new_cell.mutate(rng, self.tumor.selection):
+                        # A daughter breaching the CINner viability limits is REJECTED AT BIRTH:
+                        # the division is consumed, but it yields no cell and registers no
+                        # genotype. This makes the limits a real invariant -- no cell breaching
+                        # them ever occupies a capacity slot, is counted by get_tumor_size, or
+                        # can be sampled into cell_data. mutate() (via
+                        # update_evolutionary_parameters) is the only thing that recomputes
+                        # viability, so this is the complete seam: founders and normals are
+                        # viable by construction, and treatment moves only death_rate /
+                        # immune_resistance. Matches GenotypeTumor._is_viable, whose docstring
+                        # carries the full rationale.
+                        if new_cell.evolutionary_parameters['viability'] == 0:
+                            return
                         self.genotypes_parents[new_cell.genotype_id] = new_cell.parent.genotype_id
                         self.tumor.register_parent(new_cell.genotype_id, new_cell.parent.genotype_id)
                     self.add_cell(new_cell, genotype_id=new_cell.genotype_id)

@@ -67,7 +67,7 @@ Defaults are those in `notebooks/example_config.yaml`. Set them under the matchi
 
 CINner-style hard limits on what genome is compatible with life. A daughter breaching **any** of
 them is not born: the division is consumed but yields no cell (`Selection.update_viability`;
-enforced in **both** engines — `GenotypeTumor._is_viable` and `Deme.sample_event`). The defaults
+enforced at birth in **both** engines — `GenotypeTumor._is_viable` and `Deme.apply_event`). The defaults
 are deliberately loose — the exact engine never reaches them at the shipped defaults, so they only
 matter once you tighten them or push amplification/deletion hard.
 

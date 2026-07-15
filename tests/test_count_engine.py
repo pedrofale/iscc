@@ -364,3 +364,145 @@ def test_default_nullisomy_can_bind_under_tau():
     # every rejection is a nullisomy breach (ploidy/cn stay far from 6/12 at defaults)
     assert all(gs["nullisomy_count"] > 2 for gs in rejected)
     assert all(gs["ploidy"] <= 6 and gs["highest_cn"] <= 12 for gs in rejected)
+
+
+# --- the CELL engine enforces the same limits, the same way -----------------------------------
+# GlandularTumor used to check viability LAZILY, in Deme.sample_event: a non-viable daughter was
+# added to the deme and only died when it was next *sampled* for an event. While it waited it held
+# a carrying-capacity slot, counted towards get_tumor_size, and could be sampled into cell_data --
+# so genomes breaching the configured limits leaked into the emitted assay data. It now rejects at
+# birth like the count engine (see Deme.apply_event / GenotypeTumor._is_viable), which makes the
+# limits a real invariant in BOTH engines. The lazy check remains as a backstop only.
+
+
+def _grow_cell_counting_rejections(selection_params, seed=1, steps=400, cancer=None):
+    """Grow a CELL-level tumour and report how many daughters the viability gate rejected.
+
+    The cell engine has no ``_is_viable`` seam to spy on -- its gate reads the ``viability`` that
+    ``Cell.mutate`` already computed. ``Selection.update_viability`` is called only from
+    ``update_evolutionary_parameters``, which in turn runs only inside ``Cell.mutate``, so a 0
+    verdict during growth is exactly one rejected daughter.
+    """
+    from iscc.tumor.components.selection import Selection
+
+    rejected = []
+    real = Selection.update_viability
+
+    def spy(self, genome_summary, **kwargs):
+        v = real(self, genome_summary, **kwargs)
+        if v == 0:
+            rejected.append(dict(genome_summary))
+        return v
+
+    Selection.update_viability = spy
+    try:
+        t = GlandularTumor(seed=seed, genome_params=VIAB_GENOME, selection_params=selection_params,
+                           cancer_cell_params=cancer or VIAB_CANCER,
+                           epithelial_cell_params=EPITHELIAL_CELL_PARAMS,
+                           stromal_cell_params=STROMAL_CELL_PARAMS,
+                           immune_cell_params=IMMUNE_CELL_PARAMS,
+                           deme_params=VIAB_DEME, grid_size=VIAB_SPATIAL["grid_size"],
+                           structure_radius=0)
+        t.grow(n_steps=steps, seed=seed)
+    finally:
+        Selection.update_viability = real
+    return t, rejected
+
+
+def _living_cancer_cells(t):
+    return [c for deme in t.deme_list for c in deme.cells if c.type == "cancer"]
+
+
+def test_cell_engine_rejects_non_viable_daughters_at_birth():
+    """The reported reproducer. Before the fix this ended with worst ploidy 2.75 (limit 2.5),
+    worst highest_cn 4 (limit 3) and 72 non-viable cells still alive in the demes."""
+    limits = {"prop_driver": 0.1, "driver_effects": 1.2,
+              "max_ploidy": 2.5, "max_cn": 3, "max_nullisomy": 0}
+    t, rejected = _grow_cell_counting_rejections(limits)
+    assert rejected, "limits never reached -- the test config no longer exercises them"
+    living = _living_cancer_cells(t)
+    assert living, "tumour died out -- the reproducer no longer exercises the limits"
+
+    # the invariant: no living cell breaches any limit, and none is merely awaiting its lazy death
+    assert max(c.genome_summary["ploidy"] for c in living) <= 2.5
+    assert max(c.genome_summary["highest_cn"] for c in living) <= 3
+    assert max(c.genome_summary["nullisomy_count"] for c in living) == 0
+    assert all(c.evolutionary_parameters["viability"] == 1 for c in living)
+    assert all(t.selection.update_viability(c.genome_summary) == 1 for c in living)
+
+
+def test_cell_engine_never_emits_a_breaching_cell():
+    """The point of rejecting at birth: breaching genomes cannot reach the assay data.
+
+    Under the lazy rule a doomed cell was sampled into cell_data for as long as it happened to
+    dwell in the deme, so make_cell_data could emit genomes that breach the configured limits.
+    """
+    limits = {"prop_driver": 0.1, "driver_effects": 1.2,
+              "max_ploidy": 2.5, "max_cn": 3, "max_nullisomy": 0}
+    t, rejected = _grow_cell_counting_rejections(limits)
+    assert rejected, "limits never reached -- the test config no longer exercises them"
+    t.make_cell_data()
+    evo = t.cell_data["cell_evo"]
+    assert len(evo), "no cells emitted -- the test no longer exercises the emitted data"
+    assert (evo["viability"] == 1).all()
+
+
+def test_cell_engine_gate_fires_on_every_limit():
+    """The gate must reject on ALL FOUR limits, not just the ones a run happens to reach.
+
+    The cell engine's gate is the `viability` that Selection.update_viability wrote during
+    mutate(), so this pins the same four-limit coverage the count engine's gate has.
+    """
+    t = GlandularTumor(seed=1, genome_params=VIAB_GENOME,
+                       selection_params={"max_ploidy": 6, "max_cn": 12, "max_nullisomy": 2,
+                                         "max_mut_drivers": 1000},
+                       cancer_cell_params=VIAB_CANCER,
+                       epithelial_cell_params=EPITHELIAL_CELL_PARAMS,
+                       stromal_cell_params=STROMAL_CELL_PARAMS,
+                       immune_cell_params=IMMUNE_CELL_PARAMS,
+                       deme_params=VIAB_DEME, grid_size=VIAB_SPATIAL["grid_size"],
+                       structure_radius=0)
+    founder = _living_cancer_cells(t)[0]
+    assert t.selection.update_viability(founder.genome_summary) == 1  # diploid founder is viable
+
+    for key, breach in (("ploidy", 6.5), ("highest_cn", 13),
+                        ("nullisomy_count", 3), ("n_mutated_drivers", 1001)):
+        gs = dict(founder.genome_summary)
+        gs[key] = breach
+        assert t.selection.update_viability(gs) == 0, f"gate ignores a {key} breach"
+
+
+def test_cell_engine_default_limits_are_a_noop():
+    """At the shipped defaults (ploidy 6 / cn 12 / nullisomy 2 / drivers 1000) the cell engine never
+    reaches a limit, so the birth gate never fires and no cell-level baseline can move.
+
+    This is the guarantee that makes the change safe to land: the gate only READS a value that
+    mutate() already computed and draws no randomness, so a gate that never fires leaves the
+    trajectory bit-identical. Configs where the limits DO bind shift on purpose -- that is the fix.
+    """
+    from iscc.tumor.components.selection import Selection
+
+    rejected = []
+    real = Selection.update_viability
+
+    def spy(self, genome_summary, **kwargs):
+        v = real(self, genome_summary, **kwargs)
+        if v == 0:
+            rejected.append(dict(genome_summary))
+        return v
+
+    Selection.update_viability = spy
+    try:
+        for seed in range(3):
+            t = GlandularTumor(seed=seed, genome_params={"n_segments": 5, "segment_size": 200},
+                               selection_params={}, cancer_cell_params={},
+                               epithelial_cell_params=EPITHELIAL_CELL_PARAMS,
+                               stromal_cell_params=STROMAL_CELL_PARAMS,
+                               immune_cell_params=IMMUNE_CELL_PARAMS,
+                               deme_params={"carrying_capacity": 8, "initial_cancer_cells": 5},
+                               grid_size=15, structure_radius=0)
+            t.grow(n_steps=400, seed=seed)
+            assert t.get_tumor_size() > 0
+    finally:
+        Selection.update_viability = real
+    assert rejected == [], f"viability gate fired at shipped defaults: {rejected}"

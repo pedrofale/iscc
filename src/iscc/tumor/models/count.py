@@ -277,26 +277,26 @@ class GenotypeTumor:
         Selection.update_viability). A non-viable daughter is REJECTED AT BIRTH: the division is
         still consumed, but it yields no cell and no genotype is registered.
 
-        WHY REJECT-AT-BIRTH, AND HOW IT DIFFERS FROM THE CELL ENGINE. The cell-level engine checks
-        the same limits lazily, in ``Deme.sample_event``: the non-viable daughter is added to the
-        deme and only dies when it is next *sampled* for an event. Both rules agree on the long-run
-        dynamics -- the division yields no surviving descendant either way, and the event is
-        consumed either way, so the parent pays for it identically. They differ only in a
-        transient: under the lazy rule the doomed cell occupies a carrying-capacity slot until it
-        happens to be picked. That dwell time is not a modelled quantity -- it is set by the deme's
-        total event rate, so it has no parameter behind it and no biological meaning, and while it
-        lasts the cell is counted by ``get_tumor_size`` and can be sampled into ``cell_data``,
-        i.e. genomes that breach the configured limits leak into the emitted assay data. Rejecting
-        at birth instead gives the invariant the limits are documented to provide: no cell
-        breaching them ever exists. It is also the complete seam -- ``update_evolutionary_parameters``
-        (the only thing that computes viability) runs only inside ``Cell.mutate``, so a successful
-        mutation is the ONLY way a genotype can become non-viable. Founders and normal cells are
-        viable by construction, in this engine and the cell engine alike.
+        WHY REJECT-AT-BIRTH. The alternative is to check lazily, when a cell is next *sampled* for
+        an event -- which is what the cell-level engine used to do. Both rules agree on the long-run
+        dynamics: the division yields no surviving descendant either way, and the event is consumed
+        either way, so the parent pays for it identically. They differ only in a transient: under
+        the lazy rule the doomed cell occupies a carrying-capacity slot until it happens to be
+        picked. That dwell time is not a modelled quantity -- it is set by the deme's total event
+        rate, so it has no parameter behind it and no biological meaning -- and while it lasts the
+        cell is counted by ``get_tumor_size`` and can be sampled into ``cell_data``, i.e. genomes
+        that breach the configured limits leak into the emitted assay data. Rejecting at birth
+        instead gives the invariant the limits are documented to provide: no cell breaching them
+        ever exists. It is also the complete seam -- ``update_evolutionary_parameters`` (the only
+        thing that computes viability) runs only inside ``Cell.mutate``, so a successful mutation is
+        the ONLY way a genotype can become non-viable. Founders and normal cells are viable by
+        construction, in this engine and the cell engine alike.
 
-        The cell engine's transient is left as-is (fixing it there would shift cell-level
-        baselines for a strictly separate reason); the two engines' *statistical* equivalence --
-        survivor sizes in the same ballpark -- is unaffected and still covered by
-        tests/test_count_engine.py.
+        BOTH ENGINES NOW REJECT AT BIRTH. ``Deme.apply_event`` applies the same rule for the
+        cell-level engine (its ``sample_event`` viability check survives only as a backstop), so the
+        limits are a true invariant everywhere rather than a property of this engine alone. That
+        change was a no-op at the shipped defaults, where the limits are never reached -- see
+        tests/test_count_engine.py::test_cell_engine_default_limits_are_a_noop.
         """
         return self.selection.update_viability(rep.genome_summary) != 0
 
