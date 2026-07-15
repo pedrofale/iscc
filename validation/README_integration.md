@@ -82,29 +82,27 @@ RETICULATE_PYTHON=~/miniconda3/envs/iscc-clonealign/bin/python \
 conda create -y -n iscc-cnmf -c conda-forge python=3.10
 ~/miniconda3/envs/iscc-cnmf/bin/pip install cnmf          # pulls scanpy/anndata/scikit-learn
 
-# --- scDEF (Python + jax) — the flagship program-inference tool ---
-# Built by cloning an existing working scDEF env (fastest reliable route on this machine):
-conda create -y -n iscc-scdef --clone scdef
-# From scratch instead:
-#   conda create -y -n iscc-scdef -c conda-forge python=3.10
-#   ~/miniconda3/envs/iscc-scdef/bin/pip install scdef
+# --- scDEF (Python + jax) — the flagship program-inference tool. PINNED: see the note below ---
+conda create -y -n iscc-scdef -c conda-forge python=3.10
+~/miniconda3/envs/iscc-scdef/bin/pip install "scdef==0.6.1"     # pulls jax / scanpy / anndata
 ```
 
-!!! warning "`iscc-scdef` is NOT pinned — resolve before submission"
-    The cloned env installs scDEF **editable**, pointing at the working checkout at
-    `~/projects/scDEF/src`. Three consequences, all bad for a reproducible benchmark:
+!!! note "`iscc-scdef` is pinned to scDEF **0.6.1** — keep it that way"
+    **The benchmark's scDEF version of record is 0.6.1** (PyPI), verified with
+    `python -c "import scdef; print(scdef.__version__)"` → `0.6.1`, loading from the env's own
+    `site-packages`.
 
-    * `scdef.__version__` and the dist metadata report **0.4.8**, while the checkout's
-      `pyproject.toml` declares **0.6.1** — so the version a paper would record is not the code that
-      ran.
-    * Editing that checkout silently changes iscc's benchmark numbers.
-    * scDEF was under review while this benchmark was written, and its authors' response letter notes
-      that they *"identified issues with the initial version of our model… fixed these problems, and
-      re-ran all the analyses"* — so 0.4.8 vs 0.6.1 may straddle a model fix.
+    This is deliberate, and the earlier state is worth remembering as a cautionary tale: the env was
+    first built by cloning a local `scdef` env, which turned out to be an **editable install pointing
+    at the working checkout** `~/projects/scDEF/src`. It reported version **0.4.8** (both
+    `__version__` and the dist metadata) while executing the checkout's **0.6.1** source — so the
+    version a paper would have recorded was not the code that ran, and any edit to that checkout
+    would have silently changed iscc's published numbers. scDEF was also mid-revision at the time,
+    with a model fix between those versions, so the discrepancy was not cosmetic.
 
-    Before publishing, decide which scDEF is the benchmark target and pin it
-    (`pip install scdef==<version>` into a fresh `iscc-scdef`), then record that version in the
-    manuscript. Override the interpreter meanwhile with `ISCC_SCDEF_PYTHON`.
+    Do not rebuild this env by cloning a development env. Pin the version, and update the number here
+    **and in the manuscript Methods** together if it ever changes. Override the interpreter with
+    `ISCC_SCDEF_PYTHON` for local experiments only.
 
 `clonealign_runner.R` points `reticulate` at its own env's Python (where `tensorflow` /
 `tensorflow_probability` live), so no extra configuration is needed.

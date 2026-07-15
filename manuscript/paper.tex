@@ -763,9 +763,10 @@ motivates a specific hypothesis. Because a CNA moves every gene on a segment tog
 copy-number burden should induce \emph{positional} co-expression: genes co-varying because they share
 a segment, not a function. A factor model has no notion of genome position and could absorb this as a
 program. We test this by sweeping copy-number burden (fraction of the genome altered, FGA) and, as a
-control axis, SNV burden, scoring the recovery of the true programs by \textbf{scDEF}, a hierarchical
-Bayesian factor model~\cite{ferreira_scdef_2024}, against \textbf{cNMF}, the field-standard consensus
-NMF method~\cite{kotliar_cnmf_2019}. Each true program is Hungarian-matched to its best inferred
+control axis, SNV burden, scoring the recovery of the true programs by \textbf{scDEF} (v0.6.1), a
+hierarchical Bayesian factor model~\cite{ferreira_scdef_2024}, against \textbf{cNMF} (v1.7.1), the
+field-standard consensus NMF method~\cite{kotliar_cnmf_2019}. Each tool is run at its published
+defaults in its own pinned environment. Each true program is Hungarian-matched to its best inferred
 factor by loading cosine; a factor resembling \emph{no} true program is counted as spurious.
 
 The result is more specific than the hypothesis, and it splits in two. Recovery of the true programs

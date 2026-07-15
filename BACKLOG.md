@@ -280,10 +280,14 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
     makes correctly-matched factors score 0.37/0.42 too — a flag for review, not a verdict); magnitude
     depends on the per-gene dosage buffering `s_g`. **Unplanned:** scDEF wins on loadings + fewer/cleaner
     spurious factors, but cNMF recovers per-cell ACTIVITIES far better (r≈0.80 vs 0.44).
-    **OPEN:** `iscc-scdef` is not version-pinned (editable install of `~/projects/scDEF`, reports 0.4.8
-    while the checkout says 0.6.1, and scDEF was mid-revision) — see the warning in
-    `validation/README_integration.md`; and `ferreira_scdef_2024`'s venue/DOI are deliberately blank
-    (unpublished). Both need a human decision before submission.
+    **RESOLVED 2026-07-15 (user decision):** `iscc-scdef` is now **pinned to scDEF 0.6.1** from PyPI
+    (rebuilt from scratch — no longer an editable clone of `~/projects/scDEF`, which had reported
+    0.4.8 while executing 0.6.1 source). `__version__`, the dist metadata and the load path all agree,
+    and both runner paths (plain + `batch_key`) were re-verified against the released package. The
+    version of record is stated in `validation/README_integration.md` and in the manuscript Results
+    (scDEF v0.6.1, cNMF v1.7.1) — **update both together if it ever changes**. `ferreira_scdef_2024`
+    now cites the **bioRxiv preprint** (v2, 2024-01-04, doi 10.1101/2022.10.15.512383), confirmed
+    against the bioRxiv API; no journal DOI exists yet, so re-check at submission.
   - **DONE (with a caveat) — cohort-level: shared vs patient-specific programs** (§4.3,
     `validation/validate_programs_cohort.py` → `manuscript/figures/validation_programs_cohort.png`).
     Cohort now forwards `expression_params` + `microenv_params` (it forwarded NEITHER — F8 was
