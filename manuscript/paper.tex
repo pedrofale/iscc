@@ -974,6 +974,64 @@ which concentrates selection on specific chromosome arms, is the sharper substra
 \end{figure}
 
 
+\subsection*{A ground-truth benchmark: which planted evolutionary dependencies can cohort progression models recover?}
+\label{sec:epistasis}
+Cohort progression models --- MHN~\cite{schill_modelling_2020}, TreeMHN~\cite{luo_joint_2023},
+conjunctive Bayesian networks~\cite{gerstung_quantifying_2009} and
+REVOLVER~\cite{caravagna_detecting_2018} --- pool many tumors to recover a single \emph{network} of
+promoting, inhibiting and ordering dependencies between evolutionary events. Benchmarking them needs
+a known network, which a real cohort never provides. \texttt{iscc}'s selection is additive by default
+(fitness reads the \emph{count} of mutated drivers), so its true network is empty and such a benchmark
+would measure only a method's false-positive rate. We therefore extended selection so that a genotype's
+fitness depends on \emph{which} events co-occur: log fitness gains
+$\sum_i \beta_i x_i + \sum_{i<j} E_{ij} x_i x_j$ over the genotype's event vector $x$, optionally with
+a conjunctive dependency DAG (\Cref{sec:methods_tumor}). The interaction is a pure function of the
+event set, so it caches per genotype and is unchanged under tau-leaping; with no network configured
+the engine is bit-identical to the additive model. Crucially the network is drawn from the
+\emph{layout} stream, so every patient in a cohort evolves under the \emph{same} network --- the
+premise that makes pooling patients to fit one model well-posed at all --- while their evolution stays
+private.
+
+Planting the answer key turns a specificity check into a real benchmark, and the result is a negative
+one that we think is the more useful outcome (\Cref{fig:epistasis}). Pairwise epistasis $E$ acts on
+\emph{fitness}: it decides how large a clone grows. MHN and CBN instead model the \emph{rate at which
+events are acquired}. A cross-sectional ``which events did this patient ever acquire'' matrix cannot
+distinguish the two, because an event is equally present whether its clone reached 1\% or 60\% of the
+tumor. Consequently the planted $E$ is recovered at chance, and neither pooling more patients
+(\Cref{fig:epistasis}B) nor planting the interaction harder (\Cref{fig:epistasis}C) helps: the limit is
+the observable, not the effect size or the sample size. Ordered constraints behave differently, and the
+distinction is the \emph{gating mode} --- a modelling choice we make explicit because the two are
+different generative stories. Under \emph{accessibility} gating (event $B$ cannot arise until $A$ is
+present; the CBN story) the constraint acts on the mutation process itself, and is recovered perfectly
+in every network draw, from true and reconstructed trees alike. Under \emph{fitness} gating ($B$ arises
+freely but is inert until $A$; closer to what MHN assumes) the identical planted DAG leaves essentially
+no recoverable trace: the conjunction holds in only $\approx$23\% of lineages, and the apparent ordering
+merely reports which event is intrinsically faster --- swinging from 0.07 to 0.85 across network draws
+--- because event acquisition rates are themselves heterogeneous, an emergent consequence of the
+copy-number landscape (single-nucleotide variants are drawn per allele, so a module on an amplified
+segment is hit more often). The practical reading is not that these methods are poor, but that
+cross-sectional event presence is the wrong observable for fitness epistasis, and that a benchmark must
+state which generative story it planted. Only a simulator that knows the answer can make that
+distinction visible.
+
+\begin{figure}[tbp]
+  \centering
+  \includegraphics[width=\textwidth]{validation_epistasis.png}
+  \caption{\textbf{Which planted evolutionary dependencies can cohort progression models recover?}
+  A known network is planted in selection and a cohort is grown over it (shared network, private
+  evolution); recovery is scored against the answer key. \textbf{(A)} The planted interaction matrix
+  $E$ and conjunctive DAG. \textbf{(B)} Edge recall for pairwise epistasis versus cohort size, at two
+  detection thresholds, against the empty-network false-positive control: recall sits at chance and
+  does not improve with more patients, because a cross-sectional event-presence matrix is blind to how
+  large a clone grew. \textbf{(C)} Nor does planting the interaction more strongly help --- the
+  observable, not the effect size, is the limit. \textbf{(D)} Ordered constraints under the two gating
+  modes, scored on the two axes they admit (``$B$ requires $A$'' and ``$A$ precedes $B$''), from true
+  versus reconstructed trees. Accessibility gating acts on the mutation process and is recovered
+  perfectly; fitness gating leaves the same planted DAG with no recoverable trace.}
+  \label{fig:epistasis}
+\end{figure}
+
+
 \subsection*{Outlook: from benchmarking to experimental design}
 \label{sec:outlook}
 Because \texttt{iscc} connects a known evolutionary ground truth to the data an analyst actually
@@ -992,6 +1050,7 @@ In the following we outline the modules that constitute the package: tumor, trea
 and data, together with the inference routines that fit them to real data.
 
 \subsection*{The \texttt{tumor} module}
+\label{sec:methods_tumor}
 This module contains the building blocks of a tumor as classes: \texttt{Genome},
 \texttt{Cell}, \texttt{Deme} and \texttt{Selection}. A tumor can be instantiated as a glandular
 (spatially structured) model. Demes are arranged on a 2D grid; each holds cells up to a
@@ -1011,6 +1070,25 @@ populations an optional $\tau$-leaping update advances all demes by a fixed time
 Poisson numbers of division, death and dispersal events per genotype; it preserves the growth
 trajectory, clonal structure and clone-size distribution of the exact update
 (\Cref{fig:tau}) while the speed-up grows with tumor size.
+
+Selection is additive in this base model. An optional \emph{epistasis} layer (\Cref{sec:epistasis},
+off by default and bit-identical to the additive model when unused) makes fitness depend on which
+events co-occur. An \emph{event} is a disjoint module of driver genes, acquired when at least one
+variant lands in the module and monotone thereafter --- the generative assumption the progression
+models are defined under. Log division fitness gains $\sum_i \beta_i x_i + \sum_{i<j} E_{ij} x_i x_j$
+over the genotype's binary event vector $x$, where $\beta$ are the events' marginal effects and the
+sparse symmetric $E$ carries the planted interactions (positive: synergy; negative: antagonism;
+strongly negative: mutual exclusivity / synthetic lethality). Conjunctive constraints are a layered
+random DAG over the events, applied in one of two modes: \emph{fitness} gating, where a child event
+arises freely but contributes no $\beta$ until all its parents are present, or \emph{accessibility}
+gating, where variants in a child's module are vetoed until its parents are present. Because the
+term depends only on the event set, it is cached per genotype and is identical under the exact and
+$\tau$-leaping updates. The network is drawn from a dedicated sub-stream of the configuration-determined
+\emph{layout} seed rather than the per-run evolution seed, so that every patient of a cohort shares one
+network (and so that changing the network does not perturb the gene-role layout); an explicit distinct
+layout seed draws an independent network for replicate studies. The true $E$, DAG, exclusive pairs and
+the realized per-lineage event order --- with events acquired in the same division recorded as tied,
+since no order between them exists --- are exposed as the answer key.
 
 \subsection*{The \texttt{treatment} module}
 This module includes chemotherapy, targeted therapy and immunotherapy. Each treatment is applied

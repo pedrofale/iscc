@@ -253,7 +253,11 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   - cell–cell communication / niche: CellChat / CellPhoneDB / COMMOT ⬜ (F8 ground truth)
   - scRNA cohort integration: **Harmony, scVI/scANVI** ✅ (+ Scanorama, LIGER; scIB metrics)
   - multi-sample Visium integration: GraphST / STAligner ⬜ (2D cross-patient; PASTE 3D out of scope, R1)
-  - DNA cohort progression: **MHN, TreeMHN**, CBN/H-CBN, REVOLVER ⬜ (needs epistasis, R14)
+  - DNA cohort progression: **MHN, TreeMHN**, CBN/H-CBN, REVOLVER ◑ — R14 (epistasis) DONE, so the
+    planted network + the scoring seam (`iscc.integrations.progression`: `to_mhn_matrix` /
+    `to_treemhn_trees` / `score_edges` / `score_order`) now EXIST and the built-in co-occurrence
+    baseline runs (`validation/validate_epistasis.py`). Running the REAL tools in their own
+    `iscc-mhn` / `iscc-treemhn` envs is what remains.
   - pooled demultiplexing: vireo/souporcell (DNA), cell-hashing + scDblFinder (RNA) ✅
   - subclonal deconvolution (multi-region bulk): PyClone-VI / Pairtree / Clomial ◑ (oracle deconv done)
   - **gene-program / GEP inference: `scDEF` ⬜ FLAGSHIP** (+ cNMF comparator, Hotspot optional) — ground
@@ -271,9 +275,22 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
     dynamics, R13 = `z`→counts + overlays) → the program layer is on the paper-1 critical path. Gates
     clonealign/inferCNV *fairness*, **Numbat/CalicoST** (ASE), **cardelino/PhylEx** (SNV). Hard engine
     prerequisite: **stop summing the `p`/`m` alleles** (ASE/BAF), shared with R10.
-  - **Epistasis** — `DESIGN_epistasis.md` (R14, **paper 1 now**). Plant a known dependency network
-    (pairwise / conjunctive order / mutual exclusivity) so **MHN/TreeMHN/CBN/REVOLVER** have a
-    ground-truth network to recover (else the benchmark tests specificity only).
+  - **Epistasis** — `DESIGN_epistasis.md` (R14, **paper 1**) ✅ **DONE**. Pairwise `E`, a conjunctive
+    dependency DAG (`fitness` | `accessibility` gating) and mutual exclusivity are plantable in
+    `Selection` (off by default → bit-identical; cached per event set → tau-leap safe), drawn from the
+    layout stream (`LAYOUT_OFFSET_EPISTASIS`) so a whole cohort shares ONE network. Ground truth via
+    `tumor.epistasis_ground_truth()` / `tumor.event_table()`; benchmark in
+    `validation/validate_epistasis.py` → `manuscript/figures/validation_epistasis.png`; Results
+    section `sec:epistasis`.
+    **Honest headline (a NEGATIVE result, and the interesting one):** iscc's `E` acts on FITNESS
+    (clone size) while MHN/CBN model the RATE of event ACQUISITION, and a cross-sectional
+    event-presence matrix cannot tell them apart — so pairwise `E` is recovered at CHANCE regardless
+    of cohort size (10→80) or interaction strength (0.25→2.0). Conjunctive constraints under
+    **accessibility** gating are recovered perfectly (1.00 in every network draw, true AND
+    reconstructed trees); the same DAG under **fitness** gating leaves no trace (conjunction holds in
+    ~23% of lineages; apparent order swings 0.07–0.85 across draws, tracking which event is
+    intrinsically faster). Next: run the REAL MHN/TreeMHN in their own envs against this same answer
+    key — the seam and metrics are already in place.
 - **Priority (new work):** deconvolution (cell2location/RCTD, flagship) → Numbat → cardelino/PhylEx →
   MHN/TreeMHN (after epistasis) → multi-Visium → CCI. Each external tool in its own `iscc-<tool>` env.
 - **QUEUED — "cash in R13": handoff `handoffs/deconvolution_numbat.md`** (BLOCKED until R13 lands). Runs

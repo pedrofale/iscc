@@ -173,7 +173,8 @@ class Cohort:
         return Selection(n_segments=self.genome_params["n_segments"],
                          segment_size=self.genome_params.get("segment_size", 1000),
                          segment_sizes=self.genome_params.get("segment_sizes"),
-                         rng=np.random.default_rng(self.layout_seed), **self.selection_params)
+                         rng=np.random.default_rng(self.layout_seed),
+                         layout_seed=self.layout_seed, **self.selection_params)
 
     def _draw_germline_markers(self):
         """Disjoint per-patient private germline marker sets, sampled from NON-driver positions so

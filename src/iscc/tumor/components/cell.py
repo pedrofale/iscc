@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 from copy import copy, deepcopy
 
+from .epistasis import bits_to_events
+
 
 class Cell(object):
     # Process-wide monotonic counter for unique genotype ids. Using str(id(self)) is unsafe:
@@ -82,6 +84,25 @@ class Cell(object):
                                'death_rate': death_rate,
                                'dispersal_rate': dispersal_rate}
 
+        # Epistasis event set (R14, DESIGN_epistasis.md). ``event_bits`` is a bitmask over the shared
+        # event alphabet ("event i has been acquired"); ``event_groups`` is the order this lineage
+        # acquired them — the per-patient ordering ground truth TreeMHN/CBN are scored against.
+        #
+        # ``event_groups`` is a tuple of TUPLES, one per mutating division: events in the same group
+        # were acquired together and are genuinely TIED — their relative order does not exist. Being
+        # explicit about that matters. Flattening the groups (as ``event_order`` does, for the tree
+        # exports that need a linear path) has to break ties somehow, and any fixed rule invents an
+        # ordering the simulator never generated — which would then be scored as if it were real, at
+        # whatever rate the tie-breaking happens to agree with the planted DAG. Order scoring must
+        # therefore read ``event_groups`` and skip ties (see integrations.progression.score_order).
+        #
+        # Both are IMMUTABLE (int / nested tuple), so the shallow copy() in divide() propagates them
+        # by value with no aliasing. Kept OFF genome_summary so the summary schema (and every
+        # dataframe built from it) is unchanged when epistasis is off. Events are MONOTONE by design:
+        # once acquired, never lost — the generative assumption MHN/CBN/TreeMHN are defined under.
+        self.event_bits = 0 if parent is None else parent.event_bits
+        self.event_groups = () if parent is None else parent.event_groups
+
         self.evolutionary_parameters = dict()
         self.evolutionary_parameters['division_rate'] = division_rate
         self.evolutionary_parameters['death_rate'] = death_rate
@@ -101,7 +122,8 @@ class Cell(object):
         gs = self.genome_summary
         self.evolutionary_parameters['viability'] = selection.update_viability(gs)
         self.evolutionary_parameters['division_rate'] = min(
-            self.baseline_rates['division_rate'] * selection.update_division_rate(gs),
+            self.baseline_rates['division_rate'] * selection.update_division_rate(
+                gs, event_bits=self.event_bits),
             self.max_birth_rate)
         self.evolutionary_parameters['death_rate'] = self.baseline_rates['death_rate']
         self.evolutionary_parameters['dispersal_rate'] = min(
@@ -133,6 +155,15 @@ class Cell(object):
         n_new_tr = int(mut_bits[selection.treatment_resistance[seg]].sum())
         self.genome_summary['n_mut_tr'] += n_new_tr
         self.genome_summary['n_wt_tr'] -= n_new_tr
+
+        # Epistasis events: an event fires when >= 1 SNV lands in its gene module. Only event_bits is
+        # touched here — the TIED group is closed once per division by mutate(), because this method
+        # runs once per (segment, allele) and that loop walks segments in index order: grouping here
+        # would rank events by which segment their module happens to sit in, which is a property of
+        # the layout, not of the evolution. That artifact is invisible in the event SET and silently
+        # corrupts every ordering ground truth built from it.
+        if selection.epistasis is not None:
+            self.event_bits |= selection.epistasis.events_from_mutation(seg, mut_bits)
 
         # TODO: Maybe increase number of mutated drivers
 
@@ -174,6 +205,26 @@ class Cell(object):
         self.genome_summary['nullisomy_count'] = int(np.sum(np.asarray(seg_cns) == 0))
 
         # TODO: maybe reduce the number of unique drivers...
+
+    @property
+    def event_order(self):
+        """``event_groups`` flattened to a linear acquisition sequence, for the exports that need a
+        path (e.g. a mutation tree). Events tied within a division appear in index order — an
+        ARBITRARY tie-break, so never score ordering off this; use ``event_groups``."""
+        return tuple(e for group in self.event_groups for e in group)
+
+    def _available_sites(self, selection, seg, allele, gate_bits):
+        """Positions on this allele copy that may still take a new SNV: unmutated (infinite sites
+        per allele) and, under ACCESSIBILITY gating, not inside an event module whose dependency-DAG
+        parents are still absent. Accessibility is judged on ``gate_bits`` — the event set as it
+        stood at the START of the division — so an event acquired earlier in the same division does
+        not unblock its children until the next one."""
+        available = np.where(~allele)[0]
+        if selection.epistasis is not None and len(available):
+            blocked = selection.epistasis.blocked_mask(seg, gate_bits)
+            if blocked is not None:
+                available = available[~blocked[available]]
+        return available
 
     def set_genotype_id(self):
         Cell._genotype_counter += 1
@@ -326,6 +377,7 @@ class CancerCell(Cell):
         # This is the only place the genome is mutated, so sharing elsewhere is safe.
         self.genome = deepcopy(self.genome)
         self.genome_summary = deepcopy(self.genome_summary)
+        events_before = self.event_bits   # everything acquired below is ONE tied group (see _close_event_group)
         # A fully deleted genome (every segment at nullisomy) has no allele to act on; the
         # per-segment selection weights would be all-zero (0/0 -> NaN). Nothing to mutate.
         if not any(self.genome[s]['p'] or self.genome[s]['m'] for s in range(self.n_segments)):
@@ -338,6 +390,7 @@ class CancerCell(Cell):
             # scales with ploidy/copy number (≈ n_snvs_per_allele × number of alleles). Within an
             # allele, positions are drawn only from sites not yet mutated on that copy (infinite-
             # sites per allele); the same locus may still be hit independently on a different copy.
+            gate_bits = self.event_bits  # accessibility judged on the PRE-division event set
             placed = 0
             for seg in range(self.n_segments):
                 for hap in ('p', 'm'):
@@ -345,7 +398,7 @@ class CancerCell(Cell):
                         k = rng.poisson(n_snvs_per_allele)
                         if k == 0:
                             continue
-                        available = np.where(~allele)[0]
+                        available = self._available_sites(selection, seg, allele, gate_bits)
                         if len(available) == 0:
                             continue
                         n_mutations = min(k, len(available))
@@ -364,13 +417,13 @@ class CancerCell(Cell):
                     for seg in range(self.n_segments)
                     for hap in ('p', 'm')
                     for ai, allele in enumerate(self.genome[seg][hap])
-                    if (~allele).any()
+                    if len(self._available_sites(selection, seg, allele, gate_bits))
                 ]
                 if not candidates:
                     return False  # genome fully saturated everywhere: nothing to mutate
                 seg, hap, ai = candidates[rng.choice(len(candidates))]
                 allele = self.genome[seg][hap][ai]
-                pos = int(rng.choice(np.where(~allele)[0]))
+                pos = int(rng.choice(self._available_sites(selection, seg, allele, gate_bits)))
                 allele[pos] = True
                 mut_bits = np.zeros(self.segment_sizes[seg], dtype=bool)
                 mut_bits[pos] = True
@@ -402,6 +455,16 @@ class CancerCell(Cell):
                 del self.genome[seg][hap][all]
             self.update_genome_summary_cnv(selection, allele_bits, seg, sign) # for evolutionary parameters
 
+        self._close_event_group(selection, events_before)
         self.update_evolutionary_parameters(selection)
         self.set_genotype_id()
         return True  # a new genotype was created
+
+    def _close_event_group(self, selection, events_before):
+        """Record everything this ONE division acquired as a single tied group (see event_groups)."""
+        if selection.epistasis is None:
+            return
+        new = self.event_bits & ~events_before
+        if new:
+            self.event_groups = self.event_groups + (
+                tuple(bits_to_events(new, selection.epistasis.n_events)),)

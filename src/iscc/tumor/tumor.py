@@ -56,6 +56,7 @@ class Tumor(object):
             n_segments=self.genome_params['n_segments'],
             segment_size=self.genome_params.get('segment_size', 1000),
             rng=self.layout_rng,
+            layout_seed=self.layout_seed,
             **selection_params,
         )
         self.n_genes = self.selection.n_genes

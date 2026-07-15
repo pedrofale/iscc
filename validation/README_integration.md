@@ -85,4 +85,35 @@ RETICULATE_PYTHON=~/miniconda3/envs/iscc-clonealign/bin/python \
 ```bash
 python -u validation/validate_clonealign.py   # -> manuscript/figures/validation_clonealign.png
 python -u validation/validate_infercnv.py      # -> manuscript/figures/validation_infercnv.png
+python -u validation/validate_epistasis.py     # -> manuscript/figures/validation_epistasis.png
 ```
+
+## Cohort progression models (MHN / TreeMHN / CBN / REVOLVER) — R14
+
+`validate_epistasis.py` plants a known event×event network (`DESIGN_epistasis.md`) and scores recovery
+against it. It runs **core-env-only today**: the "method" is the built-in pairwise log-odds baseline
+(`iscc.integrations.cooccurrence_scores` — the DISCOVER/MEGSA statistic), so the figure renders without
+R. That baseline is the **floor of the benchmark, not a stand-in for MHN**: it cannot separate a direct
+interaction from one induced through a shared ancestor, which is exactly what MHN's regularized fit is
+built to remove.
+
+Wiring the real tools in is deliberately cheap, because the seam already exists —
+`iscc.integrations.progression` emits each tool's input shape and scores any tool's output:
+
+| tool | env | input (already emitted) | scored with |
+|---|---|---|---|
+| MHN | `iscc-mhn` | `to_mhn_matrix(tumors)` — patients × events binary | `score_edges` (vs the planted `E`) |
+| TreeMHN | `iscc-treemhn` | `to_treemhn_trees(tumors)` — per-patient mutation trees (`Patient_ID`, `Node_ID`, `Mutation_ID`, `Parent_ID`) | `score_edges` + `score_order` |
+| CBN / H-CBN | `iscc-cbn` | `to_cbn_poset(tumors)` | `score_order` (the conjunction) |
+| REVOLVER | `iscc-revolver` | `to_treemhn_trees(tumors)` | `score_edges` + `score_order` |
+
+Follow the one-env-per-tool convention above: add `<TOOL> = os.environ.get("ISCC_<TOOL>_RSCRIPT", ...)`,
+a `<tool>_available()` skip guard, and a thin `<tool>_runner.R` that reads the emitted CSV and writes
+back an edge/order list.
+
+**Read the result carefully before running anything.** The benchmark's finding is that iscc's pairwise
+`E` acts on *fitness* while MHN/CBN model the *rate of acquisition*, so a cross-sectional matrix is
+near-blind to it — recovery sits at chance for any cohort size or interaction strength, while
+conjunctive constraints under `gating_mode: accessibility` are recovered perfectly. A real MHN run is
+expected to reproduce that contrast, not overturn it; if it does overturn it, that is the interesting
+result and worth chasing.

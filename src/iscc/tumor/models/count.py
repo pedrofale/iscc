@@ -27,6 +27,7 @@ import pandas as pd
 import yaml
 
 from ..components.selection import Selection
+from ..components.epistasis import bits_to_events
 from ..components.cell import CancerCell, EpithelialCell, StromalCell, ImmuneCell
 from .glandular import bresenham_circumference, get_inside
 from ...constants import normal_names, DEFAULT_LAYOUT_SEED
@@ -119,8 +120,12 @@ class GenotypeTumor:
             "immune": (ImmuneCell, immune_cell_params or {}),
         }
 
+        # ``layout_seed`` is handed over (as well as ``layout_rng``) so the optional epistasis network
+        # can draw from its own layout SUB-STREAM — part of the shared landscape, but independent of
+        # the gene-role layout drawn from layout_rng. See DESIGN_epistasis.md / constants.py.
         self.selection = Selection(n_segments=self.n_segments, segment_size=self.segment_size,
-                                   segment_sizes=self.segment_sizes, rng=self.layout_rng, **selection_params)
+                                   segment_sizes=self.segment_sizes, rng=self.layout_rng,
+                                   layout_seed=self.layout_seed, **selection_params)
         self.n_genes = self.selection.n_genes
         self._cancer_params = cancer_cell_params
 
@@ -823,6 +828,44 @@ class GenotypeTumor:
 
     def get_gene_data(self, **kwargs):
         return self.selection.get_gene_data(**kwargs)
+
+    # --- epistasis ground truth (R14, DESIGN_epistasis.md §4) ----------------
+    def epistasis_ground_truth(self):
+        """The planted network — the answer key for MHN/TreeMHN/CBN/REVOLVER edge + order recovery.
+
+        Returns the true ``E`` matrix, the marginal effects ``beta``, the interaction edges, the
+        conjunctive dependency DAG, the mutually-exclusive pairs and the event->gene modules; or
+        ``None`` when epistasis is off. Shared by every patient of a cohort (drawn from the layout
+        stream), which is what makes pooling patients to recover ONE network well-posed.
+        """
+        if self.selection.epistasis is None:
+            return None
+        return self.selection.epistasis.ground_truth()
+
+    def event_table(self):
+        """Per-clone event sets and the ORDER this lineage acquired them (empty when epistasis is off).
+
+        One row per cancer genotype: its cell count, the events it carries, and the realised order
+        along its lineage — the per-patient ordering ground truth. ``event_groups`` is the truthful
+        form (one tuple per mutating division; events inside a group are TIED, having been acquired
+        together, so no order between them exists); ``event_order`` is that flattened for exports
+        needing a linear path. **Score ordering against ``event_groups``** — ``event_order`` breaks
+        ties arbitrarily.
+        """
+        net = self.selection.epistasis
+        rows = []
+        cols = ["genotype_id", "n_cells", "events", "event_order", "event_groups"]
+        if net is None:
+            return pd.DataFrame(columns=cols)
+        for gid, count in self.genotypes_counts.items():
+            if gid in normal_names:
+                continue
+            rep = self.genotypes[gid]
+            rows.append(dict(genotype_id=gid, n_cells=int(count),
+                             events=tuple(bits_to_events(rep.event_bits, net.n_events)),
+                             event_order=tuple(rep.event_order),
+                             event_groups=tuple(rep.event_groups)))
+        return pd.DataFrame(rows, columns=cols)
 
     # --- operating-envelope QC (read-only; DESIGN_operating_envelope.md) ------
     def diagnose(self, thresholds=None, verbose=False):

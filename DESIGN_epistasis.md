@@ -1,10 +1,38 @@
-# DESIGN — epistasis / evolutionary-dependency structure in selection [design-first; NOT built]
+# DESIGN — epistasis / evolutionary-dependency structure in selection [BUILT]
 
-Status: **PLANNED FOR PAPER 1 — build now** (decision 2026-07-14; R14 is no longer deferred). Design
-written, not yet built. Companion to `RESEARCH_QUESTIONS.md` R14, the multi-patient cohort milestone
-(`DESIGN_cohort.md`, done), `DESIGN_expression.md` (R13, the data-side sibling — also paper 1 now).
-Motivated by the **DNA cohort-integration** row of the benchmark suite: cohort progression models need a
-*known dependency network* to recover, which iscc's additive selection does not provide.
+Status: **BUILT** (2026-07-15; paper 1). Companion to `RESEARCH_QUESTIONS.md` R14, the multi-patient
+cohort milestone (`DESIGN_cohort.md`, done), `DESIGN_expression.md` (R13, the data-side sibling — also
+paper 1 now). Motivated by the **DNA cohort-integration** row of the benchmark suite: cohort
+progression models need a *known dependency network* to recover, which iscc's additive selection did
+not provide.
+
+**Where it lives:** `src/iscc/tumor/components/epistasis.py` (the network) + `Selection`
+(`epistasis_params` / `dependency_params`, off by default, drawn from `layout_seed +
+LAYOUT_OFFSET_EPISTASIS`) · ground truth `tumor.epistasis_ground_truth()` / `tumor.event_table()` ·
+scoring seam `iscc.integrations.progression` · tests `tests/test_epistasis.py` · benchmark
+`validation/validate_epistasis.py` · docs `PARAMETERS.md` · Results `sec:epistasis`.
+
+**Decisions made while building** (the §7 open questions, resolved):
+- **Event alphabet = disjoint MODULES of driver genes** (`event_size`), not single genes. MHN/TreeMHN
+  pool patients to fit ONE network, which needs events to RECUR across patients; a single named gene
+  out of ~10⁴ is hit in almost no patient, so a single-gene alphabet gives a cohort with no shared
+  events and nothing to recover. `event_size=1` recovers the single-gene case.
+- **Both gating modes implemented**, `fitness` the default — and the choice turns out to decide the
+  whole benchmark (see below). Stated explicitly in the paper.
+- **Events are monotone** (never revert, even if a deletion removes the mutated allele) — the
+  generative assumption MHN/CBN/TreeMHN are defined under.
+- **Ties are recorded, not broken**: events acquired in the same division form one tied group
+  (`event_groups`). Flattening them would rank events by the segment their module sits in — a
+  property of the layout, not of the evolution — and silently corrupt every ordering ground truth.
+
+**The headline result is NEGATIVE, and it is the useful one** (§5, measured in `validate_epistasis.py`):
+pairwise `E` acts on **fitness** (clone size) while MHN/CBN model the **rate of event acquisition**; a
+cross-sectional event-presence matrix cannot distinguish them, so `E` is recovered at **chance**
+regardless of cohort size (10→80 patients) or interaction strength (0.25→2.0). Conjunctive constraints
+under **accessibility** gating are recovered **perfectly** (1.00 in every network draw, true and
+reconstructed trees); the identical DAG under **fitness** gating leaves **no recoverable trace**. So
+the benchmark's real finding is *which* planted structure these tools can see — visible only because
+iscc knows the answer.
 
 ## 1. Why (the gap)
 

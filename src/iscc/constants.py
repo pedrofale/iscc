@@ -11,6 +11,28 @@ import numpy as np
 # DESIGN_cohort.md §1.
 DEFAULT_LAYOUT_SEED = 42
 
+# --- LAYOUT sub-stream registry ---------------------------------------------------------------
+# Pre-assigned offsets into the LAYOUT stream. Every property of the GENOME/LANDSCAPE (as opposed to
+# a per-run EVENT) must be drawn from the layout stream, so that two patients sharing a config share
+# it. Each optional layer of that landscape draws from its OWN sub-stream,
+# ``default_rng(layout_seed + OFFSET)``, rather than from ``layout_rng`` itself. Two reasons:
+#
+#  1. The base ``layout_rng`` is left untouched, so Selection's gene-role layout and the per-cell-type
+#     baseline expression stay byte-identical whether these layers are on or off — nothing re-baselines.
+#  2. The sub-streams are INDEPENDENT, so changing one layer's parameters (``n_programs``,
+#     ``n_interactions``, …) cannot shift another layer's draws. A single shared stream would couple
+#     them: adding a program would silently reshuffle which genes are oncogenes, breaking
+#     comparability between configs that differ only in program parameters.
+#
+# Offsets are permanent identifiers and are registered here — and only here — so that
+# concurrently-developed layers cannot collide. Never renumber one (that would silently change the
+# landscape of every existing tumour); claim a new one here before use.
+LAYOUT_OFFSET_PROGRAMS = 101       # expression gene programs (R13, DESIGN_expression.md): gene->program
+                                   # map, `loading`, program regulators, per-gene dosage sensitivity s_g
+LAYOUT_OFFSET_F8_PROGRAMS = 102    # F8 microenvironment programs (DESIGN_features §H): the
+                                   # hypoxia-responsive + CCI-target gene sets
+LAYOUT_OFFSET_EPISTASIS = 201      # the epistasis E matrix / dependency DAG (R14, DESIGN_epistasis.md)
+
 normal_cmap = {'epithelial': 'green', 'immune': 'yellow', 'stromal': 'pink'}
 normal_names = list(normal_cmap.keys())
 normal_colors = list(normal_cmap.values())

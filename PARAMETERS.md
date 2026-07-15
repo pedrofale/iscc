@@ -73,6 +73,68 @@ Defaults are those in `notebooks/example_config.yaml`. Set them under the matchi
 |---|---|---|---|
 | `amp_prob` | 0.5 | 0.2–0.8 | high → copy-number-heavy genome (viability-capped) |
 
+### Epistasis / dependency network (R14, optional; **off by default**) — `selection_params.epistasis_params`
+
+Selection is **additive** by default (fitness reads the *count* of mutated drivers), so the true
+event×event dependency network is empty. These knobs **plant a known network** — the answer key the
+cohort progression models (MHN, TreeMHN, CBN/H-CBN, REVOLVER) are scored against. With
+`epistasis_params` absent, or `n_events: 0`, nothing is built and the engine is **bit-identical** to
+the additive model. See `DESIGN_epistasis.md` and `validation/validate_epistasis.py`.
+
+An **event** is a disjoint module of `event_size` driver genes; it fires when ≥1 SNV lands anywhere in
+the module, and is **monotone** (once acquired, never lost — the assumption MHN/CBN are defined under).
+Modules rather than single genes because MHN/TreeMHN pool many tumours to fit **one** network, which
+requires the same events to **recur across patients**; a single named gene out of ~10⁴ is hit in
+almost no patient. `event_size: 1` recovers the single-gene case.
+
+Fitness gains `exp(Σᵢ βᵢxᵢ + Σᵢ<ⱼ Eᵢⱼxᵢxⱼ)` as a multiplier on the additive model.
+
+| Knob | Default | Valid range | Outside the range |
+|---|---|---|---|
+| `n_events` | 0 (**off**) | 4–20 | 0 → additive engine, bit-identical; many → each event rarer, cohort needs to be larger |
+| `event_size` | 20 | 1–~5% of the genome | **the rate knob**: too small → events never fire (empty matrix); too large → every patient acquires every event (all-ones matrix, zero variance, nothing to correlate) |
+| `event_effect_mean` / `_sd` | 0.1 / 0.0 | 0–0.5 | the events' own marginal log-fitness effect (MHN's diagonal). 0 → events are marginally neutral and only `E` acts |
+| `n_interactions` | `None` → use `network_sparsity` | 0–`n_events(n_events−1)/2` | 0 → empty `E` (the false-positive control) |
+| `network_sparsity` | 0.2 | 0.05–0.5 | fraction of event pairs that interact, when `n_interactions` is unset |
+| `network_topology` | `random` | `random` \| `hub` \| `chain` | `hub` = one master event wired to all; `chain` = a stepwise cascade |
+| `interaction_strength` / `_sd` | 0.3 / 0.05 | 0.1–1.0 | **must fit under the fitness clamp — see the trap below** |
+| `prop_synergy` | 0.5 | 0–1 | P(`E>0`); the rest are antagonistic |
+| `mutual_exclusivity_strength` | 0.0 | 2–8 when used | magnitude of the strongly-negative (synthetic-lethal) edges |
+| `n_exclusive_pairs` | 0 | ≤ pairs left after the interaction edges | how many such edges |
+
+**Trap — the fitness clamp silently eats `E`.** Division rate is `baseline × fitness`, capped at
+`max_birth_rate`. With `driver_effects > 1` and many drivers the additive term already pins clones at
+the cap, leaving **no room** for the interaction term: the planted network is then present in the
+config and absent from the dynamics. Keep `log(max_birth_rate / division_rate)` comfortably larger
+than the largest `Σ E` you plant (e.g. `division_rate: 0.2`, `max_birth_rate: 0.95` ⇒ ~1.56 of room),
+and set `driver_effects: 1.0` if you want the network to be the *only* thing under selection.
+
+#### Conjunctive / ordered constraints — `selection_params.dependency_params`
+
+| Knob | Default | Valid range | Outside the range |
+|---|---|---|---|
+| `n_constraints` | 0 (**off**) | 1–`n_events` | 0 → no DAG, no ordering |
+| `dag_depth` | 2 | 2–4 | the number of layers; edges only run from an earlier layer to a later one (acyclic by construction) |
+| `dag_branching` | 2 | 1–3 | max parents per gated event; excess constraints are dropped, so the realised DAG may have fewer edges than `n_constraints` |
+| `gating_mode` | `fitness` | `fitness` \| `accessibility` | **these are different generative stories — see below** |
+
+**`gating_mode` is a modelling decision, not a tuning knob**, and it decides what a progression model
+can recover:
+
+- **`fitness`** — `B` arises freely but is *inert* until `A` is present; order emerges from selection.
+  Softer and more biological, and closest to what MHN/TreeMHN assume (rates modulated, never zero).
+- **`accessibility`** — `B` *cannot arise at all* until `A` is present; mutations in `B`'s module are
+  vetoed. Order is imposed on the mutation process. This is the CBN/H-CBN story.
+
+`validation/validate_epistasis.py` measures the consequence, and it is stark: under **accessibility**
+gating the constraint is recovered perfectly (`B requires A` and the ordering, 1.00 in every network
+draw), while under **fitness** gating the same planted DAG leaves essentially **no recoverable trace**
+(the conjunction holds in ~23% of lineages, and the apparent "order" just reports which event is
+intrinsically faster). The same script shows that pairwise `E` — which acts on fitness — is recovered
+at **chance** by a cross-sectional method regardless of cohort size or how hard it is planted, because
+"which events did this patient ever acquire" is blind to how large a clone grew. State which gating
+mode you used; the two are not interchangeable.
+
 ### Microenvironment (F8, optional; off by default) — `microenv_params`
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|

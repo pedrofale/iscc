@@ -1,12 +1,16 @@
 import numpy as np
 import pandas as pd
 
+from .epistasis import EpistasisNetwork
+from ...constants import DEFAULT_LAYOUT_SEED, LAYOUT_OFFSET_EPISTASIS
+
 class Selection(object):
     def __init__(self, n_segments=10, segment_size=1000, segment_sizes=None,
                  prop_driver=0.1, prop_dispersal=0.1, prop_treatment_resistance=0.1, prop_immune_resistance=0.1,
                  driver_effects=1.1, dispersal_effects=1.1, treatment_resistant_effects=1.1, immune_resistant_effects=1.1,
                  selection_mode="gene", s_arm=None, arm_baseline=2.0,
-                 max_ploidy=6, max_cn=12, max_nullisomy=2, max_mut_drivers=1000, rng=None, ):
+                 max_ploidy=6, max_cn=12, max_nullisomy=2, max_mut_drivers=1000, rng=None,
+                 epistasis_params=None, dependency_params=None, layout_seed=None, ):
         # Seeded generator so the driver/resistance layout is reproducible. This ``rng`` is used
         # ONLY for the config-determined gene-role LAYOUT (make_drivers / make_dispersal /
         # make_treatment_resistant / make_immune_resistant), never for evolution — so the engines
@@ -80,6 +84,26 @@ class Selection(object):
                             'death_rate': self.update_death_rate,}
         
         self.gene_names = self.get_gene_names()
+
+        # Epistasis / dependency network (R14, DESIGN_epistasis.md). OFF BY DEFAULT: with no
+        # ``epistasis_params`` (or ``n_events=0``) nothing is built, ``self.epistasis`` stays None and
+        # every fitness path below is bit-identical to the additive model. When ON, the network is
+        # drawn from a DEDICATED layout SUB-STREAM (``layout_seed + LAYOUT_OFFSET_EPISTASIS``) rather
+        # than from ``self.rng``: the network is part of the SHARED landscape (every patient of a
+        # cohort must evolve under the SAME network for MHN/TreeMHN to be well-posed), and using a
+        # sub-stream means turning epistasis on — or changing n_interactions/topology — leaves the
+        # gene-role layout drawn from ``self.rng`` above untouched.
+        self.layout_seed = DEFAULT_LAYOUT_SEED if layout_seed is None else layout_seed
+        self.epistasis_params = epistasis_params
+        self.dependency_params = dependency_params
+        self.epistasis = None
+        if epistasis_params and int(epistasis_params.get("n_events", 0)) > 0:
+            driver_pool = np.concatenate([self.get_oncogenes(), self.get_tsgs()])
+            self.epistasis = EpistasisNetwork(
+                driver_pool=driver_pool, seg_offsets=self._seg_offsets,
+                segment_sizes=self.segment_sizes,
+                rng=np.random.default_rng(self.layout_seed + LAYOUT_OFFSET_EPISTASIS),
+                epistasis_params=epistasis_params, dependency_params=dependency_params)
 
     def get_evolutionary_parameters(self):
         return list(self.update_dict.keys())
@@ -213,9 +237,19 @@ class Selection(object):
         cns = np.asarray(genome_summary['seg_cns'], dtype=float)
         return float(np.exp(np.sum((cns - self.arm_baseline) * self._log_s_arm)))
 
-    def update_division_rate(self, genome_summary, **kwargs):
+    def _epistasis_multiplier(self, event_bits):
+        """The planted network's contribution to division fitness (1.0 when off / no events).
+
+        A pure function of the genotype's event set, so it is cached per event set inside
+        ``EpistasisNetwork`` — the same value under the exact and tau-leaping engines alike.
+        """
+        if self.epistasis is None or not event_bits:
+            return 1.0
+        return self.epistasis.multiplier(event_bits)
+
+    def update_division_rate(self, genome_summary, event_bits=0, **kwargs):
         if self.selection_mode == "arm":
-            return self._arm_division_rate(genome_summary)
+            return self._arm_division_rate(genome_summary) * self._epistasis_multiplier(event_bits)
         # Following CINner: oncogenes (effect>1) and tumour suppressors (effect<1) act in
         # opposite directions; mutating an oncogene or a TSG copy increases division fitness.
         de = self.driver_effects
@@ -223,7 +257,10 @@ class Selection(object):
                                genome_summary['ploidy'], self.N_onc, de, de**2)
         tsg = self._rel_fitness(genome_summary['n_wt_tsg'], genome_summary['n_mut_tsg'],
                                 genome_summary['ploidy'], self.N_tsg, 1. / de, 1.)
-        return og * tsg
+        # The epistasis term multiplies the additive model rather than replacing it: the additive
+        # driver-count fitness stays exactly what it was, and the network adds
+        # exp(sum_i beta_i x_i + sum_{i<j} E_ij x_i x_j) on top (DESIGN_epistasis.md §3).
+        return og * tsg * self._epistasis_multiplier(event_bits)
 
     def update_dispersal_rate(self, genome_summary, **kwargs):
         e = self.dispersal_effects
