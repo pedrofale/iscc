@@ -276,6 +276,12 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
     ground-truth network to recover (else the benchmark tests specificity only).
 - **Priority (new work):** deconvolution (cell2location/RCTD, flagship) → Numbat → cardelino/PhylEx →
   MHN/TreeMHN (after epistasis) → multi-Visium → CCI. Each external tool in its own `iscc-<tool>` env.
+- **QUEUED — "cash in R13": handoff `handoffs/deconvolution_numbat.md`** (BLOCKED until R13 lands). Runs
+  the two tools R13 was built for: **deconvolution** (needs the program layer; headline = matched-vs-
+  MISMATCHED reference via the `Cohort` layer — the experiment no real benchmark can do) and **Numbat**
+  (needs ASE/BAF; headline = does the allele layer beat expression-only inferCNV?). Known risk: Numbat's
+  allele input normally comes from cellsnp-lite + a phasing panel, which an abstract genome lacks — scope
+  the interface first (likely feed allele counts directly).
 
 ## Cell-state trajectories & differentiation (R12; plan-first, LATER)
 - **LATER (design-first, like F8; whiteboard stage).** Add a CONTINUOUS cell-state / differentiation
