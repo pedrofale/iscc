@@ -113,6 +113,17 @@ Composes cleanly with the existing CNA dosage, F8 niche modifier (done), and the
 All of these are user-facing config (`PARAMETERS.md` + `tumor.diagnose()` once built). Ground truth for
 every one is surfaced (`program_truth`: `loading` matrix, per-cell `z`, gene→program map, `s_g`, SNV classes).
 
+**COMPARABILITY (user requirement 2026-07-15).** The same program parameters + the same `layout_seed`
+must yield the **same programs across simulations/patients**, exactly as the shared driver landscape
+already does. Rule: anything that is a property of the **genome/landscape** — gene→program map,
+`loading`, program-regulator assignment, per-gene `s_g`, and the R14 epistasis network — is drawn from
+the **layout stream** (`layout_seed`/`layout_rng`, `count.py:43-55`; `Selection` already uses it, so
+oncogene/TSG identities are comparable today). **Event-level** draws (which mutation occurs, a given
+SNV's class, per-cell `z` noise) stay on the per-run evolution seed. Use **independent sub-streams per
+component** (`SeedSequence(layout_seed).spawn(n)`) so changing `n_programs` does not reshuffle the
+oncogene/TSG layout. NB **F8 currently violates this** (`prog_rng = default_rng(self.seed + 9973)`,
+`count.py:142` — the run seed): migrate it to the layout stream (tracked in `BACKLOG.md`).
+
 **Program dictionary — `program_params`** (the `loading` matrix, K × G):
 | Knob | What it controls |
 |---|---|

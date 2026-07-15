@@ -51,6 +51,32 @@ expr_{g,a} = base[type,g] · exp(Σ_k z_k·loading[k,g]) · dosage(CN_{g,a}; s_g
 Document them all in `PARAMETERS.md` with defaults + valid ranges (that file's conventions), and surface
 `program_truth` ground truth: `loading`, per-cell `z`, gene→program map, `s_g`, per-SNV class.
 
+=== COMPARABILITY ACROSS TUMOURS/PATIENTS (MUST-HAVE — user requirement 2026-07-15) ===
+The SAME gene programs must be re-used across simulations whenever the program parameters + the layout
+seed match, so cohort-level program analysis is meaningful (same requirement as the shared driver
+landscape). The mechanism ALREADY EXISTS — use it, don't invent one:
+- `layout_seed` / `self.layout_rng` / `DEFAULT_LAYOUT_SEED` (`count.py:43-55`), decoupled from the per-run
+  EVOLUTION seed. `Selection` already takes `rng=self.layout_rng` (count.py:123), so oncogene/TSG/driver
+  identities are comparable by construction; baseline `celltype_exps` likewise (count.py:131).
+- **Everything that is a property of the GENOME/landscape must come from the LAYOUT stream**, not
+  `self.seed`: the program dictionary (gene→program map + `loading` matrix), the program-regulator
+  assignment, and the per-gene dosage sensitivities `s_g`. **Event-level draws stay on the run seed**
+  (which mutation happens when; a given SNV's functional class draw; the per-cell `z` noise).
+- **Use INDEPENDENT sub-streams per landscape component** — e.g. `np.random.SeedSequence(layout_seed).spawn(n)`
+  (or documented fixed offsets). Otherwise changing `n_programs` shifts one shared stream and silently
+  reshuffles which genes are oncogenes — breaking comparability between configs that differ only in
+  program parameters. This matters; get it right.
+- **BUG TO FIX while you're here:** F8's program designation uses `prog_rng =
+  np.random.default_rng(self.seed + 9973)` (`count.py:142`) — the RUN seed — so `_hypoxia_genes` /
+  `_cci_target_genes` DIFFER per patient in a cohort. F8 predates `layout_seed` and was never migrated.
+  Move it to the layout stream (the dedicated-stream intent was right, the seed source is wrong). This
+  changes which arbitrary genes are hypoxia-responsive ⇒ regenerate the F8/PEtracer figures (results
+  should be statistically unchanged) and re-check `tests/test_microenvironment.py`.
+- **Tests (mirror the cohort's):** two `GenotypeTumor(same config, DIFFERENT evolution seed)` ⇒ IDENTICAL
+  gene→program map + `loading` + `s_g` (and, already covered, identical oncogene/TSG sets); an explicit
+  different `layout_seed` ⇒ different programs; changing `n_programs` does NOT change the oncogene/TSG
+  layout (the independent-substream property).
+
 === HARD ENGINE PREREQUISITE ===
 Stop **summing the `p`/`m` alleles** in `get_exp` (`components/cell.py:236`) — emit per-allele expression
 so dosage and cis-SNV effects are allele-resolved and a **BAF** is available in RNA. This is what

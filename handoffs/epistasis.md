@@ -52,6 +52,26 @@ Fitness reads a genotype's event set already; add the interaction term:
 Document in `PARAMETERS.md` (defaults + valid ranges). Surface ground truth: the true `E` matrix /
 dependency DAG / order constraints, plus the realised per-patient event ORDER along each lineage.
 
+=== COMPARABILITY ACROSS PATIENTS (MUST-HAVE — user requirement 2026-07-15) ===
+The planted network is only identifiable if **every patient in the cohort evolves under the SAME
+network** — that is the entire premise of MHN/TreeMHN (they pool many tumours to recover one shared
+progression model). So the network is part of the **shared landscape**, not per-run state.
+- Draw `E` / the dependency DAG from the **LAYOUT stream** (`layout_seed` / `self.layout_rng`,
+  `count.py:43-55`, `DEFAULT_LAYOUT_SEED`) — NOT from `self.seed` (the per-run evolution seed).
+  `Selection` already takes `rng=self.layout_rng` (count.py:123), so the driver/oncogene/TSG identities
+  the network is defined over are themselves already comparable — build `E` on top of that, in the same
+  layout stream.
+- **Use an independent sub-stream** (`np.random.SeedSequence(layout_seed).spawn(n)` or a documented
+  offset) so that changing `n_interactions` / `network_topology` does NOT reshuffle the oncogene/TSG
+  layout or the gene programs (R13 has the same requirement).
+- Same config + same `layout_seed` ⇒ **identical network** across all patients and across separate
+  simulations; only the stochastic evolution differs. An explicit different `layout_seed` ⇒ a different
+  network (for replicate studies).
+- **Tests (mirror the cohort's driver-set Jaccard test):** two `GenotypeTumor(same config, DIFFERENT
+  evolution seed)` ⇒ IDENTICAL `E` matrix / DAG; different `layout_seed` ⇒ different network; changing
+  `n_interactions` does NOT change the oncogene/TSG layout. Also assert the whole `Cohort` shares one
+  network — that is the precondition for the benchmark to be well-posed at all.
+
 === VALIDATION (pairs with the cohort milestone, DESIGN_cohort.md — done) ===
 Plant a network → run a COHORT (shared driver landscape, per-patient private evolution; the `Cohort`
 layer + `layout_seed` decoupling already exist) → collect per-patient trees (true via

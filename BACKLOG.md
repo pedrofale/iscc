@@ -348,6 +348,22 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   gained a "demes over-filling" check (now passing). (4) PEtracer confound (100%→32%) and multi-region
   spurious parallelism (0.219 vs 0.004) both re-confirmed after re-baselining; figures regenerated.
 
+## Engine bug — F8 gene programs are not comparable across patients (NEXT; small)
+- **F8's program designation uses the RUN seed, not the layout seed.** `prog_rng =
+  np.random.default_rng(self.seed + 9973)` (`count.py:142`) ⇒ `_hypoxia_genes` / `_cci_target_genes`
+  DIFFER between patients in a cohort, so "the hypoxia program" isn't comparable across tumours. F8
+  predates the cohort's `layout_seed` decoupling and was never migrated (the dedicated-stream intent was
+  right; the seed source is wrong). **Fix:** draw them from a `layout_seed`-derived sub-stream (see
+  `layout_rng`, `count.py:43-55`). Changes which arbitrary genes are hypoxia-responsive ⇒ regenerate the
+  F8/PEtracer figures (results should be statistically unchanged) + re-check `test_microenvironment.py`.
+  **Folded into `handoffs/expression_programs.md`** (R13 builds the general program layer and must use the
+  layout stream anyway) — do it there, or standalone if R13 slips.
+- **General rule (user, 2026-07-15):** anything that is a property of the GENOME/landscape (gene→program
+  map, `loading`, dosage sensitivities `s_g`, the epistasis network) comes from the **layout stream**;
+  event-level draws stay on the run seed. Use **independent sub-streams per component**
+  (`SeedSequence(layout_seed).spawn(n)`) so changing e.g. `n_programs` doesn't reshuffle the oncogene/TSG
+  layout.
+
 ## Engine / inference follow-ups
 - **LATER — M3b HPC rerun** — fewer, bigger tumors (~800 × 8000-cell, tau-leaped) for the canonical
   Charm/PCAWG figure; HPC-bound. The flagship real-genome figure.
