@@ -271,6 +271,35 @@ class GenotypeTumor:
         self.cell_data = None
 
     # --- genotype registry ---------------------------------------------------
+    def _is_viable(self, rep):
+        """Whether a freshly mutated genotype satisfies the CINner viability limits
+        (``max_ploidy`` / ``max_cn`` / ``max_nullisomy`` / ``max_mut_drivers``; see
+        Selection.update_viability). A non-viable daughter is REJECTED AT BIRTH: the division is
+        still consumed, but it yields no cell and no genotype is registered.
+
+        WHY REJECT-AT-BIRTH, AND HOW IT DIFFERS FROM THE CELL ENGINE. The cell-level engine checks
+        the same limits lazily, in ``Deme.sample_event``: the non-viable daughter is added to the
+        deme and only dies when it is next *sampled* for an event. Both rules agree on the long-run
+        dynamics -- the division yields no surviving descendant either way, and the event is
+        consumed either way, so the parent pays for it identically. They differ only in a
+        transient: under the lazy rule the doomed cell occupies a carrying-capacity slot until it
+        happens to be picked. That dwell time is not a modelled quantity -- it is set by the deme's
+        total event rate, so it has no parameter behind it and no biological meaning, and while it
+        lasts the cell is counted by ``get_tumor_size`` and can be sampled into ``cell_data``,
+        i.e. genomes that breach the configured limits leak into the emitted assay data. Rejecting
+        at birth instead gives the invariant the limits are documented to provide: no cell
+        breaching them ever exists. It is also the complete seam -- ``update_evolutionary_parameters``
+        (the only thing that computes viability) runs only inside ``Cell.mutate``, so a successful
+        mutation is the ONLY way a genotype can become non-viable. Founders and normal cells are
+        viable by construction, in this engine and the cell engine alike.
+
+        The cell engine's transient is left as-is (fixing it there would shift cell-level
+        baselines for a strictly separate reason); the two engines' *statistical* equivalence --
+        survivor sizes in the same ballpark -- is unaffected and still covered by
+        tests/test_count_engine.py.
+        """
+        return self.selection.update_viability(rep.genome_summary) != 0
+
     def _register(self, rep):
         rep.ord = self._next_ord
         self._next_ord += 1
@@ -443,9 +472,12 @@ class GenotypeTumor:
             if rng.random() < mut_prob:
                 child = rep.divide()
                 if child.mutate(rng, self.selection):
-                    self._register(child)
-                    self.genotypes_parents[child.genotype_id] = rep.genotype_id
-                    self._add(di, child.genotype_id, 1)
+                    # A daughter breaching the viability limits is never born (see _is_viable):
+                    # the division is consumed but adds no cell.
+                    if self._is_viable(child):
+                        self._register(child)
+                        self.genotypes_parents[child.genotype_id] = rep.genotype_id
+                        self._add(di, child.genotype_id, 1)
                 else:
                     # no-op mutation (saturated allele): same genotype, grows in place
                     self._add(di, rep.genotype_id, 1)
@@ -577,7 +609,8 @@ class GenotypeTumor:
             if n:
                 self._remove(di, gid, n)
         # mutation-branch births: each is one division that attempts a mutation. A successful
-        # mutate() spawns a new genotype (count 1); a saturated allele grows the parent in place.
+        # mutate() spawns a new genotype (count 1) unless it breaches the viability limits, in
+        # which case nothing is born; a saturated allele grows the parent in place.
         # This per-mutation genotype creation is intrinsic to the infinite-sites model and costs
         # exactly the same as in the exact engine (the separate #genotypes concern of §3).
         for di, gid, n in mutants:
@@ -585,9 +618,11 @@ class GenotypeTumor:
             for _ in range(n):
                 child = rep.divide()
                 if child.mutate(rng, self.selection):
-                    self._register(child)
-                    self.genotypes_parents[child.genotype_id] = rep.genotype_id
-                    self._add(di, child.genotype_id, 1)
+                    # non-viable daughter: division consumed, no cell added (see _is_viable)
+                    if self._is_viable(child):
+                        self._register(child)
+                        self.genotypes_parents[child.genotype_id] = rep.genotype_id
+                        self._add(di, child.genotype_id, 1)
                 else:
                     self._add(di, gid, 1)
         # dispersal-branch births: same genotype, one daughter into a uniformly random neighbour
