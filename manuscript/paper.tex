@@ -519,9 +519,9 @@ validation of CINner~\cite{dinh_cinner_2025}, which fits its copy-number-evoluti
 real pan-cancer copy-number landscape. Building a reference of simulated tumors grown to several
 hundred cells with $\tau$-leaping and fitting them to the per-arm copy-number landscape of breast
 cancers from PCAWG~\cite{pcawg_2020}, \texttt{iscc} reproduces the real arm-level alteration frequencies
-($r=0.78$) and, orthogonally, recovers a positive relationship between its inferred per-arm
+($r=0.55$) and, orthogonally, recovers a positive relationship between its inferred per-arm
 selection and an external oncogenic-content score in the spirit of CINner~\cite{dinh_cinner_2025}
-($\rho=0.32$; \Cref{fig:inference_realgenome}). The $\tau$-leaped reference is statistically
+($\rho=0.38$; \Cref{fig:inference_realgenome}). The $\tau$-leaped reference is statistically
 interchangeable with an exact-update reference for this fit, confirming that the acceleration of
 \Cref{sec:scalability} does not degrade inference.
 
@@ -542,8 +542,8 @@ interchangeable with an exact-update reference for this fit, confirming that the
   \caption{\textbf{Fitting a real copy-number landscape.} \texttt{iscc} fit to the per-arm
   copy-number alteration landscape of breast cancers from PCAWG~\cite{pcawg_2020}. Left to right:
   the fitted versus real per-arm gain/loss landscape; the fitted-versus-observed alteration
-  frequencies ($r=0.78$); the inferred per-arm selection versus an external oncogenic-content
-  (Charm) score ($\rho=0.32$); and the equivalence of $\tau$-leaped and exact-update references
+  frequencies ($r=0.55$); the inferred per-arm selection versus an external oncogenic-content
+  (Charm) score ($\rho=0.38$); and the equivalence of $\tau$-leaped and exact-update references
   for the fit. The reference uses $\tau$-leaping (\Cref{sec:scalability}).}
   \label{fig:inference_realgenome}
 \end{figure}
