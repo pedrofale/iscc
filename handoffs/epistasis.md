@@ -61,9 +61,18 @@ progression model). So the network is part of the **shared landscape**, not per-
   `Selection` already takes `rng=self.layout_rng` (count.py:123), so the driver/oncogene/TSG identities
   the network is defined over are themselves already comparable — build `E` on top of that, in the same
   layout stream.
-- **Use an independent sub-stream** (`np.random.SeedSequence(layout_seed).spawn(n)` or a documented
-  offset) so that changing `n_interactions` / `network_topology` does NOT reshuffle the oncogene/TSG
-  layout or the gene programs (R13 has the same requirement).
+- **Use an independent sub-stream** so that changing `n_interactions` / `network_topology` does NOT
+  reshuffle the oncogene/TSG layout or the gene programs (R13 has the same requirement).
+- **PRE-ASSIGNED OFFSET (parallel-safe — `handoffs/expression_programs.md` is being built concurrently).**
+  Do NOT invent your own scheme and do NOT touch the existing `self.layout_rng = default_rng(layout_seed)`
+  — leaving it alone keeps `Selection` + `celltype_exps` byte-identical, so **nothing re-baselines**. Use
+  a documented fixed offset in `constants.py` (next to `DEFAULT_LAYOUT_SEED`):
+    * `LAYOUT_OFFSET_EPISTASIS = 201` → `default_rng(layout_seed + 201)` — the `E` matrix / dependency
+      DAG. **Yours.**
+    * `LAYOUT_OFFSET_PROGRAMS = 101` / `LAYOUT_OFFSET_F8_PROGRAMS = 102` — **reserved for R13; do not use.**
+  If the R13 session already added the registry, reuse it; otherwise add all three so R13's are claimed.
+- **Merge note:** R13 (concurrent) also edits `count.py.__init__`, `selection.py`, `PARAMETERS.md` and
+  `BACKLOG.md`. R14 is the smaller change — expect to land FIRST and let R13 rebase. Keep your diff tight.
 - Same config + same `layout_seed` ⇒ **identical network** across all patients and across separate
   simulations; only the stochastic evolution differs. An explicit different `layout_seed` ⇒ a different
   network (for replicate studies).

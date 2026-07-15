@@ -90,10 +90,18 @@ landscape). The mechanism ALREADY EXISTS — use it, don't invent one:
   `self.seed`: the program dictionary (gene→program map + `loading` matrix), the program-regulator
   assignment, and the per-gene dosage sensitivities `s_g`. **Event-level draws stay on the run seed**
   (which mutation happens when; a given SNV's functional class draw; the per-cell `z` noise).
-- **Use INDEPENDENT sub-streams per landscape component** — e.g. `np.random.SeedSequence(layout_seed).spawn(n)`
-  (or documented fixed offsets). Otherwise changing `n_programs` shifts one shared stream and silently
-  reshuffles which genes are oncogenes — breaking comparability between configs that differ only in
-  program parameters. This matters; get it right.
+- **Use INDEPENDENT sub-streams per landscape component.** Otherwise changing `n_programs` shifts one
+  shared stream and silently reshuffles which genes are oncogenes — breaking comparability between
+  configs that differ only in program parameters. This matters; get it right.
+- **PRE-ASSIGNED OFFSETS (parallel-safe — `handoffs/epistasis.md` is being built concurrently).** Do NOT
+  invent your own scheme and do NOT touch the existing `self.layout_rng = default_rng(layout_seed)` —
+  leaving it alone keeps `Selection` + `celltype_exps` byte-identical, so **nothing re-baselines**. Add
+  new streams as documented fixed offsets in `constants.py` (next to `DEFAULT_LAYOUT_SEED`):
+    * `LAYOUT_OFFSET_PROGRAMS = 101` → `default_rng(layout_seed + 101)` — program dictionary
+      (gene→program map, `loading`), program-regulator assignment, per-gene `s_g`. **Yours.**
+    * `LAYOUT_OFFSET_F8_PROGRAMS = 102` → the F8 hypoxia/CCI migration below. **Yours.**
+    * `LAYOUT_OFFSET_EPISTASIS = 201` — **reserved for R14; do not use.**
+  Add the whole registry (all three) so the concurrent R14 session's offset is already claimed.
 - **BUG TO FIX while you're here:** F8's program designation uses `prog_rng =
   np.random.default_rng(self.seed + 9973)` (`count.py:142`) — the RUN seed — so `_hypoxia_genes` /
   `_cci_target_genes` DIFFER per patient in a cohort. F8 predates `layout_seed` and was never migrated.
