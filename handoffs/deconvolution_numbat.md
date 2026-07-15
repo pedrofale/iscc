@@ -34,17 +34,36 @@ already made for clonealign/inferCNV. R13 makes them testable at all.
 **Why iscc is unique here:** it emits BOTH an scRNA reference AND Visium spots from the SAME tumour, with
 the TRUE per-spot cell-type/clone composition. Real benchmarks must borrow a reference from a different
 sample and can never control the mismatch. iscc can.
-- **Data gen:** grow a tumour with F8 microenvironment (niches) + R13 programs ON → sample → emit scRNA
-  (the reference) AND Visium (the spots) from the same tumour. Keep the true per-spot composition.
+- **Data gen — mirror how this is ACTUALLY done.** Grow ONE tumour (F8 niches + R13 programs ON). Take
+  the **Visium section** from one region. Take a **SEPARATE biopsy (F1) from a DIFFERENT REGION of the
+  SAME tumour**, push it through **dissociation (F2)**, and emit **scRNA** from that — *that* is the
+  reference. The reference is always same-tumour but a **different sample**; it is NOT another patient's
+  scRNA (nobody does that by choice). Keep the true per-spot composition (`visium.py` already records
+  `n_cells`, member cell ids, dominant clone + clone fractions) AND the true composition of the reference
+  biopsy — so the reference mismatch itself is measurable, not just its effect.
 - **Tools:** `cell2location` (env `iscc-cell2location`), `RCTD`/`spacexr` (env `iscc-rctd`, R).
   destVI/Tangram optional — don't gold-plate.
 - **Metrics:** per-spot composition accuracy (JSD / RMSE / correlation of true vs inferred proportions);
   per-cell-type recall; behaviour vs cells-per-spot / spot size.
-- **THE HEADLINE EXPERIMENT — matched vs mismatched reference.** Run with (a) the SAME tumour's scRNA as
-  reference (matched; best case) vs (b) a DIFFERENT PATIENT's scRNA as reference (the realistic case —
-  use the existing `Cohort` layer, which already gives private clones over a shared landscape). Quantify
-  the degradation. **This is the result no real benchmark can produce**; make it the headline rather than
-  a raw accuracy number.
+- **THE HEADLINE EXPERIMENT — what does a realistic (same-tumour, different-sample) reference cost, and
+  WHY?** The reference is imperfect for three REAL and SEPARABLE reasons, and iscc is the only thing that
+  can dial them independently *and* know the truth for each:
+    1. **Regional mismatch** — the scRNA biopsy came from a different part of the tumour, so it carries a
+       different clonal / niche composition. Sweep biopsy distance / overlap with the section (under
+       clonal territories — low `dispersal_rate` — a distant biopsy sees very different clones).
+    2. **Dissociation bias (F2)** — the reference passes through dissociation, which distorts cell-type
+       composition; the Visium section does not. Sweep the bias strength.
+    3. **Assay / batch (F3)** — scRNA and Visium are different technologies and batches.
+  **Ceiling control:** an oracle reference built from the EXACT cells in the section (no regional
+  mismatch, no dissociation) = the upper bound; then degrade toward realism and ATTRIBUTE the error to
+  each source. **That decomposition is the headline** — "what an imperfect reference actually costs, split
+  into its three real causes" — not a raw accuracy number. Real benchmarks cannot do this: they never know
+  the true per-spot composition, and cannot separate the three sources.
+  *(Optional extreme endpoint, clearly labelled as such: a different patient's scRNA via the `Cohort`
+  layer = the "no matched scRNA, fall back to an atlas" scenario. Not the main axis.)*
+- **Narrative tie-in:** this makes deconvolution a DOWNSTREAM CONSEQUENCE of the paper's existing
+  "Biopsy and dissociation shape the sampled data" Results section — the sampling biases already modelled
+  there propagate into deconvolution error, with ground truth at both ends. Cross-reference it.
 - **iscc-only extra axes (pick the interesting ones):** does accuracy degrade with **CNA burden** (clones
   become transcriptionally distinct)? Do the tools **confuse clones with cell types** (both are
   "populations" but only one is a program combination)? The latter is a nice tie-in to the R13 confound arc.

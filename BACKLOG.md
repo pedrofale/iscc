@@ -277,8 +277,11 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
 - **Priority (new work):** deconvolution (cell2location/RCTD, flagship) → Numbat → cardelino/PhylEx →
   MHN/TreeMHN (after epistasis) → multi-Visium → CCI. Each external tool in its own `iscc-<tool>` env.
 - **QUEUED — "cash in R13": handoff `handoffs/deconvolution_numbat.md`** (BLOCKED until R13 lands). Runs
-  the two tools R13 was built for: **deconvolution** (needs the program layer; headline = matched-vs-
-  MISMATCHED reference via the `Cohort` layer — the experiment no real benchmark can do) and **Numbat**
+  the two tools R13 was built for: **deconvolution** (needs the program layer; headline = the cost of a
+  REALISTIC reference — same tumour, *different sample*: Visium section vs an scRNA reference from a
+  separate F1 biopsy of another region, after F2 dissociation — decomposed into its three real sources:
+  regional mismatch, dissociation bias, assay/batch. iscc alone can dial each and know the truth for all;
+  ties to the existing "biopsy and dissociation shape the sampled data" section) and **Numbat**
   (needs ASE/BAF; headline = does the allele layer beat expression-only inferCNV?). Known risk: Numbat's
   allele input normally comes from cellsnp-lite + a phasing panel, which an abstract genome lacks — scope
   the interface first (likely feed allele counts directly).
