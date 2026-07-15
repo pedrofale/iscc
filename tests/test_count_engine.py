@@ -159,8 +159,9 @@ def test_statistically_equivalent_to_cell_engine():
 # --- viability limits (CINner max_ploidy / max_cn / max_nullisomy / max_mut_drivers) ---------
 # These were enforced ONLY in the cell-level engine (Deme.sample_event) and were never ported to
 # this one, so they were silently inert here: genotypes breaching them stayed alive and dividing.
-# See GenotypeTumor._is_viable for the reject-at-birth semantics and why they differ from the cell
-# engine's lazy check.
+# See GenotypeTumor._is_viable for the reject-at-birth semantics. Both engines now use that rule
+# (the cell engine's counterpart is exercised further down, under "the CELL engine enforces the
+# same limits, the same way").
 
 # A genome that mutates hard and amplifies/deletes aggressively, so the limits are actually
 # REACHED within a short run (the shipped defaults never get near them -- see
@@ -228,11 +229,7 @@ def test_nullisomy_limit_binds():
 
 
 def test_gate_rejects_a_breach_of_every_limit():
-    """The engine's gate must reject on ALL FOUR limits, not just the ones a run happens to reach.
-
-    Driven directly through the gate because ``max_mut_drivers`` is currently unreachable by
-    simulation -- see test_max_mut_drivers_is_inert_because_its_input_is_never_computed.
-    """
+    """The engine's gate must reject on ALL FOUR limits, not just the ones a run happens to reach."""
     t = GenotypeTumor(seed=1, genome_params=VIAB_GENOME,
                       selection_params={"max_ploidy": 6, "max_cn": 12, "max_nullisomy": 2,
                                         "max_mut_drivers": 1000},
@@ -249,29 +246,74 @@ def test_gate_rejects_a_breach_of_every_limit():
         assert not t._is_viable(probe), f"gate ignores a {key} breach"
 
 
-def test_max_mut_drivers_is_inert_because_its_input_is_never_computed():
-    """SEPARATE PRE-EXISTING BUG (both engines): ``genome_summary['n_mutated_drivers']`` is
-    initialised to 0 in Cell.__init__ and never written by any code path -- the summary maintains
-    n_mut_onc / n_mut_tsg / n_mut_disp / n_mut_ir / n_mut_tr instead. So
-    ``update_viability``'s ``n_mutated_drivers > max_mut_drivers`` is ``0 > 1000`` forever, and
-    max_mut_drivers cannot fire in the count engine OR the cell engine.
+def test_max_mut_drivers_limit_binds():
+    """``max_mut_drivers`` caps the number of distinct mutated driver genes, in BOTH engines.
 
-    Enforcing viability here does not fix that: the gate reads the limit correctly
-    (test_gate_rejects_a_breach_of_every_limit), the input is simply never populated. It is not a
-    mechanical fix either -- n_mut_onc/n_mut_tsg count mutated COPIES (CNVs scale them), not
-    distinct mutated driver genes, so populating n_mutated_drivers is a modelling decision.
-
-    This test pins the current reality; delete it when n_mutated_drivers is actually maintained.
+    It was inert until ``Cell._recount_seg_drivers`` was added: ``n_mutated_drivers`` was
+    initialised to 0 in ``Cell.__init__`` and written by no code path, so ``update_viability``'s
+    ``n_mutated_drivers > max_mut_drivers`` was ``0 > 1000`` forever. The gate always read the
+    limit correctly (test_gate_rejects_a_breach_of_every_limit); only its input was missing.
     """
-    cancer = {**VIAB_CANCER, "cnv_prob": 0.05, "snv_prob": 0.95}
-    limits = {"prop_driver": 0.3, "driver_effects": 1.2, "max_mut_drivers": 0}
+    cancer = {**VIAB_CANCER, "cnv_prob": 0.05, "snv_prob": 0.95}   # SNV-heavy: drivers get mutated
+    limits = {"prop_driver": 0.3, "driver_effects": 1.2, "max_mut_drivers": 2}
     t, rejected = _grow_counting_rejections(limits, cancer=cancer)
-    # even with max_mut_drivers=0 and an SNV-heavy genome, nothing is ever rejected for it
-    assert rejected == []
-    living = _living_cancer_summaries(t)
-    assert living and all(gs["n_mutated_drivers"] == 0 for gs in living)
-    # ...while the drivers that ARE tracked did accumulate, proving the run mutated drivers
-    assert any(gs["n_mut_onc"] + gs["n_mut_tsg"] > 0 for gs in living)
+    assert rejected, "max_mut_drivers was never reached -- the test config no longer exercises it"
+    assert all(gs["n_mutated_drivers"] <= 2 for gs in _living_cancer_summaries(t))
+
+
+def test_n_mutated_drivers_counts_distinct_genes_not_mutated_copies():
+    """The gate's input is DISTINCT mutated driver genes -- the modelling decision behind the knob.
+
+    This is why the copy-weighted ``n_mut_onc``/``n_mut_tsg`` could not be reused as the input:
+    ``update_genome_summary_cnv`` scales them by ``sign`` as copies come and go, so one mutated
+    oncogene at copy number 4 contributes 4 to them but must contribute 1 here -- amplifying a
+    driver is not the same event as mutating three more.
+    """
+    from iscc.tumor.components.cell import Cell
+    from iscc.tumor.components.selection import Selection
+
+    # prop_driver=1.0 -> every position is a driver (onc or tsg), so the arithmetic below is exact
+    sel = Selection(n_segments=1, segment_size=20, prop_driver=1.0, rng=np.random.default_rng(0))
+    cell = Cell(n_segments=1, segment_size=20, n_onc=len(sel.get_oncogenes()),
+                n_tsg=len(sel.get_tsgs()))
+    seg, pos = 0, int(sel.drivers[0][0])
+    mut_bits = np.zeros(20, dtype=bool)
+    mut_bits[pos] = True
+
+    assert cell.genome_summary["n_mutated_drivers"] == 0     # untouched diploid founder
+
+    # one SNV on one copy of one driver gene -> one distinct mutated driver
+    cell.genome[seg]["p"][0][pos] = True
+    cell.update_genome_summary_mutation(sel, mut_bits, seg)
+    assert cell.genome_summary["n_mutated_drivers"] == 1
+
+    # the SAME gene mutated on the other haplotype is still ONE mutated gene
+    cell.genome[seg]["m"][0][pos] = True
+    cell.update_genome_summary_mutation(sel, mut_bits, seg)
+    assert cell.genome_summary["n_mutated_drivers"] == 1
+
+    # amplifying a mutated copy raises the copy-weighted counts but NOT the distinct gene count
+    copies_before = cell.genome_summary["n_mut_onc"] + cell.genome_summary["n_mut_tsg"]
+    cell.genome[seg]["p"].append(cell.genome[seg]["p"][0].copy())
+    cell.update_genome_summary_cnv(sel, cell.genome[seg]["p"][0], seg, 1)
+    assert cell.genome_summary["n_mutated_drivers"] == 1
+    assert cell.genome_summary["n_mut_onc"] + cell.genome_summary["n_mut_tsg"] > copies_before
+
+    # a second, DIFFERENT driver gene does move it
+    pos2 = int(sel.drivers[0][1])
+    mut_bits2 = np.zeros(20, dtype=bool)
+    mut_bits2[pos2] = True
+    cell.genome[seg]["p"][0][pos2] = True
+    cell.update_genome_summary_mutation(sel, mut_bits2, seg)
+    assert cell.genome_summary["n_mutated_drivers"] == 2
+
+    # deleting every copy carrying them un-mutates both genes again
+    for hap in ("p", "m"):
+        while cell.genome[seg][hap]:
+            bits = cell.genome[seg][hap][0].copy()
+            del cell.genome[seg][hap][0]
+            cell.update_genome_summary_cnv(sel, bits, seg, -1)
+    assert cell.genome_summary["n_mutated_drivers"] == 0
 
 
 def test_tau_engine_also_enforces_viability():

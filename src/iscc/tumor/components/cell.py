@@ -69,7 +69,8 @@ class Cell(object):
                                     'highest_cn': 2,
                                     'nullisomy_count': 0,
                                     'n_mutated_drivers': 0,
-                                    'seg_cns': [2] * n_segments,}            
+                                    'seg_mut_drivers': [0] * n_segments,
+                                    'seg_cns': [2] * n_segments,}
         else:
             self.genome = list(parent.genome)
             self.genotype_id = self.parent.genotype_id
@@ -137,6 +138,36 @@ class Cell(object):
         self.evolutionary_parameters['treatment_resistance'] = max(
             0.0, 1.0 - 1.0 / selection.update_treatment_resistance(gs))
 
+    def _recount_seg_drivers(self, selection, seg):
+        """Refresh this segment's contribution to ``n_mutated_drivers``: the number of DISTINCT
+        driver genes (onc union tsg, i.e. driver_types != 0) mutated on AT LEAST ONE copy.
+
+        Distinct genes, not mutated copies. n_mut_onc/n_mut_tsg cannot stand in for this: they are
+        copy-weighted, because update_genome_summary_cnv scales them by `sign` as copies come and
+        go, so one mutated oncogene at copy number 4 contributes 4 to them but 1 here.
+
+        Recomputed from the genome rather than carried incrementally, because the count is not
+        monotone: a deletion un-mutates a gene whose only mutated copy it removed, so an
+        incremental counter would have to track every position's mutated-copy multiplicity. The
+        union below is O(copies x segment_size) for the ONE segment that changed -- the same order
+        as the per-category counting its callers already do -- and every caller (mutate's SNV and
+        CNV branches, cohort._apply_germline_mutations) writes the genome bits BEFORE calling in,
+        so it always reads the post-event state.
+        """
+        drivers = selection.drivers[seg]
+        copies = self.genome[seg]['p'] + self.genome[seg]['m']
+        if len(copies) and len(drivers):
+            union = np.zeros(self.segment_sizes[seg], dtype=bool)
+            for bits in copies:
+                union |= bits          # a gene counts once however many copies carry it
+            n = int(union[drivers].sum())
+        else:
+            n = 0                      # nullisomic segment: no copy, nothing mutated
+        # The per-segment breakdown lives on genome_summary so it inherits the copy-on-write
+        # deepcopy in mutate(); a plain attribute would alias across the shallow copy() in divide().
+        self.genome_summary['n_mutated_drivers'] += n - self.genome_summary['seg_mut_drivers'][seg]
+        self.genome_summary['seg_mut_drivers'][seg] = n
+
     def update_genome_summary_mutation(self, selection, mut_bits, seg):
         # `mut_bits` is a boolean mask over the segment marking newly mutated positions;
         # count how many fall in each driver category by indexing the mask.
@@ -169,7 +200,9 @@ class Cell(object):
         if selection.epistasis is not None:
             self.event_bits |= selection.epistasis.events_from_mutation(seg, mut_bits)
 
-        # TODO: Maybe increase number of mutated drivers
+        # New SNVs can only add distinct mutated drivers, but only where the gene was not already
+        # mutated on another copy -- which is exactly what the recount resolves.
+        self._recount_seg_drivers(selection, seg)
 
     def update_genome_summary_cnv(self, selection, allele_bits, seg, sign):
         # A CNV adds/removes one allele copy of segment `seg`. `allele_bits` is that
@@ -208,7 +241,9 @@ class Cell(object):
         # nullisomy = number of segments with zero copies, not the largest copy number.
         self.genome_summary['nullisomy_count'] = int(np.sum(np.asarray(seg_cns) == 0))
 
-        # TODO: maybe reduce the number of unique drivers...
+        # An amplification duplicates an existing copy and so never changes the DISTINCT count; a
+        # deletion lowers it only for genes whose last mutated copy just went.
+        self._recount_seg_drivers(selection, seg)
 
     @property
     def event_order(self):

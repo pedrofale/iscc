@@ -76,14 +76,21 @@ matter once you tighten them or push amplification/deletion hard.
 | `max_ploidy` | 6 | 3–8 | tight (≲ 3) → caps CIN; near-diploid tumour, WGD impossible |
 | `max_cn` | 12 | 6–20 | tight → caps focal amplification; interacts with `amp_prob` |
 | `max_nullisomy` | 2 | 0–`n_segments` | `0` → **any** fully deleted segment is fatal; loose → whole-genome loss survives |
-| `max_mut_drivers` | 1000 | — | **currently inert** (see below) |
+| `max_mut_drivers` | 1000 | 1–(`prop_driver` × `n_genes`) | tight → caps driver accumulation; `0` → any driver SNV is fatal |
 
-!!! warning "`max_mut_drivers` does not work"
-    `genome_summary['n_mutated_drivers']` is initialised to 0 and never written by any code path,
-    so the check is `0 > 1000` forever and the knob is a no-op in **both** engines. The summary
-    tracks `n_mut_onc` / `n_mut_tsg` instead, and those count mutated *copies* (CNVs scale them),
-    not distinct mutated driver genes — so populating it is a modelling decision, not a rename.
-    Pinned by `test_max_mut_drivers_is_inert_because_its_input_is_never_computed`.
+!!! note "`max_mut_drivers` counts distinct driver *genes*, not mutated copies"
+    Its input, `genome_summary['n_mutated_drivers']`, is the number of distinct driver genes
+    (oncogene ∪ TSG) carrying an SNV on **at least one copy**. A mutated oncogene amplified to
+    copy number 4 counts **once**; a deletion that removes a gene's last mutated copy lowers the
+    count again. Do not reach for `n_mut_onc` / `n_mut_tsg` as a substitute — those are
+    copy-weighted (CNVs scale them by copy number) and so are *not* a count of mutated drivers.
+
+    The default of 1000 is far out of reach at the shipped defaults, so this limit moves no
+    existing trajectory (`test_default_limits_are_a_noop_for_the_exact_engine`). It was inert in
+    **both** engines until `Cell._recount_seg_drivers` began maintaining the count: the gate
+    always read the limit correctly, but its input was never populated, so the check was
+    `0 > 1000` forever. Now covered by `test_max_mut_drivers_limit_binds` and
+    `test_n_mutated_drivers_counts_distinct_genes_not_mutated_copies`.
 
 !!! note "`max_nullisomy` binds at the defaults under tau-leaping"
     With the default 5-segment genome, tau-leaping reaches sizes where a daughter has deleted >2
