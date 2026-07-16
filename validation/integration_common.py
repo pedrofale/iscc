@@ -31,6 +31,12 @@ CLONEALIGN_RSCRIPT = os.environ.get(
     "ISCC_CLONEALIGN_RSCRIPT", os.path.join(HOME, "miniconda3/envs/iscc-clonealign/bin/Rscript"))
 INFERCNV_PYTHON = os.environ.get(
     "ISCC_INFERCNV_PYTHON", os.path.join(HOME, "miniconda3/envs/iscc-infercnv/bin/python"))
+NUMBAT_RSCRIPT = os.environ.get(
+    "ISCC_NUMBAT_RSCRIPT", os.path.join(HOME, "miniconda3/envs/iscc-numbat/bin/Rscript"))
+
+
+def numbat_available():
+    return os.path.exists(NUMBAT_RSCRIPT)
 
 
 def clonealign_available():
@@ -375,4 +381,231 @@ def score_infercnv(res, true_seg_cn, clone_labels=None):
               if len(info) else float("nan"))
         out.update(clone_inferred=clone_inf, clone_true=clone_true, informative_segments=info,
                    clone_level_r=rc, n_clones=K)
+    return out
+
+
+# ==================================================================================================
+# Numbat (allele-aware CNA-from-expression) — DEMO 2
+# --------------------------------------------------------------------------------------------------
+# Numbat is the allele-aware successor to inferCNV: on top of the expression signal it reads B-allele
+# frequencies (BAF) at phased SNP sites and a phylogeny prior. The clean question iscc can answer is
+# whether the allele layer actually HELPS, and by how much, in a HEAD-TO-HEAD against expression-only
+# inferCNV on the SAME cells.
+#
+# INPUT-INTERFACE SCOPING (the documented main risk). Numbat normally builds its allele dataframe from
+# cellsnp-lite pileups on a BAM + a POPULATION PHASING PANEL (Eagle/1000G) — machinery an abstract
+# genome has none of. We take the route the handoff prefers: feed Numbat the allele counts DIRECTLY.
+# iscc tracks the two homologs (`p`/`m`) explicitly, so it already knows the true PHASE — the very thing
+# a phasing panel only approximates. We therefore treat each gene as one phased heterozygous marker with
+# GT = "1|0" (the `p` homolog is haplotype 0 everywhere, globally consistent by construction), the ALT
+# (B-allele) count = reads from the `m` homolog, drawn at the gene's UMI depth from iscc's per-allele
+# expression (`cell_rna_baf`), and iscc's segments mapped onto Numbat's chromosomes via a custom `gtf`.
+# Bypassing pileup + phasing this way — "we fed allele counts directly because the population phasing
+# panel does not apply to an abstract genome, and iscc's homolog labels ARE the ground-truth phasing" —
+# is itself the honest answer to the scoping question, and worth a sentence in the paper.
+
+# The Numbat tumour reuses the shared multi-clone GENOME/SELECTION/etc. above but is grown with the R13
+# allele layer ON (allele_specific dosage) so `cell_rna_baf` exists. Programs stay OFF: this keeps the
+# expression regime identical to the inferCNV benchmark (the head-to-head must be fair), while the
+# allelic imbalance that Numbat exploits still emerges from the per-homolog dosage of the CNAs.
+NUMBAT_EXPR = {"dosage_params": {"dosage_sensitivity_mean": 0.85, "dosage_sensitivity_sd": 0.15,
+                                 "dosage_saturation": 8, "allele_specific": True}}
+
+
+def grow_tumor_alleles(seed=3, steps=750, genome=None, spatial=None, cancer=None, deme=None):
+    """Grow the shared multi-clone tumour with the allele-resolved expression layer ON (so
+    ``cell_rna_baf`` / ``cell_exp_p`` / ``cell_exp_m`` are materialised for Numbat)."""
+    from iscc.tumor.models import GenotypeTumor
+    t = GenotypeTumor(seed=seed,
+                      genome_params=genome or GENOME, selection_params=SELECTION,
+                      cancer_cell_params=cancer or CANCER, deme_params=deme or DEME,
+                      spatial_params=spatial or SPATIAL, expression_params=NUMBAT_EXPR)
+    t.grow(n_steps=steps, seed=seed)
+    t.make_cell_data()
+    return t
+
+
+def build_cna_inputs(tumor, n_cancer=None, n_normal=150, n_clones=4, protocol="10x", seed=0):
+    """Shared substrate for the Numbat-vs-inferCNV head-to-head: pick malignant (cancer) + normal
+    (epithelial/stromal) cells, emit ONE scRNA realisation, and return everything BOTH tools consume so
+    they see identical counts. Returns a dict with:
+
+      ``adata``      — infercnvpy-ready AnnData (genomic coords in ``var``, true per-cell per-segment CN
+                       in ``obsm['true_seg_cn']``, malignant/normal label in ``obs``) — the inferCNV input;
+      ``counts``     — cells x genes DataFrame (the emitted UMI counts);
+      ``cell_ids``   — malignant + normal cell order (matches ``adata`` / ``counts``);
+      ``is_malignant`` — bool per cell; ``clone_labels`` — per-malignant-cell clone id (0..K-1);
+      ``true_seg_cn`` — cells x segments true CN; ``consensus`` — clones x segments int CN;
+      ``gene_seg``   — per-gene segment index; ``n_segments``.
+    """
+    adata = build_infercnv_inputs(tumor, n_cancer=n_cancer, n_normal=n_normal, protocol=protocol,
+                                  seed=seed)
+    types = cell_types(tumor)
+    seg, gene_seg = segment_cn(tumor)
+    idx_all = np.asarray(tumor.cell_data["cell_type"].index)
+    tmap = {c: t for c, t in zip(idx_all, types)}
+
+    cell_ids = list(adata.obs_names)
+    is_mal = np.array([tmap[c] == "cancer" for c in cell_ids])
+    counts = pd.DataFrame(np.asarray(adata.X), index=cell_ids, columns=list(adata.var_names))
+
+    # clones on the malignant cells (the same CN-profile clustering used elsewhere)
+    seg_by_cell = pd.DataFrame(seg, index=idx_all, columns=[f"seg{s}" for s in range(tumor.n_segments)])
+    mal_cells = [c for c in cell_ids if tmap[c] == "cancer"]
+    labels, consensus = define_clones(seg_by_cell.loc[mal_cells].values, n_clones=n_clones)
+    clone_by_cell = {c: int(l) for c, l in zip(mal_cells, labels)}
+
+    return dict(adata=adata, counts=counts, cell_ids=cell_ids, is_malignant=is_mal,
+                clone_labels=np.array([clone_by_cell[c] for c in mal_cells]), mal_cells=mal_cells,
+                true_seg_cn=np.asarray(adata.obsm["true_seg_cn"]), consensus=consensus,
+                gene_seg=gene_seg, n_segments=int(tumor.n_segments))
+
+
+def build_numbat_inputs(tumor, shared, work_dir, depth_frac=1.0, seed=0):
+    """Materialise Numbat's file inputs from the shared substrate (route (i): allele counts directly).
+
+    Writes to ``work_dir``:
+      ``count_mat.csv``  — genes x cells integer UMI matrix (Numbat's expression input);
+      ``ref_counts.csv`` — genes x NORMAL cells (for the ``lambdas_ref`` expression reference);
+      ``df_allele.csv``  — the phased allele dataframe (cell, snp_id, CHROM, POS, cM, REF, ALT, AD, DP,
+                           GT, gene) with ALT = m-homolog counts drawn at UMI depth from ``cell_rna_baf``;
+      ``gtf.csv``        — gene -> (CHROM = segment 1..S, gene_start, gene_end) custom annotation.
+    Returns the paths + the per-cell truth needed to score.
+    """
+    os.makedirs(work_dir, exist_ok=True)
+    rng = np.random.default_rng(seed)
+    cell_ids = shared["cell_ids"]
+    genes = list(shared["counts"].columns)
+    counts = shared["counts"]                              # cells x genes
+    gene_seg = shared["gene_seg"]
+    seg_of = {g: int(gene_seg[i]) for i, g in enumerate(list(tumor.cell_data["cell_exp"].columns))}
+
+    # per-gene genomic layout: segment -> CHROM (1..S), position within segment -> POS (bp), cM ~ POS.
+    pos_in_seg = {g: int(g.split("_")[2]) for g in genes}
+    chrom = np.array([seg_of[g] + 1 for g in genes])
+    pos = np.array([pos_in_seg[g] * 1000 + 1 for g in genes])    # 1 kb gene spacing
+    gtf = pd.DataFrame({"gene": genes, "gene_start": pos, "gene_end": pos + 500,
+                        "CHROM": chrom, "gene_length": 500})   # numbat gtf schema
+    gtf.to_csv(os.path.join(work_dir, "gtf.csv"), index=False)
+
+    # count matrix (genes x cells) and the normal-cell reference
+    cmat = counts.T.round().astype(int)                    # genes x cells
+    cmat.to_csv(os.path.join(work_dir, "count_mat.csv"))
+    normal_cells = [c for c, m in zip(cell_ids, shared["is_malignant"]) if not m]
+    cmat[normal_cells].to_csv(os.path.join(work_dir, "ref_counts.csv"))
+
+    # allele dataframe: ALT(B) = m-homolog fraction (1 - BAF); DP = UMI depth; AD ~ Binomial(DP, mfrac).
+    baf = tumor.cell_data["cell_rna_baf"].loc[cell_ids, genes].values      # cells x genes (p fraction)
+    mfrac = 1.0 - baf
+    umi = counts.values                                    # cells x genes
+    dp = np.rint(umi * float(depth_frac)).astype(int)
+    ad = rng.binomial(np.maximum(dp, 0), np.clip(mfrac, 0.0, 1.0))
+    ci, gi = np.where(dp > 0)                               # only covered (cell, gene) sites
+    gpos = {g: (int(chrom[j]), int(pos[j])) for j, g in enumerate(genes)}
+    gname = np.array(genes)
+    rows = pd.DataFrame({
+        "cell": np.array(cell_ids)[ci],
+        "gene": gname[gi],
+        "CHROM": chrom[gi],
+        "POS": pos[gi],
+        "AD": ad[ci, gi],
+        "DP": dp[ci, gi],
+    })
+    rows["snp_id"] = rows["CHROM"].astype(str) + "_" + rows["POS"].astype(str)
+    rows["cM"] = rows["POS"] / 1e6                          # ~1 cM / Mb; phase is exact so this only
+    rows["REF"] = "A"                                       # sets the HMM's phase-switch length scale
+    rows["ALT"] = "B"
+    rows["GT"] = "1|0"                                      # p = hap0, m = hap1, globally consistent
+    rows = rows[["cell", "snp_id", "CHROM", "POS", "cM", "REF", "ALT", "AD", "DP", "GT", "gene"]]
+    rows.to_csv(os.path.join(work_dir, "df_allele.csv"), index=False)
+
+    return dict(work_dir=work_dir, cell_ids=cell_ids, genes=genes,
+                is_malignant=shared["is_malignant"], clone_labels=shared["clone_labels"],
+                mal_cells=shared["mal_cells"], true_seg_cn=shared["true_seg_cn"],
+                consensus=shared["consensus"], n_segments=shared["n_segments"])
+
+
+def run_numbat(numbat_in, work_dir, min_cells=20, ncores=1, max_iter=1, t=1e-5, seed=0):
+    """Run the REAL Numbat (in ``iscc-numbat``) on the file inputs; return its per-cell outputs.
+
+    Shells out to :mod:`numbat_runner` (R). Returns a dict with ``clone`` (per-cell clone id),
+    ``p_aneuploid`` (P(cell is aneuploid) — the malignant score), ``seg_cn`` (cells x segments inferred
+    total CN, aligned to ``numbat_in['cell_ids']`` order where present), and ``cells`` (row order).
+    """
+    if not numbat_available():
+        raise RuntimeError(f"numbat env not found at {NUMBAT_RSCRIPT}")
+    out_dir = os.path.join(work_dir, "numbat_out")
+    os.makedirs(out_dir, exist_ok=True)
+    runner = os.path.join(REPO, "validation", "numbat_runner.R")
+    subprocess.run([NUMBAT_RSCRIPT, runner, numbat_in["work_dir"], out_dir,
+                    str(int(min_cells)), str(int(ncores)), str(int(max_iter)),
+                    str(float(t)), str(int(seed))], check=True, capture_output=True, text=True)
+
+    clone = pd.read_csv(os.path.join(out_dir, "clone.csv"))            # cell, clone, p_aneuploid
+    seg = pd.read_csv(os.path.join(out_dir, "cell_seg_cn.csv"), index_col=0)  # cells x CHROM
+    cells = list(clone["cell"])
+    n_seg = numbat_in["n_segments"]
+    seg_cn = np.full((len(cells), n_seg), np.nan)
+    for j in range(n_seg):
+        col = str(j + 1)
+        if col in seg.columns:
+            seg_cn[:, j] = seg.reindex(cells)[col].values
+    return dict(clone=clone.set_index("cell")["clone"].to_dict(),
+                p_aneuploid=clone.set_index("cell")["p_aneuploid"].to_dict(),
+                seg_cn=seg_cn, cells=cells)
+
+
+def score_numbat(res, numbat_in):
+    """Score Numbat against iscc truth: malignant-vs-normal AUC (by P(aneuploid)), per-segment single-
+    cell CN correlation, clone-assignment ARI, and the denoised clone-level CN correlation — the same
+    quantities :func:`score_infercnv` reports, so the two tools are compared like-for-like."""
+    from sklearn.metrics import roc_auc_score, adjusted_rand_score
+
+    cells = res["cells"]
+    id_pos = {c: i for i, c in enumerate(numbat_in["cell_ids"])}
+    is_mal_all = numbat_in["is_malignant"]
+    mal = np.array([bool(is_mal_all[id_pos[c]]) for c in cells])
+    tr_all = numbat_in["true_seg_cn"]
+    tr = np.stack([tr_all[id_pos[c]] for c in cells]).astype(float)   # cells x segments (true CN)
+
+    pan = np.array([res["p_aneuploid"].get(c, np.nan) for c in cells])
+    ok = ~np.isnan(pan)
+    mn_auc = (float(roc_auc_score(mal[ok].astype(int), pan[ok]))
+              if ok.sum() and 0 < mal[ok].sum() < ok.sum() else float("nan"))
+
+    seg = res["seg_cn"]
+    per_seg_r = {}
+    for j in range(seg.shape[1]):
+        col = seg[:, j]
+        m = mal & ~np.isnan(col)
+        if m.sum() > 2 and tr[m, j].std() > 0 and np.nanstd(col[m]) > 0:
+            per_seg_r[j] = float(np.corrcoef(col[m], tr[m, j])[0, 1])
+
+    # clone assignment ARI (malignant cells only), against the true clone labels
+    mal_cells = numbat_in["mal_cells"]
+    clone_true = {c: int(l) for c, l in zip(mal_cells, numbat_in["clone_labels"])}
+    common = [c for c in cells if c in clone_true and c in res["clone"]]
+    ari = (float(adjusted_rand_score([clone_true[c] for c in common],
+                                     [res["clone"][c] for c in common]))
+           if len(common) > 2 else float("nan"))
+
+    # clone-level CN correlation (denoise per inferred clone, centre, correlate on CN-varying segments)
+    out = dict(malignant_normal_auc=mn_auc, per_segment_r=per_seg_r,
+               mean_segment_r=float(np.mean(list(per_seg_r.values()))) if per_seg_r else float("nan"),
+               clone_ari=ari, n_cells=len(cells), n_malignant=int(mal.sum()))
+    if len(common) > 2:
+        lab = np.array([res["clone"][c] for c in common])
+        pos = np.array([cells.index(c) for c in common])
+        segc = seg[pos]
+        trc = tr[pos]
+        uk = [k for k in np.unique(lab) if (lab == k).sum() >= 2]
+        if len(uk) >= 2:
+            ci = np.stack([np.nanmean(segc[lab == k], 0) for k in uk])
+            ct = np.stack([trc[lab == k].mean(0) for k in uk])
+            info = np.where(ct.std(0) > 0.1)[0]
+            cin = ci - np.nanmean(ci, 0, keepdims=True)
+            ctn = ct - ct.mean(0, keepdims=True)
+            good = info[~np.isnan(cin[:, info]).any(0)] if len(info) else info
+            out["clone_level_r"] = (float(np.corrcoef(cin[:, good].ravel(), ctn[:, good].ravel())[0, 1])
+                                    if len(good) else float("nan"))
     return out

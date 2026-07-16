@@ -668,9 +668,51 @@ separated by a single altered segment. inferCNV, in turn, separates the malignan
 diploid normal compartment almost perfectly (AUC $0.99$ by CNV burden) and recovers the clonal
 gain/loss structure (clone-level correlation $0.86$ with the true copy number); per-cell copy-number
 correlation is real but modest, reflecting the genuine difficulty of the inverse problem at single-cell
-resolution. Together with the PEtracer benchmark, these demonstrate a general pattern: because
-\texttt{iscc} generates every modality from one evolving tumour, it supplies the non-circular,
-cross-modal ground truth that integration methods are otherwise validated without.
+resolution.
+
+\texttt{iscc}'s ability to emit several modalities from one tumor is sharpest for \emph{spatial
+deconvolution}, where a method assigns each spatial spot a mixture of cell types using a single-cell
+reference. The benchmark's defining difficulty is that the reference and the spatial section are
+different samples --- and this is exactly what \texttt{iscc} can both control and measure. We grow one
+tumor with a microenvironment and the gene-program layer, so its four cell types (malignant, epithelial,
+stromal, immune) carry distinct co-expressed programs; we take a Visium section from it; and we take the
+scRNA reference from a \emph{separate} biopsy of the \emph{same} tumor, optionally passed through
+dissociation and a different assay --- exactly how such a reference is obtained in practice. \texttt{iscc}
+records the true per-spot composition of the section \emph{and} the true composition of the reference, so
+the reference mismatch is itself measurable, not merely its effect. Running the genuine tools ---
+cell2location~\cite{kleshchevnikov_cell2location_2022} and RCTD~\cite{cable_rctd_2022}, each in its own
+environment --- with an \emph{oracle} reference built from the exact section cells recovers per-spot
+proportions almost perfectly (RCTD proportion correlation $r=0.99$). Degrading the reference toward
+realism and attributing the error to its three separable causes (\Cref{fig:deconv}A) shows the cost is
+dominated by \emph{regional} mismatch: a biopsy from the wrong region under-samples the tumor cells, and
+once a cell type drops out of the reference the deconvolution of that type collapses (\Cref{fig:deconv}C),
+while dissociation and assay differences add little on top. The reference-composition error \texttt{iscc}
+measures rises in lock-step with this cost --- making deconvolution a downstream consequence of the
+sampling biases of \Cref{sec:sampling}, now with ground truth at \emph{both} ends, which no real
+benchmark can supply. And because the cell types are program \emph{combinations} while the copy-number
+clones are not, the tools resolve the program-defined cell types ($r\approx0.99$) far better than the
+CNA-defined clones ($r\approx0.4$--$0.8$; \Cref{fig:deconv}D) --- a spatial echo of the clone-versus-state
+confound.
+
+The allele layer enables a sharper copy-number test. inferCNV infers copy number from expression alone;
+Numbat~\cite{gao_numbat_2023} additionally reads B-allele frequencies at phased SNP sites together with a
+clone phylogeny. Because \texttt{iscc} tracks both homologs it already knows the true phase, so we bypass
+the population phasing panel an abstract genome lacks and feed Numbat the allele counts directly (each
+gene a phased marker, the B-allele count drawn at expression depth from the per-homolog dosage) --- itself
+the honest answer to how such a tool applies to a simulator, and one \texttt{iscc}'s explicit homolog
+tracking makes available. Head-to-head on the same cells, allele-aware Numbat and expression-only inferCNV
+separate malignant from normal comparably (AUC $0.95$ vs $0.98$) and recover per-segment copy number
+comparably ($r=0.50$ vs $0.47$), because \texttt{iscc}'s copy-number changes mostly alter \emph{total}
+copy number --- where expression already carries the signal --- and copy-neutral loss of heterozygosity
+is rare. Where the allele layer pays off is \emph{subclone} resolution: Numbat's haplotype-aware phylogeny
+recovers the copy-number clones far better than clustering inferCNV's expression profile does (adjusted
+Rand index $0.64$ vs $0.18$; \Cref{fig:numbat}C), and the allelic imbalance it exploits emerges from
+per-homolog dosage (\Cref{fig:numbat}D) rather than being imposed.
+
+Together with the PEtracer benchmark, these demonstrate a general pattern: because \texttt{iscc}
+generates every modality from one evolving tumor, it supplies the non-circular, cross-modal ground truth
+--- and, uniquely, ground truth for the \emph{sampling mismatch between modalities} --- that integration
+methods are otherwise validated without.
 
 \begin{figure}[t]
   \centering
@@ -695,6 +737,35 @@ cross-modal ground truth that integration methods are otherwise validated withou
   correlation with the true copy number is $0.86$. (C) inferCNV separates malignant from normal cells by
   CNV burden (AUC $0.99$).}
   \label{fig:infercnv}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{validation_deconvolution.png}
+  \caption{\textbf{Spatial deconvolution against \texttt{iscc}'s per-spot ground truth: what an imperfect
+  reference costs.} A Visium section and its scRNA reference come from the same tumor but different
+  samples; \texttt{iscc} knows the true composition of both. (A) an oracle reference (the exact section
+  cells) is the ceiling; degrading toward realism attributes the per-spot error to its three causes ---
+  regional mismatch dominates, dissociation and assay differences add little. (B) accuracy vs spot
+  cellularity. (C) as the reference biopsy moves away, its composition error (dashed) rises and accuracy
+  collapses when a cell type drops out of the reference --- a cause and cost real benchmarks cannot see.
+  (D) the tools resolve the program-defined cell types ($r\approx0.99$) far better than the CNA-defined
+  clones, which are not program combinations.}
+  \label{fig:deconv}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{validation_numbat.png}
+  \caption{\textbf{Allele-aware Numbat vs expression-only inferCNV --- does the allele layer help?}
+  Both run on the same cells; Numbat is fed allele counts built directly from \texttt{iscc}'s per-homolog
+  expression (its homolog labels are the ground-truth phasing). (A) per-segment and clone-level copy-number
+  correlation are comparable between the two. (B) both separate malignant from normal (AUC). (C) the allele
+  layer's payoff is subclone resolution: Numbat's haplotype phylogeny recovers the copy-number clones
+  (adjusted Rand index) far better than clustering inferCNV's expression. (D) the allelic imbalance Numbat
+  exploits is emergent --- pooled B-allele frequency departs from $0.5$ at copy-number-altered segments in
+  malignant cells and stays balanced in normal cells.}
+  \label{fig:numbat}
 \end{figure}
 
 \subsection*{A ground-truth benchmark: multi-region bulk ``sample trees'' are not phylogenies}

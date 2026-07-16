@@ -49,11 +49,11 @@ The pattern for each tool (see `integration_common.py`):
 
 Document each new env's build recipe in the "Building the dedicated envs" section below.
 
-**Current envs:** `iscc-clonealign`, `iscc-infercnv`, `iscc-scdef`, `iscc-cnmf`, `iscc-mhn`, `iscc-treemhn`.
+**Current envs:** `iscc-clonealign`, `iscc-infercnv`, `iscc-scdef`, `iscc-cnmf`, `iscc-mhn`,
+`iscc-treemhn`, `iscc-cell2location`, `iscc-rctd`, `iscc-numbat`.
 **Planned (build the same way when the benchmark lands):** cohort/batch integration — `iscc-scvi`
-(scvi-tools / scANVI), `iscc-harmony` (harmonypy); demultiplexing — `iscc-demux` (vireo / souporcell);
-spatial deconvolution — `iscc-cell2location` / `iscc-tangram`. Self-contained validations (pure
-numpy/scipy, e.g. the multi-region NJ trees) need **no** extra env.
+(scvi-tools / scANVI), `iscc-harmony` (harmonypy); demultiplexing — `iscc-demux` (vireo / souporcell).
+Self-contained validations (pure numpy/scipy, e.g. the multi-region NJ trees) need **no** extra env.
 
 ## Building the dedicated envs
 
@@ -117,6 +117,71 @@ optional — the script prints `SKIPPING (env absent)` and carries on. Override 
 ```bash
 ~/miniconda3/envs/iscc/bin/python validation/validate_programs.py --quick   # smoke test
 ~/miniconda3/envs/iscc/bin/python validation/validate_programs.py --reps 3  # the paper figure
+```
+
+### Spatial deconvolution (cell2location / RCTD) — the flagship, R13
+
+`validate_deconvolution.py` (+ `deconv_common.py`, `cell2location_runner.py`, `rctd_runner.R`) grows ONE
+four-type tumour (cancer / epithelial / stromal / immune, made transcriptionally distinct by the R13
+program layer), emits a **Visium section** and an **scRNA reference from a SEPARATE biopsy of the SAME
+tumour** (F1 biopsy → F2 dissociation → F3 assay), and scores per-spot composition against iscc's true
+per-spot composition. The headline is the **matched-vs-mismatched reference decomposition**: an oracle
+reference (the exact section cells) is the ceiling, and the cost of a realistic reference is attributed
+to regional mismatch / dissociation / assay — all with ground truth iscc uniquely has. Both tools are
+optional (the script prints a note and carries on); override with `ISCC_CELL2LOCATION_PYTHON` /
+`ISCC_RCTD_RSCRIPT`.
+
+```bash
+# --- cell2location (Python; scvi-tools / pyro / torch, CPU is fine for this small benchmark) ---
+conda create -y -n iscc-cell2location -c conda-forge python=3.10
+~/miniconda3/envs/iscc-cell2location/bin/pip install cell2location scanpy anndata
+
+# --- RCTD / spacexr (R). spacexr is GitHub-only and compiles C++, so install its CRAN deps as
+#     PRECOMPILED conda-forge packages, then compile spacexr itself inside the ACTIVATED env (a bare
+#     `Rscript -e install.packages(...)` cannot find the conda toolchain -> "C compiler cannot create
+#     executables" / make Error 127). ---
+conda create -y -n iscc-rctd -c conda-forge r-base=4.3 compilers make
+conda install -y -n iscc-rctd -c conda-forge \
+  r-matrix r-doparallel r-foreach r-quadprog r-rcpp r-rcppeigen r-dplyr r-reshape2 r-ggplot2 \
+  r-pals r-data.table r-mgcv r-irlba r-fields r-readr r-knitr r-rmarkdown r-rfast r-locfdr \
+  r-metafor r-compquadform r-tibble r-plyr
+git clone --depth 1 https://github.com/dmcable/spacexr.git /tmp/spacexr
+source ~/miniconda3/etc/profile.d/conda.sh && conda activate iscc-rctd
+R CMD INSTALL --no-multiarch /tmp/spacexr      # compiles against the conda-forge deps
+```
+
+### Numbat (allele-aware CNA-from-expression) — R13
+
+`validate_numbat.py` (+ the Numbat section of `integration_common.py`, `numbat_runner.R`) reuses the
+multi-clone tumour with the R13 **allele-resolved** expression layer ON, and runs Numbat **head-to-head
+against inferCNV** on the SAME cells: the clean question is whether the allele layer helps over
+expression-only CNA calling. **Input-interface note (the scoped main risk):** Numbat normally builds its
+allele table from a cellsnp-lite pileup + a population phasing panel — machinery an abstract genome lacks.
+We instead feed Numbat the allele counts DIRECTLY: iscc tracks the two homologs, so it knows the true
+phase (each gene is one phased marker, `GT="1|0"`, ALT = m-homolog reads drawn at UMI depth from
+`cell_rna_baf`), and iscc's segments map onto Numbat chromosomes via a custom `gtf`. iscc's homolog
+labels ARE the ground-truth phasing a real panel only approximates. Override with `ISCC_NUMBAT_RSCRIPT`.
+
+```bash
+# --- Numbat (R + Bioconductor). Same rule as RCTD: install everything available from conda-forge /
+#     bioconda PRECOMPILED, then compile the three source-only C++ packages inside the ACTIVATED env.
+#     r-paralleldist is CRAN-only (NOT on conda-forge), so it joins the source-compiled set. ---
+conda create -y -n iscc-numbat -c conda-forge r-base r-remotes r-biocmanager compilers make
+conda install -y -n iscc-numbat -c conda-forge -c bioconda \
+  r-ape r-phangorn r-vegan r-ggraph r-tidygraph r-graphlayouts r-igraph r-vcfr r-rcppparallel \
+  r-rhpcblasctl r-roptim r-reshape2 r-plyr r-ggforce r-ggrepel r-memoise r-cachem r-fastmap r-mass \
+  r-nlme r-mgcv r-digest r-fastmatch r-quadprog r-catools r-data.table r-dplyr r-tidyr r-stringr \
+  r-glue r-purrr r-zoo r-matrix r-optparse r-scales r-tibble r-magrittr r-r.utils r-logger \
+  bioconductor-ggtree bioconductor-genomicranges bioconductor-iranges
+source ~/miniconda3/etc/profile.d/conda.sh && conda activate iscc-numbat
+R -e 'install.packages(c("parallelDist","scistreer","hahmmr","numbat"), repos="https://cloud.r-project.org", dependencies=FALSE)'
+```
+
+```bash
+~/miniconda3/envs/iscc/bin/python validation/validate_deconvolution.py --quick   # smoke (RCTD only)
+~/miniconda3/envs/iscc/bin/python validation/validate_deconvolution.py           # the paper figure
+~/miniconda3/envs/iscc/bin/python validation/validate_numbat.py --quick          # smoke
+~/miniconda3/envs/iscc/bin/python validation/validate_numbat.py                  # the paper figure
 ```
 
 ## Running

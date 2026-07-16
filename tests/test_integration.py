@@ -122,3 +122,89 @@ class TestInferCNVReal:
         assert sc["malignant_normal_auc"] > 0.8                     # malignant vs normal separates
         assert sc["clone_level_r"] > 0.5                            # clonal CNA structure recovered
         assert sc["mean_segment_r"] > 0.1                           # single-cell CN signal is real
+
+
+# ==================================================================================================
+# Numbat (allele-aware CNA-from-expression) — demo 2
+# --------------------------------------------------------------------------------------------------
+@pytest.fixture(scope="module")
+def allele_tumor():
+    # the same small gland, grown with the R13 allele layer ON so cell_rna_baf exists for Numbat
+    return C.grow_tumor_alleles(seed=0, steps=650, genome=GENOME, spatial=SPATIAL, deme=DEME,
+                                cancer=dict(CANCER, cnv_prob=0.6, snv_prob=0.4))
+
+
+@pytest.fixture(scope="module")
+def numbat_bundle(allele_tumor):
+    shared = C.build_cna_inputs(allele_tumor, n_normal=80, n_clones=3, seed=0)
+    work = tempfile.mkdtemp(prefix="numbat_test_")
+    numbat_in = C.build_numbat_inputs(allele_tumor, shared, work, seed=0)
+    return allele_tumor, shared, numbat_in
+
+
+class TestNumbatDataGen:
+    def test_allele_layer_materialises(self, allele_tumor):
+        assert "cell_rna_baf" in allele_tumor.cell_data          # R13 allele layer is on
+        assert "cell_exp_p" in allele_tumor.cell_data and "cell_exp_m" in allele_tumor.cell_data
+
+    def test_emergent_allelic_imbalance_tracks_cnas(self, allele_tumor):
+        # the signal Numbat exploits: BAF deviates from 0.5 exactly where copy number is altered,
+        # and NOT (much) where it is balanced — an emergent, non-imposed consequence of dosage.
+        # Use PER-CELL copy number (a gene altered in one clone only is balanced on the cancer average
+        # but altered in that clone's cells, so a cell-averaged mask contaminates the balanced set).
+        types = C.cell_types(allele_tumor)
+        cnv = allele_tumor.cell_data["cell_cnv"].values
+        baf = allele_tumor.cell_data["cell_rna_baf"].values
+        cancer = types == "cancer"
+        cn_c = cnv[cancer]
+        baf_c = np.abs(baf[cancer] - 0.5)
+        altered = np.abs(cn_c - 2.0) > 0.5                       # per (cell, gene)
+        assert altered.sum() > 0
+        dev_alt = baf_c[altered].mean()
+        dev_bal = baf_c[~altered].mean()
+        assert dev_alt > 2 * dev_bal                             # imbalance localises to the CNAs
+
+    def test_numbat_inputs_wellformed(self, numbat_bundle):
+        _, shared, numbat_in = numbat_bundle
+        wd = numbat_in["work_dir"]
+        df = pd.read_csv(os.path.join(wd, "df_allele.csv"))
+        gtf = pd.read_csv(os.path.join(wd, "gtf.csv"))
+        cmat = pd.read_csv(os.path.join(wd, "count_mat.csv"), index_col=0)
+        # df_allele has Numbat's schema, ALT<=DP, GT phased, CHROM in the segment range
+        assert {"cell", "snp_id", "CHROM", "POS", "cM", "REF", "ALT", "AD", "DP", "GT", "gene"} \
+            <= set(df.columns)
+        assert (df["AD"] <= df["DP"]).all() and (df["DP"] > 0).all()
+        assert set(df["GT"].unique()) <= {"1|0", "0|1"}
+        assert df["CHROM"].min() >= 1 and df["CHROM"].max() <= shared["n_segments"]
+        # count_mat genes x cells; gtf maps every gene to a chromosome + length
+        assert cmat.shape[1] == len(shared["cell_ids"])
+        assert {"gene", "gene_start", "gene_end", "CHROM", "gene_length"} <= set(gtf.columns)
+        assert len(gtf) == cmat.shape[0]
+
+    def test_score_numbat_perfect(self, numbat_bundle):
+        # an oracle "prediction" (true malignancy, true clone, true CN) must score at the ceiling
+        _, shared, numbat_in = numbat_bundle
+        cells = list(numbat_in["cell_ids"])
+        id_pos = {c: i for i, c in enumerate(cells)}
+        mal_pos = {c: i for i, c in enumerate(numbat_in["mal_cells"])}
+        clone = {c: (int(numbat_in["clone_labels"][mal_pos[c]]) if c in mal_pos else -1) for c in cells}
+        p_aneu = {c: (1.0 if numbat_in["is_malignant"][id_pos[c]] else 0.0) for c in cells}
+        seg_cn = np.stack([numbat_in["true_seg_cn"][id_pos[c]] for c in cells]).astype(float)
+        res = dict(clone=clone, p_aneuploid=p_aneu, seg_cn=seg_cn, cells=cells)
+        sc = C.score_numbat(res, numbat_in)
+        assert sc["malignant_normal_auc"] == pytest.approx(1.0)
+        assert sc["clone_ari"] == pytest.approx(1.0)
+        assert sc["mean_segment_r"] > 0.9
+
+
+@pytest.mark.skipif(not C.numbat_available(),
+                    reason="iscc-numbat env (R + numbat) not installed")
+class TestNumbatReal:
+    def test_numbat_recovers_cnas(self, numbat_bundle):
+        _, shared, numbat_in = numbat_bundle
+        res = C.run_numbat(numbat_in, numbat_in["work_dir"], min_cells=15, max_iter=2)
+        sc = C.score_numbat(res, numbat_in)
+        assert res["seg_cn"].shape[1] == numbat_in["n_segments"]
+        # the allele+expression HMM recovers real per-segment copy-number signal
+        assert sc["mean_segment_r"] > 0.3
+        assert sc["n_malignant"] > 0
