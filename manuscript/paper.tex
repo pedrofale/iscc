@@ -716,12 +716,12 @@ once (a single origin, verified by parsimony on the true clone tree) but that th
 as two or more independent origins (homoplasy). Restricting the count to truly single-origin loci
 makes it an honest measure of the admixture artifact, excluding genuinely recurrent mutations.
 
-The naive region sample tree invents parallel origins for $\sim$$24\%$ of single-origin mutations,
-and it reverses the true ancestor--descendant ordering of $\sim$$23\%$ of nested mutation pairs
+The naive region sample tree invents parallel origins for $\sim$$22\%$ of single-origin mutations,
+and it reverses the true ancestor--descendant ordering of $\sim$$24\%$ of nested mutation pairs
 (\Cref{fig:multiregion}B). Crucially, taking more biopsies does not fix this: as $K$ grows from four
 to ten regions the spurious-parallelism rate does not fall toward zero --- it rises --- because the
 problem is admixture, not sampling density (\Cref{fig:multiregion}C). The error scales with the
-directly measured per-region clone admixture across a dispersal sweep ($r \approx 0.7$;
+directly measured per-region clone admixture across a dispersal sweep ($r \approx 0.4$;
 \Cref{fig:multiregion}D). Applying the paper's proposed fix --- deconvolving clones per region before
 building the tree, here bounded by \texttt{iscc}'s per-cell clone truth as an oracle deconvolution
 --- collapses the spurious rate to $\sim$$0.4\%$ and recovers $\sim$$93\%$ of the true clone splits,
