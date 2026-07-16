@@ -185,19 +185,39 @@ Focal CNAs are biologically central (recurrent oncogene amplicons / TSG focal de
 peaks). The mechanism is *known* (both competitors implement it); the genuinely open part is doing
 it cheaply.
 
-**Sub-questions / approaches.**
-- *Sub-arm bins in the real-genome mode* (DESIGN_inference §A.5): segments become bins within arms;
-  a CNA event picks `(arm, start, length)`. The crux is the **resolution-vs-cost tradeoff** — more
-  bins = a bigger per-genotype genome (memory + per-event work), against the §7 scalability budget.
-  How fine is enough? A **multi-resolution** scheme (coarse by default, refine only where focal
-  events land) may be the way.
-- *New event types in `mutate()`*: focal amp/del (sub-segment span), WGD (double all `seg_cns`),
-  whole-chromosome missegregation (gain/lose a whole chromosome = a set of arms) — each a mechanism
-  with its own rate, **estimable via the inference layer / ABC** exactly as CINner fits its
-  mechanism probabilities (extends §A.0's `mut_prob`/`cnv_prob`).
-- Must stay compatible with the genotype-count engine, **tau-leaping (§7)**, and reproducibility.
+**KEY INSIGHT (2026-07-16) — this is not one job.** The current genome (`cell.py`) is per-segment:
+a segment is `{'p':[copy,…],'m':[copy,…]}`, each copy a whole-segment SNV bitset, so **copy number is
+segment-granular** while SNVs are position-resolved. That splits the three events by difficulty:
+- **WGD — cheap** in the current rep: duplicate every copy in `p` and `m` once. Newly well-behaved
+  because the 2026-07-14 viability fix makes `max_ploidy` actually bind.
+- **Whole-chromosome gain/loss — moderate:** needs a chromosome→segment grouping (real-genome/arm mode
+  already groups segments into arms), then act on the whole set on one homolog.
+- **Focal (sub-arm) amp/del — the real refactor:** the per-segment rep cannot express sub-segment CN.
+
+**The representation decision (the crux) for focal.** Two ways to get sub-segment CN:
+- *Fine-binning* (smaller segments): simple but memory/work scale **O(#bins)**, multiplied by the
+  genotype-count caching — expensive at gene resolution.
+- *Allele-specific interval / run-length CN* (**recommended**): each homolog's CN is a piecewise-constant
+  function — a sorted list of `(start,end,copy_state)` intervals, `copy_state` carrying the SNV bitset.
+  A CNA of ANY span (focal/arm/chromosome) is an interval op (split at breakpoints, change CN over
+  `[start,end]`). Memory is **O(#breakpoints)** (tens–hundreds, not thousands) — more general AND more
+  scalable than fine-binning, and essentially how CINner represents allele-specific CN. It subsumes
+  segments/arms as special cases; it also shares the "per-homolog CN" plumbing with R13's ASE work.
+
+**What you DON'T need to build:** fitness (a focal oncogene amp already boosts `division_rate` via the
+existing dosage/driver pathway; `s_arm` scores arm/chromosome events) and viability (`max_ploidy`/
+`max_cn`/`max_nullisomy` already bind post-fix). Only the event *geometry* is new. Each event type is a
+mechanism with its own rate, **ABC-estimable** exactly as CINner fits its mechanism probabilities
+(extends §A.0's `mut_prob`/`cnv_prob`). Must stay compatible with the genotype-count engine and
+tau-leaping (§7).
+
+**Staged plan → `DESIGN_focal_cna.md`:** v1 WGD (cheap; ships alongside the Numbat benchmark, which
+detects WGD via BAF), v2 whole-chromosome, v3 focal (the interval refactor). WGD handoff:
+`handoffs/wgd.md`.
+
 - *Validation*: recurrent **focal** amplification of oncogenes / focal deletion of TSGs (the focal
-  analogue of the arm-level Davoli/Charm result); focal-CNA frequency spectra vs real GISTIC peaks.
+  analogue of the arm-level Davoli/Charm result); focal-CNA frequency spectra vs real GISTIC peaks;
+  WGD frequency (~30–50% of tumours) + the doubling+loss ploidy distribution vs PCAWG.
 
 **Serves:** CNA-mechanism parity with CINner/SISTEM; richer DNA-assay ground truth (F4/F5 already
 derive coverage from `seg_cns`, so focal events would yield realistic focal CNA profiles); more

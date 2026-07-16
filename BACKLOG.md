@@ -247,9 +247,12 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   - DNA→RNA clone assignment, CNA dosage: **clonealign** ✅
   - DNA→RNA clone assignment, SNVs: **cardelino** ⬜ (needs SNV→expr realism, R13)
   - bulk-DNA + scRNA clone tree: **PhylEx** ⬜
-  - CNA-from-expression: inferCNV/CopyKAT ✅; **Numbat** ⬜ (needs allele-specific expr/ASE, R13)
-  - scRNA→Visium deconvolution: **cell2location, RCTD** ⬜ — FLAGSHIP (paired ref + true per-spot comp;
-    can also test matched-vs-mismatched reference)
+  - CNA-from-expression: inferCNV/CopyKAT ✅; **Numbat** ✅ (allele-aware, R13; fed allele counts DIRECTLY
+    — iscc's p/m homologs ARE the phasing, no population panel; head-to-head vs inferCNV = ~tie on total
+    CN + AUC, since iscc CNAs mostly change total CN and cnLOH is rare — an honest, reported negative)
+  - scRNA→Visium deconvolution: **cell2location, RCTD** ✅ — FLAGSHIP (paired same-tumour ref + true
+    per-spot comp; matched-vs-mismatched reference decomposed into regional/dissociation/assay — regional
+    under-sampling dominates; clone-vs-cell-type confound: types r≈0.99, CNA clones r≈0.4–0.8)
   - cell–cell communication / niche: CellChat / CellPhoneDB / COMMOT ⬜ (F8 ground truth)
   - scRNA cohort integration: **Harmony, scVI/scANVI** ✅ (+ Scanorama, LIGER; scIB metrics)
   - multi-sample Visium integration: GraphST / STAligner ⬜ (2D cross-patient; PASTE 3D out of scope, R1)
@@ -470,6 +473,18 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   event-level draws stay on the run seed. Use **independent sub-streams per component**
   (`SeedSequence(layout_seed).spawn(n)`) so changing e.g. `n_programs` doesn't reshuffle the oncogene/TSG
   layout.
+
+## CNA-mechanism parity (R10) — focal / WGD / whole-chromosome (design-first)
+- **Closes the one honest capability gap vs CINner/SISTEM** (iscc is arm-resolution). Design +
+  difficulty decomposition in `DESIGN_focal_cna.md`. Key insight: the current per-segment genome makes
+  WGD **cheap**, whole-chromosome **moderate**, focal **the refactor** (needs allele-specific interval /
+  run-length CN — recommended over fine-binning: O(#breakpoints) not O(#bins), and shared plumbing with
+  R13's ASE). Fitness + viability already handle it (the 2026-07-14 viability fix makes `max_ploidy` bind).
+- **NEXT (small) — v1 WGD:** handoff `handoffs/wgd.md`. Duplicate all copies both homologs, gated by
+  `max_ploidy`; `wgd_rate` (off by default); validate WGD frequency (~30–50%) + ploidy vs PCAWG.
+  Ships alongside the Numbat benchmark (WGD → BAF signature Numbat detects) + closes a Table-1 cell.
+- **LATER — v2 whole-chromosome** (chromosome→segment grouping) and **v3 focal** (the interval refactor;
+  gate on whether the CNA-caller/Numbat results need GISTIC-peak resolution).
 
 ## Engine / inference follow-ups
 - **LATER — M3b HPC rerun** — fewer, bigger tumors (~800 × 8000-cell, tau-leaped) for the canonical
