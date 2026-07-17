@@ -67,18 +67,20 @@ Python package that grows spatially structured tumors as a selection-driven, age
 evolutionary process --- aberrant genomes shaped by copy-number and driver-mutation selection ---
 and carries one such tumor through the medical and laboratory steps that generate data (biopsy,
 tissue dissociation) into bulk and single-cell DNA and RNA sequencing and spatial transcriptomics,
-down to aligned reads, optionally under therapy. Expression is shaped by the microenvironment, so
-that spatially structured programmes such as hypoxia emerge from the tumor's own geometry. Because
-every observation is tied to the tumor's ground-truth evolutionary history, spatial niche and cell
-populations, \texttt{iscc} is designed as a substrate for benchmarking \emph{data-integration}
-methods --- central to tumor-evolution studies yet impossible to validate on real data --- at two
-scales: integrating DNA, RNA and spatial measurements of the same tumor, and integrating many
-patients across a cohort while separating biological patient variation from the technical batch
-effects with which it is confounded. Using this ground truth we expose failure modes that real data
-cannot reveal, including environmental programmes misclassified as heritable when clones form
-spatial territories --- a lineage--space confound we also confirm in real data --- and spurious
-parallel evolution inferred from multi-region ``sample trees''. \texttt{iscc} uses an efficient
-genotype-level engine that scales to large tumors, its assay parameters can be inferred from real
+down to aligned reads, optionally under therapy. Expression is generated from the evolving genome and
+the microenvironment through gene programs, coupling copy number, cell state and spatial niche rather
+than imposing their relationships. Because every observation is tied to the tumor's ground-truth
+evolutionary history, spatial niche and cell populations, \texttt{iscc} exposes a failure mode common
+to single-cell and spatial analyses yet invisible in real data: a structure a method does not model
+--- clonal lineage, spatial admixture, copy-number dosage, clonal identity, or differential fitness
+--- masquerades as the signal it seeks. We demonstrate this across five method families, from lineage
+tracing (an environmental program misread as heritable) and multi-region phylogenetics (invented
+parallel evolution) to gene-program inference, spatial deconvolution and cohort progression models.
+Its most developed instance is data integration, benchmarked at two scales --- across modalities
+within a tumor and across patients within a cohort, where biological and technical batch variation are
+confounded --- by running real tools against \texttt{iscc}'s ground truth; the lineage--space confound
+is further confirmed in real lineage-tracing data. \texttt{iscc}'s genotype-level engine reaches
+millions of cells in minutes in the well-mixed regime, its assay parameters can be inferred from real
 reference datasets, and its simulated data reproduce key statistical properties of real bulk,
 single-cell and spatial measurements. The software is available as a command-line tool and a Python
 library.
@@ -145,17 +147,21 @@ module generates bulk and single-cell DNA and RNA sequencing as well as spatial
 transcriptomics; and its treatment module applies chemotherapy, targeted therapy and
 immunotherapy, optionally as adaptive regimens. A distinguishing feature of \texttt{iscc} is
 that it relates cell phenotype to the evolutionary process and only translates phenotype into a
-gene-expression profile at the data-generation step, so that simulated transcriptomes
-correspond to interacting, spatially organized cell types rather than abstract or independent
-cell groups. Because all data are anchored to a known evolutionary history and cell-population
-structure, \texttt{iscc} serves as a ground-truth substrate for benchmarking data-integration
-methods at two scales: \emph{across modalities} within a tumor --- linking a clone's copy number
-to its expression to its spatial niche --- and \emph{across patients} within a cohort --- aligning
-shared biology while separating it from the confounded batch effects of sequencing. Because this
-cross-modal and cross-patient structure emerges from the evolutionary and microenvironmental
-process rather than being imposed, these benchmarks are non-circular; and because the whole tumor
-can be acted upon through therapy, \texttt{iscc} also connects data analysis to treatment
-decision-making.
+gene-expression profile --- through gene programs coupled to copy number, cell state and spatial
+niche --- at the data-generation step, so that simulated transcriptomes correspond to interacting,
+spatially organized cell types rather than abstract or independent cell groups. Because all data are
+anchored to a known evolutionary history and cell-population structure, and because that structure
+\emph{emerges} from the evolutionary and microenvironmental process rather than being imposed,
+\texttt{iscc} provides non-circular ground truth for a broad range of single-cell and spatial
+analyses. We use it to expose a failure mode those analyses share yet cannot diagnose on real data
+--- unmodeled structure (clonal lineage, spatial admixture, copy number, clonal identity, or
+fitness) masquerading as the signal a method seeks --- across lineage tracing, multi-region
+phylogenetics, gene-program inference, spatial deconvolution and cohort progression modelling. Its
+most developed application is data integration, at two scales: \emph{across modalities} within a
+tumor --- linking a clone's copy number to its expression to its spatial niche --- and \emph{across
+patients} within a cohort, where biological variation is confounded with the technical batch effects
+of sequencing. Because the whole tumor can additionally be acted upon through therapy, \texttt{iscc}
+also connects data analysis to treatment decision-making.
 
 \begin{table}[t]
   \centering
