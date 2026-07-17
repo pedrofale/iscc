@@ -62,6 +62,14 @@ changing crowding changes every spatial output.
   reaching SISTEM's scale (5M in ~20 min); this claim is in the manuscript scalability section. Do
   **not** claim a *spatial* speed advantage: the "millions of cells in minutes" numbers were the
   non-spreading pile, and a genuinely spatial tumour at that scale is HPC-bound (cost ∝ occupied demes).
+- **The right SPATIAL-regime runtime comparison is Noble's `demon`** (deme-based spatial tumour simulator,
+  `noble_spatial_2022`; robjohnnoble/demon_model — verify the software citation), NOT SISTEM. demon is
+  deme-structured like iscc's engine, so it is the apt head-to-head for cells-per-second in a genuinely
+  *spatial* (many-occupied-deme) tumour — whereas SISTEM was the well-mixed comparison. iscc already
+  validates its evolutionary-mode indices against Noble (M3a), so demon is the natural runtime baseline
+  too. **TODO when we target the spatial-scale / HPC issue** (BACKLOG "M3b HPC rerun"): benchmark iscc
+  vs demon on the same spatial config (grid, K, dispersal), report cells/s and time-to-N, and state the
+  regime honestly. User request 2026-07-17.
 - **`carrying_capacity` semantics:** the config comment ("cells per deme") is not what the dynamics do.
 - **QC:** add a `tumor.diagnose()` check for *demes over-filling* (mean cells/deme ≫ `carrying_capacity`).
 

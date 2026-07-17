@@ -488,7 +488,12 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
 
 ## Engine / inference follow-ups
 - **LATER — M3b HPC rerun** — fewer, bigger tumors (~800 × 8000-cell, tau-leaped) for the canonical
-  Charm/PCAWG figure; HPC-bound. The flagship real-genome figure.
+  Charm/PCAWG figure; HPC-bound. The flagship real-genome figure. **When we target the spatial-scale /
+  runtime issue, the apt comparison is Noble's `demon`** (deme-based spatial sim, `noble_spatial_2022`;
+  robjohnnoble/demon_model — verify software cite), NOT SISTEM (that was the well-mixed comparison). demon
+  is deme-structured like iscc's engine → the right cells/s + time-to-N head-to-head for a genuinely
+  spatial tumour; iscc already validates evolutionary-mode indices against Noble (M3a). See
+  `DESIGN_crowding.md`. (user 2026-07-17)
 - **LATER — `estimate_visium` kappa-on-sparse-data refinement** — fit on expressed genes; minor
   estimator robustness, doesn't affect defaults.
 - **LATER — fill the 5 analysis-stub notebooks** — `dna_mhn`, `visium_niches`, `scrna_batch_effects`,
