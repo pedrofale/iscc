@@ -916,6 +916,13 @@ class GenotypeTumor:
         denom = num + (1.0 - v)
         rna_vaf = np.divide(num, denom, out=np.zeros_like(v, dtype=float), where=denom > 0)
         self.cell_data["cell_rna_vaf"] = pd.DataFrame(rna_vaf, index=idx, columns=gene_names)
+        # WGD ground truth (DESIGN_focal_cna.md v1): the per-genotype `is_wgd` flag surfaced per cell,
+        # so downstream CNA / BAF benchmarks (e.g. Numbat) can score WGD detection against the truth.
+        # Gated on WGD being enabled — off -> the frame is absent and the base schema is unchanged
+        # (the F8 discipline, mirroring cell_microenv below). `types` is the per-cell genotype id.
+        if self._cancer_params is not None and self._cancer_params.get("wgd_rate", 0):
+            self.cell_data["cell_wgd"] = pd.DataFrame(
+                {"is_wgd": [bool(self.genotypes[g].is_wgd) for g in types]}, index=idx)
         # F8: surface the per-cell cell-extrinsic levels (ground truth for the intrinsic-vs-extrinsic
         # decomposition benchmark). Only added when F8 is enabled, so the base schema is unchanged.
         if deme_mod is not None:

@@ -107,6 +107,15 @@ matter once you tighten them or push amplification/deletion hard.
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|
 | `amp_prob` | 0.5 | 0.2–0.8 | high → copy-number-heavy genome (viability-capped) |
+| `wgd_rate` | 0.0 (off) | 0.0–~0.05 | drives genome doubling; a separate per-division channel (leaves `snv_prob`/`cnv_prob` intact). Too high → most tumours WGD and pile against `max_ploidy` (doubled genomes are viability-capped); interacts directly with `max_ploidy`/`max_cn` |
+
+`wgd_rate` is the per-(mutating-)division probability of a **whole-genome duplication** (DESIGN_focal_cna.md v1):
+every copy on both homologs of every segment is doubled at once, so ploidy jumps 2→4 (then loss erodes it
+back to a non-integer mean — the doubling+loss signature). A WGD daughter that breaches `max_ploidy`/`max_cn`
+is **rejected at birth** like any other non-viable daughter, so `max_ploidy` (default 6) sets how much
+post-WGD genome a lineage may carry. Off by default (0.0 → byte-identical to a run with no WGD). Sweeping it
+lands tumour WGD prevalence in the real ~30–50 % range (`validation/validate_wgd.py`). Per-genotype ground
+truth is surfaced as `cell_data["cell_wgd"]["is_wgd"]` (present only when `wgd_rate > 0`).
 
 ### Epistasis / dependency network (R14, optional; **off by default**) — `selection_params.epistasis_params`
 

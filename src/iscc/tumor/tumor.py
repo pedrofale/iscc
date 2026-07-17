@@ -294,6 +294,13 @@ class Tumor(object):
         denom = num + (1.0 - cell_snv)
         rna_vaf = np.divide(num, denom, out=np.zeros_like(cell_snv, dtype=float), where=denom > 0)
         self.cell_data["cell_rna_vaf"] = pd.DataFrame(rna_vaf, index=cell_names, columns=gene_names)
+        # WGD ground truth (DESIGN_focal_cna.md v1): per-cell `is_wgd`, gated on WGD being enabled so
+        # the base schema is unchanged when off (mirrors the count engine's cell_wgd). The founder
+        # CancerCell carries the configured wgd_rate.
+        if getattr(self.cancer_cell, "wgd_rate", 0):
+            is_wgd = [bool(getattr(cell, "is_wgd", False))
+                      for deme in self.deme_list for cell in deme.cells]
+            self.cell_data["cell_wgd"] = pd.DataFrame({"is_wgd": is_wgd}, index=cell_names)
 
 
 

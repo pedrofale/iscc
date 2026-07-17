@@ -178,6 +178,7 @@ also connects data analysis to treatment decision-making.
     \midrule
     Spatially-explicit tumor growth      & \checkmark &            & $\sim$     & \checkmark &            & \checkmark &            \\
     Copy-number / driver selection       & \checkmark & \checkmark & \checkmark & $\sim$     &            & $\sim$     &            \\
+    Whole-genome duplication             & \checkmark & \checkmark & \checkmark &            &            &            &            \\
     Bulk \& single-cell DNA-seq          & \checkmark & $\sim$     & \checkmark & \checkmark & $\sim$     &            &            \\
     scRNA-seq                            & \checkmark &            &            &            & \checkmark &            & \checkmark \\
     Spatial transcriptomics              & \checkmark &            &            &            & \checkmark &            & \checkmark \\
@@ -249,8 +250,8 @@ epithelial cells, enabling simulation of pre-invasive lesions and their progress
 
 Cancer-cell fitness follows a copy-number-aware selection model in the spirit of
 CINner~\cite{dinh_cinner_2025}: oncogene and tumor-suppressor copies and mutations modulate the
-division rate, while focal amplifications, deletions and single-nucleotide variants accumulate
-along the lineage. Selection is expressed relative to the wild-type genome, so that the
+division rate, while focal amplifications, deletions, whole-genome duplications and
+single-nucleotide variants accumulate along the lineage. Selection is expressed relative to the wild-type genome, so that the
 configured baseline rates are recovered in the absence of driver events and only deviations
 (driver mutations and copy-number changes) shift fitness.
 
@@ -292,6 +293,18 @@ contrast, rather than the absolute slope, is the signature. Further biological v
 cell-type spatial composition and expression states --- is ongoing and follows the same
 replicate methodology.
 
+Beyond arm-level gains and losses, \texttt{iscc} models whole-genome duplication (WGD) as a
+punctuated event that doubles every copy on both homologs at once, gated by the ploidy-viability
+limit so that a doubling which would breach the cap yields a non-viable daughter. WGD occurs in
+roughly 30--50\% of real tumors and drives them to an elevated, non-integer ploidy as subsequent
+copy-number loss erodes the doubled genome~\cite{pcawg_2020}. Sweeping the per-division WGD rate
+over replicate tumors moves the cohort WGD prevalence smoothly through this range --- reaching
+$45\%$ at a rate of $0.05$ --- while the population mean ploidy climbs from the near-diploid
+baseline ($2.0$) to elevated, non-integer values (up to $\approx 3.4$), with WGD and non-WGD cells
+separating into the characteristic near-tetraploid and near-diploid modes
+(\Cref{fig:validation_wgd}). This extends \texttt{iscc} beyond arm-level gains and losses to a
+genome-wide copy-number mechanism, at WGD parity with CINner and SISTEM (\Cref{tab:comparison}).
+
 \begin{figure}[t]
   \centering
   \includegraphics[width=\textwidth]{validation_evolution.png}
@@ -326,6 +339,22 @@ replicate methodology.
   oncogenes and deletion of tumor suppressors seen in cancer
   genomes~\cite{beroukhim_landscape_2010,davoli_cumulative_2013}.}
   \label{fig:validation_cna}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{validation_wgd.png}
+  \caption{\textbf{Whole-genome duplication reproduces the PCAWG WGD frequency and ploidy
+  signature.} (Left) Sweeping the per-division WGD rate over replicate tumors, the fraction of
+  tumors whose dominant genome is duplicated (cohort WGD prevalence) rises smoothly through the
+  real $30$--$50\%$ range (shaded)~\cite{pcawg_2020}; the mean fraction of WGD cells per tumor is
+  shown for reference. (Right) At a rate landing in that range (\texttt{wgd\_rate}$=0.05$), the
+  per-cell mean-ploidy distribution is bimodal --- a near-diploid ($\approx 2$) non-WGD mode and an
+  elevated near-tetraploid WGD mode, split by the ground-truth \texttt{is\_wgd} label --- the
+  doubling-then-loss signature of WGD tumors. WGD is neutral here (no fitted selective advantage),
+  so both the prevalence and the ploidy arise from the doubling mechanism and its interaction with
+  the ploidy-viability limit alone.}
+  \label{fig:validation_wgd}
 \end{figure}
 
 \subsection*{A genotype-level engine scales to large tumors}

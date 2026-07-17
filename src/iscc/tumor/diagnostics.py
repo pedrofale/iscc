@@ -29,6 +29,7 @@ DEFAULT_THRESHOLDS = {
     "confinement_min": 0.1,  # clone spatial confinement below this (>=2 subclones) -> well-mixed
     "contrast_min": 0.05,    # hypoxia core-rim contrast below this -> no O2 gradient
     "fga_max": 0.95,         # fraction-genome-altered above this -> CNA runaway
+    "ploidy_max_plausible": 4.5,  # mean cancer ploidy above this -> implausible (WGD/amp runaway; advisory)
     "min_genes": 100,        # fewer than this many genes -> trivial genome
     "overfill_mult": 3.0,    # mean cells/occupied-deme above this x carrying_capacity -> demes over-filling
     "within_clone_frac_min": 0.05,  # within-clone share of program-activity variance below this ->
@@ -374,6 +375,15 @@ def diagnose(tumor, thresholds=None, verbose=False):
             f"small tumour ({n_cancer} cancer cells): for realistic analyses grow to "
             f"~10^3-10^4 cells -- run more steps (exact engine: size ~ #steps) or use tau-leaping, "
             f"and ensure grid_size^2 x carrying_capacity exceeds the target size")
+
+    # Ploidy advisory (non-failing): real tumour ploidy sits ~1.5-4 (near-diploid up to WGD-driven
+    # near-tetraploid). A mean well above that points at runaway doubling/amplification -- usually
+    # wgd_rate too high against max_ploidy, or amp_prob/max_cn. Non-failing: a high but viability-
+    # capped ploidy is a modelling choice, not a degenerate regime, so it advises rather than fails.
+    if not extinct and not np.isnan(ploidy) and ploidy > th["ploidy_max_plausible"]:
+        advisories.append(
+            f"implausibly high mean ploidy ({ploidy:.1f}): real tumours rarely exceed ~4 -- lower "
+            f"wgd_rate / amp_prob, or tighten max_ploidy / max_cn (DESIGN_focal_cna.md)")
 
     # trivial genome (config-time)
     checks.append(Check(

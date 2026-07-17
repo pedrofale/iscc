@@ -480,9 +480,15 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   WGD **cheap**, whole-chromosome **moderate**, focal **the refactor** (needs allele-specific interval /
   run-length CN — recommended over fine-binning: O(#breakpoints) not O(#bins), and shared plumbing with
   R13's ASE). Fitness + viability already handle it (the 2026-07-14 viability fix makes `max_ploidy` bind).
-- **NEXT (small) — v1 WGD:** handoff `handoffs/wgd.md`. Duplicate all copies both homologs, gated by
-  `max_ploidy`; `wgd_rate` (off by default); validate WGD frequency (~30–50%) + ploidy vs PCAWG.
-  Ships alongside the Numbat benchmark (WGD → BAF signature Numbat detects) + closes a Table-1 cell.
+- **DONE — v1 WGD** (2026-07-17, handoff `handoffs/wgd.md`). `wgd_rate` is a separate per-division event
+  channel in `CancerCell.mutate` (off by default → byte-identical when off, verified vs the pre-WGD
+  baseline); WGD duplicates all copies on both homologs via the existing `update_genome_summary_cnv`
+  seam, so the reject-at-birth viability gate (`max_ploidy`/`max_cn`) drops non-viable doublings for
+  free. Ground truth `is_wgd` (per genotype, monotone) surfaced as `cell_data["cell_wgd"]` in both
+  engines. `tests/test_wgd.py`; `validation/validate_wgd.py` shows cohort WGD prevalence sweeping through
+  the real ~30–50% PCAWG band and the doubling+loss ploidy signature (near-diploid ~2 vs WGD ~3–3.5).
+  Table-1 WGD cell added. **Natural follow-up:** add a WGD-detection axis to `validate_numbat.py` (the
+  allele layer is built to detect exactly the copy-neutral-LOH / WGD imbalance that was previously rare).
 - **LATER — v2 whole-chromosome** (chromosome→segment grouping) and **v3 focal** (the interval refactor;
   gate on whether the CNA-caller/Numbat results need GISTIC-peak resolution).
 

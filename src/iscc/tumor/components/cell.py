@@ -104,6 +104,13 @@ class Cell(object):
         self.event_bits = 0 if parent is None else parent.event_bits
         self.event_groups = () if parent is None else parent.event_groups
 
+        # Whole-genome-duplication ground truth (DESIGN_focal_cna.md v1): has THIS lineage ever
+        # undergone a WGD. A plain immutable bool, kept OFF genome_summary exactly like event_bits —
+        # so the summary schema (and every dataframe built from it) is unchanged when WGD is off — and
+        # propagated by value through both the shallow copy() in divide() and the parent branch above.
+        # Monotone: a WGD is never "undone", so once True it stays True down the lineage.
+        self.is_wgd = False if parent is None else parent.is_wgd
+
         self.evolutionary_parameters = dict()
         self.evolutionary_parameters['division_rate'] = division_rate
         self.evolutionary_parameters['death_rate'] = death_rate
@@ -446,7 +453,7 @@ class ImmuneCell(Cell):
 
 class CancerCell(Cell):
     def __init__(self, mutation_rate=0.1, snv_prob=0.5, cnv_prob=0.5,
-                 n_snvs_per_allele=0.5, amp_prob=0.5, genotype_id=None, seed=42, **cell_kwargs):
+                 n_snvs_per_allele=0.5, amp_prob=0.5, wgd_rate=0.0, genotype_id=None, seed=42, **cell_kwargs):
         super(CancerCell, self).__init__(**cell_kwargs)
         self.type = "cancer"
         # mutation_rate is the per-division probability of *any* genome change relative to
@@ -462,6 +469,11 @@ class CancerCell(Cell):
         self.cnv_prob = cnv_prob
         self.n_snvs_per_allele = n_snvs_per_allele
         self.amp_prob = amp_prob
+        # wgd_rate is a SEPARATE per-division channel (DESIGN_focal_cna.md v1): the probability that
+        # a mutating division is a whole-genome duplication INSTEAD of the usual SNV/CNA split, leaving
+        # snv_prob/cnv_prob semantics intact. Default 0.0 -> WGD OFF -> mutate() draws no extra random
+        # variable, so growth is byte-identical to before (the F8 off-by-default discipline).
+        self.wgd_rate = wgd_rate
         self.seed  = seed
         self.set_params()
 
@@ -469,13 +481,15 @@ class CancerCell(Cell):
         if self.parent is not None:
             self.genotype_id = self.parent.genotype_id
 
-    def mutate(self, rng, selection, n_snvs_per_allele=None, snv_prob=None, cnv_prob=None, amp_prob=None):
+    def mutate(self, rng, selection, n_snvs_per_allele=None, snv_prob=None, cnv_prob=None,
+               amp_prob=None, wgd_rate=None):
         # SNV/CNA split, per-allele SNV rate and amp/del split default to this genotype's
         # configured rates (set in __init__, inherited through divide()), but stay overridable per call.
         n_snvs_per_allele = self.n_snvs_per_allele if n_snvs_per_allele is None else n_snvs_per_allele
         snv_prob = self.snv_prob if snv_prob is None else snv_prob
         cnv_prob = self.cnv_prob if cnv_prob is None else cnv_prob
         amp_prob = self.amp_prob if amp_prob is None else amp_prob
+        wgd_rate = self.wgd_rate if wgd_rate is None else wgd_rate
         # Copy-on-write: this cell is diverging into a new genotype, so take a private
         # copy of the (until now possibly shared) genome/summary before modifying them.
         # This is the only place the genome is mutated, so sharing elsewhere is safe.
@@ -486,8 +500,32 @@ class CancerCell(Cell):
         # per-segment selection weights would be all-zero (0/0 -> NaN). Nothing to mutate.
         if not any(self.genome[s]['p'] or self.genome[s]['m'] for s in range(self.n_segments)):
             return False
-        event = rng.choice(['cnv', 'mut'], p=np.array([cnv_prob, snv_prob])/(cnv_prob + snv_prob)) # add WGDs too...
-        if event == 'mut':
+        # WGD is its own event channel (DESIGN_focal_cna.md v1), fired with probability wgd_rate per
+        # mutating division INSTEAD of the SNV/CNA split. The `wgd_rate > 0` guard is what keeps the
+        # off-by-default path byte-identical: at the default 0.0 no random variable is drawn here, so
+        # the rng.choice below sees the exact same stream as before WGD existed.
+        if wgd_rate > 0 and rng.random() < wgd_rate:
+            event = 'wgd'
+        else:
+            event = rng.choice(['cnv', 'mut'], p=np.array([cnv_prob, snv_prob])/(cnv_prob + snv_prob))
+        if event == 'wgd':
+            # Whole-genome duplication: duplicate EVERY copy on BOTH homologs of EVERY segment once.
+            # copy number is segment-granular in this genome (a copy is a whole-segment SNV bitset),
+            # so a WGD needs no sub-segment structure — it just appends an independent .copy() of each
+            # existing copy (mirroring the CNV amp branch, so SNVs on a copy are carried into its
+            # duplicate — a WGD preserves and doubles existing mutations). Nullisomic (seg,hap) slots
+            # have no copy to double and stay at zero: a WGD never rescues a lost segment. The doubled
+            # seg_cns / ploidy / highest_cn / nullisomy_count all flow through the existing
+            # update_genome_summary_cnv seam, and the viability gate (update_evolutionary_parameters
+            # below + the engine's reject-at-birth check) drops any daughter that busts max_ploidy/max_cn.
+            for seg in range(self.n_segments):
+                for hap in ('p', 'm'):
+                    existing = list(self.genome[seg][hap])   # snapshot: don't double the new copies
+                    for allele_bits in existing:
+                        self.genome[seg][hap].append(allele_bits.copy())  # independent copy (no aliasing)
+                        self.update_genome_summary_cnv(selection, allele_bits, seg, 1)
+            self.is_wgd = True
+        elif event == 'mut':
             # A dividing cell can fix several SNVs at once, scattered across the whole genome
             # rather than clustered in one segment. Each allele (physical copy) independently
             # accrues ~Poisson(n_snvs_per_allele) new SNVs, so the expected number of new SNVs

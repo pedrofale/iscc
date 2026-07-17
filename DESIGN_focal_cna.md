@@ -1,8 +1,9 @@
 # DESIGN — focal CNAs, WGD & whole-chromosome events (CNA-mechanism parity) [design-first]
 
-Status: **design-first** (started 2026-07-16). Research framing: `RESEARCH_QUESTIONS.md` R10. Closes the
-one honest capability gap vs CINner/SISTEM — iscc is arm-resolution, they have the full CNA mechanism
-set. Companion handoff: `handoffs/wgd.md` (the cheap v1). Nothing here is built.
+Status: **v1 (WGD) BUILT** (2026-07-17); v2/v3 design-first. Research framing: `RESEARCH_QUESTIONS.md`
+R10. Closes the one honest capability gap vs CINner/SISTEM — iscc is arm-resolution, they have the full
+CNA mechanism set. Companion handoff: `handoffs/wgd.md` (the cheap v1, now shipped). v1 is the WGD event
++ `wgd_rate` (off by default, byte-identical when off); v2 (whole-chromosome) and v3 (focal) unbuilt.
 
 ## 1. The gap
 iscc's CNA model amplifies/deletes a **whole segment** (arm resolution in real-genome mode). CINner and
@@ -46,10 +47,20 @@ Two ways to get sub-segment CN:
   mechanism probabilities (extends `mut_prob`/`cnv_prob`). Must stay genotype-count- and tau-leap-compatible.
 
 ## 5. Staged plan
-- **v1 — WGD (cheap; ship alongside the Numbat benchmark).** A punctuated event doubling all copies on
-  both homologs, gated by `max_ploidy`. WGD occurs in ~30–50% of real tumours and produces the
-  doubling+loss allelic-imbalance signature **Numbat detects via BAF** — so it directly enriches the
-  in-flight Numbat benchmark. Handoff: `handoffs/wgd.md`.
+- **v1 — WGD (cheap; ship alongside the Numbat benchmark). BUILT (2026-07-17).** A punctuated event
+  doubling all copies on both homologs, gated by `max_ploidy`. WGD occurs in ~30–50% of real tumours and
+  produces the doubling+loss allelic-imbalance signature **Numbat detects via BAF** — so it directly
+  enriches the in-flight Numbat benchmark. Handoff: `handoffs/wgd.md`.
+  - *As built:* `wgd_rate` (a separate per-division channel in `CancerCell.mutate`, off by default so
+    growth is byte-identical when off — verified equal to the pre-WGD baseline). The WGD branch
+    duplicates every copy on both homologs of every segment via the existing `update_genome_summary_cnv`
+    seam, so ploidy/`highest_cn`/`nullisomy_count` update for free and the reject-at-birth viability gate
+    (`max_ploidy`/`max_cn`) drops non-viable doublings unchanged. Ground truth: per-genotype `is_wgd`
+    (monotone, inherited through `divide()`), surfaced as `cell_data["cell_wgd"]["is_wgd"]` in BOTH
+    engines when WGD is on. Tests: `tests/test_wgd.py`. Validation: `validation/validate_wgd.py` (WGD
+    frequency sweep + doubling+loss ploidy distribution). Adding a WGD-detection axis to
+    `validate_numbat.py` is the natural follow-up (its allele layer is built to detect exactly the
+    copy-neutral-LOH / WGD imbalance that was previously rare in iscc).
 - **v2 — whole-chromosome missegregation.** Add a chromosome→segment grouping (real-genome/arm mode
   already groups segments into arms; abstract mode = consecutive-segment groups), then gain/lose the
   whole set on one homolog. Feeds `s_arm` directly.
@@ -84,6 +95,11 @@ ops O(log n) via sorted breakpoints.
 ## 10. Open decisions
 - Interval representation vs fine-binning for v3 (recommend interval) — and whether to fold it into R13's
   allele refactor.
-- WGD fitness/tolerance effect: none, or a small buffer?
+- WGD fitness/tolerance effect: none, or a small buffer? **v1 decision: NONE.** WGD is neutral in v1 —
+  no `wgd_tolerance` — so the frequency/ploidy validation reflects the mechanism + viability interaction
+  alone, uncontaminated by a fitted fitness effect. A `wgd_tolerance` buffer (WGD masks deleterious loss,
+  so doubled genomes tolerate more subsequent loss / a mild fitness bump) is a clean follow-up if the
+  neutral rate can't reach the ~30–50% real prevalence band without over-tuning `wgd_rate` — see the
+  headline numbers in `validation/validate_wgd.py`.
 - Chromosome structure in abstract mode: how many, and does it need to be layout-seed-comparable across
   a cohort (the chromosome grouping is a landscape property → layout stream, like gene roles).
