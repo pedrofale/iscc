@@ -804,9 +804,8 @@ directly measured per-region clone admixture across a dispersal sweep ($r \appro
 building the tree, here bounded by \texttt{iscc}'s per-cell clone truth as an oracle deconvolution
 --- collapses the spurious rate to $\sim$$0.4\%$ and recovers $\sim$$93\%$ of the true clone splits,
 even though the resulting clone tree has \emph{more} leaves than the region tree (confirming the
-artifact is admixture, not tree size). As with the lineage--space confound, this is a failure mode
-that real multi-region data cannot diagnose for want of a ground truth, and that \texttt{iscc}
-quantifies because it has one.
+artifact is admixture, not tree size). As with the lineage--space confound, the error is invisible
+from the data alone (\Cref{sec:synthesis}).
 
 \begin{figure}[t]
   \centering
@@ -1209,6 +1208,31 @@ never develops --- but the mechanism (\Cref{fig:epistasis}B) and the tool--signa
   \label{fig:epistasis}
 \end{figure}
 
+
+\subsection*{Taken together: the structure an analysis ignores is the structure that breaks it}
+\label{sec:synthesis}
+The benchmarks above are not five unrelated curiosities. In each, a structure the analysis does not
+model masquerades as the signal it is looking for, and the resulting error is undiagnosable from the
+data alone. Clonal territories lend a purely environmental programme lineage autocorrelation, so a
+tree-based decomposition calls it heritable (\Cref{sec:petracer}). Regional admixture makes each bulk
+sample a clone mixture, so a tree built from those samples invents parallel origins and reverses
+ancestry --- and taking more biopsies makes it worse, not better (\Cref{sec:multiregion}). Contiguous
+copy-number dosage induces positional co-expression, so a factor model reports it as a gene programme
+(\Cref{sec:programs}). Clones and cell types are both ``populations'' of cells, so spatial
+deconvolution resolves the programme-defined types and largely misses the copy-number-defined clones
+(\Cref{sec:integration}). The cohort progression models fail differently but for a related reason: what
+is recoverable is set less by cohort size than by which projection of the data the tool consumes ---
+fitness epistasis generates frequency without order, and an event-presence matrix registers neither
+(\Cref{sec:epistasis}).
+
+The common ingredient is an asymmetry, not a difficulty. Diagnosing any of these requires knowing the
+answer --- which genes are environmental, which mutations truly recurred once, which programmes are
+real, which cell belongs to which clone, which dependency was planted --- and that is exactly what the
+data being analysed cannot supply. It is also exactly what a simulator supplies for free, provided the
+structure in question \emph{emerges} rather than being imposed: each confound here is a by-product of
+one selection-driven tumor carried through sampling and assay, not a term written into the generative
+model to be recovered later. That is the sense in which internal consistency is not a convenience but
+the precondition for the result.
 
 \subsection*{Outlook: from benchmarking to experimental design}
 \label{sec:outlook}
