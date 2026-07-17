@@ -922,6 +922,7 @@ the spatial programmes, from the microenvironment. The method's assumption is th
 approximately correct on \texttt{iscc} data, and every cell additionally carries its true clone label
 and true copy number.
 
+\paragraph{Clone assignment and copy-number calling.}
 We ran the genuine tools --- the R \texttt{clonealign} package and \texttt{infercnvpy} (the scverse
 reimplementation of inferCNV), each in its own environment --- on a simulated multi-clone tumour
 measured by both scDNA-seq and scRNA-seq, and scored them against \texttt{iscc}'s ground truth
@@ -937,6 +938,7 @@ gain/loss structure (clone-level correlation $0.86$ with the true copy number); 
 correlation is real but modest, reflecting the genuine difficulty of the inverse problem at single-cell
 resolution.
 
+\paragraph{Spatial deconvolution.}
 \texttt{iscc}'s ability to emit several modalities from one tumor is sharpest for \emph{spatial
 deconvolution}, where a method assigns each spatial spot a mixture of cell types using a single-cell
 reference. The benchmark's defining difficulty is that the reference and the spatial section are
@@ -961,6 +963,7 @@ clones are not, the tools resolve the program-defined cell types ($r\approx0.99$
 CNA-defined clones ($r\approx0.4$--$0.8$; \Cref{fig:deconv}D) --- a spatial echo of the clone-versus-state
 confound.
 
+\paragraph{Allele-aware copy number.}
 The allele layer enables a sharper copy-number test. inferCNV infers copy number from expression alone;
 Numbat~\cite{gao_numbat_2023} additionally reads B-allele frequencies at phased SNP sites together with a
 clone phylogeny. Benchmarking such methods is itself data-limited: the most recent comparison of
