@@ -696,11 +696,18 @@ confound.
 
 The allele layer enables a sharper copy-number test. inferCNV infers copy number from expression alone;
 Numbat~\cite{gao_numbat_2023} additionally reads B-allele frequencies at phased SNP sites together with a
-clone phylogeny. Because \texttt{iscc} tracks both homologs it already knows the true phase, so we bypass
-the population phasing panel an abstract genome lacks and feed Numbat the allele counts directly (each
-gene a phased marker, the B-allele count drawn at expression depth from the per-homolog dosage) --- itself
-the honest answer to how such a tool applies to a simulator, and one \texttt{iscc}'s explicit homolog
-tracking makes available. Head-to-head on the same cells, allele-aware Numbat and expression-only inferCNV
+clone phylogeny. Benchmarking such methods is itself data-limited: the most recent comparison of
+copy-number inference tools takes CNAs called from \emph{paired} scDNA-seq as its ground truth, and is
+explicitly constrained by how few single-cell multi-omics datasets measure DNA and RNA in the same
+cells~\cite{song_benchmarking_2025}. \texttt{iscc} removes that constraint by construction: it emits both
+modalities from the same cells at arbitrary scale and complexity, and its per-cell copy number is exact
+rather than itself an inference. Because \texttt{iscc} tracks both homologs it already knows the true
+phase, so we bypass the population phasing panel an abstract genome lacks and feed Numbat the allele
+counts directly (each gene a phased marker, the B-allele count drawn at expression depth from the
+per-homolog dosage) --- itself the honest answer to how such a tool applies to a simulator, and one
+\texttt{iscc}'s explicit homolog tracking makes available. This idealises the allele input: real Numbat
+phases from a population panel and pays for switch errors, so the comparison below is an upper bound on
+what the allele layer can deliver. Head-to-head on the same cells, allele-aware Numbat and expression-only inferCNV
 separate malignant from normal comparably (AUC $0.95$ vs $0.98$) and recover per-segment copy number
 comparably ($r=0.50$ vs $0.47$), because \texttt{iscc}'s copy-number changes mostly alter \emph{total}
 copy number --- where expression already carries the signal --- and copy-neutral loss of heterozygosity
