@@ -16,7 +16,12 @@ REPO & ENV
 - Repo: /Users/pedroferreira/projects/iscc/repo (branch `dev`).
 - Python/pytest: ~/miniconda3/envs/iscc/bin/python.
 - Conventions: commit on `dev` WITH `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`; keep the
-  FULL suite green (538 now); OFF-BY-DEFAULT / bit-identical when off (the F8 discipline); be honest.
+  FULL suite green (554 now); OFF-BY-DEFAULT / bit-identical when off (the F8 discipline); be honest.
+- **Context update (2026-07-17):** R13 (gene programs + allele-specific expression) and the Numbat
+  benchmark have LANDED since this handoff was written. The genome representation is unchanged
+  (`cell.py` `p`/`m` bitsets), so everything below still holds. Two consequences: WGD is now MOTIVATED,
+  not speculative (see the Numbat note at the end), and R13's ASE means the WGD allelic signal is
+  actually emittable now.
 
 WHY WGD IS CHEAP HERE: iscc's genome (`components/cell.py:54`) is per-segment
 (`{'p':[copy,…],'m':[copy,…]}`, each copy a whole-segment SNV bitset), so **copy number is
@@ -72,6 +77,11 @@ update (iscc now has WGD); flip an R10-v1 BACKLOG item. Full suite green; commit
 HONEST NOTES: keep it to WGD — resist scope-creeping into focal/whole-chromosome (that's the interval
 refactor, a separate milestone). If WGD frequency can't reach ~30–50% at any sane `wgd_rate` without other
 tumours going non-viable, that's a real finding about the interaction with the viability limits — report
-it (it may motivate `wgd_tolerance`). Coordinate lightly with the Numbat session: once WGD lands, Numbat's
-benchmark can add a WGD-detection axis (BAF), but that's the Numbat session's job, not this one.
+it (it may motivate `wgd_tolerance`). WGD is now directly MOTIVATED: the landed Numbat benchmark
+(`validation/validate_numbat.py`) found its allele layer only ties expression-only inferCNV on total
+copy number *because copy-neutral LOH / WGD is rare in iscc* --- WGD's doubling+loss allelic imbalance is
+exactly what the allele layer is built to detect, and R13's allele-specific expression (already landed)
+means that signal is now emittable. So make sure the `is_wgd` ground truth is surfaced. Adding a
+WGD-detection axis to `validate_numbat.py` is a natural FOLLOW-UP, not this handoff's job — keep this one
+scoped to the WGD mechanism + its own frequency/ploidy validation.
 ```
