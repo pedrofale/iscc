@@ -58,32 +58,27 @@
 \vspace{.5cm}
 
 \begin{abstract}
-Cancer is an evolutionary process that generates diverse cell states and complex tumor
+Cancer is an evolutionary process that generates diverse cell states and complex
 microenvironments. Computational methods to profile this heterogeneity from bulk, single-cell and
-spatial sequencing data are typically developed and benchmarked either on real patient data, which
-lacks reliable ground truth, or on statistical simulations that ignore the biological process by
-which the heterogeneity arises. We introduce \texttt{iscc}, an \textit{in silico} cancer center: a
+spatial sequencing data are benchmarked either on real patient data, which lacks reliable ground
+truth, or on statistical simulations that ignore the biological process generating it. We introduce \texttt{iscc}, an \textit{in silico} cancer center: a
 Python package that grows spatially structured tumors as a selection-driven, agent-based
 evolutionary process --- aberrant genomes shaped by copy-number and driver-mutation selection ---
-and carries one such tumor through the medical and laboratory steps that generate data (biopsy,
-tissue dissociation) into bulk and single-cell DNA and RNA sequencing and spatial transcriptomics,
-down to aligned reads, optionally under therapy. Expression is generated from the evolving genome and
-the microenvironment through gene programs, coupling copy number, cell state and spatial niche rather
-than imposing their relationships. Because every observation is tied to the tumor's ground-truth
-evolutionary history, spatial niche and cell populations, \texttt{iscc} exposes a failure mode common
-to single-cell and spatial analyses yet invisible in real data: a structure a method does not model
---- clonal lineage, spatial admixture, copy-number dosage, clonal identity, or differential fitness
---- masquerades as the signal it seeks. We demonstrate this across five method families, from lineage
-tracing (an environmental program misread as heritable) and multi-region phylogenetics (invented
-parallel evolution) to gene-program inference, spatial deconvolution and cohort progression models.
-Its most developed instance is data integration, benchmarked at two scales --- across modalities
-within a tumor and across patients within a cohort, where biological and technical batch variation are
-confounded --- by running real tools against \texttt{iscc}'s ground truth; the lineage--space confound
-is further confirmed in real lineage-tracing data. \texttt{iscc}'s genotype-level engine reaches
-millions of cells in minutes in the well-mixed regime, its assay parameters can be inferred from real
-reference datasets, and its simulated data reproduce key statistical properties of real bulk,
-single-cell and spatial measurements. The software is available as a command-line tool and a Python
-library.
+and carries one such tumor through biopsy and tissue dissociation into bulk and single-cell DNA and
+RNA sequencing and spatial transcriptomics, down to aligned reads, optionally under therapy.
+Expression is generated from the evolving genome and microenvironment through gene programs, coupling
+copy number, cell state and niche rather than imposing their relationships. Because every observation carries the tumor's ground-truth
+evolutionary history, niche and cell populations, \texttt{iscc} exposes a failure mode invisible
+in real data: structure a method does not model ---
+clonal lineage, spatial admixture, copy number, clonal identity, or fitness --- masquerades as the
+signal it seeks. We demonstrate this across five method families: lineage tracing, multi-region
+phylogenetics, gene-program inference, spatial deconvolution and cohort progression models.
+Its most developed instance, data integration, is benchmarked with real tools at two scales --- across
+modalities within a tumor and across patients within a cohort, where biology is confounded with
+technical batch effects; the lineage--space confound is further confirmed in real data. \texttt{iscc}'s genotype-level engine reaches millions of cells in
+minutes in the well-mixed regime, its assay parameters can be inferred from real reference datasets,
+and its data reproduce key statistics of real measurements. It is available as a
+command-line tool and Python library.
 \end{abstract}
 
 
