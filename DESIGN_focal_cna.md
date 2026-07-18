@@ -68,7 +68,7 @@ Two ways to get sub-segment CN:
   R13's allele-splitting.
 
 ## 6. Parameter surface
-- `wgd_rate` (per-division probability), optional `wgd_tolerance` (fitness/viability buffer).
+- `wgd_rate` (per-division probability). **No `wgd_tolerance`** — WGD robustness is emergent (see §10).
 - `whole_chrom_rate`; chromosome structure (`n_chromosomes` or a segment→chromosome map).
 - `focal_rate`, `focal_size_dist` (log-normal small span), `focal_amp_prob` (amp vs del).
 All ABC-estimable (new mechanism-rate targets for M1). Surface ground truth: per-genotype `is_wgd`,
@@ -95,11 +95,15 @@ ops O(log n) via sorted breakpoints.
 ## 10. Open decisions
 - Interval representation vs fine-binning for v3 (recommend interval) — and whether to fold it into R13's
   allele refactor.
-- WGD fitness/tolerance effect: none, or a small buffer? **v1 decision: NONE.** WGD is neutral in v1 —
-  no `wgd_tolerance` — so the frequency/ploidy validation reflects the mechanism + viability interaction
-  alone, uncontaminated by a fitted fitness effect. A `wgd_tolerance` buffer (WGD masks deleterious loss,
-  so doubled genomes tolerate more subsequent loss / a mild fitness bump) is a clean follow-up if the
-  neutral rate can't reach the ~30–50% real prevalence band without over-tuning `wgd_rate` — see the
+- WGD fitness/tolerance effect: **DECIDED — never add `wgd_tolerance`** (user 2026-07-17; closed, not
+  open). WGD's robustness (masking of deleterious loss) is ALREADY EMERGENT: a 4n cell has a copy-number
+  buffer (several deletions per segment before nullisomy) and the count-based CINner fitness dilutes the
+  effect of any single loss, so post-WGD cells tolerate loss with no fitted term. An explicit
+  `wgd_tolerance` would be a bolt-on, contrary to iscc's emerge-not-impose / non-circularity principle.
+  Vindicated in v1: neutral WGD reaches the real 30–50% prevalence band (45% at `wgd_rate=0.05`) with no
+  tolerance. The per-cell non-integer-ploidy *erosion* signature of real WGD tumours is therefore not a
+  missing mechanism but a matter of DYNAMICS — it should emerge as subsequent copy-number loss
+  accumulates over longer runs / larger tumours, buffered by the emergent robustness; no new knob. See the
   headline numbers in `validation/validate_wgd.py`.
 - Chromosome structure in abstract mode: how many, and does it need to be layout-seed-comparable across
   a cohort (the chromosome grouping is a landscape property → layout stream, like gene roles).
