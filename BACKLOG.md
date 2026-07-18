@@ -487,8 +487,19 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   free. Ground truth `is_wgd` (per genotype, monotone) surfaced as `cell_data["cell_wgd"]` in both
   engines. `tests/test_wgd.py`; `validation/validate_wgd.py` shows cohort WGD prevalence sweeping through
   the real ~30–50% PCAWG band and the doubling+loss ploidy signature (near-diploid ~2 vs WGD ~3–3.5).
-  Table-1 WGD cell added. **Natural follow-up:** add a WGD-detection axis to `validate_numbat.py` (the
-  allele layer is built to detect exactly the copy-neutral-LOH / WGD imbalance that was previously rare).
+  Table-1 WGD cell added.
+- **DONE — WGD allele-state axis** (2026-07-18, `validate_numbat.py --wgd-rate`). Measurement corrected
+  the naive premise: a **pure** doubling (the diploid 1+1 -> 2+2) is *unidentifiable* from relative
+  expression + BAF (it is
+  allelically balanced and cancels under per-cell normalisation → both inferCNV AND Numbat infer ~2n for
+  WGD cells; iscc reproduces the limit). What WGD *does* create as the doubled genome erodes is high-copy
+  **allelic imbalance** — even-total states (4+0, 3+1) whose total CN matches a balanced 2+2, so only the
+  allele layer can see them. The axis scores allelic-imbalance-STATE recovery *controlling for total CN*
+  (the total-CN benchmark had collapsed Numbat's `loh` state into `neu`=2, discarding the signal). WGD
+  raises the allele-only-detectable segment fraction ~4-6× (≈1%→≈4-6%); Numbat recovers imbalance at
+  AUC ≈0.7-0.8 where inferCNV sits at chance. New: `segment_allele_cn`/`score_numbat_imbalance`,
+  `numbat_runner.R` emits per-seg `cnv_state`/P(imbalance)/P(loh) + degrades to neutral (never crashes)
+  when Numbat finds nothing, `tests/test_integration.py::TestWgdAlleleState`, `fig:numbat_wgd`.
 - **LATER — v2 whole-chromosome** (chromosome→segment grouping) and **v3 focal** (the interval refactor;
   gate on whether the CNA-caller/Numbat results need GISTIC-peak resolution).
 

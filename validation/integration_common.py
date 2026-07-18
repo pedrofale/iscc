@@ -89,6 +89,31 @@ def segment_cn(tumor):
     return seg, gene_seg
 
 
+def segment_allele_cn(tumor):
+    """Per-cell per-segment ALLELE-SPECIFIC copy number ``(p_cn, m_cn)`` from the genotype genome —
+    the ground truth for the WGD allele-state benchmark. ``cell_cnv`` only carries TOTAL CN (p+m), so
+    it cannot express allelic imbalance (a 4+0 segment reads as total 4, identical to a balanced 2+2);
+    the per-homolog counts here can. Returns ``cell_id -> (n_seg, 2) int array`` (columns = p, m); a
+    cell whose genotype has no materialised genome maps to ``None``.
+
+    A segment ``(p, m)`` is *allelically imbalanced* when ``p != m`` (BAF != 0.5 — the signal the allele
+    layer reads); it is *allele-only detectable* (copy-neutral-LOH-like) when it is imbalanced yet its
+    total ``p+m`` is even, so total copy number alone cannot distinguish it from a balanced state. WGD
+    is what populates these high-CN even-total imbalanced states (the doubling+loss signature).
+    """
+    gid = tumor.cell_data["cell_type"].iloc[:, 0].astype(str).values
+    idx = np.asarray(tumor.cell_data["cell_type"].index)
+    g = tumor.genotypes
+    cache, out = {}, {}
+    for cell, gg in zip(idx, gid):
+        if gg not in cache:
+            rep = g.get(gg)
+            cache[gg] = (np.array([(len(s["p"]), len(s["m"])) for s in rep.genome], dtype=int)
+                         if rep is not None and hasattr(rep, "genome") else None)
+        out[cell] = cache[gg]
+    return out
+
+
 def define_clones(seg_cn_cancer, n_clones=4, min_frac=0.05, random_state=0):
     """Group cancer cells into ``n_clones`` clones by their per-segment CN profile (the standard
     clonealign setup: clones + their integer CN profiles come from the DNA modality). Returns
@@ -525,12 +550,14 @@ def build_numbat_inputs(tumor, shared, work_dir, depth_frac=1.0, seed=0):
                 consensus=shared["consensus"], n_segments=shared["n_segments"])
 
 
-def run_numbat(numbat_in, work_dir, min_cells=20, ncores=1, max_iter=1, t=1e-5, seed=0):
+def run_numbat(numbat_in, work_dir, min_cells=20, ncores=1, max_iter=1, t=1e-5, seed=0, min_llr=5.0):
     """Run the REAL Numbat (in ``iscc-numbat``) on the file inputs; return its per-cell outputs.
 
     Shells out to :mod:`numbat_runner` (R). Returns a dict with ``clone`` (per-cell clone id),
     ``p_aneuploid`` (P(cell is aneuploid) — the malignant score), ``seg_cn`` (cells x segments inferred
     total CN, aligned to ``numbat_in['cell_ids']`` order where present), and ``cells`` (row order).
+    ``min_llr`` is Numbat's pseudobulk CNV-filtering threshold (default 5); the noisier WGD regime uses
+    a lower value so real-but-weak CNVs are not all filtered out (its own "reduce min_LLR" advice).
     """
     if not numbat_available():
         raise RuntimeError(f"numbat env not found at {NUMBAT_RSCRIPT}")
@@ -539,20 +566,35 @@ def run_numbat(numbat_in, work_dir, min_cells=20, ncores=1, max_iter=1, t=1e-5, 
     runner = os.path.join(REPO, "validation", "numbat_runner.R")
     subprocess.run([NUMBAT_RSCRIPT, runner, numbat_in["work_dir"], out_dir,
                     str(int(min_cells)), str(int(ncores)), str(int(max_iter)),
-                    str(float(t)), str(int(seed))], check=True, capture_output=True, text=True)
+                    str(float(t)), str(int(seed)), str(float(min_llr))],
+                   check=True, capture_output=True, text=True)
 
     clone = pd.read_csv(os.path.join(out_dir, "clone.csv"))            # cell, clone, p_aneuploid
     seg = pd.read_csv(os.path.join(out_dir, "cell_seg_cn.csv"), index_col=0)  # cells x CHROM
     cells = list(clone["cell"])
     n_seg = numbat_in["n_segments"]
-    seg_cn = np.full((len(cells), n_seg), np.nan)
-    for j in range(n_seg):
-        col = str(j + 1)
-        if col in seg.columns:
-            seg_cn[:, j] = seg.reindex(cells)[col].values
+
+    def _grid(fname):
+        """Read a cells x CHROM numbat output into a (cells x n_seg) array aligned to `cells`."""
+        path = os.path.join(out_dir, fname)
+        if not os.path.exists(path):
+            return None
+        m = pd.read_csv(path, index_col=0)
+        arr = np.full((len(cells), n_seg), np.nan)
+        for j in range(n_seg):
+            col = str(j + 1)
+            if col in m.columns:
+                arr[:, j] = m.reindex(cells)[col].values
+        return arr
+
+    seg_cn = _grid("cell_seg_cn.csv")
+    # allele-state layer (the point of Numbat over inferCNV): P(allelic imbalance) and P(copy-neutral
+    # LOH) per (cell, segment) — present only if the runner emitted them (older runs won't have them).
+    seg_imbalance = _grid("cell_seg_imbalance.csv")
+    seg_loh = _grid("cell_seg_loh.csv")
     return dict(clone=clone.set_index("cell")["clone"].to_dict(),
                 p_aneuploid=clone.set_index("cell")["p_aneuploid"].to_dict(),
-                seg_cn=seg_cn, cells=cells)
+                seg_cn=seg_cn, seg_imbalance=seg_imbalance, seg_loh=seg_loh, cells=cells)
 
 
 def score_numbat(res, numbat_in):
@@ -608,4 +650,84 @@ def score_numbat(res, numbat_in):
             good = info[~np.isnan(cin[:, info]).any(0)] if len(info) else info
             out["clone_level_r"] = (float(np.corrcoef(cin[:, good].ravel(), ctn[:, good].ravel())[0, 1])
                                     if len(good) else float("nan"))
+    return out
+
+
+def _stratified_auc(total, y, score):
+    """AUC of ``score`` for ``y`` (0/1), computed WITHIN each total-CN stratum and pooled (size-
+    weighted). Controlling for total CN isolates the *allelic* signal: an inferCNV-style total-CN score
+    is chance (~0.5) here by construction, because 4+0 and 2+2 have the same total; the allele layer is
+    not. Strata lacking both classes or with a constant score are skipped."""
+    from sklearn.metrics import roc_auc_score
+    total, y, score = np.asarray(total), np.asarray(y, int), np.asarray(score, float)
+    ok = ~np.isnan(score)
+    total, y, score = total[ok], y[ok], score[ok]
+    aucs, wts = [], []
+    for t in np.unique(total):
+        m = total == t
+        yt, st = y[m], score[m]
+        if 0 < yt.sum() < len(yt) and np.std(st) > 0:
+            aucs.append(roc_auc_score(yt, st)); wts.append(len(yt))
+    return float(np.average(aucs, weights=wts)) if aucs else float("nan"), int(np.sum(wts))
+
+
+def score_numbat_imbalance(res, numbat_in, allele_cn, infercnv=None):
+    """Score allelic-imbalance-STATE recovery — the capability the allele layer has and inferCNV does
+    not. For every malignant (cell, segment) present in Numbat's output, the ground truth is whether
+    the segment is allelically imbalanced (``p != m``, from :func:`segment_allele_cn`); Numbat's score
+    is ``P(imbalance)`` from its allele posterior. inferCNV, if given, is scored on the SAME segments
+    using its total-CN magnitude — the only signal it has.
+
+    Returns AUCs both marginally and *controlling for total CN* (the honest test: at a fixed total,
+    only the allele layer can see the split), plus the segment-class fractions for the figure.
+    """
+    from sklearn.metrics import roc_auc_score
+
+    cells = res["cells"]
+    nb_imb = res.get("seg_imbalance")
+    if nb_imb is None:
+        return None                                    # runner predates the allele-state output
+    id_pos = {c: i for i, c in enumerate(numbat_in["cell_ids"])}
+    is_mal_all = numbat_in["is_malignant"]
+    mal_set = set(numbat_in["mal_cells"])
+
+    inf_lookup = None
+    if infercnv is not None:
+        inf_seg = np.abs(infercnv["seg_score"])        # |relative CNV| per (cell, seg)
+        inf_lookup = {c: inf_seg[i] for i, c in enumerate(infercnv["obs_names"])}
+
+    gt_imb, total, nb_s, nb_l, inf_s = [], [], [], [], []
+    for ci, c in enumerate(cells):
+        if c not in mal_set or c not in id_pos or allele_cn.get(c) is None:
+            continue
+        acn = allele_cn[c]
+        for s in range(numbat_in["n_segments"]):
+            p, m = int(acn[s, 0]), int(acn[s, 1])
+            gt_imb.append(int(abs(p - m) >= 1))
+            total.append(p + m)
+            nb_s.append(nb_imb[ci, s])
+            nb_l.append(res["seg_loh"][ci, s] if res.get("seg_loh") is not None else np.nan)
+            inf_s.append(inf_lookup[c][s] if (inf_lookup is not None and c in inf_lookup) else np.nan)
+    gt_imb = np.array(gt_imb); total = np.array(total)
+    nb_s = np.array(nb_s, float); nb_l = np.array(nb_l, float); inf_s = np.array(inf_s, float)
+
+    def _auc(y, sc):
+        ok = ~np.isnan(sc)
+        return (float(roc_auc_score(y[ok], sc[ok]))
+                if ok.sum() and 0 < y[ok].sum() < ok.sum() and np.std(sc[ok]) > 0 else float("nan"))
+
+    even = total % 2 == 0                               # even total -> total CN can't reveal imbalance
+    out = dict(
+        n_pairs=int(len(gt_imb)),
+        frac_imbalanced=float(gt_imb.mean()) if len(gt_imb) else float("nan"),
+        frac_allele_only=float((gt_imb & even).mean()) if len(gt_imb) else float("nan"),
+        # marginal AUCs
+        numbat_auc=_auc(gt_imb, nb_s),
+        numbat_auc_even=_auc(gt_imb[even], nb_s[even]),
+        infercnv_auc_even=_auc(gt_imb[even], inf_s[even]) if infercnv is not None else float("nan"),
+    )
+    # the rigorous, total-CN-controlled AUCs (the money numbers)
+    out["numbat_auc_ctrl"], out["n_ctrl"] = _stratified_auc(total, gt_imb, nb_s)
+    if infercnv is not None:
+        out["infercnv_auc_ctrl"], _ = _stratified_auc(total, gt_imb, inf_s)
     return out

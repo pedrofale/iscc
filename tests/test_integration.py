@@ -208,3 +208,58 @@ class TestNumbatReal:
         # the allele+expression HMM recovers real per-segment copy-number signal
         assert sc["mean_segment_r"] > 0.3
         assert sc["n_malignant"] > 0
+
+
+# ==================================================================================================
+# WGD allele-state axis — the ground truth + scoring (no external tool needed)
+# --------------------------------------------------------------------------------------------------
+@pytest.fixture(scope="module")
+def wgd_allele_tumor():
+    # allele layer ON + WGD ON, so cell_wgd exists and the doubling+loss populates allelically
+    # imbalanced segments to score against.
+    return C.grow_tumor_alleles(seed=0, steps=750, genome=GENOME, spatial=SPATIAL, deme=DEME,
+                                cancer=dict(CANCER, cnv_prob=0.6, snv_prob=0.4, wgd_rate=0.08))
+
+
+class TestWgdAlleleState:
+    def test_wgd_ground_truth_surfaces(self, wgd_allele_tumor):
+        assert "cell_wgd" in wgd_allele_tumor.cell_data                 # is_wgd only when wgd_rate>0
+        assert wgd_allele_tumor.cell_data["cell_wgd"]["is_wgd"].any()   # some lineage doubled
+
+    def test_segment_allele_cn_matches_total(self, wgd_allele_tumor):
+        # per-homolog CN (p, m) must sum to the total CN carried in cell_cnv for that segment.
+        acn = C.segment_allele_cn(wgd_allele_tumor)
+        seg_total, _ = C.segment_cn(wgd_allele_tumor)                   # cells x segments total CN
+        idx = list(wgd_allele_tumor.cell_data["cell_type"].index)
+        types = C.cell_types(wgd_allele_tumor)
+        checked = imbalanced = 0
+        for i, c in enumerate(idx):
+            if types[i] != "cancer" or acn.get(c) is None:
+                continue
+            per_seg_total = acn[c].sum(1)                               # p + m per segment
+            assert np.array_equal(per_seg_total, seg_total[i].astype(int))
+            imbalanced += int((np.abs(acn[c][:, 0] - acn[c][:, 1]) >= 1).any())
+            checked += 1
+        assert checked > 0 and imbalanced > 0                          # imbalance is actually present
+
+    def test_score_numbat_imbalance_oracle(self, wgd_allele_tumor):
+        # an oracle whose P(imbalance) = the true imbalance must score at the ceiling; a constant
+        # (no-signal) predictor must be undefined/chance. This exercises the scoring without Numbat.
+        t = wgd_allele_tumor
+        shared = C.build_cna_inputs(t, n_normal=60, n_clones=3, seed=0)
+        acn = C.segment_allele_cn(t)
+        cells = list(shared["mal_cells"])
+        n_seg = shared["n_segments"]
+        oracle = np.zeros((len(cells), n_seg))
+        for i, c in enumerate(cells):
+            a = acn[c]
+            oracle[i] = (np.abs(a[:, 0] - a[:, 1]) >= 1).astype(float)
+        numbat_in = dict(cell_ids=shared["cell_ids"], is_malignant=shared["is_malignant"],
+                         mal_cells=shared["mal_cells"], n_segments=n_seg)
+        res = dict(cells=cells, seg_imbalance=oracle, seg_loh=oracle)
+        sc = C.score_numbat_imbalance(res, numbat_in, acn)
+        assert sc["frac_imbalanced"] > 0
+        assert sc["numbat_auc"] == pytest.approx(1.0)                   # perfect allelic-state recovery
+        # a constant predictor carries no signal -> AUC undefined (nan), never a spurious pass
+        flat = dict(cells=cells, seg_imbalance=np.zeros_like(oracle), seg_loh=np.zeros_like(oracle))
+        assert np.isnan(C.score_numbat_imbalance(flat, numbat_in, acn)["numbat_auc"])

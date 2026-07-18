@@ -1011,10 +1011,26 @@ what the allele layer can deliver. Head-to-head on the same cells, allele-aware 
 separate malignant from normal comparably (AUC $0.95$ vs $0.98$) and recover per-segment copy number
 comparably ($r=0.50$ vs $0.47$), because \texttt{iscc}'s copy-number changes mostly alter \emph{total}
 copy number --- where expression already carries the signal --- and copy-neutral loss of heterozygosity
-is rare. Where the allele layer pays off is \emph{subclone} resolution: Numbat's haplotype-aware phylogeny
+is rare in the absence of whole-genome duplication (which we turn to next). Where the allele layer already
+pays off is \emph{subclone} resolution: Numbat's haplotype-aware phylogeny
 recovers the copy-number clones far better than clustering inferCNV's expression profile does (adjusted
 Rand index $0.64$ vs $0.18$; \Cref{fig:numbat}C), and the allelic imbalance it exploits emerges from
 per-homolog dosage (\Cref{fig:numbat}D) rather than being imposed.
+
+\paragraph{Where the allele layer becomes decisive: whole-genome duplication.}
+The tie on total copy number is itself faithful, not an artefact of the idealised allele input. A pure
+genome doubling --- the diploid $1{+}1$ becoming $2{+}2$ --- is allelically balanced (BAF $0.5$) and, as a
+uniform scaling, cancels under the per-cell normalisation both callers apply, so absolute ploidy is
+genuinely unidentifiable from relative expression and B-allele frequency --- and \texttt{iscc} reproduces
+this limit (both tools infer near-diploid copy number for duplicated cells). What a doubling \emph{does}
+leave, as subsequent loss erodes the tetraploid genome (\Cref{fig:validation_wgd}), is high-copy
+\emph{allelic imbalance}: even-total states such as $4{+}0$ or $3{+}1$ whose total copy number matches the
+balanced $2{+}2$, visible only to the allele layer. Switching WGD on multiplies the fraction of these copy-neutral-like segments several-fold (from
+$\approx 1\%$ to $\approx 6\%$ of malignant segments; \Cref{fig:numbat_wgd}A), and there --- controlling
+for total copy number --- Numbat recovers the allelic state (imbalance-detection AUC $\approx 0.85$) that
+inferCNV, having only total copy number, cannot ($\approx 0.52$, chance; \Cref{fig:numbat_wgd}B,C). This
+is the one regime where the allele layer must win by construction, and only a simulator that tracks both
+homologs supplies the per-cell ground truth to measure it.
 
 Together with the PEtracer benchmark, these demonstrate a general pattern: because \texttt{iscc}
 generates every modality from one evolving tumor, it supplies the non-circular, cross-modal ground truth
@@ -1073,6 +1089,23 @@ methods are otherwise validated without.
   exploits is emergent --- pooled B-allele frequency departs from $0.5$ at copy-number-altered segments in
   malignant cells and stays balanced in normal cells.}
   \label{fig:numbat}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{validation_numbat_wgd.png}
+  \caption{\textbf{Whole-genome duplication is where the allele layer becomes decisive.} With WGD on
+  (\texttt{wgd\_rate}$=0.04$), the doubling-then-loss erosion populates high-copy \emph{allelic
+  imbalance}. (A) The fraction of malignant segments that are \emph{allele-only} detectable --- imbalanced
+  yet at an even total copy number, so indistinguishable from a balanced state on total copy number alone
+  ($4{+}0$ or $3{+}1$ vs $2{+}2$) --- rises several-fold when WGD is switched on, while ordinary
+  total-copy-number-visible imbalance is unchanged. (B) Recovering the allelic state \emph{at fixed total
+  copy number}: allele-aware Numbat detects the imbalance where expression-only inferCNV, having only
+  total copy number, is at chance. (C) The same on the even-total (copy-neutral-like) segments directly.
+  Ground truth is \texttt{iscc}'s per-homolog copy number, averaged over the tumours where Numbat's allele
+  HMM converged ($7$ of $8$; it can fail on the noisier mixed-ploidy pseudobulks, which the runner degrades
+  to a null result rather than a crash).}
+  \label{fig:numbat_wgd}
 \end{figure}
 
 \subsection*{\texttt{iscc} provides cohort-level ground truth: shared-vs-private states and the need for personalized medicine}

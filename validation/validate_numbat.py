@@ -24,9 +24,24 @@ Figure (manuscript/figures/validation_numbat.png):
   D. the emergent allele signal — pooled segment BAF at copy-number-altered vs balanced segments,
      malignant vs normal (why the allele layer carries information at all).
 
+WGD AXIS (--wgd-rate > 0 -> manuscript/figures/validation_numbat_wgd.png). The total-CN head-to-head
+above finds the allele layer only TIES inferCNV — because a pure whole-genome duplication (1+1 -> 2+2) is
+allelically balanced (BAF 0.5) and, being a uniform doubling, is invisible in relative expression too:
+absolute ploidy is genuinely unidentifiable from relative-expression + BAF, and iscc reproduces that
+limit (both tools infer ~2n for WGD cells; a probe confirmed it). What WGD DOES create as the doubled
+genome erodes is high-CN ALLELIC IMBALANCE — even-total states like 4+0 / 3+1 whose total CN matches a
+balanced 2+2, so ONLY the allele layer can see them. Turning WGD on, this axis scores allelic-imbalance-
+STATE recovery, controlling for total CN — the one place the allele layer must beat inferCNV by
+construction (Numbat AUC > 0.5, inferCNV ~0.5), and the fraction of allele-only states climbs with WGD.
+
 Run (from the repo root, in the `iscc` env):
-    python -u validation/validate_numbat.py            # the paper figure
+    python -u validation/validate_numbat.py            # the total-CN head-to-head (paper figure)
     python -u validation/validate_numbat.py --quick    # fast smoke
+    # the WGD allele-state figure (fig:numbat_wgd) — 8 seeds, Numbat converges on ~7:
+    python -u validation/validate_numbat.py --wgd-rate 0.04 --seeds 3 4 5 6 7 8 9 11 --steps 1300
+(wgd_rate 0.04 lands a moderate ~10% WGD fraction — enough to populate the allele-only states while
+keeping the per-clone signal clean enough for Numbat; much higher and the mixed-ploidy pseudobulks get
+noisy and Numbat recovers nothing on some tumours, which the runner degrades to neutral rather than crash.)
 Requires `iscc-numbat` (and `iscc-infercnv` for the head-to-head); missing tools are skipped w/ a note.
 """
 import argparse
@@ -42,6 +57,7 @@ import integration_common as C
 
 REPO = C.REPO
 FIG = os.path.join(REPO, "manuscript", "figures", "validation_numbat.png")
+FIG_WGD = os.path.join(REPO, "manuscript", "figures", "validation_numbat_wgd.png")
 
 
 def allele_signal(tumor, shared, numbat_in):
@@ -105,6 +121,140 @@ def run_once(seed, steps, cnv_prob, tmp, min_cells, max_iter):
               f"  clone_ARI={sci['clone_ari']:.3f}  clone_r={sci.get('clone_level_r', float('nan')):.3f}")
     result["allele"] = allele_signal(tumor, shared, numbat_in)
     return result
+
+
+# ==================================================================================================
+# WGD axis: does the allele layer recover the allelic STATE that WGD populates and inferCNV cannot?
+# --------------------------------------------------------------------------------------------------
+# The head-to-head above scores TOTAL copy number, on which the allele layer only ties inferCNV. That
+# is the honest result *when copy-neutral LOH is rare* — and a probe confirmed WHY: a pure whole-genome
+# duplication (the diploid 1+1 -> 2+2) is invisible to BOTH tools (relative expression cancels the uniform
+# doubling; BAF stays 0.5), so absolute ploidy is genuinely unidentifiable from relative-expression + BAF.
+# What WGD
+# DOES create, as the doubled genome erodes (doubling+loss), is high-CN ALLELIC IMBALANCE — even-total
+# states like 4+0 / 3+1 whose total CN matches a balanced 2+2, so ONLY the allele layer can see them.
+# This axis turns WGD on and scores exactly that: allelic-imbalance-state recovery, controlling for
+# total CN. It is the one place the allele layer must beat inferCNV by construction.
+def _malignant_seg_fracs(tumor):
+    """Ground-truth fraction of malignant (cell, segment) pairs that are allelically imbalanced, split
+    into total-CN-visible (odd total) vs allele-only (even total, inferCNV-blind). Returns None if the
+    tumour has no cancer cells (nothing to average into the cohort contrast)."""
+    types = C.cell_types(tumor)
+    acn = C.segment_allele_cn(tumor)
+    idx = np.asarray(tumor.cell_data["cell_type"].index)
+    odd = even = tot = 0
+    for cell, ty in zip(idx, types):
+        if ty != "cancer" or acn.get(cell) is None:
+            continue
+        for p, m in acn[cell]:
+            tot += 1
+            if abs(int(p) - int(m)) >= 1:
+                even += int((int(p) + int(m)) % 2 == 0)
+                odd += int((int(p) + int(m)) % 2 == 1)
+    if tot == 0:
+        return None
+    return dict(visible=odd / tot, allele_only=even / tot)
+
+
+def run_wgd_once(seed, steps, cnv_prob, wgd_rate, tmp, min_cells, max_iter):
+    """One WGD-on tumour: ground-truth allele states + Numbat allele-imbalance recovery vs inferCNV.
+
+    Uses the default SNV/CNV split (not the head-to-head's cnv_prob override): WGD already adds
+    genome-wide expression variance, and the balanced split keeps the per-clone CNV signal Numbat needs.
+    """
+    base = dict(C.CANCER)
+    on = C.grow_tumor_alleles(seed=seed, steps=steps, cancer=dict(base, wgd_rate=wgd_rate))
+    # scoring needs the WGD-ON tumour; some seeds never establish a cancer population (it drifts out
+    # before the normal compartment fills the gland), leaving nothing to score — skip rather than crash.
+    n_on = int((C.cell_types(on) == "cancer").sum())
+    if n_on < 20:
+        print(f"  seed={seed}: only {n_on} cancer cells (WGD on) — skipping")
+        return None
+    # the WGD-off contrast is a SEPARATE trajectory (the WGD draw shifts the RNG stream), so it is a
+    # cohort-level baseline, not a paired one; its cancer population can independently fail to establish,
+    # in which case this seed just doesn't contribute to the off bar (frac_off = None).
+    off = C.grow_tumor_alleles(seed=seed, steps=steps, cancer=base)
+    frac_off, frac_on = _malignant_seg_fracs(off), _malignant_seg_fracs(on)
+
+    shared = C.build_cna_inputs(on, n_normal=150, n_clones=4, seed=seed)
+    allele_cn = C.segment_allele_cn(on)
+    wgd_frac = float(on.cell_data["cell_wgd"]["is_wgd"].values[
+        C.cell_types(on) == "cancer"].mean()) if "cell_wgd" in on.cell_data else float("nan")
+    off_ao = f"{frac_off['allele_only']:.1%}" if frac_off else "n/a"
+    print(f"  seed={seed}: {shared['is_malignant'].sum()} malignant ({wgd_frac:.0%} WGD) + "
+          f"{(~shared['is_malignant']).sum()} normal; allele-only segs "
+          f"{off_ao} (WGD off) -> {frac_on['allele_only']:.1%} (WGD on)")
+
+    wd = os.path.join(tmp, f"wgd_seed{seed}")
+    numbat_in = C.build_numbat_inputs(on, shared, wd, seed=seed)
+    res = {"seed": seed, "frac_off": frac_off, "frac_on": frac_on, "wgd_frac": wgd_frac}
+    if C.numbat_available():
+        nb = C.run_numbat(numbat_in, wd, min_cells=min_cells, ncores=1, max_iter=max_iter, min_llr=2.0)
+        inf = C.run_infercnv(shared["adata"], os.path.join(wd, "infercnv")) if C.infercnv_available() \
+            else None
+        sc = C.score_numbat_imbalance(nb, numbat_in, allele_cn, infercnv=inf)
+        res["imbalance"] = sc
+        if sc:
+            print(f"    allele-state recovery (total-CN-controlled AUC):  "
+                  f"Numbat={sc['numbat_auc_ctrl']:.3f}  inferCNV={sc.get('infercnv_auc_ctrl', float('nan')):.3f}"
+                  f"   | even-total subset: Numbat={sc['numbat_auc_even']:.3f}  "
+                  f"inferCNV={sc['infercnv_auc_even']:.3f}")
+    return res
+
+
+def make_wgd_figure(results, out_path):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    def mean(path):
+        vals = [r["imbalance"][path] for r in results
+                if r.get("imbalance") and r["imbalance"].get(path) is not None
+                and not np.isnan(r["imbalance"][path])]
+        return float(np.mean(vals)) if vals else float("nan")
+
+    c_nb, c_inf = "#2e6f95", "#a0a0a0"
+    fig, axes = plt.subplots(1, 3, figsize=(14.5, 4.3))
+
+    # A. WGD grows the allele-only (copy-neutral-like) class; total-CN-visible imbalance stays flat.
+    ax = axes[0]
+    def frac_mean(which, key):
+        vals = [r[which][key] for r in results if r.get(which) is not None]
+        return float(np.mean(vals)) if vals else float("nan")
+    vis_off, vis_on = frac_mean("frac_off", "visible"), frac_mean("frac_on", "visible")
+    ao_off, ao_on = frac_mean("frac_off", "allele_only"), frac_mean("frac_on", "allele_only")
+    x = np.arange(2); w = 0.36
+    ax.bar(x - w / 2, [vis_off, ao_off], w, label="WGD off", color="#c7c7c7")
+    ax.bar(x + w / 2, [vis_on, ao_on], w, label="WGD on", color="#d1495b")
+    ax.set_xticks(x)
+    ax.set_xticklabels(["total-CN-visible\n(odd total)", "allele-only\n(even total, cnLOH-like)"])
+    ax.set_ylabel("fraction of malignant segments")
+    ax.set_title("A. WGD populates allele-only states")
+    ax.legend(frameon=False, fontsize=9)
+
+    # B. recovering the allelic state, CONTROLLING for total CN (the honest, inferCNV-blind test).
+    ax = axes[1]
+    vals = [mean("numbat_auc_ctrl"), mean("infercnv_auc_ctrl")]
+    ax.bar(["Numbat\n(expr+allele)", "inferCNV\n(expr only)"], vals, color=[c_nb, c_inf])
+    ax.axhline(0.5, color="k", lw=0.8, ls="--")
+    ax.text(1.02, 0.505, "chance", fontsize=8, transform=ax.get_yaxis_transform())
+    ax.set_ylim(0, 1); ax.set_ylabel("imbalance-detection AUC")
+    ax.set_title("B. Allelic state at fixed total CN\n(only the allele layer can)")
+
+    # C. corroboration on the even-total subset directly (allele-only segments vs balanced).
+    ax = axes[2]
+    vals = [mean("numbat_auc_even"), mean("infercnv_auc_even")]
+    ax.bar(["Numbat", "inferCNV"], vals, color=[c_nb, c_inf])
+    ax.axhline(0.5, color="k", lw=0.8, ls="--")
+    ax.set_ylim(0, 1); ax.set_ylabel("imbalance-detection AUC (even-total segs)")
+    ax.set_title("C. Even-total imbalance\n(4+0 / 3+1 vs 2+2)")
+
+    fig.suptitle("WGD makes the allele layer earn its keep: recovering copy-neutral allelic imbalance "
+                 "inferCNV cannot see", fontsize=12.5, y=1.03)
+    fig.tight_layout()
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    print(f"\nwrote {out_path}")
 
 
 def make_figure(results, out_path):
@@ -181,6 +331,9 @@ def main():
     ap.add_argument("--cnv-prob", type=float, default=0.65)
     ap.add_argument("--min-cells", type=int, default=20)
     ap.add_argument("--max-iter", type=int, default=2)
+    ap.add_argument("--wgd-rate", type=float, default=0.0,
+                    help="if >0, run the WGD allele-state axis (validation_numbat_wgd.png) instead of "
+                         "the total-CN head-to-head")
     ap.add_argument("--quick", action="store_true")
     args = ap.parse_args()
 
@@ -191,9 +344,22 @@ def main():
 
     seeds = args.seeds[:1] if args.quick else args.seeds
     steps = 900 if args.quick else args.steps
+    tmp = tempfile.mkdtemp(prefix="numbat_val_")
+
+    if args.wgd_rate > 0:
+        print(f"WGD allele-state axis: wgd_rate={args.wgd_rate} numbat={C.numbat_available()} "
+              f"infercnv={C.infercnv_available()} seeds={seeds}")
+        results = [run_wgd_once(s, steps, args.cnv_prob, args.wgd_rate, tmp, args.min_cells,
+                                args.max_iter) for s in seeds]
+        results = [r for r in results if r is not None]
+        n_det = sum(1 for r in results if r.get("imbalance") and
+                    not np.isnan(r["imbalance"].get("numbat_auc_ctrl", float("nan"))))
+        print(f"\n{len(results)} tumours scored; Numbat recovered allelic state on {n_det}")
+        make_wgd_figure(results, FIG_WGD)
+        return
+
     print(f"Numbat vs inferCNV: numbat={C.numbat_available()} infercnv={C.infercnv_available()} "
           f"seeds={seeds}")
-    tmp = tempfile.mkdtemp(prefix="numbat_val_")
     results = []
     for seed in seeds:
         results.append(run_once(seed, steps, args.cnv_prob, tmp, args.min_cells, args.max_iter))

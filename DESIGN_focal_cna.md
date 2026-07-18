@@ -58,9 +58,22 @@ Two ways to get sub-segment CN:
     (`max_ploidy`/`max_cn`) drops non-viable doublings unchanged. Ground truth: per-genotype `is_wgd`
     (monotone, inherited through `divide()`), surfaced as `cell_data["cell_wgd"]["is_wgd"]` in BOTH
     engines when WGD is on. Tests: `tests/test_wgd.py`. Validation: `validation/validate_wgd.py` (WGD
-    frequency sweep + doubling+loss ploidy distribution). Adding a WGD-detection axis to
-    `validate_numbat.py` is the natural follow-up (its allele layer is built to detect exactly the
-    copy-neutral-LOH / WGD imbalance that was previously rare in iscc).
+    frequency sweep + doubling+loss ploidy distribution).
+  - *WGD allele-state axis (BUILT 2026-07-18, `validate_numbat.py --wgd-rate`).* The natural
+    follow-up, and it corrected the naive expectation. Measurement (not theory) showed a **pure**
+    doubling (the diploid 1+1 -> 2+2) is *unidentifiable* from relative expression + BAF — it is
+    allelically balanced (BAF 0.5) and cancels under per-cell expression normalisation, so BOTH inferCNV
+    and Numbat infer
+    ~2n for WGD cells; iscc faithfully reproduces that identifiability limit. What WGD *does* create as
+    the doubled genome erodes is high-copy **allelic imbalance** — even-total states (4+0, 3+1) whose
+    total CN matches a balanced 2+2, so only the allele layer can see them. The axis scores exactly
+    that: allelic-imbalance-STATE recovery *controlling for total CN* (the earlier benchmark scored
+    only total CN and collapsed Numbat's `loh` state into `neu`=2, discarding this signal). Turning WGD
+    on raises the allele-only-detectable segment fraction ~4-6x (≈1% → ≈4-6%), and Numbat recovers the
+    imbalance at AUC ≈0.7-0.8 where inferCNV sits at chance. `numbat_runner.R` now emits per-(cell,seg)
+    `cnv_state` / P(imbalance) / P(loh) (not just total CN) and degrades to neutral outputs rather than
+    crashing when Numbat finds nothing (the mixed-ploidy pseudobulks are noisy). Ground truth:
+    `integration_common.segment_allele_cn` (per-homolog CN from the genotype genome).
 - **v2 — whole-chromosome missegregation.** Add a chromosome→segment grouping (real-genome/arm mode
   already groups segments into arms; abstract mode = consecutive-segment groups), then gain/lose the
   whole set on one homolog. Feeds `s_arm` directly.
