@@ -1,217 +1,271 @@
-# Handoff prompt — showcase notebooks (integration, WGD/allele-CNA, gene programs)
+# Handoff prompt — showcase notebook SUITE (one shared spatial sim → single-tumour + cohort notebooks)
 
-Saved 2026-07-18. Copy the block below into a fresh session. **Docs/pedagogy work, not an engine change.**
-Goal: three EXECUTED Jupyter notebooks in `notebooks/` that show iscc's *science* clearly (the existing
-tutorials already cover the plumbing). The user explicitly decided: (a) build these three, (b) executed but
-`notebooks/`-only for now — do NOT wire them into the MkDocs nav (`mkdocs.yml`) or copy to `docs/tutorials/`,
-(c) **every notebook must grow a SPATIALLY STRUCTURED tumour and visualise that structure.** Branch from `dev`.
+Saved 2026-07-18 (expanded from the 3-notebook version). Copy the block below into a fresh session.
+**Docs/pedagogy work, not an engine change.** Deliverable: a coherent set of EXECUTED notebooks in
+`notebooks/` that all draw from **one shared, spatially-structured tumour-evolution simulation** (shown in its
+own notebook), plus a small **5-tumour cohort** for cross-patient notebooks. Branch from `dev`.
 
-Context the fresh session lacks: the current `notebooks/` has 7 solid executed tutorials (pipeline, growth,
-data-overview, assay_dna/scrna/spatial, reads) plus 5 near-empty STUBS. These three deliverables are two new
-notebooks + one stub rewrite. The science they show already exists and is validated under `validation/`
-(`validate_numbat.py`, `validate_programs.py`, `validate_clonealign.py`, `integration_common.py`,
-`programs_common.py`) — the notebooks are a *self-contained, teachable* view of it, NOT a re-run of the heavy
-external-tool benchmarks.
+User decisions this session (authoritative):
+- ONE spatially-structured simulation underlies all single-tumour science notebooks; show it in a SEPARATE
+  base-simulation notebook. **The base sim must reach ≥10,000 cancer cells.**
+- Analyse the MIXED tumour (malignant + microenvironment) as a real study does — ground truth only scores/
+  colours, never pre-filters to cancer cells.
+- Then a **cohort of 5 separate simulations** for cohort notebooks: (a) batch integration of scRNA + scDEF for
+  shared programs, (b) MHN + TreeMHN on the DNA for recurrent mutational patterns.
+- Executed, `notebooks/`-only for now — do NOT touch `mkdocs.yml` or `docs/tutorials/`.
+
+VERIFIED THIS SESSION (so you don't re-derive): a spatially-structured tumour (grid_size=60,
+structure_radius=8, carrying_capacity=8, tau-leaping) reaches **10.8k cancer cells (~38k total, ~28% purity)
+in ~41 s**, make_cell_data ~1.2 s, ~1–2 GB RAM with all layers on. So the base sim is a ~1-minute deterministic
+grow — RE-GROW it in each notebook via a shared helper rather than saving giant CSVs (38k×genes matrices are
+too big for disk/repo).
 
 ---
 
 ```
-Create three EXECUTED showcase notebooks in notebooks/ for iscc. These demonstrate the SCIENCE (the existing
-tutorials cover the mechanics). Do NOT add them to mkdocs.yml or docs/tutorials/ — notebooks/ only, for now.
+Build a suite of EXECUTED showcase notebooks in notebooks/ for iscc, all based on ONE shared spatially-
+structured simulation, plus a 5-tumour cohort. These show the SCIENCE (the existing 7 tutorials cover the
+mechanics). Do NOT add anything to mkdocs.yml or docs/tutorials/ — notebooks/ only, for now.
 
 REPO & ENV
 - Repo: /Users/pedroferreira/projects/iscc/repo (branch `dev`).
 - Python/Jupyter: ~/miniconda3/envs/iscc/bin/python (the core `iscc` env). Build with nbformat, execute with
-  nbclient/ExecutePreprocessor (or `jupyter nbconvert --to notebook --execute --inplace`) using THIS env's
-  kernel, so outputs are saved. Every notebook must run end-to-end with NO errors in the core env.
+  nbclient/ExecutePreprocessor (or `jupyter nbconvert --to notebook --execute --inplace`) in THIS env so
+  outputs are saved. Every notebook must run end-to-end with NO errors in the core env.
 - Conventions: commit on `dev` WITH `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`; be honest; do
-  not break the test suite (you are only adding notebooks, so it should be untouched).
-- Match the existing notebook idiom EXACTLY — read notebooks/01_pipeline_walkthrough.ipynb and
-  notebooks/assay_scrna.ipynb first: narrative markdown + focused matplotlib code cells, the public `iscc`
-  API, `%matplotlib inline`, small figures, a "Next / see also" pointer at the end.
+  not break the test suite (you only add notebooks).
+- Match the existing idiom EXACTLY — read notebooks/01_pipeline_walkthrough.ipynb and notebooks/assay_scrna.ipynb
+  first: narrative markdown + focused matplotlib code cells, the public `iscc` API, `%matplotlib inline`, small
+  figures, a "Next / see also" pointer at the end.
 
-THREE HARD REQUIREMENTS (the user asked for these specifically)
-1. SPATIALLY STRUCTURED simulations. Every notebook grows a tumour with `spatial_params` containing
-   `structure_radius > 0` (a real gland with a normal epithelial/stromal compartment), NOT the well-mixed
-   `structure_radius = 0` regime that programs_common uses. And each notebook must VISUALISE the spatial
-   structure — a `cell_crd` (row/col) scatter coloured by cell type / clone / program / is_wgd, and/or
-   `tumor.plot_grid(ax=...)` — because showing iscc's spatial modelling is part of "showing the aspects
-   clearly". Reuse `tumor.plot_muller(ax=...)` where a clonal-dynamics view helps.
-2. SELF-CONTAINED in the core env. Do the analyses with numpy/scipy/sklearn INLINE (a mini-clonealign by
-   CN-profile matching; sklearn NMF for program recovery). Do NOT shell out to the heavy dedicated tool envs
-   (iscc-clonealign / iscc-numbat / iscc-scdef) from a notebook — instead end each notebook with a short
-   pointer to the full external-tool benchmark under validation/. Rationale: notebooks must always execute.
-3. EXECUTED with outputs, in notebooks/ only.
+============================================================================================================
+THE SHARED SUBSTRATE — do this FIRST
+============================================================================================================
+Create notebooks/base_sim.py (a small importable helper, NOT a notebook) that every science notebook imports,
+so they all use the SAME simulation deterministically:
 
-THE MICROENVIRONMENT IS PART OF THE DATA — DO NOT FILTER TO CANCER CELLS. Real tumour datasets are MIXTURES:
-malignant cells PLUS microenvironment (epithelial / stromal / immune). Practitioners analyse that mixture, and
-so must these notebooks. Assay and analyse the MIXED population exactly as a real study would; the normal cells
-ARE the reference inferCNV/Numbat need, the background deconvolution must resolve, and the diploid / balanced-
-BAF anchor. iscc's ground truth (cell type, clone, CN, is_wgd, program z) is used ONLY to SCORE and COLOUR
-results — never to pre-filter the input. Where a metric is intrinsically about the malignant cells (clone-
-recovery accuracy, per-clone CN, program activity), compute it on the malignant subset IDENTIFIED within the
-mixed input via ground truth — but the analysis INPUT stays the mixture, and a natural first step in each
-notebook is separating malignant from normal (as a real pipeline does).
-
-TUMOUR PURITY (the real numeric gotcha, verified): with structure_radius>0 the normal compartment dominates
-(grid_size=20, structure_radius=5 → ~2500 stromal vs ~110 cancer ≈ 4% purity, unrealistically low). So build a
-REALISTIC mixture for the assays: keep all/most malignant cells and SUBSAMPLE the microenvironment to a
-plausible tumour purity (aim ~30–60% malignant — e.g. all malignant + n_normal≈150 sampled normal cells, the
-way validation/integration_common.build_cna_inputs does it), and/or raise initial_cancer_cells/steps. NEVER
-drop structure_radius to 0 to dodge this — spatial structure AND a present microenvironment are both hard
-requirements. See integration_common.build_infercnv_inputs / build_cna_inputs for the exact malignant+normal
-assembly to copy.
-
-SHARED SPATIAL CONFIG (proven; the integration benchmark uses it)
+    # notebooks/base_sim.py
+    import sys, os, numpy as np
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "validation"))
+    import programs_common as PC                     # reuse the vetted expression_params()
     from iscc.tumor.models import GenotypeTumor
+
+    BASE_SEED    = 3
+    COHORT_SEEDS = [3, 4, 5, 6, 7]                    # 5 tumours
     GENOME    = {"n_segments": 12, "segment_size": 50}
     SELECTION = {"prop_driver": 0.2, "prop_dispersal": 0.0, "prop_immune_resistance": 0.0,
                  "prop_treatment_resistance": 0.0}
-    DEME      = {"carrying_capacity": 8, "initial_cancer_cells": 4}
-    SPATIAL   = {"grid_size": 20, "structure_radius": 5}      # << spatial structure + normal compartment
     CANCER    = {"division_rate": 0.6, "death_rate": 0.03, "max_birth_rate": 0.98,
-                 "mutation_rate": 1.1, "dispersal_rate": 0.5}
-    t = GenotypeTumor(seed=SEED, genome_params=GENOME, selection_params=SELECTION,
-                      cancer_cell_params=CANCER, deme_params=DEME, spatial_params=SPATIAL,
-                      expression_params=EXPR)      # EXPR per-notebook (see below); omit for NB1's DNA/CN view
-    t.grow(n_steps=750, seed=SEED); t.make_cell_data()
+                 "mutation_rate": 1.1, "dispersal_rate": 0.5, "wgd_rate": 0.05}   # WGD on (realistic)
+    DEME      = {"carrying_capacity": 8, "initial_cancer_cells": 4}
+    SPATIAL   = {"grid_size": 60, "structure_radius": 8}   # SPATIAL structure + microenvironment
+    def EXPR():                                       # programs ON + allele-specific ON
+        e = PC.expression_params(scatter=1.0)
+        e["dosage_params"]["allele_specific"] = True
+        return e
+
+    def grow_base_tumor(seed=BASE_SEED, target_cancer=10000):
+        # DO NOT pass layout_seed -> defaults to DEFAULT_LAYOUT_SEED so every seed shares the SAME gene
+        # roles / program dictionary / epistasis landscape (the cohort-comparability guarantee).
+        t = GenotypeTumor(seed=seed, genome_params=GENOME, selection_params=SELECTION,
+                          cancer_cell_params=CANCER, deme_params=DEME, spatial_params=SPATIAL,
+                          expression_params=EXPR(), update_mode="tau", tau=1.0)
+        while True:
+            t.grow(n_steps=10, seed=seed)
+            ncan = sum(c for g, c in t.genotypes_counts.items() if c > 0 and t._is_cancer(g))
+            if ncan >= target_cancer:
+                break
+        t.make_cell_data()
+        return t
+
+    def grow_cohort(seeds=COHORT_SEEDS, target_cancer=10000):
+        # generator — grow one at a time so you never hold 5 full tumours in RAM (see MEMORY below)
+        for s in seeds:
+            yield s, grow_base_tumor(seed=s, target_cancer=target_cancer)
+
+MEMORY: a materialised base tumour is ~1–2 GB (≈38k cells × the per-cell matrices, extra with programs +
+allele layers). Fine for one tumour. For the cohort NEVER hold 5 at once — in grow_cohort, grow → run the
+assay to a COMPACT matrix (a few hundred cells × genes) → keep only that → let the tumour be GC'd → next seed.
+If RAM is tight, shrink GENOME (e.g. n_segments=10) or structure_radius (fewer normal cells), keeping ≥10k
+cancer + a present microenvironment.
+
+THREE HARD REQUIREMENTS (all notebooks)
+1. SPATIALLY STRUCTURED sims (structure_radius>0), and each notebook VISUALISES the spatial structure —
+   cell_crd (row/col) scatter and/or tumor.plot_grid(ax=...), plus tumor.plot_muller(ax=...) where clonal
+   dynamics help.
+2. THE MICROENVIRONMENT IS PART OF THE DATA — never filter to cancer cells. Assay/analyse the MIXTURE
+   (malignant + epithelial/stromal); the normal cells are the CNA-caller reference, the deconvolution
+   background, and the diploid/balanced-BAF anchor. Ground truth (cell type, clone, CN, is_wgd, program z,
+   spot composition, true tree) scores/colours only. Where a metric is intrinsically about malignant cells,
+   compute it on the malignant subset IDENTIFIED within the mixed input. A realistic first step in most
+   notebooks is separating malignant from normal, as a real pipeline does. For assays, subsample the
+   microenvironment to a realistic purity (~30–60% malignant) rather than assaying all ~28k normal cells.
+3. SELF-CONTAINED in the core env for the SINGLE-TUMOUR notebooks: do analyses inline (mini-clonealign by CN-
+   profile matching; NJ/UPGMA trees; NNLS spot deconvolution; sklearn NMF), and POINT to the full external-
+   tool benchmark under validation/ rather than shelling out. EXCEPTION: the two COHORT notebooks are named
+   around specific tools (scDEF, MHN, TreeMHN) — for those, REUSE the validation runners in their dedicated
+   envs (guarded to skip / fall back to a self-contained approximation if the env is absent), so they show the
+   real tool when available and still execute otherwise.
 
 API CHEAT-SHEET (all verified this session)
-- cell_data = t.cell_data (dict of DataFrames). Base keys: cell_snv, cell_cnv (TOTAL CN per gene),
-  cell_exp, cell_type (column "cell_id" = the per-cell genotype id), cell_crd (columns row, col — for
-  spatial plots). Conditionals: cell_program (programs on), cell_wgd["is_wgd"] (wgd_rate>0),
-  cell_exp_p / cell_exp_m / cell_rna_baf (dosage_params allele_specific=True).
-- Cell type per cell: ty = np.array([t.genotypes[g].type for g in cd["cell_type"]["cell_id"].values])
-  -> "cancer" / "epithelial" / "stromal". cancer_mask = ty == "cancer".
-- Assays: from iscc.data import scRNA, scDNA, bulkDNA
-    rna = scRNA(n_cells=len(cells), protocol="10x", seed=S).run(cd, cell_subset=cells); rna.observed_counts
-    dna = scDNA(n_cells=len(cells), breadth="wgs", seed=S).run(cd, cell_subset=cells); dna.coverage/.genes/.cells
-  (see notebooks/assay_scrna.ipynb and assay_dna.ipynb for the exact call shape.)
-- Per-segment total CN per cell: cnv = cd["cell_cnv"].values; segment CN = take the first gene of each
-  segment via segment offsets np.concatenate([[0], np.cumsum(t.selection.segment_sizes)]).
-- Per-HOMOLOG CN ground truth (cell_cnv is total only — needed for the allele/WGD notebook). Either
-  `from` the validation helper: sys.path.insert(0,"validation"); from integration_common import
-  segment_allele_cn  (returns cell_id -> (n_seg,2) array of (p_cn, m_cn)); OR inline the 6 lines:
-      def segment_allele_cn(t):
-          gid = t.cell_data["cell_type"]["cell_id"].astype(str).values
-          idx = np.asarray(t.cell_data["cell_type"].index); g = t.genotypes; cache={}; out={}
-          for cell, gg in zip(idx, gid):
-              if gg not in cache:
-                  rep = g.get(gg)
-                  cache[gg] = (np.array([(len(s["p"]), len(s["m"])) for s in rep.genome])
-                               if rep is not None and hasattr(rep, "genome") else None)
-              out[cell] = cache[gg]
-          return out
-- Programs (R13): EXPR from validation/programs_common.py `expression_params()` (import it, or inline its
-  dict). program_truth = t.program_truth after make_cell_data(): keys loading (K x genes), program_names,
-  program_genes (list of gene-index arrays), gene_program_map. cd["cell_program"] is cells x K with columns =
-  program names (proliferation, emt, hypoxia, drug_resistance, immune_evasion, program_5).
-- WGD: add "wgd_rate": 0.05 to CANCER and set EXPR dosage_params allele_specific=True. is_wgd per cell =
-  cd["cell_wgd"]["is_wgd"]. Per-genotype ploidy = t.genotypes[g].genome_summary["ploidy"].
+- cell_data = t.cell_data. Base keys: cell_snv, cell_cnv (TOTAL CN/gene), cell_exp, cell_type (col "cell_id" =
+  genotype id), cell_crd (row, col). With the base config also: cell_program, cell_wgd["is_wgd"],
+  cell_exp_p/cell_exp_m/cell_rna_baf (allele layer). Cell type: ty = np.array([t.genotypes[g].type for g in
+  cd["cell_type"]["cell_id"].values]) -> "cancer"/"epithelial"/"stromal"; cancer_mask = ty=="cancer".
+- Assays: from iscc.data import scRNA, scDNA, bulkDNA, Visium  (registry: iscc.data.ASSAYS =
+  {bdna, scdna, scrna, visium, scspatial}).
+    scRNA(n_cells=, protocol="10x", seed=).run(cd, cell_subset=cells).observed_counts        # cells x genes
+    scDNA(n_cells=, breadth="wgs", seed=).run(cd, cell_subset=cells) -> .coverage/.genes/.cells
+    bulkDNA(n_reads=, data_mode="counts", fpr=, fnr=).run(cd) -> .observed_data{coverage,alt_counts}  # bulk VAF
+    Visium(n_reads=, n_spots_x=, n_spots_y=, spot_radius=).run(cd) -> AnnData: X spots x genes,
+        obsm["spatial"], .obs = per-spot ground truth (n_cells, member ids, dominant clone, clone fractions)
+  (See notebooks/assay_*.ipynb and validation/validate_{visium,deconvolution,multiregion_phylo}.py for exact
+  call shapes.)
+- Per-segment total CN: segment offsets = np.concatenate([[0], np.cumsum(t.selection.segment_sizes)]).
+- Per-HOMOLOG CN ground truth (cell_cnv is total only): from validation/integration_common.py import
+  segment_allele_cn (cell_id -> (n_seg,2) (p_cn,m_cn)); imbalanced = |p-m|>=1; allele-only = imbalanced & even
+  total.
+- Programs: PC.expression_params(); program_truth = t.program_truth (keys loading K×genes, program_names,
+  program_genes, gene_program_map). cd["cell_program"] cells×K, columns=program names. Recurrence/shared: two
+  tumours grown WITHOUT overriding layout_seed share the SAME loading + gene roles (comparability).
+  positional_clustering / scattered_null diagnostics live in validation/programs_common.py.
+- True clonal tree: t.genotypes_parents (child_gid -> parent_gid); Newick via iscc.integrations.to_newick.
+  Per-lineage event order for epistasis: t.epistasis_ground_truth() (see count.py). validate_multiregion_phylo.py
+  is the phylo reference.
+- WGD ground truth: cd["cell_wgd"]["is_wgd"]; per-genotype ploidy t.genotypes[g].genome_summary["ploidy"].
 
-===================================================================================================
-NOTEBOOK 1 — notebooks/combining_scdna_scrna.ipynb  (REWRITE the stub; the flagship integration story)
-===================================================================================================
-The stub currently names SCICoNE / SCATrEx — DELETE that, those are not the tools iscc built on. New story:
-one spatially-structured tumour → scDNA + scRNA from the SAME cells → the DNA<->RNA link is EMERGENT (per-
-allele dosage), not imposed → reconstruct subclones from RNA using the DNA-defined CN profiles (clonealign's
-idea) and score against iscc's true clone labels. Grow with the shared spatial config (no EXPR needed unless
-you want; dosage is on by default). Cells:
-  1. MD: title + intro (non-circularity: CN->expression dosage EMERGES; iscc alone supplies true clone label
-     + true CN). State that the dataset is a MIXTURE — malignant + microenvironment — as in a real study.
-     One line: "the production tools clonealign / inferCNV / Numbat do this properly — see
-     validation/validate_clonealign.py, validate_infercnv.py, validate_numbat.py."
-  2. CO: imports + grow the spatial tumour; print total / malignant / normal counts and the malignant
-     fraction. Assemble the assayed dataset = all malignant cells + a subsample of microenvironment cells at a
-     realistic purity (all cancer + n_normal≈150 normal); this MIXTURE is the input to everything below.
-  3. CO: SPATIAL viz — cell_crd scatter coloured by cell type (cancer vs epithelial vs stromal), and/or
-     t.plot_grid. Show the gland + where the microenvironment sits.
-  4. CO: scRNA on the MIXTURE (malignant + normal). Embed/cluster the cells and show malignant vs normal
-     SEPARATE (colour by the true cell-type label to score it) — the real first step, and why the normal
-     cells are the reference, not noise to be discarded.
-  5. CO: define clones on the malignant cells from per-segment CN (sklearn AgglomerativeClustering, k≈3–4);
-     heatmap of the clone x segment consensus CN. (Malignant identified within the mixture via ground truth.)
-  6. CO: scDNA on the mixture -> per-clone recovered CN for the malignant clones; concordance with truth.
-  7. MD: the emergent CN->expression link.
-  8. CO: per-segment mean expression vs true CN across clones (scatter or line) — the dosage relationship,
-     emergent not imposed; normal cells sit at CN≈2 / baseline as the anchor.
-  9. CO: reconstruct clones from RNA — assign each MALIGNANT RNA cell to the clone whose CN profile best
-     matches its per-segment mean expression (correlation / nearest-profile); report accuracy vs the true
-     clone label. (Input is the mixture; the metric is naturally on the malignant subset.)
- 10. MD: "see validation/ for the real clonealign/Numbat benchmark" + Next pointer.
+============================================================================================================
+NOTEBOOK 0 — notebooks/base_simulation.ipynb  (SHOW the shared simulation)
+============================================================================================================
+Grow the base tumour via base_sim.grow_base_tumor() and SHOW it (this is the "separate notebook" the user
+asked for). Cells:
+  1. MD: intro — "every science notebook in this folder is built on THIS one spatially-structured tumour"; list
+     the features on (spatial gland + microenvironment, CINner selection, WGD, allele-specific expression, gene
+     programs), and that it grows to ≥10k cancer cells.
+  2. CO: from base_sim import grow_base_tumor; t = grow_base_tumor(); print malignant / normal counts, purity,
+     WGD fraction, #genotypes; assert cancer ≥ 10000.
+  3. CO: SPATIAL structure — tumor.plot_grid + a cell_crd scatter coloured by cell type (cancer vs epithelial
+     vs stromal); show the gland with its microenvironment.
+  4. CO: clonal dynamics — tumor.plot_muller; note the clone/genotype richness.
+  5. CO: the ground-truth matrices (cell_snv / cell_cnv / cell_exp heatmaps, as in 01_pipeline_walkthrough),
+     one line each on what later notebooks read.
+  6. MD: a table/list mapping each downstream notebook to the aspect it uses. Next pointers.
 
-===================================================================================================
-NOTEBOOK 2 — notebooks/wgd_allele_cna.ipynb  (NEW; WGD + allele-specific CNA — showcases the Numbat result)
-===================================================================================================
-EXPR = expression_params with dosage_params allele_specific=True (so cell_rna_baf exists); CANCER += wgd_rate.
-Cells:
-  1. MD: intro — WGD as a punctuated genome doubling (the diploid 1+1 -> 2+2); iscc surfaces is_wgd; the
-     allele layer (BAF) exposes imbalance total copy number cannot. (Get the notation RIGHT: a normal genome
-     is 1+1; WGD -> 2+2; the copy-neutral-detectable states are e.g. 4+0 / 3+1 at a total matching 2+2.)
-  2. CO: grow the spatial tumour with wgd_rate≈0.05 + allele_specific; print malignant/normal counts + purity
-     + WGD-cell fraction. The dataset stays a mixture (malignant + microenvironment); the normal cells are the
-     diploid / balanced-BAF anchor a real CNA caller relies on.
-  3. CO: SPATIAL viz — cell_crd scatter coloured by is_wgd for malignant cells, with the microenvironment
-     shown (e.g. grey) — WGD subclones sitting in the gland alongside normal cells.
-  4. CO: ploidy signature — histogram of per-cell mean ploidy (cd["cell_cnv"].mean(1)) for the WHOLE mixture:
-     normal cells at ~2 (the diploid anchor), malignant split by is_wgd into a near-diploid non-WGD mode and an
-     elevated WGD mode (the doubling-then-loss signature). Showing the normal anchor is the point.
-  5. MD: a PURE doubling is allelically balanced (BAF 0.5) and cancels under per-cell normalisation, so it is
-     unidentifiable from total CN + BAF; only the doubling+LOSS erosion creates allelic imbalance.
-  6. CO: grow a WGD-OFF twin (same seed, wgd_rate=0), compute with segment_allele_cn the fraction of MALIGNANT
-     segments that are "allele-only detectable" = imbalanced (|p-m|>=1) at EVEN total CN (total-CN-blind); show
-     it rises WGD-off -> WGD-on (≈1% -> several %). Ground-truth version of the Numbat figure's panel A. NB:
-     off/on are different RNG trajectories (the WGD draw shifts the stream) — frame as a cohort contrast,
-     average over a few seeds if noisy. (This metric is intrinsic to the malignant cells; the normal cells,
-     being balanced diploid, are the ~0 baseline.)
-  7. CO: the emergent allele signal — |cell_rna_baf - 0.5| at CN-altered vs balanced segments, MALIGNANT vs
-     NORMAL: imbalance localises to the CNAs in malignant cells while normal cells stay ~0.5 (the anchor that
-     makes the signal callable at all).
-  8. MD: "the full head-to-head — Numbat recovers this allelic state where expression-only inferCNV is at
-     chance — is validation/validate_numbat.py --wgd-rate 0.04" + Next pointer.
+============================================================================================================
+SINGLE-TUMOUR SCIENCE NOTEBOOKS (each: `from base_sim import grow_base_tumor`; mixed microenvironment; self-contained)
+============================================================================================================
+NB1 notebooks/combining_scdna_scrna.ipynb  (REWRITE the stub — flagship integration; delete the SCICoNE/SCATrEx text)
+  Story: scDNA + scRNA from the SAME mixed tumour → the DNA↔RNA link EMERGES (per-allele dosage) → separate
+  malignant/normal → reconstruct subclones from RNA using DNA-defined CN profiles (clonealign's idea), scored
+  vs truth. Cells: intro (non-circularity; mixture); grow + assemble a realistic-purity mixture; spatial viz by
+  cell type; scRNA on the mixture + embed/cluster showing malignant vs normal separate (colour by true type);
+  define clones on malignant CN + consensus heatmap; scDNA concordance; per-segment expression-vs-CN dosage
+  (normal cells anchor CN≈2); reconstruct malignant clones from RNA + accuracy vs truth; pointer to
+  validation/validate_clonealign.py / validate_infercnv.py / validate_numbat.py.
 
-===================================================================================================
-NOTEBOOK 3 — notebooks/gene_programs.ipynb  (NEW; R13 expression realism)
-===================================================================================================
-EXPR = validation/programs_common.py expression_params() (import it). Grow the SPATIAL config with EXPR; analyse
-the MIXTURE (malignant + microenvironment) — the programs live in the malignant cells, but a real scRNA study
-sees all cell types, and a factor model must separate cell-type identity (immune/stromal) from within-malignant
-programs. Use ground truth only to colour/score. Cells:
-  1. MD: intro — expression = gene PROGRAMS (co-expressed modules) x per-cell activity, plus genotype dosage;
-     iscc knows the true loading + per-cell z (program_truth), ground truth no real dataset has. Note the input
-     is a mixed tumour: normal cells carry baseline expression (no programs), malignant cells carry the programs.
-  2. CO: grow; assay scRNA on the MIXTURE (malignant + subsampled microenvironment at realistic purity); show
-     cd["cell_program"] for the malignant cells (per-cell activity z, columns = program names).
-  3. CO: SPATIAL viz — cell_crd scatter coloured by dominant program (argmax z) for malignant cells, with the
-     microenvironment shown; programs varying across the gland.
-  4. CO: the true loading matrix (program_truth["loading"], K x genes) heatmap; and show program_genes are
-     SCATTERED across the genome (not one contiguous block).
-  5. CO: embed the MIXTURE (e.g. PCA/UMAP or a program-activity heatmap) coloured by cell type AND by dominant
-     program — normal cells form their own cell-type structure; programs are the within-malignant axis. Showing
-     the tool must disentangle the two is itself a realism point.
-  6. MD: programs are functional (scattered genome-wide) whereas CNAs are positional (contiguous) — a factor
-     model can mistake a copy-number segment for a "program"; that is the confound.
-  7. CO: the positional-clustering diagnostic (import from programs_common: positional_clustering,
-     scattered_null) — true programs sit near the scattered null; a CNA segment approaches 1.0.
-  8. CO: recovery in the core env — sklearn.decomposition.NMF on Poisson-sampled counts of the MIXTURE (see
-     programs_common.counts_anndata for making counts from cd["cell_exp"]), Hungarian-match factors to the true
-     loading, report mean loading cosine for the malignant programs; note normal cells load onto a distinct
-     cell-type factor, exactly as they would on real data.
-  9. MD: "the full scDEF/cNMF recovery-vs-burden benchmark is validation/validate_programs.py" + Next pointer.
+NB2 notebooks/wgd_allele_cna.ipynb  (WGD + allele-specific CNA — the ground-truth view of the Numbat result)
+  Notation: a normal genome is 1+1; WGD → 2+2; the copy-neutral-detectable states are e.g. 4+0 / 3+1 at a total
+  matching the balanced 2+2. Cells: intro; grow (WGD already on in base) + print WGD fraction/purity; spatial
+  viz coloured by is_wgd with microenvironment shown; per-cell ploidy histogram over the WHOLE mixture (normal
+  ~2 anchor; malignant split by is_wgd); MD (a pure doubling is balanced → unidentifiable from total CN+BAF;
+  only doubling+LOSS creates imbalance); allele-only fraction WGD-off (grow_base_tumor with a wgd_rate=0 variant
+  — pass a modified config) vs WGD-on via segment_allele_cn (≈1% → several %); the emergent |cell_rna_baf-0.5|
+  at CN-altered vs balanced, MALIGNANT vs NORMAL (normal ~0.5 anchor); pointer to
+  validation/validate_numbat.py --wgd-rate.
+
+NB3 notebooks/gene_programs.ipynb  (R13 expression realism; analyse the mixture)
+  Cells: intro (programs live in malignant cells; a real scRNA study sees all cell types, so a factor model
+  must separate cell-type identity from within-malignant programs); grow + scRNA on the mixture; show
+  cd["cell_program"] for malignant; spatial viz coloured by dominant program; true loading heatmap +
+  program_genes SCATTERED across the genome; embed the MIXTURE coloured by cell type AND by dominant program;
+  MD (programs scattered vs CNAs contiguous — the confound); positional_clustering / scattered_null diagnostic;
+  recovery via sklearn NMF on the MIXTURE counts (Hungarian-match to true loading, report cosine for malignant
+  programs; note normal cells load a distinct cell-type factor); pointer to validation/validate_programs.py.
+
+NB4 notebooks/tree_inference_dna.ipynb  (NEW — clonal tree inference from bulk DNA-seq AND scDNA-seq)
+  iscc supplies the TRUE clonal tree (t.genotypes_parents; iscc.integrations.to_newick) — ground truth no real
+  dataset has. Cells:
+   1. MD: intro — reconstructing the clonal phylogeny from DNA, two ways; iscc gives the true tree to score
+      against. (One line: the multi-region caveat — a bulk "sample tree" ≠ the clone tree — is quantified in
+      validation/validate_multiregion_phylo.py.)
+   2. CO: grow the base tumour; render the TRUE clone tree (from genotypes_parents; a simple layout or to_newick
+      + a light tree plot). Spatial viz of where the clones sit (cell_crd coloured by clone).
+   3. CO: BULK DNA-seq route — bulkDNA over the mixed tumour (or over a few spatial regions via Biopsy multi-
+      region); cluster mutations by VAF into subclones and build a subclonal tree (pigeonhole/ordering, or a
+      simple hierarchical tree of VAF-clusters). Compare topology to the true clone tree.
+   4. CO: scDNA-seq route — scDNA on a few hundred cells of the MIXTURE; build a distance tree
+      (NJ/UPGMA on per-cell SNV±CNV profiles); normal cells root/outgroup near diploid. Compare to the true
+      tree (e.g. Robinson–Foulds or a clade-recovery score) — single-cell resolves subclones bulk VAF cannot.
+   5. MD: bulk-vs-single-cell trade-off; pointer to validate_multiregion_phylo.py (+ RevBayes head-to-head if
+      relevant). Keep the tree methods lightweight (scipy/sklearn/Bio.Phylo) — do NOT require a heavy phylo env.
+
+NB5 notebooks/scrna_visium_integration.ipynb  (NEW — integrate scRNA-seq reference with Visium spatial data)
+  Real spatial workflow: a scRNA reference deconvolves Visium spots (each spot = a mixture of cells). iscc knows
+  the TRUE per-spot composition (Visium .obs). Cells:
+   1. MD: intro — Visium spots mix several cells; use a scRNA reference to deconvolve; iscc gives true spot
+      composition. The mixture (malignant + microenvironment) is the whole point of deconvolution.
+   2. CO: grow the base tumour; Visium(...) over the section → spots × genes AnnData + per-spot truth; scRNA(...)
+      on a cell subset as the reference (with cell-type / clone labels).
+   3. CO: spatial viz — the Visium spots over the section (obsm["spatial"]) coloured by dominant clone/type
+      (from .obs); alongside the single-cell cell_crd map. Show spots straddle the tumour/microenvironment
+      boundary (the spatial-mixing artifact).
+   4. CO: deconvolve — build per-cell-type (and/or per-clone) mean expression signatures from the scRNA
+      reference; solve each spot with NNLS (scipy.optimize.nnls) for the cell-type/clone fractions.
+   5. CO: score — inferred vs true spot fractions (correlation / per-type scatter); show recovery + where it
+      blurs at boundaries. Pointer to validation/validate_deconvolution.py + validate_visium.py (cell2location /
+      RCTD do this properly).
+
+============================================================================================================
+COHORT NOTEBOOKS (5 simulations; same layout_seed → SHARED programs / gene roles / epistasis = ground truth)
+============================================================================================================
+Both grow the cohort via base_sim.grow_cohort() (5 seeds, shared landscape). Grow ONE AT A TIME, assay to a
+compact matrix, release (MEMORY note above). Because layout_seed is shared, the true gene programs, the gene
+roles (oncogenes/TSGs/drivers), and the epistasis landscape are IDENTICAL across the 5 tumours — that is the
+cross-patient ground truth these notebooks recover.
+
+NB6 notebooks/cohort_shared_programs.ipynb  (batch integration of scRNA + scDEF → shared programs)
+  1. MD: intro — 5 "patients" share the same underlying programs (comparability); can we recover the SHARED
+     programs across batches despite per-tumour batch effects? (This is the cohort-scale integration thesis.)
+  2. CO: grow_cohort(); for each tumour, scRNA on a mixed subsample; tag each cell with a batch id; concatenate
+     into one AnnData; show the raw batch effect (cluster by batch, not biology).
+  3. CO: batch-correct — reuse validation/harmony_runner.py (iscc-harmony env) or scDEF's own batch path via
+     validation/scdef_runner.py (iscc-scdef env), guarded; if absent, fall back to a simple in-core correction
+     (e.g. per-batch centring / scanpy Harmony if importable) and SAY which path ran.
+  4. CO: run scDEF (validation/programs_common.run_tool("scdef", ..., batch_key=...)) OR the fallback (NMF on
+     the integrated matrix); recover programs shared across the cohort.
+  5. CO: score vs the SHARED true loading (program_truth is identical across tumours): recovered-vs-true cosine;
+     show the shared programs are recovered across patients. Pointer to validation/validate_programs_cohort.py.
+
+NB7 notebooks/cohort_mhn_recurrence.ipynb  (MHN + TreeMHN on DNA → recurrent mutational patterns)
+  1. MD: intro — across 5 patients sharing gene roles (+ optionally an epistasis landscape), which mutations
+     RECUR and in what ORDER? MHN learns recurrent co-occurrence/exclusivity; TreeMHN adds ordering.
+  2. CO: grow_cohort(); for each tumour, call scDNA/bulkDNA (or read the ground-truth driver events directly)
+     to build a patients × genes binary alteration matrix over the recurrent driver genes; show the recurrence
+     spectrum (which genes recur across patients).
+  3. CO: MHN — run validation/mhn_runner.py (iscc-mhn env), guarded; else a self-contained co-occurrence /
+     pairwise odds-ratio approximation. Show the inferred interaction network.
+  4. CO: TreeMHN — use the per-lineage event ORDER ground truth (t.epistasis_ground_truth()) as the mutation
+     trees input; run TreeMHN (its env) guarded, else summarise the recurrent ORDERINGS directly. 
+  5. CO: score vs ground truth — recovered recurrent drivers / interactions / orderings vs the shared gene
+     roles + epistasis landscape. Pointer to validation/validate_epistasis.py. (If enabling an explicit
+     epistasis network gives a cleaner ground truth, add its params to SELECTION per validate_epistasis.py and
+     note it.)
 
 ACCEPTANCE / DELIVERABLES
-- Three notebooks in notebooks/ (combining_scdna_scrna rewritten; wgd_allele_cna + gene_programs new), each
-  executed with outputs, running clean in the core env, EACH growing a structure_radius>0 tumour and showing
-  its spatial structure. Keep each notebook's total runtime to a couple of minutes (grows are ~0.2–2s; the
-  cost is the assays/NMF — keep cell counts modest).
-- Do NOT touch mkdocs.yml or docs/tutorials/ (notebooks/ only, per the user).
-- Commit on `dev` with the Co-Authored-By trailer. A one-line note in BACKLOG.md under the notebook/pedagogy
-  track is welcome but optional.
+- notebooks/base_sim.py + these notebooks: base_simulation, combining_scdna_scrna (rewrite), wgd_allele_cna,
+  gene_programs, tree_inference_dna, scrna_visium_integration, cohort_shared_programs, cohort_mhn_recurrence —
+  each EXECUTED with outputs, running clean in the core env, each growing a structure_radius>0 tumour to ≥10k
+  cancer cells (single-tumour) / ≥10k per cohort member, and showing its spatial structure + microenvironment.
+- Keep per-notebook runtime sane: the base grow is ~40–60 s; assays/NMF/trees on subsampled cells are the rest.
+  Cohort notebooks grow 5 tumours sequentially (~4–6 min) — assay-then-release to bound RAM.
+- Do NOT touch mkdocs.yml or docs/tutorials/ (notebooks/ only). Commit on `dev` with the Co-Authored-By trailer.
+  A one-line BACKLOG.md note under the notebook/pedagogy track is welcome.
 
-HONEST NOTES: if a self-contained reconstruction (NB1 clone recovery, NB3 NMF) lands weak, report the number
-honestly rather than tuning it — the point is to SHOW the ground truth and the emergent signal, not to claim a
-tool result (the validation/ scripts own the tool claims). If the malignant-cell count is too low for a clean
-demo, raise initial_cancer_cells / steps / grid_size (or subsample less microenvironment) rather than dropping
-structure_radius to 0 or filtering out the normal cells — spatial structure AND an analysed microenvironment
-are both hard requirements.
+HONEST NOTES: if a self-contained reconstruction (clone recovery, NNLS deconvolution, NMF, a distance tree)
+lands weak, report the number honestly — the notebooks SHOW the ground truth and the emergent signal; the
+validation/ scripts own the tool claims. If reaching ≥10k cancer cells strains RAM, shrink GENOME or
+structure_radius (keeping the microenvironment present) rather than lowering the target or dropping spatial
+structure — ≥10k cancer cells, spatial structure, and an analysed microenvironment are all hard requirements.
+For the cohort, if an external tool env (iscc-scdef / iscc-harmony / iscc-mhn / iscc-treemhn) is missing, the
+notebook must still execute via the self-contained fallback and clearly state which path ran.
 ```

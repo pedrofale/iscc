@@ -424,6 +424,14 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   spatial tumor grown → non-adaptive chemo when large → partial kill → evolved resistance; every
   modality used to detect/characterize the resistant subclone, with ground truth revealed to grade
   each method. Spatial-niche/CCI lessons depend on F8.
+- **DONE (2026-07-18) — three executed SCIENCE showcase notebooks** (in `notebooks/`, not yet in
+  mkdocs): `combining_scdna_scrna.ipynb` (emergent CN→expression dosage; reconstruct clones from RNA
+  via DNA CN profiles), `wgd_allele_cna.ipynb` (WGD + the allele layer: allele-only-detectable states
+  rise with WGD; BAF imbalance localises to malignant CNAs), `gene_programs.ipynb` (R13 programs vs the
+  positional CNA confound; self-contained sklearn-NMF recovery). Each grows a `structure_radius>0`
+  spatial gland, analyses the MIXED tumour (malignant + subsampled microenvironment, ~50% purity),
+  visualises the spatial structure, is self-contained in the core env, and points to the full
+  external-tool benchmark under `validation/`.
 
 ## Paper 2 — the experimental-design RECOMMENDER (separate paper)
 - **LATER** — full scoping in `DESIGN_recommender.md`. Two modes (generative + recommender); fit
