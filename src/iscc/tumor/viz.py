@@ -42,6 +42,88 @@ def _get_colormap(pop_df, anc_df, color_by, colormap):
     return cmap(norm(ordered_colors.values)), final_order
 
 
+def _merge_small_clones(genotype_counts, full_parents, min_freq):
+    """Collapse clones that never reach ``min_freq`` of the GROWN cancer population into their nearest
+    surviving ancestor — the legibility rule Noble et al. (demon) use for Muller plots: a subclone
+    below a sensitivity threshold is shown as part of its parent. Without it an infinite-sites tumour
+    spawns tens of thousands of genotype "clones" (one per mutation event) and the layout is both
+    unreadably fine and very slow.
+
+    ``genotype_counts`` is timepoints x genotype cell counts (cancer only). ``full_parents`` is the
+    COMPLETE ``genotypes_parents`` map (child->parent over ALL genotypes ever, including the transient
+    intermediates that tau-leaping never snapshots) — needed because the snapshotted clones are a
+    fragmented forest; we reconnect each present clone to its nearest PRESENT ancestor through the full
+    chain to recover the true induced genealogy, then threshold. Roots (no present ancestor) are the
+    true founders (~1). Returns merged (counts, one-row parents)."""
+    from collections import defaultdict
+    cols = [c for c in genotype_counts.columns if c != "Generation"]
+    if len(cols) <= 1:
+        return genotype_counts, pd.DataFrame(index=[0])
+    present = set(cols)
+    fp = {str(k): str(v) for k, v in dict(full_parents).items()}
+
+    # effective parent = nearest present ancestor via the full chain (memoised, ~linear over the map)
+    eff = {}
+    for c in cols:
+        path, x = [], fp.get(c)
+        while x is not None and x not in present and x not in eff:
+            path.append(x); x = fp.get(x)
+        res = eff.get(x, x) if (x is not None and x not in present) else (x if x in present else None)
+        for p in path:
+            eff[p] = res
+        eff[c] = res
+    epar = {c: eff.get(c) for c in cols}
+    children = defaultdict(list)
+    for c in cols:
+        if epar[c] in present:
+            children[epar[c]].append(c)
+    roots = [c for c in cols if epar[c] not in present]
+
+    order, seen = [], set()
+    for r in roots:
+        stack = [(r, False)]
+        while stack:
+            x, done = stack.pop()
+            if done:
+                order.append(x); continue
+            if x in seen:
+                continue
+            seen.add(x); stack.append((x, True))
+            for ch in children.get(x, []):
+                stack.append((ch, False))
+    order += [c for c in cols if c not in seen]
+
+    subtree = {c: genotype_counts[c].to_numpy(float).copy() for c in cols}
+    for c in order:
+        for ch in children.get(c, []):
+            subtree[c] += subtree[ch]
+    # threshold on the fraction of the GROWN population (~= final): early on the whole tumour is a
+    # handful of cells, so a per-timestep frequency would wave through every transient founder.
+    total = genotype_counts[cols].to_numpy(float).sum(axis=1)
+    ok = total > 0
+    ref = float(total[ok].max()) if ok.any() else 1.0
+    def frac(arr):
+        return float(np.max(arr[ok])) / ref if ok.any() else 0.0
+    shown = {c for c in cols if epar[c] not in present or frac(subtree[c]) >= min_freq}
+
+    def nearest(c):
+        x = c
+        while x not in shown and x is not None:
+            x = epar.get(x)
+        return x
+
+    merged = {s: genotype_counts[s].to_numpy(float).copy() for s in shown}
+    for c in cols:
+        if c not in shown:
+            a = nearest(c)
+            if a in merged:
+                merged[a] += genotype_counts[c].to_numpy(float)
+    new_counts = pd.DataFrame(merged, index=genotype_counts.index)
+    kept_edges = {c: epar[c] for c in shown if epar.get(c) in shown}
+    new_parents = pd.DataFrame(kept_edges, index=[0]) if kept_edges else pd.DataFrame(index=[0])
+    return new_counts, new_parents
+
+
 def _cancer_only(traces, genotypes_parents):
     genotype_counts = pd.DataFrame([t["genotypes_counts"] for t in traces]).fillna(0)
     genotype_counts.columns = genotype_counts.columns.astype(str)
@@ -63,8 +145,17 @@ def _cancer_only(traces, genotypes_parents):
 
 
 def plot_muller(traces, genotypes_parents, ax=None, colormap="gnuplot", normalize=True,
-                smoothing_std=0.1, show_axes=True):
+                smoothing_std=0.1, show_axes=True, min_freq=None):
+    """Muller plot of clonal dynamics. ``min_freq`` (a fraction, e.g. 0.01 = 1%) merges clones whose
+    subtree never reaches that share of the cancer population into their nearest surviving ancestor
+    (Noble-style sensitivity threshold) — essential for legibility when an infinite-sites tumour has
+    thousands of genotype clones. Default ``None`` keeps every genotype (the historical behaviour)."""
     genotype_counts, genotype_parents = _cancer_only(traces, genotypes_parents)
+    if min_freq:
+        # pass the FULL parent map (not the snapshot-filtered edges) so fragmented tau-leaping
+        # ancestry is reconnected to the nearest present ancestor before thresholding.
+        genotype_counts, genotype_parents = _merge_small_clones(
+            genotype_counts, genotypes_parents, min_freq)
     if ax is None:
         _, ax = plt.subplots()
     # pymuller needs at least a couple of clones with an ancestry edge; a tumor that went
