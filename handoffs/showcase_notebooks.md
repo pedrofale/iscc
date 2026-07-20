@@ -136,7 +136,9 @@ API CHEAT-SHEET (all verified this session)
 - Muller plots: ALWAYS call tumor.plot_muller(ax=..., min_freq=0.02..0.05). Without min_freq an infinite-
   sites tumour's ~10^4–10^5 genotype clones make pymuller hang / render illegibly. min_freq merges clones
   below that fraction of the grown population into their nearest ancestor (Noble-style; added to viz.py this
-  session). tumor.plot_grid needs no such option.
+  session). Optional by_drivers=True colours by distinct DRIVER-mutation combinations instead of by genotype
+  (Noble's convention) — note iscc's drivers are dense so this still leaves many bands; pair it with min_freq
+  (e.g. plot_muller(ax=..., by_drivers=True, min_freq=0.03)). tumor.plot_grid needs no such option.
 
 ============================================================================================================
 NOTEBOOK 0 — notebooks/base_simulation.ipynb  (SHOW the shared simulation)
