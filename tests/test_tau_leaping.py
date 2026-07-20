@@ -82,6 +82,60 @@ def test_traces_real_time_axis_and_muller():
     assert t2.time == t.time
 
 
+def test_muller_min_freq_and_by_drivers():
+    # A diverse tumour spawns thousands of genotype clones; min_freq (Noble sensitivity threshold) and
+    # by_drivers (colour by driver-mutation combination) collapse them for a legible plot. Both must
+    # conserve cells, keep a valid clone TREE, and not raise.
+    import matplotlib
+    matplotlib.use("Agg")
+    from iscc.tumor import viz
+    t = GenotypeTumor(seed=3, genome_params={"n_segments": 8, "segment_size": 40},
+                      selection_params={"prop_driver": 0.1, "prop_dispersal": 0.0,
+                                        "prop_immune_resistance": 0.0, "prop_treatment_resistance": 0.0},
+                      cancer_cell_params={"division_rate": 0.6, "death_rate": 0.03,
+                                          "max_birth_rate": 0.98, "mutation_rate": 0.8,
+                                          "dispersal_rate": 0.5},
+                      deme_params={"carrying_capacity": 8, "initial_cancer_cells": 4},
+                      spatial_params={"grid_size": 24, "structure_radius": 4},
+                      update_mode="tau", tau=1.0)
+    while t.get_cancer_size() < 800:
+        t.grow(n_steps=10, seed=3)
+    gc, _ = viz._cancer_only(t.traces, t.genotypes_parents)
+    n_genotypes = len([c for c in gc.columns if c != "Generation"])
+    assert n_genotypes > 100                                    # genuinely diverse
+
+    def total(df):
+        return df[[c for c in df.columns if c != "Generation"]].to_numpy(float).sum(axis=1)
+
+    def assert_tree(counts, parents):
+        nodes = set(counts.columns)
+        edges = parents.iloc[0].to_dict() if parents.shape[1] else {}
+        assert all(p in nodes for p in edges.values())          # parents are present clones
+        assert len(edges) <= len(nodes) - 1                     # forest/tree, no cycles-by-count
+        for c in edges:                                         # explicit acyclicity
+            x, seen = c, set()
+            while x in edges:
+                x = edges[x]
+                assert x not in seen
+                seen.add(x)
+
+    # min_freq: fewer clones, cells conserved, valid tree
+    mc, mp = viz._merge_small_clones(gc.copy(), t.genotypes_parents, 0.05)
+    assert mc.shape[1] < n_genotypes
+    assert np.allclose(total(gc), total(mc))
+    assert_tree(mc, mp)
+
+    # by_drivers: driver-signature contraction is a valid tree, cells conserved
+    dmap = t._driver_signatures()
+    assert dmap and any(len(v) for v in dmap.values())          # some driver mutations exist
+    dc, dp = viz._collapse_by_drivers(gc.copy(), t.genotypes_parents, dmap)
+    assert np.allclose(total(gc), total(dc))
+    assert_tree(dc, dp)
+
+    t.plot_muller(min_freq=0.05)                                # must not raise
+    t.plot_muller(by_drivers=True, min_freq=0.05)               # must not raise
+
+
 def test_carrying_capacity_bounds_growth():
     # Density-dependent crowding (DESIGN_crowding.md, Option A) holds a deme NEAR its carrying
     # capacity instead of growing unboundedly: death rises RELATIVE to the clone's own division

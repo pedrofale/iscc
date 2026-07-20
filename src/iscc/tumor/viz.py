@@ -124,6 +124,59 @@ def _merge_small_clones(genotype_counts, full_parents, min_freq):
     return new_counts, new_parents
 
 
+def _collapse_by_drivers(genotype_counts, full_parents, driver_map):
+    """Collapse genotype clones into DRIVER clones — Noble's Muller convention, "colours represent
+    clones with distinct combinations of driver mutations". A driver clone is a maximal chain of
+    genotypes on the lineage tree sharing one driver signature (``driver_map[gid]``, the set of mutated
+    driver genes); a new clone starts wherever the signature changes from parent to child. This is a
+    CONTRACTION of the (acyclic) genotype tree, so the driver clones are guaranteed to form a tree even
+    though signatures are NOT monotone (a CNA can delete a driver-SNV copy, shrinking the signature) —
+    contracting by global signature equality instead would create cycles. Counts are summed so
+    frequencies are preserved. ``driver_map`` must cover ancestors too. Returns (counts, one-row
+    parents); the clone identities are the band-founding genotype ids (unique, so homoplasic signatures
+    stay distinct)."""
+    import collections
+    cols = [c for c in genotype_counts.columns
+            if c != "Generation" and driver_map.get(c) is not None]
+    if not cols:
+        return genotype_counts, pd.DataFrame(index=[0])
+    fp = {str(k): str(v) for k, v in dict(full_parents).items()}
+    sig = driver_map
+
+    # band(g): the genotype at which g's maximal same-signature ancestor chain begins (its "driver
+    # clone" id). Memoised, iterative (the tree is deep). A guard breaks any accidental parent cycle.
+    band = {}
+    def band_of(g):
+        path, x = [], g
+        while x not in band:
+            p = fp.get(x)
+            if p is None or sig.get(p) != sig.get(x) or x in path:
+                band[x] = x; break
+            path.append(x); x = p
+        b = band[x]
+        for y in path:
+            band[y] = b
+        return b
+
+    by_band = collections.defaultdict(list)
+    for c in cols:
+        by_band[band_of(c)].append(c)
+    dcounts = {b: genotype_counts[members].to_numpy(float).sum(axis=1)
+               for b, members in by_band.items()}
+    driver_counts = pd.DataFrame(dcounts, index=genotype_counts.index)
+
+    edges = {}
+    for b in by_band:                       # parent = nearest present band above the band founder
+        x = fp.get(b)
+        while x is not None:
+            xb = band_of(x)
+            if xb != b and xb in by_band:
+                edges[b] = xb; break
+            x = fp.get(x)
+    driver_parents = pd.DataFrame(edges, index=[0]) if edges else pd.DataFrame(index=[0])
+    return driver_counts, driver_parents
+
+
 def _cancer_only(traces, genotypes_parents):
     genotype_counts = pd.DataFrame([t["genotypes_counts"] for t in traces]).fillna(0)
     genotype_counts.columns = genotype_counts.columns.astype(str)
@@ -145,17 +198,26 @@ def _cancer_only(traces, genotypes_parents):
 
 
 def plot_muller(traces, genotypes_parents, ax=None, colormap="gnuplot", normalize=True,
-                smoothing_std=0.1, show_axes=True, min_freq=None):
-    """Muller plot of clonal dynamics. ``min_freq`` (a fraction, e.g. 0.01 = 1%) merges clones whose
-    subtree never reaches that share of the cancer population into their nearest surviving ancestor
-    (Noble-style sensitivity threshold) — essential for legibility when an infinite-sites tumour has
-    thousands of genotype clones. Default ``None`` keeps every genotype (the historical behaviour)."""
+                smoothing_std=0.1, show_axes=True, min_freq=None, driver_map=None):
+    """Muller plot of clonal dynamics.
+
+    ``driver_map`` ({genotype_id -> hashable driver signature}, supplied by the engine) colours by
+    DISTINCT DRIVER-MUTATION COMBINATIONS rather than by genotype — Noble's demon convention — so
+    passenger-only diversity collapses away (tens of thousands of genotype clones become a handful of
+    driver clones). ``min_freq`` (a fraction) additionally merges clones whose subtree never reaches
+    that share of the grown cancer population into their nearest ancestor (Noble-style sensitivity
+    threshold). The two compose: driver-collapse first, then the size threshold. Both default off, in
+    which case every genotype is a clone (the historical behaviour)."""
     genotype_counts, genotype_parents = _cancer_only(traces, genotypes_parents)
+    # FULL parent map used to reconnect ancestry; replaced by the driver-tree edges after a collapse.
+    merge_parents = genotypes_parents
+    if driver_map:
+        genotype_counts, genotype_parents = _collapse_by_drivers(
+            genotype_counts, genotypes_parents, driver_map)
+        merge_parents = {c: genotype_parents[c].iloc[0] for c in genotype_parents.columns}
     if min_freq:
-        # pass the FULL parent map (not the snapshot-filtered edges) so fragmented tau-leaping
-        # ancestry is reconnected to the nearest present ancestor before thresholding.
         genotype_counts, genotype_parents = _merge_small_clones(
-            genotype_counts, genotypes_parents, min_freq)
+            genotype_counts, merge_parents, min_freq)
     if ax is None:
         _, ax = plt.subplots()
     # pymuller needs at least a couple of clones with an ancestry edge; a tumor that went
@@ -165,8 +227,16 @@ def plot_muller(traces, genotypes_parents, ax=None, colormap="gnuplot", normaliz
         ax.text(0.5, 0.5, "no surviving clones", ha="center", va="center", transform=ax.transAxes)
         return ax
     pop_df, anc_df, color_by = _prepare(genotype_counts, genotype_parents)
-    pymuller.muller(pop_df, anc_df, color_by, ax=ax, colorbar=False, colormap=colormap,
-                    normalize=normalize, background_strain=False, smoothing_std=smoothing_std)
+    # pymuller orders strains by recursing to the depth of the clone tree; a deep tree (many nested
+    # clones) can exceed the default limit, so bump it for the call and restore afterwards.
+    import sys as _sys
+    _old_limit = _sys.getrecursionlimit()
+    try:
+        _sys.setrecursionlimit(max(_old_limit, 20000))
+        pymuller.muller(pop_df, anc_df, color_by, ax=ax, colorbar=False, colormap=colormap,
+                        normalize=normalize, background_strain=False, smoothing_std=smoothing_std)
+    finally:
+        _sys.setrecursionlimit(_old_limit)
     if show_axes:
         ax.set_xlabel("Step")
         ax.set_ylabel("Frequency" if normalize else "Cells")

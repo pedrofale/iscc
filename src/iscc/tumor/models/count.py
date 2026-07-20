@@ -954,9 +954,32 @@ class GenotypeTumor:
         return self.cell_data
 
     # --- plotting (shared, engine-agnostic) ----------------------------------
-    def plot_muller(self, ax=None, **kwargs):
+    def plot_muller(self, ax=None, by_drivers=False, **kwargs):
+        """Muller plot. ``by_drivers=True`` colours by distinct DRIVER-mutation combinations (Noble's
+        demon convention) instead of by genotype, collapsing passenger-only diversity; combine with
+        ``min_freq`` for a size threshold. See ``viz.plot_muller``."""
         from .. import viz
-        return viz.plot_muller(self.traces, self.genotypes_parents, ax=ax, **kwargs)
+        driver_map = self._driver_signatures() if by_drivers else None
+        return viz.plot_muller(self.traces, self.genotypes_parents, ax=ax,
+                               driver_map=driver_map, **kwargs)
+
+    def _driver_signatures(self):
+        """Map every cancer genotype id -> a hashable signature of its mutated DRIVER genes (the
+        oncogene/TSG loci, ``driver_types != 0``, carrying an SNV). Covers ancestors too (needed to
+        build the driver-clone ancestry). Genotypes sharing a signature are one 'driver clone'."""
+        dts = getattr(self.selection, "driver_types", None)
+        if not dts:
+            return {}
+        driver_idx = np.flatnonzero(np.concatenate(dts) != 0)
+        if driver_idx.size == 0:
+            return {}
+        out = {}
+        for gid, rep in self.genotypes.items():
+            if gid in normal_names or not hasattr(rep, "get_snvs"):
+                continue
+            vafs = rep.get_snvs()
+            out[str(gid)] = tuple(int(i) for i in driver_idx[vafs[driver_idx] > 0])
+        return out
 
     def plot_grid(self, color=None, ax=None, **kwargs):
         from .. import viz
