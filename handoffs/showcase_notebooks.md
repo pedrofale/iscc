@@ -133,6 +133,10 @@ API CHEAT-SHEET (all verified this session)
   Per-lineage event order for epistasis: t.epistasis_ground_truth() (see count.py). validate_multiregion_phylo.py
   is the phylo reference.
 - WGD ground truth: cd["cell_wgd"]["is_wgd"]; per-genotype ploidy t.genotypes[g].genome_summary["ploidy"].
+- Muller plots: ALWAYS call tumor.plot_muller(ax=..., min_freq=0.02..0.05). Without min_freq an infinite-
+  sites tumour's ~10^4–10^5 genotype clones make pymuller hang / render illegibly. min_freq merges clones
+  below that fraction of the grown population into their nearest ancestor (Noble-style; added to viz.py this
+  session). tumor.plot_grid needs no such option.
 
 ============================================================================================================
 NOTEBOOK 0 — notebooks/base_simulation.ipynb  (SHOW the shared simulation)
@@ -146,7 +150,11 @@ asked for). Cells:
      WGD fraction, #genotypes; assert cancer ≥ 10000.
   3. CO: SPATIAL structure — tumor.plot_grid + a cell_crd scatter coloured by cell type (cancer vs epithelial
      vs stromal); show the gland with its microenvironment.
-  4. CO: clonal dynamics — tumor.plot_muller; note the clone/genotype richness.
+  4. CO: clonal dynamics — tumor.plot_muller(ax=..., min_freq=0.03). MUST pass min_freq: an infinite-
+     sites tumour has tens of thousands of genotype clones (one per mutation), so a raw plot_muller is
+     unreadable and effectively hangs pymuller. min_freq merges clones whose subtree never reaches that
+     fraction of the grown population into their nearest ancestor (Noble/demon sensitivity-threshold
+     rule); ~0.02–0.05 gives a legible plot. Note the residual clone/genotype richness.
   5. CO: the ground-truth matrices (cell_snv / cell_cnv / cell_exp heatmaps, as in 01_pipeline_walkthrough),
      one line each on what later notebooks read.
   6. MD: a table/list mapping each downstream notebook to the aspect it uses. Next pointers.
