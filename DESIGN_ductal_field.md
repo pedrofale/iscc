@@ -58,6 +58,18 @@ cross-section over-count it would be if K were the whole cell budget.
   sequenceable per-location populations, TOTAL kept sane via field size. Large K is nearly free at growth (the
   count engine tracks genotype COUNTS per deme); it only costs at `make_cell_data` / assay, where you subsample.
 
+### 3.1 The 2D-section assay samples the depth (not the growth model)
+The full-depth K lives in the GROWTH model; the depth-subsampling lives in the ASSAY. A 2D-section spatial
+assay (Visium, F9 single-cell-spatial) must NOT drop a deme's whole K into a pixel — the thin cross-section
+holds only a *slice* of the deme's 3D column. So at each spot the assay **samples a realistic per-pixel number
+of cells** (≈ `section_thickness/column_depth · K`, e.g. a handful per Visium spot) **uniformly at random from
+each covered deme**, and records the per-spot ground truth (n_cells, clone/type fractions) from those *sampled*
+cells (uniform sampling keeps the composition representative). **Dissociated assays (scRNA/scDNA) have no such
+issue** — dissociation mixes all depths, so they sample the whole per-location population directly. So growth =
+the full 3D population per location; each assay takes the appropriate *view* (section slice for Visium, whole
+population for dissociation). NOTE: iscc's current `Visium` pools *all* cells in a spot — the ST-generation
+work must switch it to this section-slice sampling so large K doesn't over-fill spots.
+
 ## 4. Dispersal (engine)
 One free dispersal event as today (a fraction of divisions send a daughter elsewhere; no capacity gate —
 crowding is via death). Split the dispersing daughters into two channels:
