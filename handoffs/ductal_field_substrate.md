@@ -90,6 +90,14 @@ from ONE founder. Show:
   (C) scale sanity: per-gland cancer cell counts are realistic (tens–low-hundreds), total is sequenceable.
 Print headline numbers.
 
+GRID PLOTS ARE MANDATORY (the user reviews these to evaluate your work). The validation MUST produce a
+tumor.plot_grid(...) GROWTH TIME-SERIES — a row of snapshots at several steps (e.g. 4–6 timepoints from
+seeding to final) — saved as a PNG, showing the spatial tumour: colour by gland_id AND (a second row / panel)
+by clone/cancer-vs-normal, so the multi-focal spread from one founder across glands is visually obvious. Save
+to manuscript/figures/ and, in your FINAL REPORT, embed/display the saved image(s) (read them back) so the
+user can actually SEE the growth — do not just report numbers. A run that prints stats but shows no grid plot
+is INCOMPLETE.
+
 TESTS (tests/test_ductal_field.py):
 - OFF byte-identical (n_glands=1, kappa=0, fill=1, uniform K -> identical to the pre-change single structure).
 - n_glands>1 seeds N disjoint rings + sparse stroma; gland_id labels + gland_lumen_demes correct; one founder.

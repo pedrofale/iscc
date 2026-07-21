@@ -136,6 +136,13 @@ Grow the DUCTAL FIELD (substrate handoff: n_glands>1, island dispersal on) with 
       quantify the genetic vs niche contributions iscc knows.
 Print headline numbers.
 
+GRID PLOTS ARE MANDATORY (the user reviews these to evaluate your work). The validation MUST produce a
+tumor.plot_grid(...) GROWTH TIME-SERIES — a row of snapshots at several steps from seeding to final — saved as
+a PNG, coloured by gland_id + compartment + trait (breach / stromal_survival), so DCIS confinement then breach
+into stroma (IDC) is visually obvious, with a barrier-OFF control panel. Save to manuscript/figures/ and, in
+your FINAL REPORT, embed/display the saved image(s) (read them back) so the user can actually SEE the growth —
+do not just report numbers. A run that prints stats but shows no grid plot is INCOMPLETE.
+
 TESTS (tests/test_compartment_selection.py):
 - OFF-by-default byte-identical (both axes + barriers 0 -> identical to a ductal-field-substrate baseline).
 - a breach-competent genotype has strictly LOWER death than a non-breacher in an epithelial(wall)-occupied
