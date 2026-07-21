@@ -52,9 +52,17 @@ DEFAULT_SEEDED_PROGRAMS = ("proliferation", "emt", "hypoxia", "drug_resistance",
 # mutation → (the existing CINner fitness model) → phenotype → program → expression, so a mutation
 # that raises the division rate RAISES the proliferation program by construction, with no new
 # gene-tagging machinery. See DESIGN_expression.md §3.1.
+# Note that MULTIPLE phenotypes may map to the SAME program — `clone_drive` sums their contributions
+# (`drive[k] += ...`). The invasive `emt` program is driven by BOTH `breach` (the compartment-selection
+# invasion trait, DESIGN_phenotype_plasticity.md §2 / DESIGN_ductal_field.md §5) and `dispersal_rate`.
+# `breach` is the biologically apt, always-live genetic arm of the invasive phenotype; `dispersal_rate`
+# is retained but is INERT whenever `prop_dispersal == 0` (dispersal never varies ⇒ zero fold-change ⇒
+# no drive), which is the default in the structured configs — so relying on it alone gives the emt
+# program no genetic signal. Keeping both means emt has a robust genetic arm regardless of prop_dispersal.
 DEFAULT_PHENOTYPE_PROGRAM_MAP = {
     "division_rate": "proliferation",
     "dispersal_rate": "emt",
+    "breach": "emt",
     "treatment_resistance": "drug_resistance",
     "immune_resistance": "immune_evasion",
 }

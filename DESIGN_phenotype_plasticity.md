@@ -96,6 +96,13 @@ heritable resistance trait** — exactly the existing immune term, generalised.
   program at the epithelial front and a different program in the stroma: **env-responsive phenotype, and the
   genetic-vs-environmental attribution confound, present in the data with zero carried state.** This phenotype
   is memoryless (final location only) and is a **readout** — it does not feed back into fitness in v1.
+  - **The two arms of the `emt` confound, concretely.** The **niche arm** is route-3 (`epithelial → emt`). The
+    **genetic arm** is route-1 **`breach → emt`** — the heritable invasion trait itself drives the invasive
+    program (`DEFAULT_PHENOTYPE_PROGRAM_MAP`, added alongside the legacy `dispersal_rate → emt`). Do **not** use
+    `dispersal_rate → emt` as the genetic arm: `prop_dispersal = 0` here, so dispersal is constant and that
+    route contributes zero drive (inert). `breach` is both under selection at the front (§2) *and* the driver
+    of the genetic component of the invasive signature — so the confound benchmark contrasts the *same* trait's
+    genetic expression signal against the epithelial-niche signal.
 - **Parameters (~4 selection knobs, all ground-truth):** `epithelial_barrier`, `stromal_hazard`, plus
   `prop_`/`_effects` for the two axes. The phenotype confound reuses existing R13/F8 niche→program knobs — **no
   new dynamics parameters.**

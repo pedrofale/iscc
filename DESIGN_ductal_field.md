@@ -97,6 +97,15 @@ crowding is via death). Split the dispersing daughters into two channels:
   establishes. *(Optional variant, not the default: a persistent stromal-region FIELD if you want
   `stromal_survival` under selection everywhere even after cancer takes over — less consistent, use only if a
   benchmark needs it.)*
+- **The invasive / EMT expression program is driven by `breach` (route 1) + the compartment field (route 3).**
+  `breach` — the heritable trait a clone evolves to cross the epithelial wall — *is* the invasion phenotype, so
+  the R13 phenotype→program map drives the `emt` program from it (`DEFAULT_PHENOTYPE_PROGRAM_MAP` now includes
+  `breach → emt`, alongside the compartment-field route-3 map `epithelial → emt`). This gives the invasive
+  program a **genetic arm** (breach genotype) AND a **niche arm** (epithelial interface) — the two halves of the
+  genetic-vs-niche expression confound (`DESIGN_phenotype_plasticity.md` §2). **Do NOT rely on the legacy
+  `dispersal_rate → emt` map for the genetic arm:** `prop_dispersal = 0` in the structured configs, so
+  dispersal never varies and that route is inert (zero fold-change ⇒ zero drive). `breach → emt` is the correct,
+  always-live genetic driver; `dispersal_rate → emt` is retained only for the day `prop_dispersal > 0`.
 
 ## 6. Scope / staging
 - **v1:** the geometry (multi-gland island field), the cross-gland dispersal channel + `gland_id` labels, the

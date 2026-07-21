@@ -446,7 +446,9 @@ class GenotypeTumor:
             pos = in_border[int(self.rng.choice(len(in_border)))]
             self._add(pos[0] * self.grid_size + pos[1], self.founder_id, self._n_founder)
 
-        # stroma fills the rest, seeded SPARSE (acellular normal stroma; headroom for an invasive mass)
+        # stroma fills the rest, seeded at MODERATE density (stroma_fill_frac≈0.3-0.5: real stromal
+        # cells that carry the stromal hazard as a LIVE fraction, DESIGN_ductal_field.md §5, with
+        # headroom for an invasive mass). stroma_fill_frac=1.0 (the default) recovers the old behaviour.
         stroma = self._normal_genotype("stromal")
         n_stroma = int(round(self.stroma_fill_frac * self._cap_stroma))
         for r in range(self.grid_size):

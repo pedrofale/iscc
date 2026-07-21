@@ -112,9 +112,13 @@ COMPARTMENT a niche field:
 - In the program config (route-3 map, programs.py:62 "which niche field drives which program"), drive the
   seeded `emt`/invasive program from the epithelial-interface field. Now the SAME clone expresses the invasive
   program at the epithelial front and less in the stroma -> env-responsive phenotype + the genetic-vs-niche
-  confound, with iscc knowing both contributions. (The GENETIC arm — a driver that also drives the invasive
-  program — already exists via R13 route-1/2; optionally give breach genes an expression effect in
-  make_expmap, selection.py:151, but that's not required for v1.)
+  confound, with iscc knowing both contributions.
+- The GENETIC arm of the emt program is route-1 `breach -> emt` (in DEFAULT_PHENOTYPE_PROGRAM_MAP, additional
+  to the legacy dispersal_rate -> emt). breach is the heritable invasion trait selected at the front, so it is
+  the biologically apt AND always-live genetic driver of the invasive signature. DO NOT rely on
+  dispersal_rate -> emt for the genetic arm: prop_dispersal=0 in the structured configs, so dispersal is
+  constant and that route is INERT (zero fold-change -> zero drive). So the confound contrasts breach's genetic
+  emt signal (route 1) against the epithelial-niche emt signal (route 3) — the same trait, two attributions.
 - This is READOUT-ONLY: programs never feed back into fitness (programs.py:24) — keep it that way in v1.
 
 OFF-BY-DEFAULT / BYTE-IDENTICAL (critical)
