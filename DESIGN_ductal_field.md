@@ -41,14 +41,22 @@ bottleneck at each hop). This is the multi-region-phylogeny confound in a DCIS s
   targeting and for the compartment hazards / ground truth.
 - **One cancer founder** in one gland's lumen.
 
-## 3. Carrying capacity (the #demes-vs-K trade-off, bounded by ST)
-- `K_duct` **low** (ducts are thin tubular structures: lumen + 1–2-cell wall).
-- `K_stroma` default / modestly higher (bulk 3D invasive mass), seeded sparse. Represent the 3D invasive bulk
-  **primarily by spatial extent** (mass spanning many demes ≈ 3D volume), an optional modest K bump for the
-  thin-duct-vs-bulk-stroma asymmetry.
-- **Bound K by the ST spot:** keep per-deme K at or below a Visium spot's cell count (~a handful) so a spot
-  aggregates *several* demes — otherwise deconvolution / spatial-domain methods have nothing sub-spot to
-  resolve. Finer (smaller K, more demes) is better for ST, at more compute.
+## 3. Carrying capacity (K captures the duct's 3D depth — NOT a handful)
+A 2D deme stands for a 3D **column** of tissue (a cross-section point through the duct's/stroma's depth), so
+its K is the number of cells in that column — a real subpopulation size (Noble's deme-K), **moderate-to-large,
+not a handful**. Each duct is therefore *a few demes* (2D within-duct structure) × *a moderate K* (the depth) ≈
+a realistic **3D** duct volume; the resulting "thousands of cells per duct" is correct for a 3D duct, not the
+cross-section over-count it would be if K were the whole cell budget.
+- `K_duct`: **moderate** (captures depth); a duct is a small ring of a FEW demes (lumen + wall) so within-duct
+  neighbour dispersion still works. Not a handful of cells per deme.
+- `K_stroma`: similar / modestly higher (bulk), seeded **sparse** (acellular normal stroma; headroom for a
+  dense invasive mass).
+- **ST resolution is a GRID-SPACING constraint, NOT a K bound** (this corrects an earlier note): a Visium spot
+  must cover **several demes** to be a mixture (for deconvolution / sub-spot structure), set by grid density vs
+  spot radius — *independent of per-deme K*. K is the depth population the assay samples; large K just gives
+  more (representative) cells per location. So: grid fine relative to the spot, K moderate-large for depth +
+  sequenceable per-location populations, TOTAL kept sane via field size. Large K is nearly free at growth (the
+  count engine tracks genotype COUNTS per deme); it only costs at `make_cell_data` / assay, where you subsample.
 
 ## 4. Dispersal (engine)
 One free dispersal event as today (a fraction of divisions send a daughter elsewhere; no capacity gate —

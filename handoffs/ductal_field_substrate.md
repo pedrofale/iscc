@@ -64,12 +64,17 @@ Add a second channel:
   the cross-gland hops become the inter-gland spread tree (ground truth).
 - Do this in BOTH the exact-update dispersal resolution and the tau-leaping path so the two engines agree.
 
-PART 4 — CARRYING CAPACITY PER COMPARTMENT
-- Duct (gland ring+lumen) demes use K_duct (LOW — thin tubular structure). Stroma demes use K_stroma
-  (default / modestly higher), seeded sparse. The per-deme capacity is read by the crowding death law
-  (_death_rate / _resident_ref etc.) — make sure a per-deme K is honoured there (today carrying_capacity is
-  a scalar; you may need a per-deme capacity array). Keep K ≤ ~a Visium spot's cell count so ST spots
-  aggregate several demes (DESIGN §3). n_glands=1 + uniform K must stay byte-identical.
+PART 4 — CARRYING CAPACITY PER COMPARTMENT (K captures 3D depth — NOT a handful)
+- A 2D deme stands for a 3D COLUMN (cross-section × duct/stroma depth), so K is a real subpopulation size,
+  MODERATE-TO-LARGE — do NOT shrink it to a handful. Duct demes: K_duct moderate (captures depth), with a duct
+  = a small ring of a few demes (lumen + wall) for within-duct structure. Stroma demes: K_stroma
+  similar/modestly higher, seeded sparse. Honour a PER-DEME K in the crowding death law (_death_rate /
+  _resident_ref) — today carrying_capacity is a scalar; add a per-deme capacity array.
+- ST resolution is a GRID-SPACING constraint, NOT a K bound (corrects DESIGN's earlier note): a Visium spot
+  must cover SEVERAL demes to be a mixture — set by grid density vs spot_radius, INDEPENDENT of K. Keep the
+  grid fine relative to the spot and K moderate-large; keep TOTAL cells sane via field size / n_glands. Large K
+  is nearly free at growth (genotype COUNTS per deme); it only costs at make_cell_data / assay. n_glands=1 +
+  uniform K = current single-structure run, byte-identical.
 
 OFF-BY-DEFAULT / BYTE-IDENTICAL (critical)
 n_glands=1, cross_gland_kappa=0, stroma_fill_frac=1.0, uniform K = the CURRENT single-structure spatial run,
