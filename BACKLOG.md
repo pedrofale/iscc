@@ -497,6 +497,17 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   tree + island-bottleneck divergence); `scrna_visium_integration` spans the multi-focal section with a
   `thin_section` workaround for the Visium all-cells-pooling limitation (`DESIGN_ductal_field.md` §3.1
   engine TODO, not fixed here). `handoffs/showcase_notebooks_ductal.md`.
+- **DONE (2026-07-22) — 4-gland field + results-quality fixes (user follow-up).** Dropped `n_glands`
+  12→**4** (legible multi-focal section, bigger ducts: `grid_size=40, gland_radius=4, K_duct=60`).
+  Fixed three degenerate results: (1) `combining_scdna_scrna` is now **allele-aware** — clones defined on
+  total CN + `segment_allele_cn`, reconstructed with the `cell_rna_baf` signal (the Numbat idea on the
+  RNA side); the allele lever lifts clone-recovery ARI ~0.01 (dosage) → ~0.14, and the nan/constant-input
+  correlations are guarded. (2) `compartment_selection_confound` samples the confound + escape-trait
+  panel **mid-transition** (breach ~0.72, still segregating) instead of the swept end-state → variance
+  split niche ~83 % / genetic ~17 % (was 95/5), partial r≈0.43, a real in-gland-vs-stroma breach gradient.
+  (3) `gene_programs` NMF on **log1p(CPM)** (0.38→0.45). Also added `base_sim.expanded_tissue_rgb` — a
+  fast, pymuller-free cell-resolution grid (the `plot_grid(expand_demes)` per-clone Muller colormap is
+  O(#genotypes) and hangs at ~10^4 genotypes).
 
 ## Paper 2 — the experimental-design RECOMMENDER (separate paper)
 - **LATER** — full scoping in `DESIGN_recommender.md`. Two modes (generative + recommender); fit

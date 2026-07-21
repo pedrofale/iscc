@@ -63,14 +63,17 @@ CANCER = {"division_rate": 0.7, "death_rate": 0.05, "max_birth_rate": 0.95,
           "mutation_rate": 0.6, "dispersal_rate": 0.35, "cnv_prob": 0.15,
           "wgd_rate": 0.05}  # WGD on (PCAWG-like)
 DEME = {"carrying_capacity": 20, "initial_cancer_cells": 8, "resident_pressure_ref": 0.2}
-# The ductal FIELD: 12 small epithelial-ring glands (radius 3) scattered ≥8 apart on a 44² grid, in
-# moderate-density stroma (stroma_fill_frac=0.3). K_duct/K_stroma are MODERATE (a 2D deme stands for a
-# 3D column through the duct/stroma depth, DESIGN_ductal_field.md §3). cross_gland_kappa is the low
+# The ductal FIELD: 4 small epithelial-ring glands (radius 4) scattered ≥12 apart on a 40² grid, in
+# moderate-density stroma (stroma_fill_frac=0.3) — a legible multi-focal section (like
+# validate_ductal_field.py / validate_compartment_selection.py, 4 glands). K_duct/K_stroma are MODERATE
+# (a 2D deme stands for a 3D column through the duct/stroma depth, DESIGN_ductal_field.md §3); K_duct is
+# larger here so the 4 glands still hold enough of a confined DCIS mass to reach ≥10k cancer WITH the
+# barriers on (fewer glands ⇒ bigger ducts, not weaker barriers). cross_gland_kappa is the low
 # island-dispersal rate that seeds one gland's lumen from another's (multi-focal spread, no breach).
 # epithelial_barrier / stromal_hazard are the two compartment hazards ON (tuned so the lesion shows a
-# DCIS→IDC transition AND still reaches ≥10k cancer cells on this scaled-up field).
-SPATIAL = {"grid_size": 44, "structure_radius": 3, "n_glands": 12, "gland_radius": 3,
-           "min_gland_sep": 8, "K_duct": 40, "K_stroma": 30, "stroma_fill_frac": 0.3,
+# DCIS→IDC transition AND still reaches ≥10k cancer cells).
+SPATIAL = {"grid_size": 40, "structure_radius": 4, "n_glands": 4, "gland_radius": 4,
+           "min_gland_sep": 12, "K_duct": 60, "K_stroma": 40, "stroma_fill_frac": 0.3,
            "cross_gland_kappa": 0.06, "cross_gland_lambda": None,
            "epithelial_barrier": 1.2, "stromal_hazard": 0.7}
 
@@ -231,6 +234,42 @@ def gland_layout_grid(t):
             r, c = t.deme_coords[di]
             grid[r, c] = t.gland_id[di]
     return grid
+
+
+def expanded_tissue_rgb(t, section_frac=0.4, seed=0):
+    """Cell-resolution tissue image (each deme a block of its individual cells, a ~40% section slice):
+    green epithelial wall, pink stroma, blue immune, red cancer. Returns ``(rgb, s)``.
+
+    This is the fast, pymuller-free analogue of ``tumor.plot_grid(expand_demes=True, color=["cell_type"])``
+    with a fixed cancer colour: the engine's expand view builds a per-CLONE Muller colormap over EVERY
+    cancer genotype (``viz.cell_type_colors`` → ``pymuller``), which is O(#genotypes) and hangs at the
+    ~10^4 genotypes an infinite-sites tumour carries — even though the cancer here is drawn a single
+    colour. We colour by coarse cell TYPE directly, so it is instant and returns only a small RGB array
+    (letting the grid series keep a section image per snapshot instead of a full ~1 GB ``cell_data``)."""
+    from collections import defaultdict
+    cd = t.cell_data
+    demes = cd["cell_deme"]["deme_id"].values
+    crd = cd["cell_crd"].values
+    ty = cell_types(t)
+    rng = np.random.default_rng(seed)
+    deme_cells, deme_rc = defaultdict(list), {}
+    for i in range(len(ty)):
+        d = int(demes[i]); deme_cells[d].append(i); deme_rc[d] = (int(crd[i, 0]), int(crd[i, 1]))
+    max_sec = max((max(1, int(round(section_frac * len(v)))) for v in deme_cells.values()), default=1)
+    s = max(1, int(np.ceil(np.sqrt(max_sec))))
+    color = {"cancer": (0.84, 0.15, 0.16), "epithelial": (0.17, 0.55, 0.24),
+             "stromal": (0.98, 0.80, 0.86), "immune": (0.40, 0.40, 0.90)}
+    img = np.ones((t.grid_size * s, t.grid_size * s, 3))
+    for d, cells in deme_cells.items():
+        n_sec = min(s * s, int(round(section_frac * len(cells))))
+        sample = rng.choice(cells, size=n_sec, replace=False) if (cells and n_sec) else []
+        r, c = deme_rc[d]
+        block = np.ones((s * s, 3))
+        if len(sample):
+            for p, ci in zip(rng.choice(s * s, size=len(sample), replace=False), sample):
+                block[p] = color.get(ty[ci], (0.84, 0.15, 0.16))
+        img[r * s:(r + 1) * s, c * s:(c + 1) * s] = block.reshape(s, s, 3)
+    return img, s
 
 
 def cancer_frac_grid(t):
