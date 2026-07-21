@@ -75,8 +75,12 @@ death, attenuated by a **matching heritable resistance trait** — exactly the e
   death += epithelial_barrier · epithelial_frac(deme) · (1 − breach)
   death += stromal_hazard     · stromal_frac(deme)    · (1 − stromal_survival)
   ```
-- **Normals stay immortal** (the crowding-fix invariant, `DESIGN_crowding.md`). "Breach" = crossing a barrier
-  the trait removes, NOT Gatenbee clearance of mortal normals (that is v3, §4).
+- **Compartment is never a fixed deme label.** Every hazard reads the deme's **live** cell-type fractions
+  (`epithelial_fraction`/`stromal_fraction`, exactly like the existing `immune_fraction`), so a deme's
+  selective pressure changes as cancer accumulates and dilutes the resident normals. **Normals are not
+  cleared** in v1 — cancer coexists with / passes through them — which is sufficient because the barrier
+  selects on the *presence* of normal cells, not their removal. (Normals stay immortal, the crowding-fix
+  invariant, `DESIGN_crowding.md`.)
 - **Emergent behaviour (selection):** sequential invasion — lumen → breach the epithelial ring → survive the
   stroma → resist immune where present. Each barrier selects a *different* heritable trait, each recoverable by
   sequencing. The **selected traits are genetic** (permanent, additive, cannot switch off): who *survives* a
@@ -151,10 +155,6 @@ carried state — from a **known** `(τ, σ, β)`, ask what inference recovers:
   toward a state the genotype alone would not predict?
 - **Reproduce Yanai** — recurrent, TME-driven, spatially-patterned states emerge from the niche→state pull
   (partly already in v1; v2 adds the leading-edge *persistence* behind the front).
-- **Interrogate Gatenbee** — instantiate the ductal-breach model with known parameters and map which are
-  recoverable: the validation layer they lacked. (Likely finding: initial conditions + the genetic
-  contribution are recoverable; the plastic/noise split and payoff coefficients are only partially
-  identifiable, and not from any single modality — the negative result *is* the contribution.)
 
 ## 4. Staging / scope
 - **v1 (build first):** ~4 selection params into `Selection` + `_death_rate`, plus feeding compartment into the
@@ -163,9 +163,10 @@ carried state — from a **known** `(τ, σ, β)`, ask what inference recovers:
   baseline. No carried epistate.
 - **v2 (the flagship; likely paper-2):** the epistate `s` + `(τ, σ, β)` + selection-reads-state; the
   genotype-vs-phenotype identifiability benchmark. Build only after v1 lands **and** a benchmark motivates it.
-- **v3 (LATER, optional, each individually gated):** macrophage / public-goods diffusible fields via F8
-  (M1-ROS / M2-GF as diffusible public goods), and mortal-normal Gatenbee clearance. Each is a new
-  unmeasurable-parameter risk; add only when a specific result demands it.
+- **Not planned:** normal-cell clearance (mortal normals) and diffusible public-goods fields. Composition-based
+  selection does not need clearance (the barrier selects on the *presence* of normals, §2), and we are not
+  reproducing/benchmarking the Gatenbee model, so its clearance/public-goods mechanics carry no motivation here.
+  Each would only add unmeasurable parameters (the §0 discipline).
 
 ## 5. Open decisions
 - Reuse R13 `z` as the epistate vs a dedicated small state (recommend **reuse** — one phenotype object across

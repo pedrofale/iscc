@@ -31,9 +31,13 @@ trait. `_death_rate` (count.py:403) already does this for immune. v1 adds the sa
 that the gland geometry already seeds (structure_radius -> lumen / epithelial RING / stroma, count.py:345):
     death += epithelial_barrier · epithelial_fraction(deme) · (1 − breach)
     death += stromal_hazard     · stromal_fraction(deme)    · (1 − stromal_survival)
-Normals STAY IMMORTAL (the crowding-fix invariant, DESIGN_crowding.md) — breach = crossing a barrier the trait
-removes, NOT clearing normals. Sequential invasion emerges: lumen -> breach the ring -> survive the stroma ->
-(existing) resist immune where present. Each trait is a mutation -> sequenceable -> recoverable.
+COMPARTMENT IS NEVER A FIXED DEME LABEL: every hazard reads the deme's LIVE cell-type fractions
+(epithelial_fraction/stromal_fraction, exactly like immune_fraction), so a deme's selective pressure changes as
+cancer accumulates and dilutes the resident normals. Normals are NOT cleared in v1 — cancer coexists with /
+passes through them — which is sufficient because the barrier selects on the PRESENCE of normal cells, not
+their removal (normals stay immortal, the crowding-fix invariant, DESIGN_crowding.md). Sequential invasion
+emerges: lumen -> breach the ring -> survive the stroma -> (existing) resist immune where present. Each trait
+is a mutation -> sequenceable -> recoverable.
 
 PART A — the two heritable axes (mirror the IMMUNE-RESISTANCE axis EXACTLY, end to end)
 The immune axis is the precise template. grep `immune_resistance`, `_ir`, `N_ir`, `n_ir`,
@@ -136,6 +140,7 @@ is v2, and it's where the hard-to-tune knobs live; do NOT introduce them). If, o
 byte-identical, STOP and fix — a new genome_summary key or evo-param is perturbing an existing path. If the
 epithelial ring (1 deme thick, count.py:347) turns out too thin to select breach meaningfully, prefer raising
 epithelial_barrier over changing the geometry, and note it. The "payoff table" is the {epithelial_barrier,
-stromal_hazard} config + the two prop_/effects — keep it small (the Gatenbee unmeasurable-payoff lesson,
-DESIGN §0); do not add per-interaction coefficients or public-goods fields (that's v3).
+stromal_hazard} config + the two prop_/effects — keep it small (the identifiability discipline, DESIGN §0); do
+not add per-interaction coefficients or extra hazard fields, and do NOT add normal-cell clearance (not needed —
+the barrier selects on the presence of normals, not their removal).
 ```
