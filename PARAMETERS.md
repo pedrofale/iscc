@@ -45,6 +45,8 @@ Defaults are those in `notebooks/example_config.yaml`. Set them under the matchi
 | `grid_size` × `carrying_capacity` | 50 × 10 | the tumour caps at ~`grid_size² × carrying_capacity`; size the grid **above** the target so it can spread (≳ 10⁴ demes for a 10⁵-cell tumour) | too small → no room to spread / no O₂ gradient / too few clones |
 | `dispersal_rate` | 0.1 | **≲ `division_rate`** | ≫ division → well-mixed, **no clonal territories** (silently breaks the PEtracer and multi-region benchmarks) |
 | `structure_radius` / `n_structures` | 20 / 1 | glandular geometry (duct size / count); the cancer founds inside and spreads across the gland | — |
+| `epithelial_barrier` | **0.0 (off)** | compartment-selection hazard: the epithelial ring adds `epithelial_barrier · epithelial_fraction(deme) · (1 − breach)` to a cancer cell's death (v1, DESIGN_phenotype_plasticity.md §2) | needs `structure_radius > 0`; too high → the ring is impassable and cancer stays in the lumen (raise `breach` fitness or lower the barrier) |
+| `stromal_hazard` | **0.0 (off)** | compartment-selection hazard: the stroma adds `stromal_hazard · stromal_fraction(deme) · (1 − stromal_survival)` to death | needs `structure_radius > 0`; the stromal analogue of `epithelial_barrier` |
 
 !!! note "`carrying_capacity` is a real per-deme cap (density-dependent crowding, 2026-07-14)"
     Crowding death rises **relative to each clone's own (evolved) division rate**
@@ -62,6 +64,8 @@ Defaults are those in `notebooks/example_config.yaml`. Set them under the matchi
 | `driver_effects` | 1.1 | 1.0–2 | ≫ 1 at low mutation rate → monoclonal sweep |
 | `prop_dispersal` / `dispersal_effects` | 0.1 / 1.1 | as above | strong → invasion dominates, structure washes out |
 | `prop_treatment_resistance` / `prop_immune_resistance` (+ effects) | 0.1 / 1.1 | as above | resistance is meant to **emerge**, not be pre-seeded |
+| `prop_breach` / `breach_effects` | **0.0 (off)** / 1.1 | compartment-selection axis: sites that if mutated let a clone cross the epithelial ring (attenuate `epithelial_barrier`); heritable, sequenceable | pairs with `spatial_params.epithelial_barrier`; both must be > 0 to have any effect |
+| `prop_stromal_survival` / `stromal_survival_effects` | **0.0 (off)** / 1.1 | compartment-selection axis: sites that if mutated let a clone survive the stroma (attenuate `stromal_hazard`) | pairs with `spatial_params.stromal_hazard` |
 
 #### Viability limits — `selection_params`
 

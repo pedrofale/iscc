@@ -60,6 +60,7 @@ class TestSelection:
         assert set(gd.keys()) == {
             "driver_types", "dispersal_types",
             "treatment_resistance_types", "immune_resistance_types",
+            "breach_types", "stromal_survival_types",
         }
         for df in gd.values():
             assert len(df) == N_GENES

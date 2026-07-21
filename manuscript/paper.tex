@@ -495,6 +495,56 @@ analyses.
   \label{fig:microenv}
 \end{figure}
 
+\subsection*{Compartment-dependent selection and the genetic--niche expression confound}
+\label{sec:compartment}
+Selection in a structured tissue is not uniform: a clone's fitness depends on which normal
+compartment surrounds it. \texttt{iscc} models this with the same mechanism it uses for immune
+predation --- a local hazard attenuated by a matching heritable trait --- generalised to the
+epithelial ring and the stroma that the glandular geometry seeds (\Cref{fig:compartment}). Two
+gene-based, heritable and therefore sequenceable traits, \emph{breach} and \emph{stromal survival},
+lower the death rate a cancer cell suffers in proportion to the \emph{live} epithelial or stromal
+fraction of its deme; because that fraction is read from the current composition rather than from a
+fixed label, the pressure a clone feels changes as it dilutes the resident normal cells, which are
+themselves never removed --- the barrier selects on the \emph{presence} of normal tissue, not its
+destruction. Sequential invasion then emerges without being scripted: a lesion founded in the lumen
+must first breach the epithelial ring and then survive the stroma, and each trait is enriched
+specifically in the compartment its barrier acts on (mean \emph{breach} at the epithelial ring
+$0.78$ with the barriers on versus $0.61$ off; mean \emph{stromal survival} in the stroma $0.89$
+versus $0.63$), so the two traits sweep at their own fronts and cross over across the invasion axis
+(\Cref{fig:compartment}A). Because \texttt{iscc} can dial each hazard independently while knowing the
+ground-truth gene roles, a selection scan over single-cell DNA recovers which genes are breach versus
+stromal-survival drivers, and the compartment each was selected in, from the frequency lift each
+barrier induces (AUROC $0.61$ and $0.64$ against the known roles; \Cref{fig:compartment}B).
+
+The same structure produces the expression confound that genotype--phenotype methods must contend
+with, at no extra cost. The compartment is also a niche input to the gene-program layer, so the
+invasive (epithelial-to-mesenchymal) program is driven both by a clone's genotype and by the
+epithelial fraction of its current niche. Controlling for genotype, invasive-program activity still
+rises with the epithelial niche (partial correlation $r=0.38$): the \emph{same} genotype reads as
+more invasive at the epithelial front than in the stroma, so a naive rule that treats an invasive
+expression state as evidence of an invasive genotype is confounded by location. Because \texttt{iscc}
+generates both contributions it can quantify their split --- here $37\%$ of the program's
+variance across cancer cells is niche-driven --- providing ground truth for methods that separate the
+genetic, plastic and environmental sources of a cancer cell's phenotype. This phenotype is a pure
+read-out that never feeds back into fitness, so growth is byte-identical whether the program layer is
+on or off, and the whole mechanism reduces to $\sim\!4$ interpretable, ground-truth parameters
+(two barrier coefficients and the two selection axes), avoiding the unmeasurable payoff matrices that
+stall spatial game-theoretic models.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{validation_compartment.png}
+  \caption{\textbf{Compartment-dependent selection and the genetic--niche confound.} (A) the two
+  heritable traits sweep at their own invasion front --- \emph{breach} at the epithelial ring,
+  \emph{stromal survival} beyond it --- and are positively selected by their barriers relative to a
+  barrier-off control. (B) dialling one hazard at a time recovers which genes are breach versus
+  stromal-survival drivers, and the compartment each acts in, from single-cell DNA frequencies alone.
+  (C) controlling for genotype, invasive-program activity still rises with the epithelial fraction of
+  a cell's niche (left), so the same genotype is more invasive at the front; \texttt{iscc} knows both
+  the genetic and the niche contribution to the program and quantifies the split (right).}
+  \label{fig:compartment}
+\end{figure}
+
 \subsection*{Biopsy and dissociation shape the sampled data}
 \label{sec:sampling}
 The choices made when a tumor is sampled --- where it is biopsied, how the tissue is

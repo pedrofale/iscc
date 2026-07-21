@@ -70,6 +70,8 @@ class Tumor(object):
             n_disp=len(self.selection.get_dispersal_genes()),
             n_ir=len(self.selection.get_immune_resistant()),
             n_tr=len(self.selection.get_treatment_resistant()),
+            n_breach=len(self.selection.get_breach()),
+            n_ss=len(self.selection.get_stromal_survival()),
             **cancer_cell_params,
         )
         
@@ -269,6 +271,8 @@ class Tumor(object):
             ('n_mut_disp', self.selection.get_dispersal_genes()),
             ('n_mut_ir',   self.selection.get_immune_resistant()),
             ('n_mut_tr',   self.selection.get_treatment_resistant()),
+            ('n_mut_breach', self.selection.get_breach()),
+            ('n_mut_ss',   self.selection.get_stromal_survival()),
         ]:
             cat_genes = [gene_names[i] for i in idx]
             cell_evo_df[col] = (snv_df[cat_genes] > 0).sum(axis=1).values

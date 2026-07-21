@@ -60,6 +60,10 @@ DEFAULT_PHENOTYPE_PROGRAM_MAP = {
 }
 
 # Route 3: which niche field drives which program (generalises F8's hypoxia/CCI gene sets).
+# Available niche fields: the F8 fields "hypoxia" / "cci", and — in a structured (gland) tumour — the
+# compartment fields "epithelial" / "stromal" (per-deme live fraction; DESIGN_phenotype_plasticity.md
+# §2 Part D). Mapping "epithelial" -> "emt" makes the invasive program env-responsive to the
+# epithelial interface, which is the genetic-vs-niche expression confound v1 ships.
 DEFAULT_NICHE_PROGRAM_MAP = {"hypoxia": "hypoxia"}
 
 # The SNV functional classes (axis B). `silent` and `missense` leave mRNA level alone (a missense
@@ -343,8 +347,8 @@ class ProgramModel:
     def _phenotype_level(self, phenotype, evo, baseline_rates):
         """Program activity ∝ the phenotype RELATIVE to its wild-type baseline (monotone, normalised,
         and 0 for a wild-type clone so the founder sits at the origin)."""
-        if phenotype in ("treatment_resistance", "immune_resistance"):
-            # already normalised to [0, 1) with wild-type = 0
+        if phenotype in ("treatment_resistance", "immune_resistance", "breach", "stromal_survival"):
+            # already normalised to [0, 1) with wild-type = 0 (compartment-selection traits included)
             return float(evo.get(phenotype, 0.0))
         base = float((baseline_rates or {}).get(phenotype, 0.0))
         if base <= 0:

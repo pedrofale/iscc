@@ -194,6 +194,14 @@ class GenotypeTumor:
         self._immune_prob_kill = (immune_cell_params or {}).get("prob_kill", 0.01)
         self._tx_death_add = {}
         self._tx_immune_resist = {}
+        # Compartment-dependent selection (v1, DESIGN_phenotype_plasticity.md §2). Two local hazards,
+        # each contributed by a resident normal compartment the gland geometry seeds and each
+        # attenuated by a MATCHING heritable trait (breach / stromal_survival), exactly the shape of
+        # the immune term above. This is the whole "payoff table": edit these two coefficients (+ the
+        # two prop_/effects axes in selection_params) in config, not the engine. DEFAULT 0.0 -> the
+        # terms vanish -> growth is byte-identical to before (the F8 off-by-default discipline).
+        self._epithelial_barrier = (spatial_params or {}).get("epithelial_barrier", 0.0)
+        self._stromal_hazard = (spatial_params or {}).get("stromal_hazard", 0.0)
 
         # founder cancer genotype
         founder = CancerCell(
@@ -203,6 +211,8 @@ class GenotypeTumor:
             n_disp=len(self.selection.get_dispersal_genes()),
             n_ir=len(self.selection.get_immune_resistant()),
             n_tr=len(self.selection.get_treatment_resistant()),
+            n_breach=len(self.selection.get_breach()),
+            n_ss=len(self.selection.get_stromal_survival()),
             **cancer_cell_params,
         )
         founder.set_genotype_id()
@@ -285,6 +295,11 @@ class GenotypeTumor:
         # term is always zero, so the per-genotype death-rate can skip the O(#genotypes-in-deme)
         # immune sum entirely — a big win for the clone-heavy tau-leaping path (see _immune_fraction).
         self._has_immune = "immune" in self.genotypes
+        # Whether the gland's resident compartments exist (seeded iff structure_radius>0). When a
+        # compartment is absent its fraction is identically zero, so the matching death term can skip
+        # the O(#genotypes-in-deme) composition scan — the same optimisation as _has_immune.
+        self._has_epithelial = "epithelial" in self.genotypes
+        self._has_stromal = "stromal" in self.genotypes
 
         self.deme_rates = np.array([self._deme_rate(i) for i in range(n_demes)], dtype=float)
         self.traces = []
@@ -400,6 +415,47 @@ class GenotypeTumor:
         immune = sum(cnt for gid, cnt in deme.items() if self.genotypes[gid].type == "immune")
         return immune / total
 
+    def _epithelial_fraction(self, deme, total=None):
+        # Fraction of the deme that is (still) epithelial. Live composition, exactly like
+        # _immune_fraction: as cancer accumulates and dilutes the resident normals the epithelial
+        # barrier a cancer clone feels here falls, so the compartment is never a fixed deme label.
+        if not getattr(self, "_has_epithelial", True):
+            return 0.0
+        if total is None:
+            total = sum(deme.values())
+        if total == 0:
+            return 0.0
+        epi = sum(cnt for gid, cnt in deme.items() if self.genotypes[gid].type == "epithelial")
+        return epi / total
+
+    def _stromal_fraction(self, deme, total=None):
+        # Fraction of the deme that is (still) stromal — the stromal analogue of _epithelial_fraction.
+        if not getattr(self, "_has_stromal", True):
+            return 0.0
+        if total is None:
+            total = sum(deme.values())
+        if total == 0:
+            return 0.0
+        stro = sum(cnt for gid, cnt in deme.items() if self.genotypes[gid].type == "stromal")
+        return stro / total
+
+    def _compartment_fields(self):
+        """Per-deme epithelial / stromal LIVE fractions, as two (n_demes,) arrays — the compartment
+        as a niche field for R13 route-3 (DESIGN_phenotype_plasticity.md §2, Part D). The SAME clone
+        then expresses the niche-driven (e.g. invasive) program more at the epithelial interface than
+        in the stroma: an env-responsive phenotype and the genetic-vs-niche attribution confound, with
+        iscc knowing both contributions. Zero everywhere when no gland structure was seeded."""
+        n_demes = len(self.demes)
+        epi = np.zeros(n_demes)
+        stro = np.zeros(n_demes)
+        for i, deme in enumerate(self.demes):
+            total = sum(deme.values())
+            if total == 0:
+                continue
+            epi[i] = self._epithelial_fraction(deme, total)
+            stro[i] = self._stromal_fraction(deme, total)
+        return epi, stro
+
     def _death_rate(self, gid, deme_idx, total=None):
         """Cancer death rate = crowding-modulated baseline + local immune killing + treatment.
 
@@ -453,6 +509,17 @@ class GenotypeTumor:
         ir = self._tx_immune_resist.get(gid, rep.evolutionary_parameters["immune_resistance"])
         ir = min(max(ir, 0.0), 1.0)
         death += self._immune_prob_kill * self._immune_fraction(deme, total) * (1.0 - ir)
+
+        # Compartment-dependent selection (v1): each resident compartment adds a local hazard,
+        # attenuated by the clone's matching heritable trait — the exact shape of the immune term.
+        # The trait is clamped to [0,1] like `ir`. Both coefficients default to 0.0 (off), so these
+        # additions are `+= 0.0` and the death rate is byte-identical to before.
+        if self._epithelial_barrier:
+            b = min(max(rep.evolutionary_parameters["breach"], 0.0), 1.0)
+            death += self._epithelial_barrier * self._epithelial_fraction(deme, total) * (1.0 - b)
+        if self._stromal_hazard:
+            ss = min(max(rep.evolutionary_parameters["stromal_survival"], 0.0), 1.0)
+            death += self._stromal_hazard * self._stromal_fraction(deme, total) * (1.0 - ss)
 
         death += self._tx_death_add.get(gid, 0.0)
         return death
@@ -824,6 +891,7 @@ class GenotypeTumor:
         disp_idx, ir_idx, tr_idx = (self.selection.get_dispersal_genes(),
                                     self.selection.get_immune_resistant(),
                                     self.selection.get_treatment_resistant())
+        breach_idx, ss_idx = self.selection.get_breach(), self.selection.get_stromal_survival()
         snv_cache, cnv_cache, exp_cache, evo_cache = {}, {}, {}, {}
         # R13: per-genotype allele-resolved expression + the per-clone program drive (routes 1+2).
         # Both are per-CLONE, so they belong in this cache; the per-CELL `z` is drawn later.
@@ -867,6 +935,8 @@ class GenotypeTumor:
             evo["n_mut_disp"] = int((snv[disp_idx] > 0).sum())
             evo["n_mut_ir"] = int((snv[ir_idx] > 0).sum())
             evo["n_mut_tr"] = int((snv[tr_idx] > 0).sum())
+            evo["n_mut_breach"] = int((snv[breach_idx] > 0).sum())
+            evo["n_mut_ss"] = int((snv[ss_idx] > 0).sum())
             evo_cache[gid] = evo
 
         # F8: per-deme expression modifier (None -> disabled -> exp is bit-identical to the base
@@ -876,11 +946,30 @@ class GenotypeTumor:
 
         # R13 route 3 — niche -> program: the F8 fields drive per-deme program activity, generalising
         # F8's hard-wired hypoxia/CCI gene sets (which still apply via `deme_mod`; the two routes
-        # compose, see DESIGN_expression.md §3.1).
+        # compose, see DESIGN_expression.md §3.1). The COMPARTMENT (epithelial / stromal live
+        # fraction) is a niche field too (DESIGN_phenotype_plasticity.md §2 Part D): mapping it to the
+        # seeded invasive/emt program in `niche_program_map` makes the SAME clone express the invasive
+        # program more at the epithelial front than in the stroma — the genetic-vs-niche confound.
+        # OFF-BY-DEFAULT: `niche_drive` is a zeros matrix (or None) unless `niche_program_map` names a
+        # field, so this is byte-identical to before when route-3 is unconfigured.
         niche_drive = None
-        if P is not None and getattr(self, "microenv_truth", None) is not None:
-            niche_drive = P.niche_drive({"hypoxia": self.microenv_truth["hypoxia"],
-                                         "cci": self.microenv_truth["cci"]})
+        if P is not None:
+            fields = {}
+            # `deme_mod is not None` is the F8 signal (microenv_truth then carries hypoxia/cci).
+            if deme_mod is not None:
+                fields["hypoxia"] = self.microenv_truth["hypoxia"]
+                fields["cci"] = self.microenv_truth["cci"]
+            if self.structure_radius > 0:
+                epi_frac, stro_frac = self._compartment_fields()
+                fields["epithelial"] = epi_frac
+                fields["stromal"] = stro_frac
+                # Record the compartment field as ground truth (create microenv_truth if F8 is off).
+                if getattr(self, "microenv_truth", None) is None:
+                    self.microenv_truth = {}
+                self.microenv_truth["epithelial"] = epi_frac
+                self.microenv_truth["stromal"] = stro_frac
+            if fields:
+                niche_drive = P.niche_drive(fields)
 
         rows_snv, rows_cnv, rows_exp, rows_evo, crd, types, demes_col, names = [], [], [], [], [], [], [], []
         rows_exp_p, rows_exp_m, rows_drive = [], [], []

@@ -88,7 +88,9 @@ class Deme(object):
             rates = [self.get_cancer_death_rate(cell.evolutionary_parameters['death_rate'],
                                                 division_rate=cell.evolutionary_parameters['division_rate'],
                                                 immune_cell_fraction=immune_cell_fraction,
-                                                immune_resistance=cell.evolutionary_parameters['immune_resistance']),
+                                                immune_resistance=cell.evolutionary_parameters['immune_resistance'],
+                                                breach=cell.evolutionary_parameters.get('breach', 0.0),
+                                                stromal_survival=cell.evolutionary_parameters.get('stromal_survival', 0.0)),
                     cell.evolutionary_parameters['division_rate']]
             event = rng.choice(events, p=np.array(rates) / np.sum(rates))
         elif cell.type == 'immune':
@@ -214,7 +216,7 @@ class Deme(object):
             return min(cell_death_rate * self.carrying_capacity, self.maximum_death_rate)
         
     def get_cancer_death_rate(self, cell_death_rate, division_rate, immune_cell_fraction,
-                              immune_resistance):
+                              immune_resistance, breach=0.0, stromal_survival=0.0):
         """Cancer death rate = density-dependent baseline death PLUS local immune killing.
 
         Crowding death has two sources (DESIGN_crowding.md; mirrors the count engine's
@@ -234,6 +236,12 @@ class Deme(object):
 
         Immune killing is *additive* contact pressure: more local immune cells raise the
         death rate, attenuated by the cell's immune resistance.
+
+        Compartment-dependent selection (v1, DESIGN_phenotype_plasticity.md §2) adds two more
+        additive hazards of the same shape — the resident epithelial ring and the stroma — each
+        attenuated by a matching heritable trait (``breach`` / ``stromal_survival``). Their
+        coefficients live on the tumour (``epithelial_barrier`` / ``stromal_hazard``, default 0.0),
+        so with the feature off these are ``+= 0.0`` and this mirrors the count engine's ``_death_rate``.
         """
         if self._crowding:
             steep = 1.0 + self.crowding_margin
@@ -255,6 +263,23 @@ class Deme(object):
             prob_kill = float(np.mean(kills)) if kills else 0.0
             ir = min(max(immune_resistance, 0.0), 1.0)
             death += prob_kill * immune_cell_fraction * (1.0 - ir)
+
+        # Compartment hazards (mirror count.py _death_rate): each resident compartment's LIVE
+        # fraction contributes a hazard attenuated by the clone's matching trait. Coefficients
+        # default to 0.0 -> both terms are `+= 0.0` -> byte-identical when the feature is off.
+        epithelial_barrier = getattr(self.tumor, "epithelial_barrier", 0.0)
+        stromal_hazard = getattr(self.tumor, "stromal_hazard", 0.0)
+        if epithelial_barrier or stromal_hazard:
+            n_cells = len(self.cells)
+            if n_cells:
+                if epithelial_barrier:
+                    epi = sum(1 for c in self.cells if c.type == "epithelial") / n_cells
+                    b = min(max(breach, 0.0), 1.0)
+                    death += epithelial_barrier * epi * (1.0 - b)
+                if stromal_hazard:
+                    stro = sum(1 for c in self.cells if c.type == "stromal") / n_cells
+                    ss = min(max(stromal_survival, 0.0), 1.0)
+                    death += stromal_hazard * stro * (1.0 - ss)
         return death
 
     def get_genotype_frequencies(self, normalize=True):

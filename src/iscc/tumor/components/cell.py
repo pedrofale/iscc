@@ -26,6 +26,8 @@ class Cell(object):
         n_disp=0,
         n_ir=0,
         n_tr=0,
+        n_breach=0,
+        n_ss=0,
     ):
         self.n_segments = n_segments
         # Segments may have unequal sizes (real-genome mode: segment size proportional to
@@ -45,6 +47,8 @@ class Cell(object):
         self.n_disp = n_disp
         self.n_ir = n_ir
         self.n_tr = n_tr
+        self.n_breach = n_breach
+        self.n_ss = n_ss
         self.type = "healthy"
         self.parent = parent
         if parent is None:
@@ -65,6 +69,10 @@ class Cell(object):
                                     'n_mut_ir': 0,
                                     'n_wt_tr': n_tr * 2,
                                     'n_mut_tr': 0,
+                                    'n_wt_breach': n_breach * 2,
+                                    'n_mut_breach': 0,
+                                    'n_wt_ss': n_ss * 2,
+                                    'n_mut_ss': 0,
                                     'ploidy': 2,
                                     'highest_cn': 2,
                                     'nullisomy_count': 0,
@@ -117,6 +125,8 @@ class Cell(object):
         self.evolutionary_parameters['dispersal_rate'] = dispersal_rate
         self.evolutionary_parameters['treatment_resistance'] = 0.  # wild-type: fully treatment-sensitive
         self.evolutionary_parameters['immune_resistance'] = 0.     # wild-type: no immune escape
+        self.evolutionary_parameters['breach'] = 0.                # wild-type: cannot breach the epithelial ring
+        self.evolutionary_parameters['stromal_survival'] = 0.      # wild-type: no stromal survival advantage
         self.evolutionary_parameters['viability'] = 1.
 
     def update_evolutionary_parameters(self, selection):
@@ -144,6 +154,15 @@ class Cell(object):
             0.0, 1.0 - 1.0 / selection.update_immune_resistance(gs))
         self.evolutionary_parameters['treatment_resistance'] = max(
             0.0, 1.0 - 1.0 / selection.update_treatment_resistance(gs))
+        # Compartment-selection traits (v1): heritable resistances that attenuate a matching
+        # compartment hazard in _death_rate (breach <- epithelial barrier, stromal_survival <-
+        # stromal hazard), mapped from a relative fitness >=1 into [0,1) exactly like immune
+        # resistance. With prop_breach/prop_stromal_survival=0 (default) N_*=0 -> update_* returns
+        # 1 -> trait 0, so this is a no-op and growth is byte-identical.
+        self.evolutionary_parameters['breach'] = max(
+            0.0, 1.0 - 1.0 / selection.update_breach(gs))
+        self.evolutionary_parameters['stromal_survival'] = max(
+            0.0, 1.0 - 1.0 / selection.update_stromal_survival(gs))
 
     def _recount_seg_drivers(self, selection, seg):
         """Refresh this segment's contribution to ``n_mutated_drivers``: the number of DISTINCT
@@ -198,6 +217,14 @@ class Cell(object):
         self.genome_summary['n_mut_tr'] += n_new_tr
         self.genome_summary['n_wt_tr'] -= n_new_tr
 
+        n_new_breach = int(mut_bits[selection.breach[seg]].sum())
+        self.genome_summary['n_mut_breach'] += n_new_breach
+        self.genome_summary['n_wt_breach'] -= n_new_breach
+
+        n_new_ss = int(mut_bits[selection.stromal_survival[seg]].sum())
+        self.genome_summary['n_mut_ss'] += n_new_ss
+        self.genome_summary['n_wt_ss'] -= n_new_ss
+
         # Epistasis events: an event fires when >= 1 SNV lands in its gene module. Only event_bits is
         # touched here — the TIED group is closed once per division by mutate(), because this method
         # runs once per (segment, allele) and that loop walks segments in index order: grouping here
@@ -240,6 +267,16 @@ class Cell(object):
         n_wt_tr = len(selection.treatment_resistance[seg]) - n_mut_tr
         self.genome_summary['n_mut_tr'] += sign*n_mut_tr
         self.genome_summary['n_wt_tr'] += sign*n_wt_tr
+
+        n_mut_breach = int(allele_bits[selection.breach[seg]].sum())
+        n_wt_breach = len(selection.breach[seg]) - n_mut_breach
+        self.genome_summary['n_mut_breach'] += sign*n_mut_breach
+        self.genome_summary['n_wt_breach'] += sign*n_wt_breach
+
+        n_mut_ss = int(allele_bits[selection.stromal_survival[seg]].sum())
+        n_wt_ss = len(selection.stromal_survival[seg]) - n_mut_ss
+        self.genome_summary['n_mut_ss'] += sign*n_mut_ss
+        self.genome_summary['n_wt_ss'] += sign*n_wt_ss
 
         self.genome_summary['seg_cns'][seg] += sign
         seg_cns = self.genome_summary['seg_cns']
