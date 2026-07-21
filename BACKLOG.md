@@ -488,6 +488,15 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   spatial gland, analyses the MIXED tumour (malignant + subsampled microenvironment, ~50% purity),
   visualises the spatial structure, is self-contained in the core env, and points to the full
   external-tool benchmark under `validation/`.
+- **DONE (2026-07-22) — migrated the showcase notebook SUITE onto the DUCTAL FIELD + compartment
+  selection**, and added the flagship `compartment_selection_confound.ipynb` (DCIS→IDC + the
+  genetic-vs-niche `emt` confound; partial r≈0.4). `base_sim.py` now grows the multi-focal ductal field
+  (12 glands, compartment barriers ON, `breach→emt` + `epithelial→emt` coupling) to ≥10k cancer; every
+  notebook re-executed on it. `base_simulation` + `compartment_selection_confound` carry the mandatory
+  `plot_grid` growth-grid time-series; `tree_inference_dna` gains the inter-gland phylogeography (spread
+  tree + island-bottleneck divergence); `scrna_visium_integration` spans the multi-focal section with a
+  `thin_section` workaround for the Visium all-cells-pooling limitation (`DESIGN_ductal_field.md` §3.1
+  engine TODO, not fixed here). `handoffs/showcase_notebooks_ductal.md`.
 
 ## Paper 2 — the experimental-design RECOMMENDER (separate paper)
 - **LATER** — full scoping in `DESIGN_recommender.md`. Two modes (generative + recommender); fit

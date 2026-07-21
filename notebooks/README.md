@@ -43,24 +43,28 @@ The notebooks regenerate it automatically on first run if it's missing.
 
 Where the spine + assay notebooks cover the *mechanics*, these show the *science*: what each modality
 lets you recover, scored against ground truth. They are all built on **one** spatially-structured
-tumour — a breast **DCIS** duct (~10k cancer cells filling a lumen inside an epithelial ring, with
-fitness-gated microinvasion; WGD + allele-specific expression + phenotype-coupled gene programs on),
-re-grown deterministically by the importable helper `base_sim.py` — so every notebook shares the
-identical substrate. Start with `base_simulation`.
+tumour — a multi-focal breast **DCIS → IDC** lesion on a **ductal field** (many small epithelial-ring
+glands in moderate-density stroma; ≥10k cancer cells from ONE founder spreading between glands, then
+breaking out into the stroma under compartment selection; WGD + allele-specific expression +
+phenotype/niche-coupled gene programs on), re-grown deterministically by the importable helper
+`base_sim.py` — so every notebook shares the identical substrate. Start with `base_simulation`.
 
-- **`base_simulation.ipynb`** — shows the shared tumour: the duct + microinvasion, the distributed
-  fitness gradient, the programs tracking their drivers (proliferation↔division, EMT↔dispersal,
-  hypoxia↔core), and the ground-truth matrices each notebook reads.
+- **`base_simulation.ipynb`** — shows the shared tumour: the multi-focal DCIS→IDC growth grid
+  time-series, the clonal dynamics, and the ground-truth matrices (incl. `cell_gland` and the
+  compartment traits) each notebook reads.
+- **`compartment_selection_confound.ipynb`** — the DCIS→IDC transition (a lumen founder confined by the
+  gland wall + stroma until escape traits evolve) and the **genetic-vs-niche** expression confound (the
+  invasive `emt` program driven by both the `breach` genotype and the epithelial niche).
 - **`combining_scdna_scrna.ipynb`** — scDNA + scRNA from the same mixed tumour: reconstruct subclones
   from expression via DNA-defined copy-number profiles (the clonealign idea), scored vs truth.
 - **`wgd_allele_cna.ipynb`** — whole-genome doubling + the allele layer: the ploidy signature, why
   total copy number misses a doubling, and the allele-only-detectable states (`cell_rna_baf`).
 - **`gene_programs.ipynb`** — expression programs vs the contiguous-CNA confound; NMF recovery on the
-  mixture with the positional-clustering diagnostic.
-- **`tree_inference_dna.ipynb`** — the clonal phylogeny from bulk DNA-seq and from scDNA-seq, scored
-  against iscc's true clone tree.
-- **`scrna_visium_integration.ipynb`** — deconvolve Visium spots with an scRNA reference (NNLS),
-  scored against the true per-spot composition.
+  mixture with the positional-clustering diagnostic, plus the emt genotype+niche coupling.
+- **`tree_inference_dna.ipynb`** — the clonal phylogeny from bulk DNA-seq and from scDNA-seq, plus the
+  inter-gland **phylogeography** (which gland seeded which), scored against iscc's true clone tree.
+- **`scrna_visium_integration.ipynb`** — deconvolve Visium spots (across the multi-focal section) with
+  an scRNA reference (NNLS), scored against the true per-spot composition.
 - **`cohort_shared_programs.ipynb`** — a 5-patient cohort sharing one landscape: recover the shared
   gene programs across batches (scDEF, or an in-core fallback).
 - **`cohort_mhn_recurrence.ipynb`** — recurrent mutations and their interactions/order across the

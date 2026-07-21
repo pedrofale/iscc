@@ -1,22 +1,38 @@
-"""Shared spatial substrate for the iscc *science* showcase notebooks.
+"""Shared spatial substrate for the iscc *science* showcase notebooks — the **ductal field**.
 
 Every science notebook in ``notebooks/`` imports this helper so they all analyse the **same**
 deterministic, spatially-structured tumour (and the same 5-tumour cohort). Nothing is cached to disk
-— the tumour is small enough to re-grow in ~40-60 s, which keeps the notebooks self-contained and the
-ground truth exactly reproducible.
+— the tumour re-grows in ~15-30 s, which keeps the notebooks self-contained and the ground truth
+exactly reproducible.
 
-Design choices baked in here (see the per-notebook narratives for why they matter):
+The substrate is a **multi-focal DCIS→IDC lesion on a ductal field** (``DESIGN_ductal_field.md`` +
+``DESIGN_phenotype_plasticity.md`` §2): a FIELD of many small epithelial-ring glands scattered in
+moderate-density stroma (a population-genetics *island model*), grown from ONE cancer founder. The
+design choices baked in here (see the per-notebook narratives for why they matter):
 
-* **Spatial structure + microenvironment.** ``structure_radius > 0`` seeds a diploid
-  epithelial/stromal field with a cancer focus growing inside it, so every notebook analyses a
-  *mixture* (malignant + normal), never a pre-filtered cancer-only matrix.
-* **CINner-style selection** (``prop_driver``) drives clonal evolution.
-* **WGD on** (``wgd_rate = 0.05``) — whole-genome duplication at a realistic PCAWG-like prevalence.
-* **Allele-specific expression on** and the **gene-program layer on** (reusing the vetted
-  ``validation/programs_common.expression_params``), so the expression notebooks have real structure.
+* **Ductal-field substrate + microenvironment.** ``n_glands`` small epithelial rings in stroma
+  (``stroma_fill_frac`` real stromal cells) — every notebook analyses a *mixture* (malignant +
+  epithelial + stromal), never a pre-filtered cancer-only matrix. A single founder colonises the
+  other glands via low-rate **cross-gland (island) dispersal** (``cross_gland_kappa``), so a section
+  shows several *clonally related* foci.
+* **Compartment-dependent selection (DCIS→IDC).** Two sequenceable heritable traits, ``breach`` and
+  ``stromal_survival``, attenuate two live-cell-fraction death hazards (``epithelial_barrier`` at the
+  gland wall, ``stromal_hazard`` in the stroma). A lumen founder is confined (DCIS) until a subclone
+  evolves the escape traits and invades the stroma (IDC).
+* **CINner-style selection** (``prop_driver``) drives clonal evolution; **WGD on** (``wgd_rate=0.05``,
+  PCAWG-like); **allele-specific expression on** and the **gene-program layer on** (via the vetted
+  ``validation/programs_common.expression_params``).
+* **The genetic-vs-niche emt confound.** The invasive ``emt`` program is driven by BOTH ``breach``
+  (route-1 genetic arm, in ``DEFAULT_PHENOTYPE_PROGRAM_MAP``) AND the epithelial compartment field
+  (route-3 niche arm, ``niche_program_map={"epithelial": "emt"}``). ``prop_dispersal=0``, so the legacy
+  ``dispersal_rate→emt`` map is inert; ``breach`` gets a dedicated program gain.
 * **Shared landscape across the cohort.** ``grow_base_tumor`` never passes ``layout_seed``, so every
-  seed falls back to ``DEFAULT_LAYOUT_SEED`` and shares the SAME gene roles, program dictionary and
-  epistasis landscape — the comparability guarantee the cohort notebooks recover.
+  seed falls back to ``DEFAULT_LAYOUT_SEED`` and shares the SAME gene roles, program dictionary,
+  gland-field layout and epistasis landscape — the comparability guarantee the cohort notebooks recover.
+
+Parameters are scaled up from ``validation/validate_compartment_selection.py`` /
+``validate_ductal_field.py`` so the confined lesion still reaches **≥10 000 cancer cells** with the
+compartment barriers ON (a bigger field + more glands, not weaker barriers).
 """
 import os
 import sys
@@ -31,53 +47,52 @@ from iscc.tumor.models import GenotypeTumor  # noqa: E402
 
 BASE_SEED = 3
 COHORT_SEEDS = [3, 4, 5, 6, 7]  # 5 tumours sharing the landscape
+NORMALS = ("epithelial", "stromal", "immune")
 
 GENOME = {"n_segments": 12, "segment_size": 50}
-# CINner selection tuned so the founder is near-neutral (small, distributed fitness) rather than
-# hyper-polyclonal or instantly saturated: weak drivers (`driver_effects` just above 1) + a low
-# mutation rate keep most clones sub-maximal so there is a real fitness GRADIENT to see. Dispersal
-# mutations are rare but strong (a motility switch). No resistance genes (untreated primary).
-SELECTION = {"prop_driver": 0.15, "prop_dispersal": 0.003,
-             "prop_immune_resistance": 0.0, "prop_treatment_resistance": 0.0,
-             "driver_effects": 1.03, "dispersal_effects": 12.0}
-CANCER = {"division_rate": 0.4, "death_rate": 0.03, "max_birth_rate": 0.98,
-          "mutation_rate": 0.02, "dispersal_rate": 0.025, "cnv_prob": 0.15,
-          "wgd_rate": 0.05}  # low baseline division/dispersal so growth fills the lumen, WGD on
-# Gland geometry: an epithelial ring at `structure_radius` (a duct cross-section), an empty lumen the
-# cancer grows into, stroma outside. `resident_pressure_ref` + `crowding_mode="own"` make a cancer
-# cell in a normal-occupied deme need enough fitness to survive the crowding there, so breaching the
-# ring/stroma is fitness-gated (DCIS -> microinvasion). K per deme = 8.
-DEME = {"carrying_capacity": 8, "initial_cancer_cells": 4,
-        "resident_pressure_ref": 0.55, "crowding_mode": "own"}
-# R=18 duct holds ~13k cells, so growing to ~10k fills it ~3/4 -> the ring stays visible and only a
-# modest fraction microinvades (a contained DCIS), rather than a blob that overgrows the gland.
-SPATIAL = {"grid_size": 54, "structure_radius": 18}
-# Comedo-type hypoxia: O2 is supplied ONLY by the perfused stroma/empty tissue (`o2_source`), so the
-# cancer-packed lumen core starves and the hypoxia program lights up there (route 3, niche->program).
-# `o2_supply` must EXCEED `o2_consumption` (default 1) or even the stroma reads hypoxic (a flat field);
-# `o2_diffusion` sets the oxygen penetration depth (tuned so the gradient spans the duct radius).
-MICROENV = {"hypoxia": {"strength": 0.8, "o2_diffusion": 25.0, "o2_supply": 8.0,
-                        "o2_source": "perfused", "n_genes": 8}}
+# CINner selection on the ductal field. `prop_driver` gives clonal fitness variation; the two
+# compartment axes (`prop_breach`, `prop_stromal_survival`, with their `*_effects`) are the DCIS→IDC
+# escape traits. `prop_dispersal=0` (so cross-gland spread rate is a constant × dispersal_rate, and the
+# legacy dispersal→emt program route is inert); a small immune-resistance axis keeps the immune
+# microenvironment part of the data. Proportions × 600 genes all round to a non-empty gene set (verified
+# via t.selection.get_breach()/get_stromal_survival()).
+SELECTION = {"prop_driver": 0.04, "prop_dispersal": 0.0, "prop_immune_resistance": 0.02,
+             "prop_treatment_resistance": 0.02, "prop_breach": 0.03, "prop_stromal_survival": 0.03,
+             "breach_effects": 2.2, "stromal_survival_effects": 2.2}
+CANCER = {"division_rate": 0.7, "death_rate": 0.05, "max_birth_rate": 0.95,
+          "mutation_rate": 0.6, "dispersal_rate": 0.35, "cnv_prob": 0.15,
+          "wgd_rate": 0.05}  # WGD on (PCAWG-like)
+DEME = {"carrying_capacity": 20, "initial_cancer_cells": 8, "resident_pressure_ref": 0.2}
+# The ductal FIELD: 12 small epithelial-ring glands (radius 3) scattered ≥8 apart on a 44² grid, in
+# moderate-density stroma (stroma_fill_frac=0.3). K_duct/K_stroma are MODERATE (a 2D deme stands for a
+# 3D column through the duct/stroma depth, DESIGN_ductal_field.md §3). cross_gland_kappa is the low
+# island-dispersal rate that seeds one gland's lumen from another's (multi-focal spread, no breach).
+# epithelial_barrier / stromal_hazard are the two compartment hazards ON (tuned so the lesion shows a
+# DCIS→IDC transition AND still reaches ≥10k cancer cells on this scaled-up field).
+SPATIAL = {"grid_size": 44, "structure_radius": 3, "n_glands": 12, "gland_radius": 3,
+           "min_gland_sep": 8, "K_duct": 40, "K_stroma": 30, "stroma_fill_frac": 0.3,
+           "cross_gland_kappa": 0.06, "cross_gland_lambda": None,
+           "epithelial_barrier": 1.2, "stromal_hazard": 0.7}
 
 
 def EXPR():
-    """Program layer ON (via the vetted validation params) + allele-specific dosage ON.
+    """Program layer ON (via the vetted validation params) + allele-specific dosage ON + the
+    genetic-vs-niche emt confound coupling.
 
-    Two couplings are configured on top of the vetted params so the program gradients track their
-    drivers to a comparable degree:
-
-    * ``phenotype_program_strength`` is a PER-PHENOTYPE dict. Division's fold-change is bounded by
-      ``max_birth_rate`` (it saturates ~1.5x) whereas dispersal's is unbounded (tens x), so a single
-      shared gain would bury the proliferation signal under activity noise. A larger division gain
-      restores parity, so proliferation tracks division about as well as EMT tracks dispersal.
-    * ``niche_program_map`` routes the hypoxia FIELD (from ``MICROENV``) to the hypoxia program.
+    * ``niche_program_map={"epithelial": "emt"}`` routes the epithelial compartment field to the
+      invasive/emt program — the **niche arm** of the confound (the same clone expresses emt more at
+      the epithelial interface than in the stroma).
+    * ``phenotype_program_strength={"breach": 1.0, "__default__": 0.5}`` sizes the **genetic arm**:
+      ``breach → emt`` is already in ``DEFAULT_PHENOTYPE_PROGRAM_MAP``; ``breach`` sweeps to
+      near-fixation, so it needs a dedicated gain (larger than the ``[0,1)``-scaled default) for a
+      substantial genetic signal.
     """
     e = PC.expression_params(scatter=1.0)
     e["dosage_params"]["allele_specific"] = True
     cp = e["coupling_params"]
-    cp["phenotype_program_strength"] = {"__default__": 0.5, "division_rate": 10.0}
-    cp["niche_program_map"] = {"hypoxia": "hypoxia"}
-    cp["niche_program_strength"] = 8.0  # lift the field signal above per-cell activity noise
+    cp["niche_program_map"] = {"epithelial": "emt"}
+    cp["niche_program_strength"] = 3.0
+    cp["phenotype_program_strength"] = {"breach": 1.0, "__default__": 0.5}
     return e
 
 
@@ -87,11 +102,12 @@ def _n_cancer(t):
 
 
 def grow_base_tumor(seed=BASE_SEED, target_cancer=10000, cancer_params=None, expression=None,
-                    selection_params=None, verbose=False):
-    """Grow one spatially-structured tumour to >= ``target_cancer`` cancer cells and materialise it.
+                    selection_params=None, spatial_params=None, verbose=False):
+    """Grow one ductal-field tumour to >= ``target_cancer`` cancer cells and materialise it.
 
     Never passes ``layout_seed`` -> defaults to ``DEFAULT_LAYOUT_SEED`` so every seed shares the SAME
-    gene roles / program dictionary / epistasis landscape (the cohort-comparability guarantee).
+    gene roles / program dictionary / gland-field layout / epistasis landscape (the cohort-comparability
+    guarantee).
 
     Parameters
     ----------
@@ -99,14 +115,14 @@ def grow_base_tumor(seed=BASE_SEED, target_cancer=10000, cancer_params=None, exp
         Growth seed (also the cohort member id).
     target_cancer : int
         Grow until at least this many cancer cells exist.
-    cancer_params : dict, optional
-        Overrides merged into the base ``CANCER`` config (e.g. ``{"wgd_rate": 0.0}`` for the WGD-off
-        comparison in the allele-CNA notebook).
+    cancer_params, selection_params, spatial_params : dict, optional
+        Overrides merged into the base ``CANCER`` / ``SELECTION`` / ``SPATIAL`` configs. e.g.
+        ``cancer_params={"wgd_rate": 0.0}`` (WGD-off contrast, ``wgd_allele_cna``),
+        ``spatial_params={"epithelial_barrier": 0.0, "stromal_hazard": 0.0}`` (the barrier-OFF DCIS→IDC
+        control, ``compartment_selection_confound``), or an ``epistasis_params`` network in
+        ``selection_params`` (``cohort_mhn_recurrence``).
     expression : dict, optional
         Overrides the default ``EXPR()`` expression params.
-    selection_params : dict, optional
-        Overrides merged into the base ``SELECTION`` config (e.g. adding an ``epistasis_params``
-        network for the MHN/TreeMHN cohort notebook — the gene roles stay shared via ``layout_seed``).
     """
     cancer = dict(CANCER)
     if cancer_params:
@@ -114,17 +130,21 @@ def grow_base_tumor(seed=BASE_SEED, target_cancer=10000, cancer_params=None, exp
     selection = dict(SELECTION)
     if selection_params:
         selection.update(selection_params)
+    spatial = dict(SPATIAL)
+    if spatial_params:
+        spatial.update(spatial_params)
     t = GenotypeTumor(seed=seed, genome_params=GENOME, selection_params=selection,
-                      cancer_cell_params=cancer, deme_params=DEME, spatial_params=SPATIAL,
+                      cancer_cell_params=cancer, deme_params=DEME, spatial_params=spatial,
                       expression_params=(expression if expression is not None else EXPR()),
-                      microenv_params=MICROENV, update_mode="tau", tau=1.0)
-    # Adaptive stepping: coarse (10) while far from the target, fine (2) near it, so the tumour lands
-    # close to `target_cancer` instead of overshooting by ~50% in one big leap and overgrowing the duct.
+                      update_mode="tau", tau=1.0)
+    # Adaptive stepping: coarse while far from the target, fine near it, so the lesion lands close to
+    # `target_cancer` (an invasive mass grows fast, so a single coarse leap would overshoot badly).
     while True:
         ncan = _n_cancer(t)
         if ncan >= target_cancer:
             break
-        n_steps = 10 if ncan < 0.7 * target_cancer else 2
+        ratio = ncan / target_cancer
+        n_steps = 6 if ratio < 0.12 else (2 if ratio < 0.6 else 1)
         t.grow(n_steps=n_steps, seed=seed)
         if verbose:
             print(f"  seed={seed}: {_n_cancer(t)} cancer cells", flush=True)
@@ -135,7 +155,7 @@ def grow_base_tumor(seed=BASE_SEED, target_cancer=10000, cancer_params=None, exp
 def grow_cohort(seeds=COHORT_SEEDS, target_cancer=10000, **kwargs):
     """Generator over ``(seed, tumour)`` — grow one at a time so RAM never holds 5 full tumours.
 
-    Each materialised base tumour is ~1-2 GB; the cohort notebooks must assay each tumour to a
+    Each materialised ductal-field tumour is ~1-3 GB; the cohort notebooks must assay each tumour to a
     COMPACT matrix and drop the tumour before advancing (that is what makes this a generator).
     """
     for s in seeds:
@@ -144,46 +164,10 @@ def grow_cohort(seeds=COHORT_SEEDS, target_cancer=10000, **kwargs):
 
 # ------------------------------------------------------------------ shared per-cell helpers
 def cell_types(t):
-    """Per-cell coarse type array ('cancer'/'epithelial'/'stromal'/...) aligned to ``cell_data``."""
+    """Per-cell coarse type array ('cancer'/'epithelial'/'stromal'/'immune') aligned to ``cell_data``."""
     gid = t.cell_data["cell_type"]["cell_id"].astype(str).values
     g = t.genotypes
     return np.array([g[x].type if x in g else "?" for x in gid])
-
-
-def cell_rate(t, rate="division_rate"):
-    """Per-cell evolutionary rate ('division_rate','dispersal_rate',...) aligned to ``cell_data``.
-
-    NaN for any cell whose genotype does not carry the rate. ``division_rate`` is the CINner fitness
-    (baseline x driver multipliers, capped at ``max_birth_rate``); ``dispersal_rate`` is the motility.
-    """
-    gid = t.cell_data["cell_type"]["cell_id"].astype(str).values
-    g = t.genotypes
-    return np.array([g[x].evolutionary_parameters.get(rate, np.nan) if x in g else np.nan
-                     for x in gid])
-
-
-def cell_program(t, name):
-    """Per-cell activity of a named gene program ('proliferation','emt','hypoxia',...), or NaN col."""
-    Z = t.cell_data.get("cell_program")
-    if Z is None or name not in Z.columns:
-        import numpy as _np
-        return _np.full(len(t.cell_data["cell_type"]), _np.nan)
-    return Z[name].values
-
-
-def gland_ring(ax, color="k", ls="--", lw=0.9, alpha=0.6):
-    """Draw the epithelial-ring circle (radius ``structure_radius``) on a spatial axes, for context."""
-    R = SPATIAL["structure_radius"]
-    c = SPATIAL["grid_size"] / 2.0
-    th = np.linspace(0, 2 * np.pi, 200)
-    ax.plot(c + R * np.cos(th), c + R * np.sin(th), color=color, ls=ls, lw=lw, alpha=alpha)
-
-
-def cell_radius(t):
-    """Per-cell distance from the duct centre (for scoring core/rim gradients like hypoxia)."""
-    crd = t.cell_data["cell_crd"]
-    c = SPATIAL["grid_size"] / 2.0
-    return np.sqrt((crd["row"].values - c) ** 2 + (crd["col"].values - c) ** 2)
 
 
 def cancer_mask(t):
@@ -191,6 +175,108 @@ def cancer_mask(t):
     return cell_types(t) == "cancer"
 
 
+def cell_gland(t):
+    """Per-cell gland id aligned to ``cell_data`` (>=0 = gland index, -1 = stroma)."""
+    return t.cell_data["cell_gland"]["gland_id"].values
+
+
+def cell_rate(t, rate="division_rate"):
+    """Per-cell evolutionary rate ('division_rate','breach','stromal_survival',...) aligned to
+    ``cell_data``. NaN for any cell whose genotype does not carry the rate. ``division_rate`` is the
+    CINner fitness (baseline × driver multipliers, capped at ``max_birth_rate``)."""
+    gid = t.cell_data["cell_type"]["cell_id"].astype(str).values
+    g = t.genotypes
+    return np.array([g[x].evolutionary_parameters.get(rate, np.nan) if x in g else np.nan
+                     for x in gid])
+
+
+def cell_trait(t, name):
+    """Per-cell value of a compartment/evo trait from ``cell_evo`` ('breach','stromal_survival',...)."""
+    return t.cell_data["cell_evo"][name].values
+
+
+def cell_program(t, name):
+    """Per-cell activity of a named gene program ('proliferation','emt','hypoxia',...), or NaN col."""
+    Z = t.cell_data.get("cell_program")
+    if Z is None or name not in Z.columns:
+        return np.full(len(t.cell_data["cell_type"]), np.nan)
+    return Z[name].values
+
+
+def cell_epithelial_fraction(t):
+    """Per-cell epithelial fraction of the cell's deme — the niche arm of the emt confound.
+
+    ``microenv_truth["epithelial"]`` is the per-deme live epithelial fraction (populated by
+    ``make_cell_data`` whenever the gland structure is on), indexed here by each cell's deme."""
+    demes = t.cell_data["cell_deme"]["deme_id"].values
+    return t.microenv_truth["epithelial"][demes]
+
+
+# ------------------------------------------------------------------ spatial-viz helpers (ductal field)
+def draw_glands(ax, t, color="k", ls="--", lw=0.8, alpha=0.5):
+    """Overlay every gland's epithelial-ring circle (centre + ``gland_radius``) on a spatial axes."""
+    if t.gland_centers is None:
+        return
+    th = np.linspace(0, 2 * np.pi, 120)
+    for (cr, cc) in t.gland_centers:
+        ax.plot(cc + t.gland_radius * np.cos(th), cr + t.gland_radius * np.sin(th),
+                color=color, ls=ls, lw=lw, alpha=alpha)
+
+
+def gland_layout_grid(t):
+    """(grid × grid) per-deme gland id (>=0), NaN where stroma — the static field layout."""
+    grid = np.full((t.grid_size, t.grid_size), np.nan)
+    for di in range(len(t.demes)):
+        if t.gland_id[di] >= 0:
+            r, c = t.deme_coords[di]
+            grid[r, c] = t.gland_id[di]
+    return grid
+
+
+def cancer_frac_grid(t):
+    """(grid × grid) per-deme fraction of cells that are cancer, NaN where the deme is empty."""
+    grid = np.full((t.grid_size, t.grid_size), np.nan)
+    for di, deme in enumerate(t.demes):
+        total = sum(deme.values())
+        if total == 0:
+            continue
+        cancer = sum(c for g, c in deme.items() if t._is_cancer(g))
+        r, c = t.deme_coords[di]
+        grid[r, c] = cancer / total
+    return grid
+
+
+def cancer_gland_grid(t):
+    """(grid × grid) per-deme gland id of demes that CONTAIN cancer (>=0 = confined DCIS focus,
+    -1 = stroma-invaded IDC), NaN where no cancer — the multi-focal + breakout map."""
+    grid = np.full((t.grid_size, t.grid_size), np.nan)
+    for di, deme in enumerate(t.demes):
+        if any(t._is_cancer(g) for g in deme):
+            r, c = t.deme_coords[di]
+            grid[r, c] = t.gland_id[di]
+    return grid
+
+
+def glands_colonised(t):
+    """Set of gland indices that currently contain any cancer (multi-focal spread from one founder)."""
+    return {int(t.gland_id[di]) for di, deme in enumerate(t.demes)
+            if t.gland_id[di] >= 0 and any(t._is_cancer(g) for g in deme)}
+
+
+def stroma_cancer_pct(t):
+    """Percent of cancer cells that sit in the stroma (gland_id == -1) — the DCIS→IDC readout."""
+    stroma = ingland = 0
+    for di, deme in enumerate(t.demes):
+        cc = sum(c for g, c in deme.items() if t._is_cancer(g))
+        if t.gland_id[di] == -1:
+            stroma += cc
+        else:
+            ingland += cc
+    tot = stroma + ingland
+    return 100.0 * stroma / tot if tot else 0.0
+
+
+# ------------------------------------------------------------------ segment / assay helpers
 def segment_offsets(t):
     """Per-segment start indices into the per-gene copy-number matrix (len n_segments+1)."""
     sizes = np.asarray(t.selection.segment_sizes)
@@ -198,10 +284,38 @@ def segment_offsets(t):
 
 
 def segment_cn(t):
-    """(cells x n_segments) TOTAL copy number (first gene of each segment) + per-gene->segment map."""
+    """(cells × n_segments) TOTAL copy number (first gene of each segment) + per-gene->segment map."""
     sizes = np.asarray(t.selection.segment_sizes)
     offs = segment_offsets(t)
     cnv = t.cell_data["cell_cnv"].values
     seg = np.stack([cnv[:, offs[s]] for s in range(t.n_segments)], axis=1).astype(float)
     gene_seg = np.concatenate([np.full(sizes[s], s) for s in range(t.n_segments)]).astype(int)
     return seg, gene_seg
+
+
+def thin_section(t, per_deme_cap=8, seed=0):
+    """A depth-subsampled ``cell_data`` view for the 2D-section spatial assay (Visium).
+
+    iscc's ``Visium`` currently pools ALL cells within a spot's radius (the section-slice sampling of
+    ``DESIGN_ductal_field.md`` §3.1 is a pending ENGINE TODO, NOT built here), so with the moderate K a
+    single spot over the duct over-fills far past a realistic per-spot count. As a stand-in we sample at
+    most ``per_deme_cap`` cells per deme UNIFORMLY at random (uniform keeps the composition
+    representative) and hand Visium that thinned section. This is a NOTEBOOK-side workaround, not an
+    engine change. Returns a dict with the same keys as ``cell_data``, each frame reindexed to the kept
+    cells."""
+    rng = np.random.default_rng(seed)
+    demes = t.cell_data["cell_deme"]["deme_id"].values
+    ids = np.asarray(t.cell_data["cell_type"].index)
+    from collections import defaultdict
+    by_deme = defaultdict(list)
+    for i, d in enumerate(demes):
+        by_deme[int(d)].append(i)
+    keep_pos = []
+    for d, rows in by_deme.items():
+        if len(rows) <= per_deme_cap:
+            keep_pos.extend(rows)
+        else:
+            keep_pos.extend(int(r) for r in rng.choice(rows, size=per_deme_cap, replace=False))
+    keep_pos = np.sort(np.asarray(keep_pos))
+    keep_ids = ids[keep_pos]
+    return {k: (v.loc[keep_ids] if hasattr(v, "loc") else v) for k, v in t.cell_data.items()}
