@@ -34,7 +34,7 @@ GENOME = {"n_segments": 6, "segment_size": 60}
 CANCER = {"division_rate": 0.7, "death_rate": 0.05, "max_birth_rate": 0.95,
           "mutation_rate": 0.6, "dispersal_rate": 0.35}
 DEME = {"carrying_capacity": 20, "initial_cancer_cells": 8, "resident_pressure_ref": 0.2}
-SELECTION = {"prop_driver": 0.04, "prop_dispersal": 0.06, "prop_immune_resistance": 0.02,
+SELECTION = {"prop_driver": 0.04, "prop_dispersal": 0.0, "prop_immune_resistance": 0.02,
              "prop_treatment_resistance": 0.02, "prop_breach": 0.03, "prop_stromal_survival": 0.03,
              "breach_effects": 2.2, "stromal_survival_effects": 2.2}
 GRID = 20
@@ -48,8 +48,11 @@ EXPR = {
     "program_params": {"n_programs": 6, "n_genes_per_program": 12, "program_overlap": 0.1,
                        "seeded_programs": ("proliferation", "emt", "hypoxia", "drug_resistance",
                                            "immune_evasion")},
+    # emt genetic arm = breach (route 1); prop_dispersal=0, so dispersal->emt is inert. A dedicated
+    # breach gain sizes the genetic arm of the confound (breach in [0,1) sweeps to near-fixation, so a
+    # larger gain than the [0,1)-scaled default is needed for a substantial, illustrative genetic arm).
     "coupling_params": {"niche_program_map": {"epithelial": "emt"}, "niche_program_strength": 3.0,
-                        "phenotype_program_strength": {"dispersal_rate": 0.6, "__default__": 0.5}},
+                        "phenotype_program_strength": {"breach": 1.0, "__default__": 0.5}},
     "activity_params": {"activity_mean": 1.0, "activity_sd": 0.3, "activity_noise": 0.1},
 }
 NORMALS = ("epithelial", "stromal", "immune")
