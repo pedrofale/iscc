@@ -64,8 +64,8 @@ so v2 always degenerates back to it.
   natural home for the v2 epistate. R12 is the plastic-landscape framing.
 
 ## 2. v1 — compartment-dependent selection (GENETIC; the identifiable floor)
-**Runs on the ductal-field substrate** (`DESIGN_ductal_field.md`): many small low-K epithelial-ring glands at
-2D positions in sparse stroma, a single founder, local (cross-deme) + island (cross-gland) dispersal — so the
+**Runs on the ductal-field substrate** (`DESIGN_ductal_field.md`): many small epithelial-ring glands at
+2D positions in moderate-density stroma, a single founder, local (cross-deme) + island (cross-gland) dispersal — so the
 selection below plays out as multi-focal DCIS → IDC, and it's ST-usable. **Principle (one mechanic per
 compartment):** a compartment contributes a local **hazard** to cancer death, attenuated by a **matching
 heritable resistance trait** — exactly the existing immune term, generalised.
@@ -73,19 +73,19 @@ heritable resistance trait** — exactly the existing immune term, generalised.
 - **Two new gene-based axes** (mirror `make_immune_resistant`): `prop_breach`, `prop_stromal_survival`, with
   `breach_effects` / `stromal_survival_effects`, `N_breach`/`N_ss` counts, `update_breach`/`update_stromal_
   survival` returning `_rel_fitness` multipliers. They flow into `cell_data` + DNA-seq for free.
-- **`_death_rate` gains two terms** — but keyed differently (see `DESIGN_ductal_field.md` §5):
+- **`_death_rate` gains two terms**, both keyed to LIVE cell fractions (like the immune term):
   ```
-  death += epithelial_barrier · epithelial_fraction(deme) · (1 − breach)   # live wall cells
-  death += stromal_hazard     · stromal_field(deme)       · (1 − stromal_survival)  # environmental region
+  death += epithelial_barrier · epithelial_fraction(deme) · (1 − breach)          # live wall cells
+  death += stromal_hazard     · stromal_fraction(deme)    · (1 − stromal_survival) # live stromal cells
   ```
-- **The epithelial barrier is never a fixed label.** It reads the deme's **live** epithelial-cell fraction
-  (like the existing `immune_fraction`), so it dilutes as cancer crosses the wall — the wall *is* the
-  epithelial cells. **Normals are not cleared** (cancer coexists with / passes through them); the barrier
-  selects on *presence*, not removal, so no clearance is needed (normals stay immortal, `DESIGN_crowding.md`).
-  Cross-gland (island) dispersal bypasses the wall entirely (lumen→lumen) → confined DCIS spread needs no
-  breach; breach gates only the *local* escape into stroma. **The stromal hazard, by contrast, is an
-  environmental FIELD** (stroma is seeded sparse, so a live-fraction term would be too weak) — not a fixed
-  compartment label on the cells, but a region property.
+- **Neither is a fixed label — both read the deme's live cell fractions** (like the existing `immune_fraction`),
+  so pressure changes as cancer accumulates and dilutes the resident normals. The epithelial wall *is* the
+  epithelial cells (dilutes as cancer crosses); the stromal cells (fibroblasts etc., seeded at moderate
+  density, `DESIGN_ductal_field.md` §2) *are* the hostile microenvironment. **Normals are not cleared** (cancer
+  coexists with / passes through them); the hazard selects on *presence*, not removal, so no clearance is
+  needed (normals stay immortal, `DESIGN_crowding.md`). Cross-gland (island) dispersal bypasses the wall
+  entirely (lumen→lumen) → confined DCIS spread needs no breach; breach gates only the *local* escape into
+  stroma.
 - **Emergent behaviour (selection):** sequential invasion — lumen → breach the epithelial ring → survive the
   stroma → resist immune where present. Each barrier selects a *different* heritable trait, each recoverable by
   sequencing. The **selected traits are genetic** (permanent, additive, cannot switch off): who *survives* a

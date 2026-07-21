@@ -54,8 +54,7 @@ def get_inside(border):
     return points
 
 class GlandularTumor(Tumor):
-    def __init__(self, n_structures=1, structure_radius=0, grid_size=10,
-                 epithelial_barrier=0.0, stromal_hazard=0.0, **tumor_kwargs):
+    def __init__(self, n_structures=1, structure_radius=0, grid_size=10, **tumor_kwargs):
         super(GlandularTumor, self).__init__(**tumor_kwargs)
         self.type = 'glandular'
 
@@ -64,18 +63,10 @@ class GlandularTumor(Tumor):
             grid_size = self.spatial_params['grid_size']
             n_structures = self.spatial_params['n_structures']
             structure_radius = self.spatial_params['structure_radius']
-            epithelial_barrier = self.spatial_params.get('epithelial_barrier', epithelial_barrier)
-            stromal_hazard = self.spatial_params.get('stromal_hazard', stromal_hazard)
-
+        
         self.grid_size = grid_size
         self.n_structures = n_structures
         self.structure_radius = structure_radius
-        # Compartment-dependent selection (v1, DESIGN_phenotype_plasticity.md §2): the two
-        # compartment-hazard coefficients read by Deme.get_cancer_death_rate, mirroring the count
-        # engine's spatial_params.{epithelial_barrier,stromal_hazard}. DEFAULT 0.0 -> both terms
-        # vanish -> byte-identical to before (the F8 off-by-default discipline).
-        self.epithelial_barrier = epithelial_barrier
-        self.stromal_hazard = stromal_hazard
         self.make_grid()
 
     def make_grid(self):

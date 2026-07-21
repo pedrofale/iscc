@@ -8,7 +8,7 @@ that's v2, explicitly out of scope here. Branch from current `dev`.
 
 **PREREQUISITE: build `handoffs/ductal_field_substrate.md` FIRST** (multi-gland island field + gland_id labels
 + cross-gland dispersal). This handoff runs ON that substrate: glands = small epithelial rings at 2D positions
-in sparse stroma, one founder, multi-focal DCIS→IDC. Count engine (`GenotypeTumor`) only for v1; the cell-engine
+in moderate-density stroma, one founder, multi-focal DCIS→IDC. Count engine (`GenotypeTumor`) only for v1; the cell-engine
 mirror is deferred (the substrate is count-only). If the substrate isn't in yet, stop and do it first.
 
 The whole design principle is: **the immune-resistance axis is already exactly this pattern** — a heritable
@@ -33,16 +33,16 @@ REPO & ENV
 THE PRINCIPLE (one mechanic, already in the engine for immune)
 Each compartment contributes a LOCAL hazard to cancer death, attenuated by a MATCHING heritable resistance
 trait. `_death_rate` (count.py:403) already does this for immune. v1 adds the same shape for the two ductal-
-field compartments (gland epithelial rings + stroma, from the substrate handoff), but keyed DIFFERENTLY (see
-DESIGN_phenotype_plasticity.md §2 / DESIGN_ductal_field.md §5):
-    death += epithelial_barrier · epithelial_fraction(deme) · (1 − breach)   # LIVE wall-cell fraction
-    death += stromal_hazard     · stromal_field(deme)       · (1 − stromal_survival)  # environmental region
-THE EPITHELIAL BARRIER IS NEVER A FIXED LABEL: it reads the deme's LIVE epithelial-cell fraction (exactly like
-immune_fraction), so it dilutes as cancer crosses the wall (the wall IS the epithelial cells). Cross-gland
-(island) dispersal from the substrate BYPASSES the wall (lumen->lumen), so confined DCIS spread needs no breach
-— breach gates only LOCAL escape into stroma. THE STROMAL HAZARD, by contrast, is an environmental FIELD
-(stroma is seeded sparse, so a live-fraction term would be too weak): a per-deme stroma-region signal
-(gland_id==-1, or an F8-style field), NOT the live stromal-cell fraction. Normals are NOT cleared in v1 —
+field compartments (gland epithelial rings + stroma, from the substrate handoff) — BOTH keyed to LIVE cell
+fractions like immune (see DESIGN_phenotype_plasticity.md §2 / DESIGN_ductal_field.md §5):
+    death += epithelial_barrier · epithelial_fraction(deme) · (1 − breach)          # live wall cells
+    death += stromal_hazard     · stromal_fraction(deme)    · (1 − stromal_survival) # live stromal cells
+NEITHER IS A FIXED LABEL: both read the deme's LIVE cell fractions (exactly like immune_fraction), so pressure
+changes as cancer accumulates and dilutes the resident normals. The epithelial wall IS the epithelial cells
+(dilutes as cancer crosses); the stromal cells (fibroblasts etc., seeded at MODERATE density by the substrate,
+not sparse) ARE the hostile microenvironment. Cross-gland (island) dispersal BYPASSES the wall (lumen->lumen),
+so confined DCIS spread needs no breach — breach gates only LOCAL escape into stroma. Normals are NOT cleared in
+v1 —
 cancer coexists with / passes through them — which is sufficient because the barrier selects on the PRESENCE of
 normal cells, not
 their removal (normals stay immortal, the crowding-fix invariant, DESIGN_crowding.md). Sequential invasion
@@ -83,16 +83,17 @@ PART B — the two death terms (count engine)
 - _epithelial_fraction (mirror _immune_fraction, count.py:391): fraction of the deme that is epithelial
   (self.genotypes[gid].type == "epithelial"). Reuse the total-passed-in optimisation. This is a LIVE fraction
   (the wall dilutes as cancer crosses).
-- _stromal_field(deme_idx): the environmental stromal-region signal — NOT a live cell fraction. Simplest v1:
-  1.0 if the deme is stroma (self.gland_id[deme_idx] == -1 from the substrate) else 0.0 (optionally smoothed
-  by an F8-style field). Stroma is seeded sparse, so keying to the cell fraction would be too weak — use the
-  region.
+- _stromal_fraction (mirror _immune_fraction, count.py:391): fraction of the deme that is stromal
+  (self.genotypes[gid].type == "stromal"). LIVE fraction, symmetric with epithelial/immune — the stromal cells
+  (seeded at MODERATE density by the substrate, so the fraction is meaningful) ARE the hostile microenvironment;
+  it softens as cancer dilutes them. (Optional variant only if a benchmark needs persistent hostility: a
+  stroma-region field self.gland_id[deme_idx]==-1 instead — NOT the default.)
 - _death_rate (count.py:455, right after the immune line): add the two terms, clamping the trait to [0,1] the
   same way `ir` is clamped (count.py:454):
         b  = min(max(rep.evolutionary_parameters["breach"], 0.0), 1.0)
         ss = min(max(rep.evolutionary_parameters["stromal_survival"], 0.0), 1.0)
         death += self._epithelial_barrier * self._epithelial_fraction(deme, total) * (1.0 - b)
-        death += self._stromal_hazard     * self._stromal_field(deme_idx)          * (1.0 - ss)
+        death += self._stromal_hazard     * self._stromal_fraction(deme, total)    * (1.0 - ss)
 - config: self._epithelial_barrier / self._stromal_hazard, DEFAULT 0.0 (off -> the terms vanish -> byte-
   identical). Put them next to self._immune_prob_kill (count.py:194) — read from spatial_params so the "payoff
   table" is edit-a-config, not edit-the-engine.
@@ -147,7 +148,8 @@ TESTS (tests/test_compartment_selection.py):
 - OFF-by-default byte-identical (both axes + barriers 0 -> identical to a ductal-field-substrate baseline).
 - a breach-competent genotype has strictly LOWER death than a non-breacher in an epithelial(wall)-occupied
   deme, and EQUAL death in a pure-lumen/cancer deme (breach pays off only at the wall).
-- stromal_survival: strictly LOWER death in a stroma-region deme (stromal_field==1), EQUAL elsewhere.
+- stromal_survival: strictly LOWER death in a stromal-cell-occupied deme (stromal_fraction>0), EQUAL where no
+  stromal cells are present.
 - ground truth: breach / stromal_survival gene counts + the per-genotype traits surface correctly.
 
 DELIVERABLES: the two axes end-to-end (off-by-default); the two _death_rate terms in the COUNT engine (cell

@@ -38,7 +38,8 @@ Today _seed_structure seeds ONE ring at the grid centre. Generalise to N glands:
   lumen — leave empty (DCIS-growable). Multiple demes per gland (ring + lumen) ⇒ within-gland neighbour
   dispersion.
 - Stroma: every deme not belonging to a gland gets the "stromal" genotype at round(stroma_fill_frac*K_stroma)
-  cells (SPARSE when <1) — normal stroma is acellular; leave headroom for invasion.
+  cells — MODERATE density (stroma_fill_frac≈0.3–0.5; stroma is less dense than epithelium but NOT empty — real
+  stromal cells that the assays capture AND that carry the stromal hazard), leaving headroom for invasion.
 - Founder: ONE cancer founder in ONE gland's lumen (pick a lumen deme of gland 0).
 
 PART 2 — PER-DEME GLAND LABELS (ground truth + targeting)
@@ -68,7 +69,7 @@ PART 4 — CARRYING CAPACITY PER COMPARTMENT (K captures 3D depth — NOT a hand
 - A 2D deme stands for a 3D COLUMN (cross-section × duct/stroma depth), so K is a real subpopulation size,
   MODERATE-TO-LARGE — do NOT shrink it to a handful. Duct demes: K_duct moderate (captures depth), with a duct
   = a small ring of a few demes (lumen + wall) for within-duct structure. Stroma demes: K_stroma
-  similar/modestly higher, seeded sparse. Honour a PER-DEME K in the crowding death law (_death_rate /
+  similar/modestly higher, seeded at MODERATE density (stroma_fill_frac≈0.3–0.5). Honour a PER-DEME K in the crowding death law (_death_rate /
   _resident_ref) — today carrying_capacity is a scalar; add a per-deme capacity array.
 - ST resolution is a GRID-SPACING constraint, NOT a K bound (corrects DESIGN's earlier note): a Visium spot
   must cover SEVERAL demes to be a mixture — set by grid density vs spot_radius, INDEPENDENT of K. Keep the
@@ -85,7 +86,7 @@ PARAMETERS.md: document n_glands, gland_radius, min_gland_sep, K_duct, K_stroma,
 cross_gland_kappa, cross_gland_lambda (spatial section), with defaults = off/current.
 
 VALIDATION (validation/validate_ductal_field.py -> manuscript/figures/validation_ductal_field.png):
-Grow a multi-gland field (n_glands≈10–30, small gland_radius, low K_duct, sparse stroma, cross_gland_kappa>0)
+Grow a multi-gland field (n_glands≈10–30, small gland_radius, moderate K, moderate-density stroma, cross_gland_kappa>0)
 from ONE founder. Show:
   (A) multi-focal structure: plot_grid coloured by gland_id + cancer presence — several glands colonised from
       one founder; the fraction of glands invaded rises over time.
@@ -105,7 +106,7 @@ is INCOMPLETE.
 
 TESTS (tests/test_ductal_field.py):
 - OFF byte-identical (n_glands=1, kappa=0, fill=1, uniform K -> identical to the pre-change single structure).
-- n_glands>1 seeds N disjoint rings + sparse stroma; gland_id labels + gland_lumen_demes correct; one founder.
+- n_glands>1 seeds N disjoint rings + moderate-density stroma; gland_id labels + gland_lumen_demes correct; one founder.
 - cross_gland_kappa>0: cancer reaches a DIFFERENT gland than the founder's (a cross-gland hop occurs), and its
   lineage traces back to the founder (genotypes_parents); a STROMA cell never initiates a cross-gland hop.
 - per-deme K honoured (duct demes cap at K_duct, stroma at K_stroma).

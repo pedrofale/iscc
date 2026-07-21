@@ -35,8 +35,10 @@ bottleneck at each hop). This is the multi-region-phylogeny confound in a DCIS s
   epithelial ring** (radius ~2–3 demes: lumen inside, epithelial wall on the circumference), seeded to
   `K_duct` on the wall; lumen demes start empty (DCIS-growable). Multiple demes per gland ⇒ within-gland
   neighbour dispersion (the requested intra-duct spatial effect).
-- **Stroma** fills the rest, seeded **sparse** (low baseline occupancy of a higher-headroom deme — normal
-  stroma is acellular; invasion fills it into a dense mass).
+- **Stroma** fills the rest, seeded at a **realistic moderate density** (stroma is less dense than epithelium
+  but NOT empty — it has fibroblasts/immune/endothelial cells; `stroma_fill_frac` ≈ 0.3–0.5 of `K_stroma`),
+  leaving headroom for an invasive mass to fill. These stromal cells are real cells (captured by scRNA/Visium)
+  AND the source of the stromal hazard (§5).
 - **Per-deme `gland_id`** label (which gland, or stroma) recorded at seeding — needed for cross-gland
   targeting and for the compartment hazards / ground truth.
 - **One cancer founder** in one gland's lumen.
@@ -49,8 +51,8 @@ a realistic **3D** duct volume; the resulting "thousands of cells per duct" is c
 cross-section over-count it would be if K were the whole cell budget.
 - `K_duct`: **moderate** (captures depth); a duct is a small ring of a FEW demes (lumen + wall) so within-duct
   neighbour dispersion still works. Not a handful of cells per deme.
-- `K_stroma`: similar / modestly higher (bulk), seeded **sparse** (acellular normal stroma; headroom for a
-  dense invasive mass).
+- `K_stroma`: similar / modestly higher (bulk), seeded at **moderate density** (`stroma_fill_frac`≈0.3–0.5 —
+  real stromal cells, meaningful fraction for the hazard, headroom for a dense invasive mass).
 - **ST resolution is a GRID-SPACING constraint, NOT a K bound** (this corrects an earlier note): a Visium spot
   must cover **several demes** to be a mixture (for deconvolution / sub-spot structure), set by grid density vs
   spot radius — *independent of per-deme K*. K is the depth population the assay samples; large K just gives
@@ -86,13 +88,19 @@ crowding is via death). Split the dispersing daughters into two channels:
   epithelial cells; it dynamically dilutes as cancer crosses (the composition-based, no-fixed-label
   requirement). Cross-gland (island) dispersal **bypasses** the wall (lumen→lumen), so it needs no breach —
   the wall confines *local* escape into stroma, not intraductal spread. That is exactly DCIS biology.
-- **Stromal hazard = a stromal-region FIELD**, not the live stromal-cell fraction: normal stroma is seeded
-  sparse, so a fraction-based term would be too weak; the stromal hostility is environmental (immune/hypoxia/
-  ECM/no niche support), so key it to the stromal region (F8-style), `(1−stromal_survival)`.
+- **Stromal hazard = the live stromal-cell fraction** (`stromal_fraction(deme)·(1−stromal_survival)`),
+  symmetric with the epithelial barrier and the immune term — the stromal cells (fibroblasts etc.) *are* the
+  hostile microenvironment, and keying to their live fraction is composition-based (no fixed label) and
+  consistent. This requires seeding stroma at a **realistic moderate density** (§2) so the fraction is
+  meaningful (stroma is less dense than epithelium but NOT empty); the (immortal) stromal cells then dilute as
+  cancer invades, so the hazard is strongest when a clone first arrives in virgin stroma and softens as it
+  establishes. *(Optional variant, not the default: a persistent stromal-region FIELD if you want
+  `stromal_survival` under selection everywhere even after cancer takes over — less consistent, use only if a
+  benchmark needs it.)*
 
 ## 6. Scope / staging
 - **v1:** the geometry (multi-gland island field), the cross-gland dispersal channel + `gland_id` labels, the
-  low-K / sparse-stroma capacities. The `GenotypeTumor` (count) engine only (default). Off-by-default: N=1
+  per-compartment K + moderate-density stroma. The `GenotypeTumor` (count) engine only (default). Off-by-default: N=1
   gland + κ=0 recovers the current single-structure behaviour (byte-identical when the field is off).
 - **Not planned:** an explicit ductal graph / drawn connecting ducts (option B — the island rate replaces it);
   a full 3D engine; normal-cell clearance (`DESIGN_phenotype_plasticity.md` §2 — the barrier selects on
