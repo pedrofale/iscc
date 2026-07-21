@@ -175,3 +175,69 @@ cohort_mhn_recurrence — all EXECUTED, ≥10k cancer cells, mixed microenvironm
 BACKLOG.md note. Commit on `dev` with the Co-Authored-By trailer. In the FINAL REPORT, embed the base_simulation
 and compartment_selection_confound growth grid images so the user can SEE the multi-focal DCIS→IDC growth.
 ```
+
+---
+
+## FOLLOW-UP FIXES (post-execution review, 2026-07-21)
+
+The migration executed cleanly (commit `b13ac35`, all 9 notebooks run with no errors), but a REVIEW OF THE
+RESULTS (not just "did it run") found three notebooks whose headline metrics came back degenerate/weak. "Ran
+without errors" is not "the science is sound" — a `nan` correlation and an ARI of −0.02 are SILENT failures.
+Fix the three below. Copy this block into the same session (it already has the notebooks' context).
+
+```
+Fix three notebooks in notebooks/ whose executed RESULTS came back degenerate/weak (the migration itself,
+commit b13ac35, is fine — this is a results-quality follow-up). Re-execute each in the core env
+(~/miniconda3/envs/iscc/bin/python), keep every grid plot, report numbers honestly, commit on `dev` WITH
+`Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`. Do NOT change engine code — notebooks only.
+
+FIX 1 (HIGHEST PRIORITY) — notebooks/combining_scdna_scrna.ipynb (flagship integration; results are broken)
+Symptoms in the executed outputs: "scDNA per-clone CN correlation with truth = nan"; per-clone Spearman
+[nan, nan, -0.22, 0.37, 0.43]; "clone reconstructed from RNA alone: accuracy 45%, ARI -0.02" (≈ chance —
+the 45% is inflated by class imbalance).
+(a) BUG — the nan/ConstantInputWarning is a CONSTANT-INPUT correlation: a clone's CN (or consensus) profile is
+    constant across segments, so corr is undefined. Guard it — skip/NaN-omit clones whose CN profile has zero
+    variance, or aggregate only over clones that actually carry CN variation. No metric should print nan.
+(b) THE REAL GAP — the notebook identifies clones from TOTAL copy number ONLY. It references NO allele signal at
+    all (grep: 0 hits for baf / allele / cell_rna_baf / segment_allele_cn / cell_exp_p / cell_exp_m). But
+    base_sim turns the ALLELE-SPECIFIC layer ON (allele_specific=True, wgd_rate=0.05) and provides cell_rna_baf,
+    cell_exp_p/m, and the GROUND-TRUTH allele CN via validation/integration_common.segment_allele_cn (per-cell
+    per-segment (p_cn,m_cn); imbalanced = |p-m|>=1). Allelic imbalance (BAF != 0.5) separates clones that total
+    CN CANNOT — copy-neutral LOH and allelically-unbalanced states. ADD the allele/BAF signal to the clone-ID
+    (e.g. cluster on total CN + per-segment BAF / allele-specific CN together), which is exactly the
+    "in the presence of allelic imbalances" lever that should raise the accuracy above chance.
+(c) MODALITY LABELLING (do not mislabel the tool) — Numbat is an scRNA-based, allele-aware CNA/clone caller
+    (fed the RNA allele counts; iscc's p/m homologs ARE the phasing, no population panel — see
+    validation/validate_numbat.py). Route allele-aware calling as Numbat ON THE RNA SIDE; do NOT call it "Numbat"
+    in a DNA-only step. The DNA-side allele-aware analogue is allele-specific scDNA / BAF clustering.
+(d) SIGNAL AVAILABILITY / expectations — allele-ONLY signal is scarce unless there are WGD+loss / LOH events
+    ("iscc CNAs mostly change total CN and cnLOH is rare" — the Numbat validation finding). base_sim has WGD on,
+    so SOME imbalance exists; verify the allele-imbalanced fraction is non-trivial (segment_allele_cn: imbalanced
+    & even total) before claiming allele signal helps. If the in-core reconstruction stays weak even with the
+    allele signal, report it HONESTLY and point to validation/validate_clonealign.py (the REAL clonealign gets
+    AUC 0.84) rather than inflating — do NOT print a misleading accuracy without its ARI. Cross-reference
+    notebooks/wgd_allele_cna.ipynb (the dedicated allelic-imbalance showcase) for the allele-CN API.
+
+FIX 2 — notebooks/compartment_selection_confound.ipynb (confound variance panel is degenerate)
+Symptom: emt-drive variance split = 95% niche / 5% genetic (genetic 0.030, niche 0.624), and panel B is flat
+(mean breach 0.93 in-gland vs 0.92 in-stroma). Cause: breach SWEEPS to near-fixation (0.87-0.93) in the
+fully-invaded end-state tumour, so its genetic-arm variance collapses (a swept driver explains little
+cell-to-cell variance) and the in-gland-vs-in-stroma contrast washes out.
+FIX: sample the confound at a MID-TRANSITION timepoint — while the DCIS→IDC breakout is still in progress and
+breach mean is ≈0.71 (the regime validate_compartment_selection.py runs in, giving the balanced ~65% niche /
+35% genetic split with genotype-controlled r≈0.40-0.43). Grow to the mid-transition (e.g. stop when ~30-50% of
+cancer has reached the stroma, or take an intermediate snapshot) and compute the confound + the trait panel
+THERE. Keep the genotype-controlled partial correlation r≈0.43 as the HEADLINE (it is the real confound result);
+the point of the fix is to make the variance split and panel B non-degenerate, not to change the message.
+
+FIX 3 (LOWER PRIORITY) — notebooks/gene_programs.ipynb (NMF recovery mediocre)
+Symptom: mean matched cosine 0.39; immune_evasion 0.05 (essentially unrecovered). Naive NMF on a mixture is
+expected to be weak, so this is mostly about honesty: add a one-line note that the REAL scDEF/cNMF benchmark
+(validation/validate_programs.py) recovers programs far better, OR improve the in-core preprocessing (HVG
+selection / normalization) if it lifts recovery cheaply. Not blocking; do not over-engineer.
+
+ACCEPTANCE: re-execute the three notebooks (no errors, no nan headline metrics, grid plots intact); commit on
+`dev`; in the FINAL REPORT quote the corrected numbers (combining_scdna_scrna clone-ID accuracy WITH allele
+signal + its ARI; the mid-transition confound split + r) so the user can see the fixes actually improved the
+results. Report weak results honestly rather than inflating them.
+```
