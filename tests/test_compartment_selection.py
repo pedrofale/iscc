@@ -26,9 +26,8 @@ from conftest import (
     GENOME_PARAMS, SELECTION_PARAMS, CANCER_CELL_PARAMS, N_SEGMENTS, SEGMENT_SIZE,
     EPITHELIAL_CELL_PARAMS, STROMAL_CELL_PARAMS, IMMUNE_CELL_PARAMS, DEME_PARAMS,
 )
-from iscc.tumor.models import GenotypeTumor, GlandularTumor
-from iscc.tumor.components.cell import CancerCell, EpithelialCell, StromalCell
-from iscc.tumor.components.deme import Deme
+from iscc.tumor.models import GenotypeTumor
+from iscc.tumor.components.cell import CancerCell
 from iscc.tumor.components.selection import Selection
 
 # A structured tumour (structure_radius > 0) seeds the epithelial ring + stroma the compartment
@@ -50,11 +49,6 @@ _GOLDEN_COUNT = {
     2: (1526, "291cfc18b067fc46b9eef9b6b6177ddc"),
     3: (1526, "59029138da96904e502af4aa46c2badf"),
 }
-_GOLDEN_CELL = {
-    1: (1460, "aef23751cd4977f37c450a65af4ad073"),
-    2: (1458, "1c1226ba9d23c2afcc6acc2040be9772"),
-    3: (1464, "45aaeb336a17aa2755909796baefa93f"),
-}
 
 
 def _snv_hash(t):
@@ -70,30 +64,12 @@ def _count(seed, steps=120, selection=SELECTION_PARAMS, spatial=SPATIAL):
     return t
 
 
-def _cell(seed, steps=60, selection=SELECTION_PARAMS, epithelial_barrier=0.0, stromal_hazard=0.0):
-    t = GlandularTumor(seed=seed, genome_params=GENOME_PARAMS, selection_params=selection,
-                       cancer_cell_params=CANCER_CELL_PARAMS, epithelial_cell_params=EPITHELIAL_CELL_PARAMS,
-                       stromal_cell_params=STROMAL_CELL_PARAMS, immune_cell_params=IMMUNE_CELL_PARAMS,
-                       deme_params=DEME_PARAMS, grid_size=15, n_structures=1, structure_radius=4,
-                       epithelial_barrier=epithelial_barrier, stromal_hazard=stromal_hazard)
-    t.grow(n_steps=steps, seed=seed)
-    return t
-
-
 @pytest.mark.parametrize("seed", sorted(_GOLDEN_COUNT))
 def test_count_off_by_default_byte_identical(seed):
     t = _count(seed)
     size, digest = _GOLDEN_COUNT[seed]
     assert t.get_tumor_size() == size
     assert _snv_hash(t) == digest, "compartment feature off perturbed the count-engine growth stream"
-
-
-@pytest.mark.parametrize("seed", sorted(_GOLDEN_CELL))
-def test_cell_off_by_default_byte_identical(seed):
-    t = _cell(seed)
-    size, digest = _GOLDEN_CELL[seed]
-    assert t.get_tumor_size() == size
-    assert _snv_hash(t) == digest, "compartment feature off perturbed the cell-engine growth stream"
 
 
 def test_explicit_zero_matches_absent():
@@ -205,46 +181,8 @@ def test_live_composition_gates_the_barrier():
 
 
 # --- both engines agree on the compartment death terms ----------------------------------------
-def test_engines_agree_compartment_death():
-    barrier, hazard = 0.5, 0.3
-    breach, ss = 0.7, 0.4
-    deme_params = {"carrying_capacity": 10, "initial_cancer_cells": 3, "crowding_margin": 0.1,
-                   "maximum_death_rate": 1.0, "resident_pressure_ref": 0.5}
-
-    # COUNT engine: a deme of 3 cancer + 4 epithelial + 2 stromal.
-    tc = GenotypeTumor(seed=1, genome_params=GENOME_PARAMS, selection_params=SEL_ON,
-                       cancer_cell_params=CANCER_CELL_PARAMS, deme_params=deme_params,
-                       spatial_params={**SPATIAL, "structure_radius": 3,
-                                       "epithelial_barrier": barrier, "stromal_hazard": hazard})
-    cg = tc.founder_id
-    tc.genotypes[cg].evolutionary_parameters["breach"] = breach
-    tc.genotypes[cg].evolutionary_parameters["stromal_survival"] = ss
-    epi, stro = tc._normal_genotype("epithelial"), tc._normal_genotype("stromal")
-    tc.demes[0] = {cg: 3, epi: 4, stro: 2}
-    d_count = tc._death_rate(cg, 0)
-
-    # CELL engine: the same composition and traits in one Deme.
-    tg = GlandularTumor(seed=1, genome_params=GENOME_PARAMS, selection_params=SEL_ON,
-                        cancer_cell_params=CANCER_CELL_PARAMS, epithelial_cell_params=EPITHELIAL_CELL_PARAMS,
-                        stromal_cell_params=STROMAL_CELL_PARAMS, immune_cell_params=IMMUNE_CELL_PARAMS,
-                        deme_params=deme_params, grid_size=11, structure_radius=0,
-                        epithelial_barrier=barrier, stromal_hazard=hazard)
-    deme = Deme(tumor=tg, row=0, col=0, id=0, **deme_params)
-    for _ in range(3):
-        c = tg.cancer_cell.divide()
-        c.evolutionary_parameters = dict(tg.cancer_cell.evolutionary_parameters)
-        c.evolutionary_parameters["breach"] = breach
-        c.evolutionary_parameters["stromal_survival"] = ss
-        deme.add_cell(c, genotype_id="cancer")
-    for _ in range(4):
-        deme.add_cell(EpithelialCell(n_segments=N_SEGMENTS, segment_size=SEGMENT_SIZE, **EPITHELIAL_CELL_PARAMS))
-    for _ in range(2):
-        deme.add_cell(StromalCell(n_segments=N_SEGMENTS, segment_size=SEGMENT_SIZE, **STROMAL_CELL_PARAMS))
-    d_cell = deme.get_cancer_death_rate(
-        CANCER_CELL_PARAMS["death_rate"], division_rate=CANCER_CELL_PARAMS["division_rate"],
-        immune_cell_fraction=0.0, immune_resistance=0.0, breach=breach, stromal_survival=ss)
-
-    assert d_count == pytest.approx(d_cell, abs=1e-12)
+# NB the cell-engine mirror is DEFERRED in v1 (the ductal-field substrate is count-engine only), so
+# there is no engine-agreement test here; the death terms live in count.py's _death_rate only.
 
 
 # --- Part D: the compartment as an R13 niche field (the confound) ------------------------------

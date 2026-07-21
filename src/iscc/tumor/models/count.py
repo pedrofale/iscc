@@ -260,6 +260,28 @@ class GenotypeTumor:
         self._crowding_ref = deme_params.get(
             "crowding_ref", getattr(self.genotypes[self.founder_id], "max_birth_rate", 0.98))
         self.structure_radius = spatial_params.get("structure_radius", 0)
+        # Ductal-field substrate (DESIGN_ductal_field.md): the structured case is a FIELD of many small
+        # epithelial-ring glands at 2D positions in sparse stroma (an island model), not one central
+        # ring. OFF-BY-DEFAULT: n_glands=1 + gland_radius=structure_radius + stroma_fill_frac=1.0 +
+        # K_duct=K_stroma=carrying_capacity reproduces the single-central-ring seeding byte-identically.
+        self.n_glands = int(spatial_params.get("n_glands", 1))
+        self.gland_radius = int(spatial_params.get("gland_radius", self.structure_radius))
+        self.min_gland_sep = spatial_params.get("min_gland_sep", 2 * self.gland_radius + 2)
+        self.stroma_fill_frac = float(spatial_params.get("stroma_fill_frac", 1.0))
+        # Per-compartment carrying capacity (K captures the duct's/stroma's 3D depth — a deme is a 3D
+        # column, so K is MODERATE-TO-LARGE, not a handful). Default to the scalar carrying_capacity so
+        # a uniform-K field is byte-identical to the current single-K crowding law.
+        self._cap_duct = int(spatial_params.get("K_duct", self._cap)) if self._crowding else 1
+        self._cap_stroma = int(spatial_params.get("K_stroma", self._cap)) if self._crowding else 1
+        # Cross-gland (island) dispersal: a low rate that seeds one gland's lumen from another's,
+        # abstracting intraductal spread through the out-of-plane ductal tree. kappa=0 -> OFF ->
+        # byte-identical. lambda (distance kernel over gland centres); None -> uniform targeting.
+        self.cross_gland_kappa = float(spatial_params.get("cross_gland_kappa", 0.0))
+        self.cross_gland_lambda = spatial_params.get("cross_gland_lambda", None)
+        # Ground-truth ductal-field labels, populated by _seed_structure (None when unstructured).
+        self.gland_id = None
+        self.gland_centers = None
+        self.gland_lumen_demes = None
         # Number of founder cancer cells to seed (an established micro-lesion). A single founder
         # has P(extinction) ≈ death/division (~7% for the defaults) regardless of carrying
         # capacity, so a one-cell start makes runs/demos randomly cancer-free; seeding a small
@@ -272,6 +294,11 @@ class GenotypeTumor:
         n_demes = self.grid_size * self.grid_size
         self.demes = [dict() for _ in range(n_demes)]
         self.deme_coords = [(i // self.grid_size, i % self.grid_size) for i in range(n_demes)]
+        # Per-deme carrying capacity (DESIGN_ductal_field.md §3): uniform = carrying_capacity by
+        # default (byte-identical to the scalar law); _seed_structure overwrites duct demes with
+        # K_duct and stroma demes with K_stroma. Only consulted when crowding is on.
+        self._deme_capacity = (np.full(n_demes, self.carrying_capacity, dtype=float)
+                               if self._crowding else None)
 
         if self.structure_radius > 0:
             self._seed_structure()
@@ -356,28 +383,80 @@ class GenotypeTumor:
     def _is_cancer(self, gid):
         return self.genotypes[gid].type == "cancer"
 
-    # --- structure seeding (mirrors GlandularTumor.make_structure) ------------
-    def _seed_structure(self):
-        center = self.grid_size // 2
-        border = bresenham_circumference(center, center, self.structure_radius)
-        epi = self._normal_genotype("epithelial")
-        for (r, c) in border:
-            if 0 <= r < self.grid_size and 0 <= c < self.grid_size:
-                self._add(r * self.grid_size + c, epi, self._cap)
-        circle = get_inside(border)
-        occupied = set(border) | set(circle)
+    # --- structure seeding: the ductal field (DESIGN_ductal_field.md §2) -------
+    def _place_glands(self):
+        """Gland centres in the grid interior, >= min_gland_sep apart, ring fully inside the grid.
 
-        in_border = bresenham_circumference(center, center, self.structure_radius - 1)
+        n_glands==1 short-circuits to the grid centre and draws NO rng, so the single-gland field is
+        byte-identical to the old single central ring (the founder draw below is then the first rng
+        consumption, exactly as before). n_glands>1 rejection-samples from ``self.rng`` (the LAYOUT rng,
+        so the field layout is cohort-comparable like every other make_*)."""
+        c0 = self.grid_size // 2
+        if self.n_glands <= 1:
+            return [(c0, c0)]
+        lo = self.gland_radius + 1
+        hi = self.grid_size - self.gland_radius - 1
+        centers = []
+        attempts = 0
+        max_attempts = 200 * self.n_glands
+        while len(centers) < self.n_glands and attempts < max_attempts:
+            attempts += 1
+            r = int(self.rng.integers(lo, hi)) if hi > lo else c0
+            c = int(self.rng.integers(lo, hi)) if hi > lo else c0
+            if all((r - rr) ** 2 + (c - cc) ** 2 >= self.min_gland_sep ** 2 for (rr, cc) in centers):
+                centers.append((r, c))
+        return centers
+
+    def _seed_structure(self):
+        """Seed a FIELD of small epithelial-ring glands in sparse stroma, one cancer founder in gland
+        0's lumen. n_glands=1 + gland_radius=structure_radius + stroma_fill_frac=1.0 +
+        K_duct=K_stroma=carrying_capacity reproduces the old single-central-ring seeding byte-for-byte."""
+        n_demes = len(self.demes)
+        self.gland_centers = self._place_glands()
+        self.gland_id = np.full(n_demes, -1, dtype=int)
+        self.gland_lumen_demes = []
+        epi = self._normal_genotype("epithelial")
+        occupied = set()
+        for gi, (cr, cc) in enumerate(self.gland_centers):
+            border = bresenham_circumference(cr, cc, self.gland_radius)
+            for (r, c) in border:
+                if 0 <= r < self.grid_size and 0 <= c < self.grid_size:
+                    di = r * self.grid_size + c
+                    self._add(di, epi, self._cap_duct)
+                    self.gland_id[di] = gi
+                    if self._deme_capacity is not None:
+                        self._deme_capacity[di] = self._cap_duct
+            circle = get_inside(border)
+            lumen = []
+            for (r, c) in circle:
+                if 0 <= r < self.grid_size and 0 <= c < self.grid_size:
+                    di = r * self.grid_size + c
+                    self.gland_id[di] = gi
+                    if self._deme_capacity is not None:
+                        self._deme_capacity[di] = self._cap_duct
+                    lumen.append(di)
+            self.gland_lumen_demes.append(lumen)
+            occupied |= set(border) | set(circle)
+
+        # founder: one micro-lesion in gland 0's lumen (same rng draw as the old single ring)
+        cr, cc = self.gland_centers[0]
+        in_border = bresenham_circumference(cr, cc, self.gland_radius - 1)
         in_border = [(r, c) for (r, c) in in_border if 0 <= r < self.grid_size and 0 <= c < self.grid_size]
         if in_border:
             pos = in_border[int(self.rng.choice(len(in_border)))]
             self._add(pos[0] * self.grid_size + pos[1], self.founder_id, self._n_founder)
 
+        # stroma fills the rest, seeded SPARSE (acellular normal stroma; headroom for an invasive mass)
         stroma = self._normal_genotype("stromal")
+        n_stroma = int(round(self.stroma_fill_frac * self._cap_stroma))
         for r in range(self.grid_size):
             for c in range(self.grid_size):
-                if (r, c) not in occupied and not self.demes[r * self.grid_size + c]:
-                    self._add(r * self.grid_size + c, stroma, self._cap)
+                di = r * self.grid_size + c
+                if (r, c) not in occupied and not self.demes[di]:
+                    if self._deme_capacity is not None:
+                        self._deme_capacity[di] = self._cap_stroma
+                    if n_stroma > 0:
+                        self._add(di, stroma, n_stroma)
 
     # --- count bookkeeping ---------------------------------------------------
     def _add(self, deme_idx, gid, n):
@@ -393,6 +472,29 @@ class GenotypeTumor:
         self.genotypes_counts[gid] -= n
         if self.genotypes_counts[gid] <= 0:
             del self.genotypes_counts[gid]
+
+    def _cross_gland_target(self, src_gland, rng):
+        """A lumen deme of ANOTHER gland, for an island (cross-gland) dispersal hop
+        (DESIGN_ductal_field.md §4). Glands are chosen distance-weighted (prob ~ exp(-d/lambda) over
+        gland centres from the source) or uniformly when ``cross_gland_lambda`` is None; the daughter
+        lands in a random lumen deme of the chosen gland — lumen->lumen, bypassing the wall, so a
+        confined intraductal hop needs no breach. Returns None if no other gland has a lumen deme."""
+        if self.gland_centers is None or len(self.gland_centers) <= 1:
+            return None
+        others = [g for g in range(len(self.gland_centers))
+                  if g != src_gland and self.gland_lumen_demes[g]]
+        if not others:
+            return None
+        if self.cross_gland_lambda is None:
+            g = others[int(rng.integers(0, len(others)))]
+        else:
+            sr, sc = self.gland_centers[src_gland]
+            d = np.array([np.hypot(self.gland_centers[g][0] - sr, self.gland_centers[g][1] - sc)
+                          for g in others])
+            w = np.exp(-d / max(float(self.cross_gland_lambda), 1e-9))
+            g = others[int(rng.choice(len(others), p=w / w.sum()))]
+        lumen = self.gland_lumen_demes[g]
+        return lumen[int(rng.integers(0, len(lumen)))]
 
     def _neighbors(self, deme_idx):
         r, c = self.deme_coords[deme_idx]
@@ -489,18 +591,21 @@ class GenotypeTumor:
             # identical to the previous `slope * (total / K)` form.
             div = rep.evolutionary_parameters["division_rate"]
             steep = 1.0 + self.crowding_margin
+            # Per-deme carrying capacity (DESIGN_ductal_field.md §3): duct demes cap at K_duct, stroma
+            # at K_stroma. Uniform (= carrying_capacity) reproduces the scalar law byte-identically.
+            K = self.carrying_capacity if self._deme_capacity is None else self._deme_capacity[deme_idx]
             if self._crowding_mode == "fixed":
                 # Unified fixed-reference law: death ~ TOTAL occupancy relative to a fixed reference
                 # (not the clone's own division), so survival under crowding is fitness-DEPENDENT
                 # everywhere. Near-neutral at low density; at the crowded border only clones with
                 # div near the reference persist. No overfill (nothing exceeds the reference).
-                death = base + max(0.0, self._crowding_ref - base) * steep * (total / self.carrying_capacity)
+                death = base + max(0.0, self._crowding_ref - base) * steep * (total / K)
             else:
                 n_normal = sum(deme.get(nm, 0) for nm in normal_names)
                 n_cancer = total - n_normal
-                death = base + max(0.0, div - base) * steep * (n_cancer / self.carrying_capacity)
+                death = base + max(0.0, div - base) * steep * (n_cancer / K)
                 if n_normal:
-                    death += max(0.0, self._resident_ref - base) * steep * (n_normal / self.carrying_capacity)
+                    death += max(0.0, self._resident_ref - base) * steep * (n_normal / K)
         else:
             # well-mixed regime (carrying_capacity None/0): no crowding ceiling -> unbounded growth.
             death = base
@@ -588,8 +693,17 @@ class GenotypeTumor:
                     # no-op mutation (saturated allele): same genotype, grows in place
                     self._add(di, rep.genotype_id, 1)
             else:
-                nbrs = self._neighbors(di)
-                tgt = nbrs[int(rng.choice(len(nbrs)))] if nbrs else di
+                # dispersal: a low fraction (~kappa) of gland-resident daughters take an island hop
+                # to another gland's lumen (bypassing the wall); the rest disperse to a local
+                # neighbour. kappa=0 short-circuits before any extra rng draw -> byte-identical.
+                src_g = self.gland_id[di] if self.gland_id is not None else -1
+                tgt = None
+                if (self.cross_gland_kappa > 0 and src_g != -1
+                        and rng.random() < self.cross_gland_kappa / (1.0 + self.cross_gland_kappa)):
+                    tgt = self._cross_gland_target(src_g, rng)
+                if tgt is None:
+                    nbrs = self._neighbors(di)
+                    tgt = nbrs[int(rng.choice(len(nbrs)))] if nbrs else di
                 self._add(tgt, gid, 1)
                 affected.append(tgt)
 
@@ -731,16 +845,30 @@ class GenotypeTumor:
                         self._add(di, child.genotype_id, 1)
                 else:
                     self._add(di, gid, 1)
-        # dispersal-branch births: same genotype, one daughter into a uniformly random neighbour
+        # dispersal-branch births: same genotype. A low fraction (~kappa) of gland-resident daughters
+        # take an island hop to another gland's lumen; the rest go to a uniformly random neighbour.
+        # kappa=0 draws no binomial and leaves the neighbour draw untouched -> byte-identical.
         for di, gid, n in dispersals:
-            nbrs = self._neighbors(di)
-            if not nbrs:
-                self._add(di, gid, n)
-                continue
-            idx = rng.integers(0, len(nbrs), size=n)
-            u, cnts = np.unique(idx, return_counts=True)
-            for k, cnt in zip(u, cnts):
-                self._add(nbrs[int(k)], gid, int(cnt))
+            src_g = self.gland_id[di] if self.gland_id is not None else -1
+            n_cross = 0
+            if self.cross_gland_kappa > 0 and src_g != -1:
+                n_cross = int(rng.binomial(n, self.cross_gland_kappa / (1.0 + self.cross_gland_kappa)))
+            n_local = n - n_cross
+            if n_local > 0:
+                nbrs = self._neighbors(di)
+                if not nbrs:
+                    self._add(di, gid, n_local)
+                else:
+                    idx = rng.integers(0, len(nbrs), size=n_local)
+                    u, cnts = np.unique(idx, return_counts=True)
+                    for k, cnt in zip(u, cnts):
+                        self._add(nbrs[int(k)], gid, int(cnt))
+            for _ in range(n_cross):
+                tgt = self._cross_gland_target(src_g, rng)
+                if tgt is None:
+                    nbrs = self._neighbors(di)
+                    tgt = nbrs[int(rng.integers(0, len(nbrs)))] if nbrs else di
+                self._add(tgt, gid, 1)
 
     def _tau_generation(self, rng, tau):
         """Advance the whole tumour by one generation of length `tau`, adaptively sub-stepping so
@@ -1059,6 +1187,13 @@ class GenotypeTumor:
             self.cell_data["cell_microenv"] = pd.DataFrame(
                 {"hypoxia_level": hyp[dcol] if dcol.size else np.array([]),
                  "cci_level": cci[dcol] if dcol.size else np.array([])}, index=idx)
+
+        # Ductal-field ground truth (DESIGN_ductal_field.md §2): the gland each cell sits in (-1 for
+        # stroma). Only added when a gland field was seeded, so the base schema is unchanged otherwise.
+        if self.gland_id is not None:
+            gcol = np.asarray(demes_col, dtype=int)
+            self.cell_data["cell_gland"] = pd.DataFrame(
+                {"gland_id": self.gland_id[gcol] if gcol.size else np.array([], dtype=int)}, index=idx)
 
         # R13: the allele layers + the RNA BAF, and the per-cell program activity. Only added when
         # the program layer is on, so the base schema is unchanged.

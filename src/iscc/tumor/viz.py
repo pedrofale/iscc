@@ -282,6 +282,18 @@ def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap=
                     legend_patches.append(mpatches.Patch(color=col, label=label))
             ax.imshow(grid)
             ax.legend(handles=legend_patches, loc="upper right", fontsize=7, framealpha=0.8)
+        elif color_key == "cancer_frac":
+            # per-deme fraction of cells that are cancer (minority cancer is invisible under the
+            # mode-based cell_type view, so this exposes early multi-focal / intraductal spread).
+            base = cell_data["cell_deme"].join(cell_data["cell_crd"])
+            ids = cell_data["cell_type"]["cell_id"].values
+            base["val"] = np.array([g not in normal_names for g in ids], dtype=float)
+            deme_data = base.groupby(["deme_id"]).mean(numeric_only=True)
+            grid = np.zeros((grid_size, grid_size), dtype=float)
+            grid[deme_data["row"].astype(int), deme_data["col"].astype(int)] = deme_data["val"]
+            im = ax.imshow(grid, cmap=cmap, vmin=0.0, vmax=1.0)
+            plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            ax.set_title(color_key)
         else:
             base = cell_data["cell_deme"].join(cell_data["cell_crd"])
             val = None
@@ -289,7 +301,9 @@ def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap=
                 if color_key.startswith(prefix):
                     val = cell_data[key][color_key.split("_", 1)[1]]
             if val is None:
-                for key in ["cell_evo", "cell_exp", "cell_snv"]:
+                # search every per-cell frame, including the ductal-field (cell_gland) and F8
+                # (cell_microenv) labels, so `color=["gland_id"]` / `["hypoxia_level"]` just work.
+                for key in ["cell_evo", "cell_exp", "cell_snv", "cell_gland", "cell_microenv"]:
                     if key in cell_data and color_key in cell_data[key].columns:
                         val = cell_data[key][color_key].values
                         break

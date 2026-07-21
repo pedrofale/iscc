@@ -386,6 +386,25 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   allele input normally comes from cellsnp-lite + a phasing panel, which an abstract genome lacks — scope
   the interface first (likely feed allele counts directly).
 
+## Ductal-field spatial substrate (DESIGN_ductal_field.md)
+- **DONE (2026-07-21) — the island-model ductal field (count engine).** `count.py:_seed_structure`
+  rewritten from ONE central ring to a FIELD of `n_glands` small epithelial-ring glands (ring wall +
+  empty DCIS-growable lumen) at 2D positions in **moderate-density** stroma (`stroma_fill_frac`≈0.3–0.5;
+  real stromal cells that carry the compartment stromal hazard), grown from ONE
+  founder in gland 0's lumen. New spatial_params: `n_glands`, `gland_radius`, `min_gland_sep`,
+  `K_duct`/`K_stroma` (per-deme capacity — a deme is a 3D column so K is moderate-to-large, honoured
+  via a per-deme `_deme_capacity` array in the crowding law), `stroma_fill_frac`, `cross_gland_kappa`,
+  `cross_gland_lambda`. **Cross-gland (island) dispersal** (`κ·dispersal_rate`, distance-weighted or
+  uniform) seeds one gland's lumen from another's (lumen→lumen, bypasses the wall → confined DCIS, no
+  breach); a stroma cell never hops; wired into BOTH the exact and tau dispersal paths. Per-deme
+  `gland_id` (−1 = stroma) + `gland_lumen_demes` + `gland_centers` ground truth, surfaced as
+  `cell_data["cell_gland"]`; `viz.plot_grid` gained `color=["gland_id"]` and `["cancer_frac"]`.
+  **OFF-BY-DEFAULT & byte-identical** (n_glands=1 + κ=0 + fill=1.0 + uniform K = the old single ring;
+  golden hashes). One founder → many clonally-related foci (the inter-gland hops are the spread tree,
+  a DCIS phylogeography). Ships: `tests/test_ductal_field.py` (11), `validate_ductal_field.py` →
+  `validation_ductal_field.png` (grid growth time-series), `PARAMETERS.md`. Handoff:
+  `handoffs/ductal_field_substrate.md`. **Prerequisite for the revised compartment-selection v1.**
+
 ## Genotype→phenotype in the structured setting (DESIGN_phenotype_plasticity.md)
 - **DONE (2026-07-21) — v1 compartment-dependent selection.** Two gene-based heritable axes
   (`prop_breach`, `prop_stromal_survival` + `_effects`, off by default) attenuate two compartment
