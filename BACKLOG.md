@@ -401,9 +401,17 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   `cell_data["cell_gland"]`; `viz.plot_grid` gained `color=["gland_id"]` and `["cancer_frac"]`.
   **OFF-BY-DEFAULT & byte-identical** (n_glands=1 + κ=0 + fill=1.0 + uniform K = the old single ring;
   golden hashes). One founder → many clonally-related foci (the inter-gland hops are the spread tree,
-  a DCIS phylogeography). Ships: `tests/test_ductal_field.py` (11), `validate_ductal_field.py` →
-  `validation_ductal_field.png` (grid growth time-series), `PARAMETERS.md`. Handoff:
+  a DCIS phylogeography). Ships: `tests/test_ductal_field.py` (12), `validate_ductal_field.py` →
+  `validation_ductal_field.png` (grid growth time-series + a CELL-resolution 2D-section row via the new
+  `viz.plot_grid(expand_demes=True, section_frac=…)`), `PARAMETERS.md`. Handoff:
   `handoffs/ductal_field_substrate.md`. **Prerequisite for the revised compartment-selection v1.**
+- **DONE (2026-07-21) — spatial diagnostics validation.** `validation/validate_spatial_diagnostic.py`
+  → `validation_spatial_diagnostic.png` (+ `tests/test_spatial_diagnostic.py`): at a mid generation
+  (before takeover) shows CLONAL TERRITORIES (per-deme genetic PC1 + Moran's I — the structure a
+  genotype-id map hides under infinite-sites; lower dispersal tends to sharpen it), spatial SELECTION
+  (breach/stromal_survival trait maps), spatial CNA (per-deme ploidy), and NICHE-vs-GENOTYPE expression
+  (emt tracks the epithelial wall, corr ≈ 0.95; proliferation flatter). Verifies the spatial layer end
+  to end.
 
 ## Genotype→phenotype in the structured setting (DESIGN_phenotype_plasticity.md)
 - **DONE (2026-07-21) — v1 compartment-dependent selection (COUNT engine, on the ductal field).** Two
