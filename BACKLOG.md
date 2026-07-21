@@ -406,24 +406,28 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   `handoffs/ductal_field_substrate.md`. **Prerequisite for the revised compartment-selection v1.**
 
 ## Genotype→phenotype in the structured setting (DESIGN_phenotype_plasticity.md)
-- **DONE (2026-07-21) — v1 compartment-dependent selection.** Two gene-based heritable axes
-  (`prop_breach`, `prop_stromal_survival` + `_effects`, off by default) attenuate two compartment
-  hazards (`spatial_params.{epithelial_barrier, stromal_hazard}`, default 0) that the gland geometry
-  already seeds, in the EXACT shape of the existing immune term:
-  `death += barrier · compartment_fraction(deme) · (1 − trait)`. **Compartment is the deme's LIVE
-  cell-type fraction** (epithelial / stromal), so a deme's selective pressure tracks where the
-  resident normals still are; normals are never cleared (the barrier selects on their *presence*, the
-  `DESIGN_crowding.md` immortal-normal invariant). Sequential invasion emerges — lumen → breach the
-  ring → survive the stroma — each trait a mutation → sequenceable → recoverable. Mirrored end-to-end
-  across `Selection` / `Cell` / both engines; `count._death_rate` and `Deme.get_cancer_death_rate`
-  agree to 1e-12. OFF-by-default & **byte-identical** when off (golden hashes, both engines;
-  `binomial(1,0.0)` short-circuits so the layout stream is untouched). The compartment is also an R13
-  route-3 **niche field** (`epithelial`/`stromal` in `microenv_truth` → `niche_program_map`), so the
-  SAME clone expresses the invasive/emt program more at the epithelial front — the genetic-vs-niche
-  expression confound, present with ZERO carried epistate and zero new dynamics knobs. Readout-only
-  (programs never feed fitness). Ships: `tests/test_compartment_selection.py` (16 tests),
-  `validation/validate_compartment_selection.py` → `manuscript/figures/validation_compartment.png`,
-  `PARAMETERS.md` rows, a manuscript paragraph. Handoff: `handoffs/compartment_selection_v1.md`.
+- **DONE (2026-07-21) — v1 compartment-dependent selection (COUNT engine, on the ductal field).** Two
+  gene-based heritable axes (`prop_breach`, `prop_stromal_survival` + `_effects`, off by default)
+  attenuate two compartment hazards (`spatial_params.{epithelial_barrier, stromal_hazard}`, default 0),
+  in the EXACT shape of the existing immune term:
+  `death += barrier · compartment_fraction(deme) · (1 − trait)`. **BOTH keyed to the deme's LIVE
+  cell fraction** (epithelial wall / stromal cells — symmetric with immune; the stroma is seeded at
+  MODERATE density by the substrate so its live fraction is meaningful); pressure tracks where the
+  resident normals still are and softens as cancer dilutes them. Normals are never cleared (barrier
+  selects on their *presence*, the `DESIGN_crowding.md` immortal-normal invariant). On the ductal-field
+  substrate this yields **DCIS→IDC**: a lumen-founded lesion is confined by the wall + stroma (DCIS),
+  spreads multi-focally via the confined cross-gland route, and invades the stroma (IDC) only once a
+  subclone evolves `breach` (cross the wall) + `stromal_survival` (survive the stroma); each trait a
+  mutation → sequenceable → recoverable. **COUNT engine only** (`count._death_rate`); the cell-engine
+  mirror is DEFERRED with the count-only substrate. OFF-by-default & **byte-identical** (golden hashes;
+  and on the multi-gland field; `binomial(1,0.0)` short-circuits so the layout stream is untouched).
+  The compartment is also an R13 route-3 **niche field** (`epithelial`/`stromal` in `microenv_truth`
+  → `niche_program_map`), so the SAME clone expresses the invasive/emt program more at the epithelial
+  front — the genetic-vs-niche confound (validation: genotype-controlled r≈0.46, niche ≈72% of emt
+  variance), present with ZERO carried epistate. Readout-only. Ships:
+  `tests/test_compartment_selection.py` (14), `validate_compartment_selection.py` →
+  `validation_compartment.png` (DCIS→IDC grid growth series), `PARAMETERS.md`, manuscript paragraph.
+  Handoff: `handoffs/compartment_selection_v1.md`.
 - **LATER — v2 the plastic epistate** (a memoried + noisy state `s` + the `(τ, σ, β)` identifiability
   map; DESIGN_phenotype_plasticity.md §3). Build ONLY once a benchmark needs the carried state — the
   three things a post-growth, memoryless readout cannot represent: memory / hysteresis, selection

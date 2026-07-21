@@ -29,13 +29,13 @@ CANCER = {"division_rate": 0.7, "death_rate": 0.05, "max_birth_rate": 0.95,
 SELECTION = {"prop_driver": 0.05, "prop_dispersal": 0.08, "prop_immune_resistance": 0.02,
              "prop_treatment_resistance": 0.02}
 DEME = {"carrying_capacity": 20, "initial_cancer_cells": 8, "resident_pressure_ref": 0.2}
-GRID = 34
-# A LOW cross-gland rate makes the field colonise gradually, one focus at a time, from the single
-# founder gland — the multi-focal island signature — and gives each focus a bottleneck so foci diverge
-# (a high rate re-mixes them into panmixia). See the colonisation curve in panel B.
-FIELD = {"grid_size": GRID, "n_structures": 1, "structure_radius": 2, "n_glands": 22,
-         "gland_radius": 2, "min_gland_sep": 6, "K_duct": 20, "K_stroma": 25,
-         "stroma_fill_frac": 0.35, "cross_gland_kappa": 0.03, "cross_gland_lambda": 6.0}
+GRID = 20
+# A few well-separated glands (a legible multi-focal section) and a LOW cross-gland rate, so the field
+# colonises gradually, one focus at a time, from the single founder gland — the island signature —
+# with each focus founded by a bottleneck so the foci diverge. See the colonisation curve in panel B.
+FIELD = {"grid_size": GRID, "n_structures": 1, "structure_radius": 3, "n_glands": 4,
+         "gland_radius": 3, "min_gland_sep": 8, "K_duct": 25, "K_stroma": 25,
+         "stroma_fill_frac": 0.35, "cross_gland_kappa": 0.04, "cross_gland_lambda": None}
 NORMALS = ("epithelial", "stromal", "immune")
 
 

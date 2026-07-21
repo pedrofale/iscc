@@ -1,18 +1,21 @@
-"""Compartment-dependent selection — v1 of DESIGN_phenotype_plasticity.md §2.
+"""Compartment-dependent selection — v1 of DESIGN_phenotype_plasticity.md §2, on the ductal-field
+substrate (DESIGN_ductal_field.md). COUNT engine only (the cell-engine mirror is deferred with the
+count-only substrate).
 
-Two new gene-based heritable axes (``breach`` / ``stromal_survival``) attenuate two local
-compartment hazards (``epithelial_barrier`` / ``stromal_hazard``) that the gland geometry seeds, in
-the exact shape of the existing immune term. The compartment is never a fixed deme label: every
-hazard reads the deme's LIVE cell-type fractions, so a clone that has diluted the resident normals
-feels less of the barrier. The compartment is also an R13 route-3 niche field (Part D), driving the
+Two new gene-based heritable axes (``breach`` / ``stromal_survival``) attenuate two local compartment
+hazards (``epithelial_barrier`` / ``stromal_hazard``), BOTH keyed to the deme's LIVE cell fraction
+(symmetric with the immune term): the gland wall (epithelial cells) and the stroma (stromal cells).
+So a clone that has diluted the resident normals feels less of the barrier, and a lumen-founded lesion
+is confined (DCIS) until a subclone evolves ``breach`` (cross the wall) and ``stromal_survival``
+(survive the stroma) — DCIS→IDC. The compartment is also an R13 route-3 niche field driving the
 invasive program at the epithelial front — the genetic-vs-niche expression confound.
 
 Covered here:
-  * OFF-by-default -> growth is byte-identical (golden hashes captured on the pre-feature engine).
+  * OFF-by-default -> growth is byte-identical (golden hashes; and on the multi-gland ductal field).
   * a breach-competent genotype has strictly LOWER death than a non-breacher in an epithelial-
-    occupied deme, and EQUAL death in a pure-cancer deme (the trait pays off only at the epithelium).
-  * stromal_survival is the analogous statement in a stromal-occupied deme.
-  * both engines compute the SAME compartment death terms.
+    occupied deme, and EQUAL death in a pure-cancer deme (the trait pays off only at the wall).
+  * stromal_survival is the analogous statement in a stromal-cell-occupied deme.
+  * the barrier confines cancer to the glands (DCIS) — stroma invasion is delayed vs a barrier-off run.
   * the two axes are ground-truth (gene counts + the per-genotype trait surface correctly).
   * the compartment niche field drives the invasive program (readout-only; growth is byte-identical
     whether the program layer is on or off).
@@ -228,3 +231,50 @@ def test_program_layer_is_readout_only_for_compartment():
     b.grow(n_steps=80, seed=2)
     assert a.get_tumor_size() == b.get_tumor_size()
     assert _snv_hash(a) == _snv_hash(b)
+
+
+# --- on the DUCTAL FIELD substrate -------------------------------------------------------------
+_FIELD = {"grid_size": 26, "n_structures": 1, "structure_radius": 2, "n_glands": 10,
+          "gland_radius": 2, "min_gland_sep": 6, "K_duct": 20, "K_stroma": 20,
+          "stroma_fill_frac": 0.4, "cross_gland_kappa": 0.05, "cross_gland_lambda": 6.0}
+_FIELD_DEME = {"carrying_capacity": 20, "initial_cancer_cells": 8, "resident_pressure_ref": 0.2}
+
+
+def _field_grow(spatial, seed=2, steps=30, selection=SEL_ON):
+    t = GenotypeTumor(seed=seed, genome_params=GENOME_PARAMS, selection_params=selection,
+                      cancer_cell_params=CANCER_CELL_PARAMS, deme_params=_FIELD_DEME,
+                      spatial_params=spatial, update_mode="tau", tau=1.0)
+    t.grow(n_steps=steps, seed=seed)
+    return t
+
+
+def _stroma_cancer_frac(t):
+    stroma = ingland = 0
+    for di, deme in enumerate(t.demes):
+        cc = sum(c for g, c in deme.items() if t._is_cancer(g))
+        if t.gland_id[di] == -1:
+            stroma += cc
+        else:
+            ingland += cc
+    tot = stroma + ingland
+    return stroma / tot if tot else 0.0
+
+
+def test_compartment_off_ductal_field_byte_identical():
+    """Barriers 0 + axes 0 on a MULTI-GLAND field is byte-identical to the same field without any
+    compartment params (the substrate baseline)."""
+    base = {**_FIELD}                                   # no compartment params
+    off = {**_FIELD, "epithelial_barrier": 0.0, "stromal_hazard": 0.0}
+    sel_off = {**SELECTION_PARAMS, "prop_breach": 0.0, "prop_stromal_survival": 0.0}
+    a = _field_grow(base, selection=sel_off)
+    b = _field_grow(off, selection=sel_off)
+    assert a.get_tumor_size() == b.get_tumor_size()
+    assert _snv_hash(a) == _snv_hash(b)
+
+
+def test_barrier_confines_cancer_to_glands_dcis():
+    """With the barriers ON, cancer is confined to the glands (DCIS) — the stroma-invading fraction is
+    strictly lower than a barrier-OFF run at the same seed (which invades the stroma immediately)."""
+    on = _field_grow({**_FIELD, "epithelial_barrier": 1.2, "stromal_hazard": 0.7}, steps=18)
+    off = _field_grow({**_FIELD}, steps=18)
+    assert _stroma_cancer_frac(on) < _stroma_cancer_frac(off)
