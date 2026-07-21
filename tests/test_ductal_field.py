@@ -167,3 +167,27 @@ def test_cross_gland_off_no_hop_needed_for_byte_identity():
     spatial = {**FIELD, "cross_gland_kappa": 0.0}
     t = _grow(1, steps=40, spatial=spatial, deme=FIELD_DEME, update_mode="tau", tau=1.0)
     assert t.get_cancer_size() > 0
+
+
+# --- cell-resolution (deme-expanded) plot with section sampling -------------------------------
+def test_plot_grid_expand_demes_section():
+    import matplotlib
+    matplotlib.use("Agg")
+    from iscc.tumor import viz
+    t = _grow(1, steps=24, spatial=FIELD, deme=FIELD_DEME, update_mode="tau", tau=1.0)
+    cd = t.make_cell_data()
+    full, s_full, _ = viz._expanded_cell_grid(cd, t.grid_size, t.traces, t.genotypes_parents,
+                                              1.0, 0, "#d62728")
+    sec, s_sec, _ = viz._expanded_cell_grid(cd, t.grid_size, t.traces, t.genotypes_parents,
+                                            0.4, 0, "#d62728")
+    # each deme is an s x s block, so the image is (grid_size*s) square, RGB
+    assert full.shape == (t.grid_size * s_full, t.grid_size * s_full, 3)
+
+    def n_cells(img):  # non-white pixels = drawn cells
+        flat = img.reshape(-1, 3)
+        return int((flat < 0.999).any(axis=1).sum())
+    # a 40% section shows strictly fewer cells than the full 3D column
+    assert 0 < n_cells(sec) < n_cells(full)
+    # and it flows through tumor.plot_grid end to end (both cancer colourings)
+    t.plot_grid(color=["cell_type"], expand_demes=True, section_frac=0.4)
+    t.plot_grid(color=["cell_type"], expand_demes=True, section_frac=0.4, cancer_color=None)

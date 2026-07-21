@@ -255,8 +255,63 @@ def cell_type_colors(traces, genotypes_parents, colormap="gnuplot"):
     return cmap
 
 
+def _expanded_cell_grid(cell_data, grid_size, traces, genotypes_parents, section_frac, seed,
+                        cancer_color):
+    """Cell-resolution image of the grid: each deme becomes an ``s×s`` block of its INDIVIDUAL cells.
+
+    Normal cells take their type colour; cancer cells take ``cancer_color`` (a single colour — the
+    clean tissue view, cancer-vs-normal) or, when ``cancer_color`` is None, their per-clone Muller
+    colour. Under infinite-sites most divisions spawn a new (passenger-differentiated) genotype, so
+    per-clone is usually a noisy rainbow; the single colour reads as tissue structure.
+
+    A 2D deme stands for a 3D column of up to K cells (DESIGN_ductal_field.md §3), so a flat section
+    should show only a SLICE of that depth, not the whole column: ``section_frac`` (≈
+    section_thickness / column_depth) is the fraction of each deme's cells sampled UNIFORMLY at random
+    into the section (1.0 = the whole column). Cells are scattered within the deme's block — the count
+    engine tracks per-deme COUNTS, not sub-deme positions, so the intra-deme layout is cosmetic while
+    the composition (and the sampled section depth) is exact. Returns ``(rgb, s, type_cmap)``.
+    """
+    from collections import defaultdict
+    rng = np.random.default_rng(seed)
+    demes = cell_data["cell_deme"]["deme_id"].values
+    crd = cell_data["cell_crd"].values
+    ids = cell_data["cell_type"]["cell_id"].values
+    deme_cells, deme_rc = defaultdict(list), {}
+    for i in range(len(ids)):
+        d = int(demes[i])
+        deme_cells[d].append(ids[i])
+        deme_rc[d] = (int(crd[i, 0]), int(crd[i, 1]))
+    max_sec = max((max(1, int(round(section_frac * len(v)))) for v in deme_cells.values()), default=1)
+    s = max(1, int(np.ceil(np.sqrt(max_sec))))
+    type_cmap = cell_type_colors(traces, genotypes_parents)
+    fixed_cancer = None if cancer_color is None else np.asarray(matplotlib.colors.to_rgb(cancer_color))
+    fallback = np.array([0.84, 0.15, 0.16])                     # cancer red if a clone is uncoloured
+
+    def cell_col(g):
+        if g in normal_names:
+            return np.asarray(type_cmap[g])[:3] if g in type_cmap else fallback
+        if fixed_cancer is not None:
+            return fixed_cancer
+        col = type_cmap.get(g)
+        return fallback if col is None else np.asarray(col)[:3]
+
+    img = np.ones((grid_size * s, grid_size * s, 3))
+    for d, cells in deme_cells.items():
+        n_sec = min(s * s, int(round(section_frac * len(cells))))
+        sample = ([cells[i] for i in rng.choice(len(cells), size=n_sec, replace=False)]
+                  if cells and n_sec else [])
+        r, c = deme_rc[d]
+        block = np.ones((s * s, 3))
+        if sample:
+            for p, g in zip(rng.choice(s * s, size=len(sample), replace=False), sample):
+                block[p] = cell_col(g)
+        img[r * s:(r + 1) * s, c * s:(c + 1) * s] = block.reshape(s, s, 3)
+    return img, s, type_cmap
+
+
 def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap="viridis",
-              ax=None, figsize=(10, 10), dpi=100):
+              ax=None, figsize=(10, 10), dpi=100, expand_demes=False, section_frac=1.0, expand_seed=0,
+              cancer_color="#d62728"):
     if color is None:
         color = ["cell_type"]
     if ax is None:
@@ -265,6 +320,24 @@ def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap=
         plt.sca(ax)
 
     for color_key in color:
+        if expand_demes and color_key == "cell_type":
+            # cell-resolution (deme-expanded) view — each deme is a block of its individual cells,
+            # section-sampled to `section_frac` of the deme's depth. See _expanded_cell_grid.
+            img, s, type_cmap = _expanded_cell_grid(cell_data, grid_size, traces, genotypes_parents,
+                                                    section_frac, expand_seed, cancer_color)
+            ax.imshow(img, interpolation="nearest")
+            present = set(cell_data["cell_type"]["cell_id"].values)
+            legend_patches = [mpatches.Patch(color=type_cmap[n], label=n)
+                              for n in normal_names if n in present and n in type_cmap]
+            n_clones = sum(1 for g in present if g not in normal_names)
+            if n_clones:
+                lbl = "cancer" if cancer_color is not None else f"cancer ({n_clones} clones, by colour)"
+                legend_patches.append(mpatches.Patch(
+                    color=cancer_color if cancer_color is not None else (0.84, 0.15, 0.16), label=lbl))
+            ax.legend(handles=legend_patches, loc="upper right", fontsize=7, framealpha=0.8)
+            ax.set_title("cell_type (cells)")
+            ax.set_xticks([]); ax.set_yticks([])
+            continue
         if color_key == "cell_type":
             type_cmap = cell_type_colors(traces, genotypes_parents)
             base = cell_data["cell_deme"].join(cell_data["cell_crd"])
@@ -303,7 +376,8 @@ def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap=
             if val is None:
                 # search every per-cell frame, including the ductal-field (cell_gland) and F8
                 # (cell_microenv) labels, so `color=["gland_id"]` / `["hypoxia_level"]` just work.
-                for key in ["cell_evo", "cell_exp", "cell_snv", "cell_gland", "cell_microenv"]:
+                for key in ["cell_evo", "cell_exp", "cell_snv", "cell_gland", "cell_microenv",
+                            "cell_program"]:
                     if key in cell_data and color_key in cell_data[key].columns:
                         val = cell_data[key][color_key].values
                         break

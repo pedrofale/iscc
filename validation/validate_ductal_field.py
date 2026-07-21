@@ -6,13 +6,14 @@ tree. Shows multi-focal, clonally-related DCIS foci arising from a single origin
 layout (separate foci in stroma; connecting ducts out of plane, not drawn).
 
 Panels (manuscript/figures/validation_ductal_field.png):
-  A. GROWTH TIME-SERIES (mandatory): a row of grid snapshots (cancer fraction per deme) from seeding
-     to final, over the gland field — cancer appears in one gland then seeds several others; a second
-     row shows the gland_id layout and the dominant-clone map, so multi-focal spread from one founder
-     is visually obvious.
-  B. multi-focal dynamics: the fraction of glands colonised rises over time.
-  C. RELATEDNESS: every colonised focus traces to the founder (clonal); between-focus genetic
-     divergence > within-focus (the island bottleneck) — a DCIS phylogeography with a known answer.
+  A. GROWTH TIME-SERIES (mandatory): a row of grid snapshots from seeding to final — the per-deme
+     cancer fraction (top) and the SAME timepoints at CELL RESOLUTION (a 2D section: each deme
+     expanded into a slice of its 3D-column cells, green epithelial wall / red cancer / pink stroma),
+     so cancer appearing in one gland then seeding several others is visible at both scales.
+  B. multi-focal dynamics: the fraction of glands colonised rises over time; the gland_id layout and
+     dominant-clone map show the shared origin.
+  C. RELATEDNESS: every colonised focus traces to the founder (clonal); between- vs within-focus
+     genetic divergence (the island bottleneck) — a DCIS phylogeography with a known answer.
 
 Run:  python -u validation/validate_ductal_field.py
 """
@@ -90,12 +91,17 @@ def main():
         r, c = t.deme_coords[di]
         gland_layout[r, c] = t.gland_id[di]
 
-    # grow in equal segments, snapshot the cancer-fraction grid + glands colonised at each
+    from iscc.tumor import viz
+    # grow in equal segments; at each snapshot record the per-deme cancer fraction AND a cell-
+    # resolution 2D SECTION (each deme expanded into a slice — ~40% — of its 3D-column cells).
     seg = max(1, args.gens // args.snaps)
-    snap_frac, snap_step, invaded = [], [], []
+    snap_frac, snap_cells, snap_step, invaded = [], [], [], []
     for k in range(args.snaps):
         t.grow(n_steps=seg, seed=args.seed)
+        t.make_cell_data()
         snap_frac.append(_cancer_frac_grid(t))
+        snap_cells.append(viz._expanded_cell_grid(
+            t.cell_data, t.grid_size, t.traces, t.genotypes_parents, 0.4, 0, "#d62728")[0])
         snap_step.append(t.step)
         invaded.append(len(_glands_colonised(t)))
     t.make_cell_data()
@@ -158,49 +164,57 @@ def main():
     import matplotlib.pyplot as plt
 
     ncol = args.snaps
-    fig, axes = plt.subplots(2, ncol, figsize=(2.7 * ncol, 8.2), constrained_layout=True)
+    fig, axes = plt.subplots(3, ncol, figsize=(2.7 * ncol, 11.6), constrained_layout=True)
 
-    # Row 1: the cancer-fraction growth time-series (the mandatory grid movie)
+    # Row 1: the per-deme cancer-fraction growth time-series (the mandatory grid movie)
     im = None
     for k in range(ncol):
         ax = axes[0, k]
         im = ax.imshow(snap_frac[k], cmap="inferno", vmin=0.0, vmax=1.0)
         ax.set_title(f"gen {snap_step[k]}\n{invaded[k]}/{t.n_glands} glands", fontsize=9)
         ax.set_xticks([]); ax.set_yticks([])
-    axes[0, 0].set_ylabel("A. cancer fraction\n(grid growth series)", fontsize=9)
+    axes[0, 0].set_ylabel("A. cancer fraction\nper deme", fontsize=9)
     fig.colorbar(im, ax=axes[0, :].tolist(), fraction=0.015, pad=0.01, label="cancer fraction")
 
-    # Row 2: gland layout, dominant-clone map, colonisation curve, per-gland load, divergence
-    axg = axes[1, 0]
+    # Row 2: the SAME timepoints at CELL resolution — each deme expanded into a 2D section (~40% of
+    # its 3D-column depth); green epithelial gland walls, red cancer, pink stroma.
+    for k in range(ncol):
+        ax = axes[1, k]
+        ax.imshow(snap_cells[k], interpolation="nearest")
+        ax.set_xticks([]); ax.set_yticks([])
+    axes[1, 0].set_ylabel("A. cells (2D section)\ngreen wall · red cancer · pink stroma", fontsize=9)
+
+    # Row 3: gland layout, dominant-clone map, colonisation curve, per-gland load, divergence
+    axg = axes[2, 0]
     axg.imshow(np.where(gland_layout < 0, np.nan, gland_layout), cmap="tab20")
     axg.set_title("gland_id layout\n(founder in gland 0)", fontsize=9)
     axg.set_xticks([]); axg.set_yticks([])
 
-    axc = axes[1, 1]
+    axc = axes[2, 1]
     dom = _dominant_clone_grid(t)
     axc.imshow(np.where(dom < 0, np.nan, dom), cmap="nipy_spectral")
     axc.set_title("dominant cancer clone\n(shared origin)", fontsize=9)
     axc.set_xticks([]); axc.set_yticks([])
 
-    axk = axes[1, 2]
+    axk = axes[2, 2]
     axk.plot(snap_step, invaded, "-o", color="#2c7fb8")
     axk.set_xlabel("generation"); axk.set_ylabel("glands colonised")
     axk.set_title("B. multi-focal spread\nfrom one founder", fontsize=9)
 
-    axr = axes[1, 3] if ncol > 3 else None
+    axr = axes[2, 3] if ncol > 3 else None
     if axr is not None:
         axr.bar(range(len(gl)), [per_gland[g] for g in gl], color="#c51b8a")
         axr.set_xlabel("colonised gland"); axr.set_ylabel("cancer cells")
         axr.set_title(f"per-gland load\n({len(colonised)} foci)", fontsize=9)
 
-    axd = axes[1, 4] if ncol > 4 else None
+    axd = axes[2, 4] if ncol > 4 else None
     if axd is not None:
         axd.bar(["within\nfocus", "between\nfoci"], [within_m, between_m], color=["#7fbf7b", "#af8dc3"])
         axd.set_ylabel("mean SNV difference")
         axd.set_title(f"C. divergence\n(clonal: {frac_related*100:.0f}%)", fontsize=9)
 
     for k in range(5, ncol):
-        axes[1, k].axis("off")
+        axes[2, k].axis("off")
 
     fig.suptitle("Ductal-field substrate: multi-focal, clonally-related DCIS foci from ONE founder "
                  "via cross-gland (island) dispersal", fontsize=13)
