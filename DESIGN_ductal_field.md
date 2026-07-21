@@ -113,3 +113,20 @@ crowding is via death). Split the dispersing daughters into two channels:
   effects, and it cleanly separates lumen=DCIS-growable from wall=barrier).
 - Realistic N, K_duct, K_stroma, gland radius — pick so a gland cross-section is ~tens–low-hundreds of cells
   and a section holds several glands, within the ST-spot bound (§3).
+
+## 8. Follow-ups (future additions, NOT v1)
+- **Make immune infiltration spatial (currently uniform + static).** iscc seeds immune cells UNIFORMLY in every
+  deme at a fixed density (`immune_density`), static — no recruitment/migration/depletion — and the kill term is
+  `immune_prob_kill·immune_fraction(deme)·(1−immune_resistance)` (`count.py`). For DCIS→IDC, real immune activity
+  is **peri-ductal and concentrated at the invasive front / in the stroma**, not a flat backdrop. Follow-up: key
+  immune density to the **stromal region and/or the tumour boundary** (a front-concentrated field, F8-style) —
+  optionally active recruitment dynamics — so immune surveillance actually shapes *where* invasion succeeds.
+- **Immune-interaction expression program in cancer cells (R13 route-3).** A cancer cell that is NOT
+  immune-resistant and sits among immune cells is under immune attack and should EXPRESS that interaction — an
+  interferon / immune-response program (IFN response, antigen presentation, stress) — whereas a resistant cell
+  shows immune-evasion instead. Follow-up: add a niche→program coupling (`DESIGN_expression.md` R13 route-3, the
+  same mechanism the compartment niche uses to drive the invasive program) that drives an "immune-response"
+  program in cancer cells as a function of the **local immune fraction × (1 − immune_resistance)**, so the
+  interaction is visible in scRNA/ST. This is both realism (real cancer cells at an immune front carry an IFN
+  signature) AND a ground-truth confound (is the immune signature driven by genotype / resistance status vs the
+  local immune niche?).
