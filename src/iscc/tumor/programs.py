@@ -366,14 +366,28 @@ class ProgramModel:
         idx = self.dictionary.program_index
 
         # Route 1 — phenotype-mediated (the default). mutation → CINner fitness → phenotype → program.
-        strength = float(cp.get("phenotype_program_strength", 0.5))
-        if strength != 0:
-            pmap = cp.get("phenotype_program_map", DEFAULT_PHENOTYPE_PROGRAM_MAP)
-            for phenotype, prog in dict(pmap).items():
-                k = idx.get(prog)
-                if k is None:
-                    continue
-                drive[k] += strength * self._phenotype_level(phenotype, evo, baseline_rates)
+        # `phenotype_program_strength` is either a scalar gain shared by every phenotype, OR a per-
+        # phenotype dict {phenotype: gain, "__default__": gain}. The per-phenotype form exists because
+        # `_phenotype_level` is a RAW fold-change, and different phenotypes live on wildly different
+        # fold-change scales: division_rate is bounded above by `max_birth_rate` (fold-change caps at
+        # ~1.5 and saturates), whereas dispersal_rate is unbounded (fold-change can reach tens). A
+        # single shared gain therefore makes the proliferation drive tiny relative to the EMT drive and
+        # to `activity_noise`, so proliferation stops tracking division. A larger division gain
+        # restores parity — biologically, the proliferation- and EMT-signature amplitudes are
+        # independently calibrated, not tied to a common gain.
+        strength_cfg = cp.get("phenotype_program_strength", 0.5)
+        pmap = cp.get("phenotype_program_map", DEFAULT_PHENOTYPE_PROGRAM_MAP)
+        for phenotype, prog in dict(pmap).items():
+            k = idx.get(prog)
+            if k is None:
+                continue
+            if isinstance(strength_cfg, dict):
+                strength = float(strength_cfg.get(phenotype, strength_cfg.get("__default__", 0.5)))
+            else:
+                strength = float(strength_cfg)
+            if strength == 0:
+                continue
+            drive[k] += strength * self._phenotype_level(phenotype, evo, baseline_rates)
 
         # Route 2 — direct regulators, graded by the mutation's VAF (so a clone that has amplified the
         # mutant allele drives the program harder). No fitness change.

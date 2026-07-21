@@ -228,6 +228,27 @@ class GenotypeTumor:
         # evolved up to max_birth_rate needs its crowding death to be able to reach (and exceed) that
         # rate. Default 1.0 (>= the 0.8 max_birth_rate default). A lower value re-opens the overfill bug.
         self.maximum_death_rate = deme_params.get("maximum_death_rate", 1.0)
+        # Resident-pressure reference division rate (DESIGN_crowding.md, invasion gate). A deme's
+        # immortal normal cells (epithelial/stromal) contribute to a cancer cell's crowding death at
+        # this FIXED reference rate rather than at the cancer cell's own evolved division rate — so
+        # their contribution does NOT cancel in the survival condition (net = div - death > 0) and
+        # becomes a genuine FITNESS THRESHOLD a cancer clone must clear to establish (and then invade)
+        # a normal-occupied gland deme. Defaults to the founder cancer division rate: a clone must be
+        # at least as fit as a baseline cancer cell to hold a slot against a resident. Cancer-only
+        # demes (no normal cells) are byte-identical to before (the term is zero there). Raise it for
+        # a stricter invasion gate.
+        self._resident_ref = deme_params.get(
+            "resident_pressure_ref",
+            self.genotypes[self.founder_id].baseline_rates["division_rate"])
+        # Crowding law (DESIGN_crowding.md). "own" = Option A (own-division cancer term + fixed-ref
+        # resident term). "fixed" = a single UNIFIED law: crowding death rises with TOTAL occupancy
+        # relative to a FIXED reference (`crowding_ref`, default max_birth_rate), NOT the clone's own
+        # division. => near-neutral where there is space (low density) and fitness-selective where
+        # crowded (the invasion border), from one context-free rule; nothing exceeds the reference so
+        # demes still cannot overfill. Subsumes the resident-pressure gate (normals count in `total`).
+        self._crowding_mode = deme_params.get("crowding_mode", "own")
+        self._crowding_ref = deme_params.get(
+            "crowding_ref", getattr(self.genotypes[self.founder_id], "max_birth_rate", 0.98))
         self.structure_radius = spatial_params.get("structure_radius", 0)
         # Number of founder cancer cells to seed (an established micro-lesion). A single founder
         # has P(extinction) ≈ death/division (~7% for the defaults) regardless of carrying
@@ -395,17 +416,35 @@ class GenotypeTumor:
             total = sum(deme.values())
         base = rep.evolutionary_parameters["death_rate"]
         if self._crowding:
-            # Density-dependent death RELATIVE to this clone's OWN (evolved) division rate
-            # (DESIGN_crowding.md, Option A). The crowding slope is the clone's net growth rate
-            # (div - base), steepened by (1 + crowding_margin), so at occupancy == K/(1+margin)
-            # death == div and above it death > div — a true restoring force to the carrying
-            # capacity even for a clone whose division has evolved up to max_birth_rate (the old
-            # step-function `death_rate * K` capped at maximum_death_rate could not, because an
-            # evolved division rate outran the absolute cap). maximum_death_rate must be >=
-            # max_birth_rate (default 1.0) or the clamp below re-opens the overfill bug.
+            # Density-dependent death split into two crowding sources (DESIGN_crowding.md).
+            #
+            # (1) Co-resident CANCER cells crowd RELATIVE to this clone's OWN evolved division rate
+            #     (Option A): the slope is the clone's net growth (div - base) steepened by
+            #     (1 + crowding_margin), so a cancer-only deme caps at K/(1+margin) INDEPENDENT of
+            #     fitness — no overfill even for a clone evolved up to max_birth_rate.
+            # (2) The deme's immortal NORMAL cells (epithelial/stromal) crowd at a FIXED reference
+            #     rate `_resident_ref`, NOT the clone's own division. Because it is not scaled by
+            #     (div - base), this term does NOT cancel in the survival condition net = div - death:
+            #     net > 0 becomes div > base + (ref - base)(1+margin)(n_normal/K), a genuine FITNESS
+            #     THRESHOLD rising with the resident count. Only fitter cancer survives (and then
+            #     disperses onward from) a normal-occupied gland deme; the normal cells never die.
+            #
+            # A cancer-only deme has n_normal = 0, so term (2) vanishes and the result is byte-
+            # identical to the previous `slope * (total / K)` form.
             div = rep.evolutionary_parameters["division_rate"]
-            slope = max(0.0, div - base) * (1.0 + self.crowding_margin)
-            death = base + slope * (total / self.carrying_capacity)
+            steep = 1.0 + self.crowding_margin
+            if self._crowding_mode == "fixed":
+                # Unified fixed-reference law: death ~ TOTAL occupancy relative to a fixed reference
+                # (not the clone's own division), so survival under crowding is fitness-DEPENDENT
+                # everywhere. Near-neutral at low density; at the crowded border only clones with
+                # div near the reference persist. No overfill (nothing exceeds the reference).
+                death = base + max(0.0, self._crowding_ref - base) * steep * (total / self.carrying_capacity)
+            else:
+                n_normal = sum(deme.get(nm, 0) for nm in normal_names)
+                n_cancer = total - n_normal
+                death = base + max(0.0, div - base) * steep * (n_cancer / self.carrying_capacity)
+                if n_normal:
+                    death += max(0.0, self._resident_ref - base) * steep * (n_normal / self.carrying_capacity)
         else:
             # well-mixed regime (carrying_capacity None/0): no crowding ceiling -> unbounded growth.
             death = base

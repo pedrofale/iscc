@@ -140,3 +140,91 @@ Inference configs → `maximum_death_rate` 1.0.
 
 **QC.** `tumor.diagnose()` gained a `deme_occupancy` metric and an `overfilled` check (fails if mean
 cells/occupied-deme > 3×K; skipped in the well-mixed regime) — see `DESIGN_operating_envelope.md`.
+
+---
+
+# ADDENDUM — resident-pressure invasion gate + the "finger" regime [2026-07-20]
+
+Status: **engine change shipped, full `pytest` green (569).** Option A made the equilibrium deme
+density *independent of fitness* (its whole point: cap overfill for any evolved division rate). A side
+effect surfaced while trying to get **fitness-gated invasion of a gland**: because crowding death is
+`base + (div − base)(1+m)·occupancy`, the survival condition `net = div − death > 0` reduces to
+`occupancy < K/(1+m)` — the `(div − base)` factor **cancels**, so *survival under crowding is
+fitness-independent*. A cancer cell dispersing into a gland deme (occupancy ≥ 1 from the immortal
+epithelial residents) therefore has `net < 0` **regardless of fitness**, and invasion is by dispersal
+pressure alone, not selection (measured: invaded cells no fitter than core, Mann–Whitney p = 0.76).
+
+## The fix (two-term crowding death)
+
+Split the crowding death by the crowder type — keep Option A for cancer-on-cancer, add a **fixed-
+reference** term for the immortal normal residents:
+
+```
+death = base
+      + (div − base)·(1+m)·(n_cancer / K)     # Option A: caps cancer density, fitness-independent, no overfill
+      + (ref − base)·(1+m)·(n_normal / K)      # resident pressure: FIXED ref (not div) => a fitness threshold
+```
+
+Because the resident term uses a fixed `ref` (default = the founder cancer division rate,
+`deme_params["resident_pressure_ref"]`), it does **not** cancel in the survival condition:
+
+```
+net > 0  ⇔  div > base + (ref − base)(1+m)(n_normal / K)
+```
+
+a genuine **fitness threshold** rising with the resident count. Only fitter cancer survives (and then
+disperses onward from) a normal-occupied gland deme; **normal cells never die** (still static). A
+cancer-only deme has `n_normal = 0`, so the term vanishes and every `structure_radius = 0` result is
+**byte-identical** to Option A (verified against the stashed original). Implemented identically in both
+engines (`count.py _death_rate`, `deme.py get_cancer_death_rate`); `resident_pressure_ref` also plumbed
+through `Deme.__init__`. Verified: invaded cells now significantly fitter than core (p < 1e-4).
+
+## Localized invasion needs RARE dispersal, not just the gate
+
+With the gate on, the *whole* gland ring still dissolves at once, because CINner + spatial selection
+drives the **entire front to `max_birth_rate`** (fitness saturates ~0.98), so every boundary clone
+clears the gate. Localization comes from making **dispersal rare** (a clone crosses only if it also
+acquires a dispersal mutation): **low baseline `dispersal_rate` + small `prop_dispersal` + low
+`mutation_rate` + strong `dispersal_effects`**. Then only the rare clones that acquire dispersal punch
+**localized fingers**; the low-dispersal bulk is held inside the ring.
+
+Caveat (known, accepted): dispersal is **undirected diffusion** (daughter → uniformly-random
+neighbour) and is crowding-neutralised inside the packed tumour, so a high-dispersal clone
+random-walks around **wherever it arose** (often central) rather than migrating to the front; the
+fingers are its escapees across the ring. Directional (free-space-biased) dispersal is a possible
+future change, deliberately NOT made here.
+
+## Rule of thumb — population size vs `structure_radius` (the finger regime)
+
+The confined bulk fills the gland interior — a disk of radius `R = structure_radius`, ≈ `π·R²` demes,
+each holding ≈ `c·K` cancer cells (dispersal influx over-packs the cap by `c ≈ 1.6`, measured; `c`
+drifts ~1.9→1.6 as K goes 4→16). So the gland's cancer capacity is
+
+  **N_gland ≈ π · R² · c · K   (c ≈ 1.6)  ⟹  R ≈ √( N / (π · c · K) )**
+
+This is **linear in the deme size `K`** (verified: at fixed `R=20`, confined cells 8,070 / 15,440 /
+31,984 for K = 4 / 8 / 16 — doubling with K). `K` therefore sets **spatial resolution, not physical
+size**: a deme holding `K` cells is `≈ √K` cell-diameters across, so the physical gland radius is
+`r ≈ R·√K·d_cell` and the physical cell count `N ≈ π·(r/d_cell)²` is *independent* of `K`. The same
+physical DCIS duct (radius `r`, `N` cells) is reproduced by any `(K, R)` with `R·√K = r/d_cell`
+(equivalently `π·R²·K = N`) — a genuine degeneracy. The DCIS mapping: a distended duct ~1–2 mm across,
+breast cells ~10–20 µm ⟹ `N ≈ 4,000–15,000` cross-section cancer cells; `base_sim` uses `K=8, R=20`
+(≈ a ~1.8 mm duct).
+
+- `R ≪ R*` : gland can't contain N → demes overfill, overflow is large → **broad, whole-ring** invasion.
+- `R ≈ R*` : bulk fills the gland (~K–1.3K/deme) with **modest overflow → localized fingers**.
+- `R ≫ R*` : tumour never fills/pressures the ring → **no breach**.
+
+Verified (target N ≈ 10 000, K = 8, so `R* ≈ √(10000/(π·8)) ≈ 20`):
+
+| `R` | `π·R²·K` | invaded % | cells / gland-deme |
+|----:|--------:|----------:|-------------------:|
+| 12  | 3,619   | 19%       | 18.0 (overfull)    |
+| 16  | 6,433   | 13%       | 11.4               |
+| 20  | 10,053  | 9%        | 12.3 (fills nicely)|
+| 24  | 14,476  | 9%        | 10.3               |
+| 28  | 19,704  | 10%       | 10.8               |
+
+Below `R*` the interior is overfull (18 vs K=8) and overflow doubles (19%); at/above `R*` the bulk is
+contained and overflow settles to ~9–10% (localized fingers). This `R ≈ √(N/(π·c·K))` sizing is the
+design rule for the showcase `base_sim` (N ≈ 10k, K = 8 → `structure_radius = 20`).

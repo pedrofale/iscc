@@ -12,6 +12,7 @@ class Deme(object):
         maximum_death_rate=1.0,
         crowding_margin=0.1,
         initial_cancer_cells=1,
+        resident_pressure_ref=None,
         tumor=None,
         row=None,
         col=None,
@@ -28,6 +29,10 @@ class Deme(object):
         self.carrying_capacity = carrying_capacity
         self._crowding = carrying_capacity is not None and carrying_capacity > 0
         self.crowding_margin = crowding_margin
+        # Fixed reference division rate for the resident (normal-cell) crowding hurdle — the invasion
+        # gate (DESIGN_crowding.md; mirrors count.py's _resident_ref). None -> resolve from the
+        # tumour's founder cancer division rate lazily in get_cancer_death_rate.
+        self.resident_pressure_ref = resident_pressure_ref
         self.initial_death_rate = initial_death_rate
         # maximum_death_rate MUST be >= max_birth_rate so an evolved clone's crowding death can
         # reach its division rate (default 1.0 >= the 0.8 default max_birth_rate).
@@ -212,23 +217,36 @@ class Deme(object):
                               immune_resistance):
         """Cancer death rate = density-dependent baseline death PLUS local immune killing.
 
-        Crowding death is RELATIVE to the cell's OWN (evolved) division rate (DESIGN_crowding.md,
-        Option A) — the same formula as the count engine's ``_death_rate``, so the two engines
-        agree: the crowding slope is the cell's net growth rate ``(division - death)`` steepened by
-        ``(1 + crowding_margin)``, so at occupancy ``K/(1+margin)`` death == division and above it
-        death > division (a true restoring force to the carrying capacity, for any evolved division
-        rate). The old ``death_rate * K`` step, capped at ``maximum_death_rate``, could not cap a
-        clone whose division had evolved past that absolute cap. ``carrying_capacity`` None/0
-        disables crowding (well-mixed / unbounded growth).
+        Crowding death has two sources (DESIGN_crowding.md; mirrors the count engine's
+        ``_death_rate``, so the two engines agree):
+
+        (1) Co-resident CANCER cells crowd RELATIVE to this cell's OWN evolved division rate
+            (Option A): slope ``(division - death)`` steepened by ``(1 + crowding_margin)``, so a
+            cancer-only deme caps at ``K/(1+margin)`` INDEPENDENT of fitness (no overfill).
+        (2) The deme's immortal NORMAL cells crowd at a FIXED reference rate ``resident_pressure_ref``
+            (default = the founder cancer division rate), NOT the cell's own division — so their
+            contribution does not cancel in ``net = division - death`` and becomes a FITNESS
+            THRESHOLD ``division > death + (ref - death)(1+margin)(n_normal/K)`` a clone must clear
+            to establish (and then invade) a normal-occupied gland deme. Normal cells never die.
+
+        A cancer-only deme (no normal cells) is byte-identical to the previous single-slope form.
+        ``carrying_capacity`` None/0 disables crowding (well-mixed / unbounded growth).
 
         Immune killing is *additive* contact pressure: more local immune cells raise the
-        death rate, attenuated by the cell's immune resistance. (The previous formula
-        `death * immune_fraction ** immune_resistance` was degenerate: it could only ever
-        lower the death rate, and an immune-free deme gave 0**r = 0, i.e. immortal cancer.)
+        death rate, attenuated by the cell's immune resistance.
         """
         if self._crowding:
-            slope = max(0.0, division_rate - cell_death_rate) * (1.0 + self.crowding_margin)
-            death = cell_death_rate + slope * (len(self.cells) / self.carrying_capacity)
+            steep = 1.0 + self.crowding_margin
+            n_normal = sum(1 for c in self.cells if c.type != "cancer")
+            n_cancer = len(self.cells) - n_normal
+            death = cell_death_rate + max(0.0, division_rate - cell_death_rate) * steep \
+                * (n_cancer / self.carrying_capacity)
+            if n_normal:
+                ref = self.resident_pressure_ref
+                if ref is None:
+                    cc = getattr(self.tumor, "cancer_cell", None)
+                    ref = cc.baseline_rates["division_rate"] if cc is not None else division_rate
+                death += max(0.0, ref - cell_death_rate) * steep * (n_normal / self.carrying_capacity)
         else:
             death = cell_death_rate
         death = min(death, self.maximum_death_rate)
