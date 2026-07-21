@@ -1,10 +1,15 @@
 # Handoff prompt — v1 compartment-dependent selection (+ context-dependent phenotype confound)
 
-Saved 2026-07-18. Copy the block below into a fresh session. **v1 of `DESIGN_phenotype_plasticity.md` — READ
-§0–§2 first, don't re-derive.** This is the GENETIC floor: compartment-dependent selection via two new
-gene-based axes + the genetic-vs-environment expression confound (free, via post-growth materialisation). It
-adds **no** carried epistate and **no** new dynamics parameters — that's v2, explicitly out of scope here.
-Branch from current `dev`.
+Saved 2026-07-18 (revised — now runs on the ductal-field substrate). Copy the block below into a fresh session.
+**v1 of `DESIGN_phenotype_plasticity.md` — READ §0–§2 first, don't re-derive.** This is the GENETIC floor:
+compartment-dependent selection via two new gene-based axes + the genetic-vs-environment expression confound
+(free, via post-growth materialisation). It adds **no** carried epistate and **no** new dynamics parameters —
+that's v2, explicitly out of scope here. Branch from current `dev`.
+
+**PREREQUISITE: build `handoffs/ductal_field_substrate.md` FIRST** (multi-gland island field + gland_id labels
++ cross-gland dispersal). This handoff runs ON that substrate: glands = small epithelial rings at 2D positions
+in sparse stroma, one founder, multi-focal DCIS→IDC. Count engine (`GenotypeTumor`) only for v1; the cell-engine
+mirror is deferred (the substrate is count-only). If the substrate isn't in yet, stop and do it first.
 
 The whole design principle is: **the immune-resistance axis is already exactly this pattern** — a heritable
 gene-based trait that attenuates a *local* compartment hazard (`_death_rate`:
@@ -27,14 +32,19 @@ REPO & ENV
 
 THE PRINCIPLE (one mechanic, already in the engine for immune)
 Each compartment contributes a LOCAL hazard to cancer death, attenuated by a MATCHING heritable resistance
-trait. `_death_rate` (count.py:403) already does this for immune. v1 adds the same shape for two compartments
-that the gland geometry already seeds (structure_radius -> lumen / epithelial RING / stroma, count.py:345):
-    death += epithelial_barrier · epithelial_fraction(deme) · (1 − breach)
-    death += stromal_hazard     · stromal_fraction(deme)    · (1 − stromal_survival)
-COMPARTMENT IS NEVER A FIXED DEME LABEL: every hazard reads the deme's LIVE cell-type fractions
-(epithelial_fraction/stromal_fraction, exactly like immune_fraction), so a deme's selective pressure changes as
-cancer accumulates and dilutes the resident normals. Normals are NOT cleared in v1 — cancer coexists with /
-passes through them — which is sufficient because the barrier selects on the PRESENCE of normal cells, not
+trait. `_death_rate` (count.py:403) already does this for immune. v1 adds the same shape for the two ductal-
+field compartments (gland epithelial rings + stroma, from the substrate handoff), but keyed DIFFERENTLY (see
+DESIGN_phenotype_plasticity.md §2 / DESIGN_ductal_field.md §5):
+    death += epithelial_barrier · epithelial_fraction(deme) · (1 − breach)   # LIVE wall-cell fraction
+    death += stromal_hazard     · stromal_field(deme)       · (1 − stromal_survival)  # environmental region
+THE EPITHELIAL BARRIER IS NEVER A FIXED LABEL: it reads the deme's LIVE epithelial-cell fraction (exactly like
+immune_fraction), so it dilutes as cancer crosses the wall (the wall IS the epithelial cells). Cross-gland
+(island) dispersal from the substrate BYPASSES the wall (lumen->lumen), so confined DCIS spread needs no breach
+— breach gates only LOCAL escape into stroma. THE STROMAL HAZARD, by contrast, is an environmental FIELD
+(stroma is seeded sparse, so a live-fraction term would be too weak): a per-deme stroma-region signal
+(gland_id==-1, or an F8-style field), NOT the live stromal-cell fraction. Normals are NOT cleared in v1 —
+cancer coexists with / passes through them — which is sufficient because the barrier selects on the PRESENCE of
+normal cells, not
 their removal (normals stay immortal, the crowding-fix invariant, DESIGN_crowding.md). Sequential invasion
 emerges: lumen -> breach the ring -> survive the stroma -> (existing) resist immune where present. Each trait
 is a mutation -> sequenceable -> recoverable.
@@ -69,24 +79,28 @@ The immune axis is the precise template. grep `immune_resistance`, `_ir`, `N_ir`
   * genome-summary template call (count.py:204, the `n_ir=...` seam): add
     `n_breach=len(self.selection.get_breach()), n_ss=len(self.selection.get_stromal_survival())`.
 
-PART B — the two death terms + compartment fractions (count engine)
-- _epithelial_fraction / _stromal_fraction (mirror _immune_fraction, count.py:391): fraction of the deme that
-  is epithelial / stromal (self.genotypes[gid].type == "epithelial" / "stromal"). Reuse the total-passed-in
-  optimisation. (Optional _has_epithelial/_has_stromal guards like _has_immune — structure_radius>0 always
-  seeds them, so a guard is a minor speedup, not required.)
+PART B — the two death terms (count engine)
+- _epithelial_fraction (mirror _immune_fraction, count.py:391): fraction of the deme that is epithelial
+  (self.genotypes[gid].type == "epithelial"). Reuse the total-passed-in optimisation. This is a LIVE fraction
+  (the wall dilutes as cancer crosses).
+- _stromal_field(deme_idx): the environmental stromal-region signal — NOT a live cell fraction. Simplest v1:
+  1.0 if the deme is stroma (self.gland_id[deme_idx] == -1 from the substrate) else 0.0 (optionally smoothed
+  by an F8-style field). Stroma is seeded sparse, so keying to the cell fraction would be too weak — use the
+  region.
 - _death_rate (count.py:455, right after the immune line): add the two terms, clamping the trait to [0,1] the
   same way `ir` is clamped (count.py:454):
         b  = min(max(rep.evolutionary_parameters["breach"], 0.0), 1.0)
         ss = min(max(rep.evolutionary_parameters["stromal_survival"], 0.0), 1.0)
         death += self._epithelial_barrier * self._epithelial_fraction(deme, total) * (1.0 - b)
-        death += self._stromal_hazard     * self._stromal_fraction(deme, total)    * (1.0 - ss)
+        death += self._stromal_hazard     * self._stromal_field(deme_idx)          * (1.0 - ss)
 - config: self._epithelial_barrier / self._stromal_hazard, DEFAULT 0.0 (off -> the terms vanish -> byte-
-  identical). Put them next to self._immune_prob_kill (count.py:194) — read from spatial_params (e.g.
-  spatial_params.get("epithelial_barrier", 0.0)) so the "payoff table" is edit-a-config, not edit-the-engine.
+  identical). Put them next to self._immune_prob_kill (count.py:194) — read from spatial_params so the "payoff
+  table" is edit-a-config, not edit-the-engine.
 
-PART C — the cell engine (mirror)
-Deme.get_cancer_death_rate (deme.py) already mirrors the immune term (see count.py:406 note). Add the same two
-compartment terms + fractions there, so both engines agree. Add a `test_engines_agree`-style check.
+PART C — the cell engine: DEFERRED for v1
+The ductal-field substrate is count-engine only, so implement the death terms in count.py's _death_rate ONLY.
+Do NOT port to Deme.get_cancer_death_rate in this handoff (the cell engine has no ductal field yet). Note the
+deferral; a later handoff mirrors both once the substrate is on the cell engine.
 
 PART D — context-dependent phenotype = the confound (R13 route-3, ALREADY BUILT)
 The confound is free: cell_exp is materialised post-growth as f(genotype, niche), and R13 route-3 (niche ->
@@ -111,28 +125,28 @@ PARAMETERS.md: document prop_breach, prop_stromal_survival, breach_effects, stro
 section) and epithelial_barrier, stromal_hazard (spatial/microenv section), all default 0/off.
 
 VALIDATION (validation/validate_compartment_selection.py -> manuscript/figures/validation_compartment.png):
-Grow a STRUCTURED tumour (structure_radius>0) with both axes + barriers ON. Show:
-  (A) sequential invasion: fraction of cells carrying breach vs the epithelial ring, and stromal_survival vs
-      the stroma — traits sweep at their own front; plot_grid coloured by compartment + trait. Barrier OFF ->
-      no compartment selection (control).
-  (B) SELECTION-recovery benchmark: scDNA/bulkDNA on the tumour -> can a selection-inference method recover
-      WHICH genes are breach / stromal drivers and the COMPARTMENT each was selected in, vs iscc ground truth?
+Grow the DUCTAL FIELD (substrate handoff: n_glands>1, island dispersal on) with both axes + barriers ON. Show:
+  (A) DCIS -> IDC: breach sweeps as cancer escapes glands into stroma; stromal_survival sweeps as it traverses
+      stroma; multi-focal foci (from island dispersal) each a DCIS focus until a subclone breaches. plot_grid
+      coloured by gland_id + compartment + trait. Barrier OFF -> confined DCIS only (control).
+  (B) SELECTION-recovery benchmark: scDNA/bulkDNA -> can a selection-inference method recover WHICH genes are
+      breach / stromal drivers and the COMPARTMENT each was selected in, vs iscc ground truth?
   (C) CONFOUND benchmark: for a FIXED clone, scRNA invasive-program activity by compartment (env-responsive
       phenotype); show a naive "invasive expression => invasive genotype" call is confounded by location, and
       quantify the genetic vs niche contributions iscc knows.
 Print headline numbers.
 
 TESTS (tests/test_compartment_selection.py):
-- OFF-by-default byte-identical (both axes + barriers 0 -> identical to a no-compartment baseline).
-- a breach-competent genotype has strictly LOWER death than a non-breacher in an epithelial-occupied deme, and
-  EQUAL death in a pure-cancer/stromal deme (the trait pays off only at the epithelium).
-- stromal_survival analogous in a stromal-occupied deme.
-- both engines agree on the compartment death terms.
-- ground truth: breach / stromal_survival gene counts + the per-genotype trait surface correctly.
+- OFF-by-default byte-identical (both axes + barriers 0 -> identical to a ductal-field-substrate baseline).
+- a breach-competent genotype has strictly LOWER death than a non-breacher in an epithelial(wall)-occupied
+  deme, and EQUAL death in a pure-lumen/cancer deme (breach pays off only at the wall).
+- stromal_survival: strictly LOWER death in a stroma-region deme (stromal_field==1), EQUAL elsewhere.
+- ground truth: breach / stromal_survival gene counts + the per-genotype traits surface correctly.
 
-DELIVERABLES: the two axes end-to-end (off-by-default); the two _death_rate terms in BOTH engines; compartment
-as an R13 niche field driving the invasive program; PARAMETERS.md; validate_compartment_selection.py + figure;
-tests; a short manuscript paragraph (compartment-dependent selection + the genetic-vs-niche expression
+DELIVERABLES: the two axes end-to-end (off-by-default); the two _death_rate terms in the COUNT engine (cell
+engine deferred, Part C); the stromal field + epithelial live-fraction; compartment/gland as an R13 niche field
+driving the invasive program; PARAMETERS.md; validate_compartment_selection.py + figure; tests; a short
+manuscript paragraph (compartment-dependent selection on the ductal field + the genetic-vs-niche expression
 confound); flip a BACKLOG item. Full suite green; commit on `dev`.
 
 HONEST NOTES: keep it to v1 — resist adding a carried epistate, memory, noise, or selection-on-phenotype (that
