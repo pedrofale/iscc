@@ -261,8 +261,8 @@ class GenotypeTumor:
             "crowding_ref", getattr(self.genotypes[self.founder_id], "max_birth_rate", 0.98))
         self.structure_radius = spatial_params.get("structure_radius", 0)
         # Ductal-field substrate (DESIGN_ductal_field.md): the structured case is a FIELD of many small
-        # epithelial-ring glands at 2D positions in sparse stroma (an island model), not one central
-        # ring. OFF-BY-DEFAULT: n_glands=1 + gland_radius=structure_radius + stroma_fill_frac=1.0 +
+        # epithelial-ring glands at 2D positions in moderate-density stroma (an island model), not one
+        # central ring. OFF-BY-DEFAULT: n_glands=1 + gland_radius=structure_radius + stroma_fill_frac=1.0 +
         # K_duct=K_stroma=carrying_capacity reproduces the single-central-ring seeding byte-identically.
         self.n_glands = int(spatial_params.get("n_glands", 1))
         self.gland_radius = int(spatial_params.get("gland_radius", self.structure_radius))
@@ -408,7 +408,7 @@ class GenotypeTumor:
         return centers
 
     def _seed_structure(self):
-        """Seed a FIELD of small epithelial-ring glands in sparse stroma, one cancer founder in gland
+        """Seed a FIELD of small epithelial-ring glands in moderate-density stroma, one cancer founder in gland
         0's lumen. n_glands=1 + gland_radius=structure_radius + stroma_fill_frac=1.0 +
         K_duct=K_stroma=carrying_capacity reproduces the old single-central-ring seeding byte-for-byte."""
         n_demes = len(self.demes)
