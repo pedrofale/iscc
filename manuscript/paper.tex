@@ -70,9 +70,10 @@ Expression is generated from the evolving genome and microenvironment through ge
 copy number, cell state and niche rather than imposing their relationships. Because every observation carries the tumor's ground-truth
 evolutionary history, niche and cell populations, \texttt{iscc} exposes a failure mode invisible
 in real data: structure a method does not model ---
-clonal lineage, spatial admixture, copy number, clonal identity, or fitness --- masquerades as the
-signal it seeks. We demonstrate this across five method families: lineage tracing, multi-region
-phylogenetics, gene-program inference, spatial deconvolution and cohort progression models.
+clonal lineage, spatial admixture, copy number, clonal identity, microenvironmental niche, or fitness --- masquerades as the
+signal it seeks. We demonstrate this across six method families: lineage tracing, multi-region
+phylogenetics, gene-program inference, spatial deconvolution, cohort progression models and
+genotype--niche attribution of cell state.
 Its most developed instance, data integration, is benchmarked with real tools at two scales --- across
 modalities within a tumor and across patients within a cohort, where biology is confounded with
 technical batch effects; the lineage--space confound is further confirmed in real data. \texttt{iscc}'s genotype-level engine reaches millions of cells in
@@ -149,9 +150,10 @@ anchored to a known evolutionary history and cell-population structure, and beca
 \emph{emerges} from the evolutionary and microenvironmental process rather than being imposed,
 \texttt{iscc} provides non-circular ground truth for a broad range of single-cell and spatial
 analyses. We use it to expose a failure mode those analyses share yet cannot diagnose on real data
---- unmodeled structure (clonal lineage, spatial admixture, copy number, clonal identity, or
-fitness) masquerading as the signal a method seeks --- across lineage tracing, multi-region
-phylogenetics, gene-program inference, spatial deconvolution and cohort progression modelling. Its
+--- unmodeled structure (clonal lineage, spatial admixture, copy number, clonal identity,
+microenvironmental niche, or fitness) masquerading as the signal a method seeks --- across lineage tracing, multi-region
+phylogenetics, gene-program inference, spatial deconvolution, cohort progression modelling and
+genotype--niche attribution of cell state. Its
 most developed application is data integration, at two scales: \emph{across modalities} within a
 tumor --- linking a clone's copy number to its expression to its spatial niche --- and \emph{across
 patients} within a cohort, where biological variation is confounded with the technical batch effects
@@ -534,7 +536,9 @@ more invasive at the epithelial front than in the stroma, so a naive rule that t
 expression state as evidence of an invasive genotype is confounded by location. Because \texttt{iscc}
 generates both contributions it can quantify their split --- here the niche accounts for the majority
 ($65\%$) of the program's variance across cancer cells --- providing ground truth for methods that
-separate the genetic, plastic and environmental sources of a cancer cell's phenotype. This phenotype
+separate the genetic, plastic and environmental sources of a cancer cell's phenotype. This is the same
+asymmetry the benchmarks below make their theme (\Cref{sec:synthesis}): unmodeled structure --- here the
+microenvironmental niche --- read off as the genotype a method sets out to call. This phenotype
 is a pure read-out that never feeds back into fitness, so growth is byte-identical whether the program
 layer is on or off.
 
@@ -1335,7 +1339,7 @@ never develops --- but the mechanism (\Cref{fig:epistasis}B) and the tool--signa
 
 \subsection*{Taken together: the structure an analysis ignores is the structure that breaks it}
 \label{sec:synthesis}
-The benchmarks above are not five unrelated curiosities. In each, a structure the analysis does not
+The benchmarks above are not a set of unrelated curiosities. In each, a structure the analysis does not
 model masquerades as the signal it is looking for, and the resulting error is undiagnosable from the
 data alone. Clonal territories lend a purely environmental programme lineage autocorrelation, so a
 tree-based decomposition calls it heritable (\Cref{sec:petracer}). Regional admixture makes each bulk
@@ -1344,7 +1348,10 @@ ancestry --- and taking more biopsies makes it worse, not better (\Cref{sec:mult
 copy-number dosage induces positional co-expression, so a factor model reports it as a gene programme
 (\Cref{sec:programs}). Clones and cell types are both ``populations'' of cells, so spatial
 deconvolution resolves the programme-defined types and largely misses the copy-number-defined clones
-(\Cref{sec:integration}). The cohort progression models fail differently but for a related reason: what
+(\Cref{sec:integration}). A cell's niche shapes its expression, so an invasive state read from
+transcription is confounded with the genotype that would independently produce it, and a method
+attributing phenotype to genotype absorbs the niche's share (\Cref{sec:compartment}). The cohort
+progression models fail differently but for a related reason: what
 is recoverable is set less by cohort size than by which projection of the data the tool consumes ---
 fitness epistasis generates frequency without order, and an event-presence matrix registers neither
 (\Cref{sec:epistasis}).
