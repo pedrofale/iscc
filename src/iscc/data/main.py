@@ -14,22 +14,18 @@ from pathlib import Path
 
 import pandas as pd
 
-# Per-cell matrices the assays may consume. `cell_type` carries the clone / genotype
-# ground-truth label, surfaced into the assay output's `.obs` for benchmarking.
-CELL_DATA_KEYS = ["cell_snv", "cell_exp", "cell_cnv", "cell_crd", "cell_type"]
-
-
 def load_cell_data(path):
-    """Load a cell_data dict from a sample directory (or a cell_data/ dir directly)."""
+    """Load the full cell_data dict from a sample directory (or a cell_data/ dir directly).
+
+    Reads every per-cell CSV present, so the optional ground-truth layers (WGD, gene
+    programs, allele-specific expression, gland id, microenvironment, region) reach the
+    assay whenever the tumor was grown/sampled with them; the base schema loads on its own.
+    """
     base = path
     nested = os.path.join(path, "cell_data")
     if os.path.isdir(nested):
         base = nested
-    data = {}
-    for key in CELL_DATA_KEYS:
-        f = os.path.join(base, f"{key}.csv")
-        if os.path.exists(f):
-            data[key] = pd.read_csv(f, index_col=0)
+    data = {f.stem: pd.read_csv(f, index_col=0) for f in sorted(Path(base).glob("*.csv"))}
     if not data:
         raise click.ClickException(
             f"No cell_data CSVs found under {path!r}. Run `isccsample` first."

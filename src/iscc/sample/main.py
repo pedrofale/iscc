@@ -34,23 +34,15 @@ import yaml
 from iscc.sample.biopsy.biopsy import Biopsy
 from iscc.sample.dissociation.dissociation import Dissociation
 
-# The full per-cell ground-truth schema written by Tumor.make_cell_data / write.
-CELL_DATA_KEYS = [
-    "cell_evo", "cell_exp", "cell_snv", "cell_cnv", "cell_crd", "cell_type",
-    "cell_deme", "cell_rna_vaf",
-]
-
-
 def load_cell_data(tumor_path):
+    """Load the full ground-truth cell_data dict (every per-cell CSV present), so the
+    optional layers (WGD, gene programs, allele-specific expression, gland id,
+    microenvironment) are preserved through sampling rather than silently dropped."""
     base = tumor_path
     nested = os.path.join(tumor_path, "cell_data")
     if os.path.isdir(nested):
         base = nested
-    data = {}
-    for key in CELL_DATA_KEYS:
-        f = os.path.join(base, f"{key}.csv")
-        if os.path.exists(f):
-            data[key] = pd.read_csv(f, index_col=0)
+    data = {f.stem: pd.read_csv(f, index_col=0) for f in sorted(Path(base).glob("*.csv"))}
     if not data:
         raise click.ClickException(
             f"No cell_data CSVs found under {tumor_path!r}. Run `isccsim` first."

@@ -42,12 +42,24 @@ per-type `cell_params` (cancer / epithelial / stromal / immune). See
 | File | Columns | Meaning |
 |---|---|---|
 | `cell_snv.csv` | genes | SNV VAF / indicator per gene |
-| `cell_cnv.csv` | genes | copy number per gene |
+| `cell_cnv.csv` | genes | copy number per gene (total) |
 | `cell_exp.csv` | genes | transcriptional activity per gene |
 | `cell_evo.csv` | evolutionary params + driver tallies | division/death/dispersal rates, resistances, `n_mut_*` |
 | `cell_crd.csv` | `row`, `col` | deme coordinates on the grid |
 | `cell_type.csv` | `cell_id` | genotype id (cancer) or cell type (normal) |
 | `cell_deme.csv` | `deme_id` | which deme the cell is in |
+| `cell_rna_vaf.csv` | genes | RNA-level B-allele VAF per gene |
+
+The following are written **only when the corresponding feature is enabled** (the base schema above is
+unchanged otherwise), so a `cell_data/` directory may additionally contain:
+
+| File | Written when | Meaning |
+|---|---|---|
+| `cell_wgd.csv` | `wgd_rate > 0` | per-cell `is_wgd` flag (whole-genome-duplication status) |
+| `cell_program.csv` | the gene-program layer is on (`expression_params`) | per-cell program activity (cells × programs; R13) |
+| `cell_exp_p.csv`, `cell_exp_m.csv` | allele-specific dosage on (`allele_specific=True`) | paternal / maternal homolog expression per gene |
+| `cell_rna_baf.csv` | allele-specific dosage on | RNA B-allele fraction per gene (allele imbalance) |
+| `cell_gland.csv` | a ductal field is seeded (`n_glands` set) | `gland_id` per cell (which gland, `-1` = stroma) |
 
 ## Stage 2 — `isccsample` (biopsy / dissociation)
 
