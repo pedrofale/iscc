@@ -29,7 +29,6 @@ reads — all sharing the *same* ground truth.
 ## Quickstart
 
 ```bash
-pip install iscc
 isccsim --sim-config config.yaml --steps 2000 --random-seed 0 -o sim_out
 ```
 
