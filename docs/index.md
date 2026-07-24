@@ -1,5 +1,10 @@
 # **in silico** cancer center
 
+![A primary tumor seeds a clonally-linked metastasis; both deme-grids grow alongside their Muller plot — live animation coming soon.](assets/landing_hero_placeholder.png)
+
+*A primary tumor seeds a clonally-linked metastasis — watch both grids grow alongside their clonal
+(Muller) dynamics. Live animation coming soon.*
+
 `iscc` is an internally-consistent, multi-modal **tumor-evolution data simulator**. It grows one
 selection-driven, spatially-structured tumor, optionally treats it, samples it (biopsy /
 dissociation), and generates single-cell and bulk **DNA / RNA / spatial** data — down to sequencing
