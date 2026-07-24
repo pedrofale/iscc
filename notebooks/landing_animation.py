@@ -40,8 +40,11 @@ os.makedirs(FRAMES, exist_ok=True)
 
 # ---- config: metastasis_demo.py's arc, scaled up a touch for the story -------------------------
 GENOME = {"n_segments": 12, "segment_size": 50}
+# breach is rarer + the epithelial barrier is HIGH, so the ducts pack full (DCIS) for a good stretch
+# before a breach subclone escapes into the stroma (IDC); met seeding is delayed (met_seed_kappa) so it
+# follows stromal invasion. On-screen order: ducts fill -> breach -> stroma -> met seeding -> chemo -> relapse.
 SELECTION = {"prop_driver": 0.04, "prop_dispersal": 0.0, "prop_immune_resistance": 0.02,
-             "prop_treatment_resistance": 0.03, "prop_breach": 0.03, "prop_stromal_survival": 0.03,
+             "prop_treatment_resistance": 0.03, "prop_breach": 0.012, "prop_stromal_survival": 0.03,
              "prop_met_survival": 0.05, "breach_effects": 2.2, "stromal_survival_effects": 2.2,
              "met_survival_effects": 2.5}
 CANCER = {"division_rate": 0.7, "death_rate": 0.05, "max_birth_rate": 0.95, "mutation_rate": 0.6,
@@ -49,9 +52,9 @@ CANCER = {"division_rate": 0.7, "death_rate": 0.05, "max_birth_rate": 0.95, "mut
 DEME = {"carrying_capacity": 20, "initial_cancer_cells": 8, "resident_pressure_ref": 0.2}
 SPATIAL = {"grid_size": 26, "structure_radius": 3, "n_glands": 4, "gland_radius": 3, "min_gland_sep": 8,
            "K_duct": 40, "K_stroma": 26, "stroma_fill_frac": 0.3, "cross_gland_kappa": 0.06,
-           "epithelial_barrier": 1.2, "stromal_hazard": 0.7,
+           "epithelial_barrier": 6.0, "stromal_hazard": 0.7,
            "met_grid_size": 12, "K_met": 18, "host_fill_frac": 0.35,
-           "met_seed_kappa": 0.07, "met_hazard": 0.45, "met_transit_floor": 0.02}
+           "met_seed_kappa": 0.02, "met_hazard": 0.45, "met_transit_floor": 0.02}
 
 # ---- dark hero aesthetic -----------------------------------------------------------------------
 BG, PANEL, INK, SUBINK, GRID_LINE = "#0d1117", "#161b22", "#e6edf3", "#9aa4b2", "#30363d"
@@ -181,13 +184,24 @@ def build_figure(t, marks, colors, splash=False):
     the reveal cursor over them (no band flicker)."""
     fig = plt.figure(figsize=(12.6, 7.1), dpi=170)          # ~2140 x 1210 px -> crisp when shown large
     fig.patch.set_facecolor(BG)
-    top = 0.955 if splash else 0.865                        # splash has no legend/caption -> use the room
-    gs = GridSpec(2, 2, width_ratios=[1.0, 1.62], height_ratios=[1, 1], hspace=0.22, wspace=0.075,
-                  left=0.028, right=0.988, top=top, bottom=0.085)
-    axp = fig.add_subplot(gs[0, 0])                          # primary grid (top-left)
-    ax_mp = fig.add_subplot(gs[0, 1])                        # primary Muller (top-right)
-    axm = fig.add_subplot(gs[1, 0])                          # metastasis grid (bottom-left)
-    ax_mm = fig.add_subplot(gs[1, 1], sharex=ax_mp)          # metastasis Muller (bottom-right), shared x
+    if splash:
+        # Manual, SYMMETRIC placement: two EQUAL square grids in the left column, two wide Mullers in
+        # the right column, the whole block centered in the canvas (equal left/right & top/bottom
+        # margins). The grid axes are square and IDENTICAL in size, so both grids render the same size.
+        gh = 0.40                                           # grid height (figure fraction)
+        gw = gh * 7.1 / 12.6                                # equal width -> square axes (=> equal grids)
+        mw, gap = 0.52, 0.045                               # Muller width, grid<->Muller gap
+        lw = (1.0 - gw - gap - mw) / 2.0                    # equal L/R margin -> content centered at x=0.5
+        mx, y_top, y_bot = lw + gw + gap, 0.525, 0.075      # rows centered at y=0.5
+        axp = fig.add_axes([lw, y_top, gw, gh])             # primary grid (top-left)
+        ax_mp = fig.add_axes([mx, y_top, mw, gh])           # primary Muller (top-right)
+        axm = fig.add_axes([lw, y_bot, gw, gh])             # metastasis grid (bottom-left)
+        ax_mm = fig.add_axes([mx, y_bot, mw, gh])           # metastasis Muller (bottom-right)
+    else:
+        gs = GridSpec(2, 2, width_ratios=[1.0, 1.62], height_ratios=[1, 1], hspace=0.22, wspace=0.075,
+                      left=0.028, right=0.988, top=0.865, bottom=0.085)
+        axp = fig.add_subplot(gs[0, 0]); ax_mp = fig.add_subplot(gs[0, 1])
+        axm = fig.add_subplot(gs[1, 0]); ax_mm = fig.add_subplot(gs[1, 1], sharex=ax_mp)
 
     # draw the full-arc 2-band Muller once (semantic clone colours; min_freq collapses the passenger
     # rainbow so the sweeps read as bands). Founder-coloured bands -> a band's colour is its clone's.
@@ -200,21 +214,18 @@ def build_figure(t, marks, colors, splash=False):
     for ax, band in ((ax_mp, "primary"), (ax_mm, "metastasis")):
         ax.set_facecolor(BG)                     # axes background == the page colour (no card/seam)
         ax.set_xlim(0, xmax)
+        for ln in ax.lines:                      # event vlines -> visible dashed grey on the dark page
+            ln.set_color(SUBINK); ln.set_alpha(0.75)
+        for txt in ax.texts:                     # recolour the event labels for the dark theme
+            txt.set_color(INK); txt.set_fontsize(9 if splash else 8.5)
         if splash:
-            # NO axis chrome at all — no spines, ticks, y/x labels; just the centered bands + the
-            # event vertical lines and their annotations, sitting directly on the seamless page.
-            for sp in ax.spines.values():
-                sp.set_visible(False)
-            ax.tick_params(left=False, labelleft=False, bottom=False, labelbottom=False)
-            ax.set_ylabel(""); ax.set_xlabel("")
+            ax.axis("off")                       # NO axis chrome whatsoever (no spines/ticks/labels);
+            #                                      the bands + event vlines + their text still render.
         else:
-            # full/general path: a faint bottom+left L with labelled axes.
             for side, sp in ax.spines.items():
                 sp.set_visible(side in ("left", "bottom")); sp.set_color(GRID_LINE)
             ax.tick_params(colors=SUBINK, labelsize=8, length=2.5)
             ax.set_ylabel(f"{band}\ncells", color=SUBINK, fontsize=9.5)
-        for txt in ax.texts:                     # recolour the event labels for the dark theme
-            txt.set_color(INK); txt.set_fontsize(8.5)
     if not splash:
         ax_mp.set_xlabel(""); ax_mp.tick_params(labelbottom=False)   # only the bottom Muller carries x
         ax_mm.set_xlabel("tumour time (snapshot) — seeding · resection · chemotherapy annotated",
@@ -287,7 +298,7 @@ def main(splash=False):
         cursor_artists.clear()
         for ax in (ax_mp, ax_mm):
             cursor_artists.append(ax.axvspan(tl, xmax, color=BG, alpha=0.82, zorder=5))
-            cursor_artists.append(ax.axvline(tl, color="#f0f6fc", lw=1.8, alpha=0.95, zorder=6))
+            cursor_artists.append(ax.axvline(tl, color="#c9d1d9", lw=1.1, alpha=0.55, zorder=6))
         if caption is not None:
             caption.set_text({
                 "growth": "① proliferation in the ducts (DCIS)",
@@ -307,9 +318,9 @@ def main(splash=False):
         if fi % 10 == 0:
             print(f"  frame {fi+1}/{len(frames)}  ({time.time()-t0:.0f}s)")
     if splash:
-        # UNIFORM slow cadence (~3 fps, ~17 s loop): every frame the same duration so the loop is
-        # seamless — no dwell at the DCIS start or the relapsed end.
-        per = [450] * len(imgs)
+        # UNIFORM slow cadence, ~17 s loop regardless of frame count: every frame the same duration so
+        # the loop is seamless — no dwell at the DCIS start or the relapsed end.
+        per = [max(300, round(17000 / len(imgs)))] * len(imgs)
     else:
         # general path: ~6 fps with a short hold on the first/last frames so the loop reads.
         per = [170] * len(imgs)
