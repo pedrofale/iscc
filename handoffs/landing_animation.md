@@ -2,8 +2,8 @@
 
 Saved 2026-07-24. Copy the block below into a fresh session. **Docs/viz work.** Deliverable: the animation
 that replaces the placeholder hero on the docs landing page — the **primary tumour grid**, the
-**metastasis grid**, and the **Muller plot(s)** growing over time, side by side, on one shared clone
-colormap. Branch from `dev`.
+**metastasis grid**, and the **Muller plot(s)** growing over time on one shared clone colormap, laid out as two
+**cell-resolution** grids on top and a full-width Muller below (see LAYOUT). Branch from `dev`.
 
 Context you need:
 - The landing page is a Material "splash": `docs/index.md` uses `overrides/home.html`, whose hero is a single
@@ -19,8 +19,9 @@ Context you need:
 
 ```
 Build the docs landing-page growth ANIMATION for iscc: the primary tumour grid, the metastasis grid, and the
-Muller plot(s) growing over time, side by side on ONE shared clone colormap, to replace the static hero
-placeholder. READ notebooks/metastasis_demo.py FIRST (the static version of exactly this scene). Branch from `dev`.
+Muller plot(s) growing over time on ONE shared clone colormap, laid out as two CELL-RESOLUTION grids on top and a
+full-width Muller below (see LAYOUT), to replace the static hero placeholder. READ notebooks/metastasis_demo.py
+FIRST (the static version of exactly this scene). Branch from `dev`.
 
 REPO & ENV
 - Repo: /Users/pedroferreira/projects/iscc/repo (branch `dev`). Python: ~/miniconda3/envs/iscc/bin/python.
@@ -28,13 +29,22 @@ REPO & ENV
   break the test suite (this is viz/docs — you should not need to touch engine code; if you do, keep it green).
 
 THE SCENE (what animates, per frame)
-A wide, dark-themed hero (match the placeholder aesthetic: bg ~#0d1117, panel ~#161b22, light labels) with three
-panels growing together over the tumour's life:
-  1. PRIMARY tumour deme-grid (the ductal field) — coloured by clone (functional clone / driver combo).
-  2. METASTASIS deme-grid — SAME clone colormap, so a clone is the same colour in both grids (the met founder
-     inherits its primary clone's colour). It appears only after the seeding event, then grows.
-  3. MULLER — the clonal dynamics revealed progressively up to the current time (a growing Muller, or the full
-     2-band primary-over-metastasis Muller with a moving time cursor). Same clone colours as the grids.
+A dark-themed hero (match the placeholder aesthetic: bg ~#0d1117, panel ~#161b22, light labels) laid out in TWO
+ROWS (see LAYOUT), three panels growing together over the tumour's life:
+  - PRIMARY tumour grid (the ductal field) and METASTASIS grid — both CELL-RESOLUTION: each deme expanded to a
+    block of its INDIVIDUAL CELLS, NOT the deme-consensus / one-colour-per-deme view. Coloured by clone
+    (functional clone / driver combo) on ONE shared colormap, so a clone is the same colour in both grids (the met
+    founder inherits its primary clone's colour). The met grid is empty until the seeding event, then grows.
+  - MULLER — the clonal dynamics revealed progressively up to the current time (a growing Muller, or the full
+    2-band primary-over-metastasis Muller with a moving time cursor). Same clone colours as the grids.
+
+LAYOUT (2 rows — use a matplotlib gridspec, NOT plot_grid_compartments' built-in side-by-side layout):
+  Row 1 — TWO COLUMNS: primary grid (left) | metastasis grid (right), each cell-resolution, equal size.
+  Row 2 — FULL WIDTH, spanning both columns: the Muller (the 2-band primary-over-met Muller may stack its two
+    bands within this row).
+  i.e. gridspec(2, 2): grids at [0,0] and [0,1]; Muller at [1, :]. Render each grid into its own top-row axis.
+  This replaces the old single-row banner; the hero <img> scales to whatever aspect you render (roughly 3:2 / 4:3
+  — two grids on top, wide Muller below). Keep it legible at hero size.
 
 THE STORY THE ANIMATION MUST TELL (non-negotiable — this IS the deliverable, not decoration). The four
 selection episodes of the metastatic arc must each be clearly legible, both as spatial progression in the grids
@@ -59,11 +69,14 @@ API (all in metastasis_demo.py + src/iscc/tumor/viz.py — reuse, don't reinvent
   compartment_cancer(t) splits primary/met cancer counts — use it to detect the seeding frame (met cancer first >0).
 - t.grow(n_steps, seed, treatment=...) grows and appends to t.traces; Surgery(site="primary") and
   Chemotherapy(...) drive the resection/chemo phases (see the demo's arc).
-- Grids: viz.plot_grid_compartments(cell_data, primary_grid_size, met_grid_size, traces, genotypes_parents,
-  color=["cancer_frac" or a clone key]) draws the two grids side by side (t.plot_grid_compartments(...) is the
-  bound form). For a MOVING grid you need the per-timepoint deme composition — grow in small increments and render
-  the current grid each increment (plot_clone_grid_series / _expanded_cell_grid in viz.py show how a grid is drawn
-  from deme state; expand_demes=True gives the cell-resolution look).
+- Grids (CELL-RESOLUTION, REQUIRED — show cells, not deme consensus): expand each deme into a block of its
+  individual cells. viz.py's `_expanded_cell_grid` / `plot_grid(ax=..., expand_demes=True, section_frac=...)` do
+  exactly this (section-sampled); use it, coloured by clone. If that path is currently wired only for cell-TYPE
+  colouring, extend it to clone colouring (viz.py edits are fine — keep the suite green). Because the layout is the
+  custom 2-row gridspec (LAYOUT), render EACH grid into its OWN top-row axis (ax=...); use plot_grid_compartments /
+  compartment_cancer only as the reference for how primary-vs-met demes are split (the first t.n_primary_demes
+  demes are primary, the rest are met). For a MOVING grid, grow in small increments and re-render the current
+  cell-resolution grid each increment.
 - Muller: viz.plot_muller_compartments(traces, genotypes_parents, by_drivers=True, min_freq=0.05,
   mark_generations=marks) draws the 2-band primary-over-met Muller across the whole arc. min_freq is REQUIRED
   (infinite-sites => thousands of clones); by_drivers=True colours by functional clone so sweeps are legible.
@@ -73,8 +86,9 @@ API (all in metastasis_demo.py + src/iscc/tumor/viz.py — reuse, don't reinvent
 FRAME CAPTURE (recommended approach)
 Grow the arc in small steps; at each step render one combined figure (the 3 panels via subplots on the shared
 colormap) and capture it as a frame. Concretely: build the config -> loop { t.grow(n_steps=1 or 2); t.make_cell_data();
-render primary grid + met grid + Muller-so-far into a 16:5-ish figure; append the frame }. Cover the arc through
-seeding, growth, resection, chemo, relapse (as in the demo). Hold a few frames on the final state so the loop reads.
+render the 2-row layout (LAYOUT) — the two CELL-RESOLUTION grids on the top row (two columns) and the full-width
+Muller-so-far below — into one figure; append the frame }. Cover the arc through seeding, growth, resection,
+chemo, relapse (as in the demo). Hold a few frames on the final state so the loop reads.
 
 SIZE FOR THE STORY, NOT FOR SPEED. The tumour must be large enough and run long enough that all FOUR selective
 sweeps above are clearly legible — that is the whole point (showing iscc's power and a plausible metastatic-
