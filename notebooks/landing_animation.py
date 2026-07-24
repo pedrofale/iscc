@@ -67,9 +67,10 @@ STAGE_COL = {
 STAGE_ORDER = ["prolif", "breach", "stromal", "met", "resistance"]
 STAGE_LABEL = {"prolif": "proliferation", "breach": "duct escape", "stromal": "stromal survival",
                "met": "met establishment", "resistance": "chemo resistance"}
-# muted normal tissue (close to the panel so the cancer pops, but faintly readable as anatomy)
-NORMAL_MUTED = {"epithelial": (0.16, 0.30, 0.24, 1.0), "stromal": (0.28, 0.22, 0.27, 1.0),
-                "host": (0.22, 0.25, 0.30, 1.0), "immune": (0.32, 0.30, 0.14, 1.0)}
+# muted normal tissue: barely above the page colour so the cancer pops and the grids blend seamlessly
+# into the splash (no filled-square seam). The duct epithelium stays a touch brighter as the DCIS anchor.
+NORMAL_MUTED = {"epithelial": (0.15, 0.29, 0.23, 1.0), "stromal": (0.18, 0.15, 0.18, 1.0),
+                "host": (0.13, 0.16, 0.21, 1.0), "immune": (0.24, 0.22, 0.11, 1.0)}
 
 
 def stage_of(rep, B=0.70, S=0.80, M=0.92, R=0.55):
@@ -165,70 +166,103 @@ def grow_arc():
     return t, frames, marks
 
 
-def build_figure(t, marks, colors):
-    """Persistent figure: two cell-resolution grids on top, the static 2-band Muller full-width below.
-    The Muller is drawn ONCE; each frame only moves the reveal cursor over it (no band flicker)."""
-    fig = plt.figure(figsize=(7.4, 6.9), dpi=115)
+def build_figure(t, marks, colors, splash=False):
+    """Persistent, LANDSCAPE figure: each cell-resolution grid on the LEFT, its own-compartment Muller
+    on the RIGHT, in a 2x2 gridspec so the two Mullers stack in the right column and SHARE one
+    tumour-time x-axis, each aligned with its grid's row:
+
+        [0,0] primary grid      | [0,1] primary Muller
+        [1,0] metastasis grid   | [1,1] metastasis Muller  (shares x with the primary Muller)
+
+    ``splash=False`` (the DEFAULT, general path) keeps the full labelling — per-band y-axis labels and
+    tick counts, a descriptive x label. ``splash=True`` is the minimal HERO variant: no y labels/ticks,
+    an x label of just "Time", and (in ``main``) no clone legend / cell counts / phase caption; only the
+    event vertical lines + their annotations remain. The Mullers are drawn ONCE; each frame only moves
+    the reveal cursor over them (no band flicker)."""
+    fig = plt.figure(figsize=(12.6, 7.1), dpi=170)          # ~2140 x 1210 px -> crisp when shown large
     fig.patch.set_facecolor(BG)
-    gs = GridSpec(3, 2, height_ratios=[1.5, 0.6, 0.6], hspace=0.32, wspace=0.10,
-                  left=0.035, right=0.985, top=0.815, bottom=0.065)
-    axp = fig.add_subplot(gs[0, 0])
-    axm = fig.add_subplot(gs[0, 1])
-    ax_mp = fig.add_subplot(gs[1, :])
-    ax_mm = fig.add_subplot(gs[2, :], sharex=ax_mp)
+    top = 0.955 if splash else 0.865                        # splash has no legend/caption -> use the room
+    gs = GridSpec(2, 2, width_ratios=[1.0, 1.62], height_ratios=[1, 1], hspace=0.22, wspace=0.075,
+                  left=0.028, right=0.988, top=top, bottom=0.085)
+    axp = fig.add_subplot(gs[0, 0])                          # primary grid (top-left)
+    ax_mp = fig.add_subplot(gs[0, 1])                        # primary Muller (top-right)
+    axm = fig.add_subplot(gs[1, 0])                          # metastasis grid (bottom-left)
+    ax_mm = fig.add_subplot(gs[1, 1], sharex=ax_mp)          # metastasis Muller (bottom-right), shared x
 
     # draw the full-arc 2-band Muller once (semantic clone colours; min_freq collapses the passenger
     # rainbow so the sweeps read as bands). Founder-coloured bands -> a band's colour is its clone's.
+    # splash uses the CENTERED (Noble "fish"/stream) baseline — bands grow outward from a midline.
     viz.plot_muller_compartments(t.traces, t.genotypes_parents, axes=(ax_mp, ax_mm),
                                  driver_map=t._functional_signatures(), min_freq=0.05,
-                                 clone_colors=colors, mark_generations=marks, star_genotype=None)
+                                 clone_colors=colors, mark_generations=marks, star_genotype=None,
+                                 centered=splash)
     xmax = len(t.traces) - 1
     for ax, band in ((ax_mp, "primary"), (ax_mm, "metastasis")):
-        ax.set_facecolor(PANEL)
-        for sp in ax.spines.values():
-            sp.set_color(GRID_LINE)
-        ax.tick_params(colors=SUBINK, labelsize=6.5, length=2)
+        ax.set_facecolor(BG)                     # axes background == the page colour (no card/seam)
         ax.set_xlim(0, xmax)
-        ax.set_ylabel(f"{band}\ncells", color=SUBINK, fontsize=7.5)
+        if splash:
+            # NO axis chrome at all — no spines, ticks, y/x labels; just the centered bands + the
+            # event vertical lines and their annotations, sitting directly on the seamless page.
+            for sp in ax.spines.values():
+                sp.set_visible(False)
+            ax.tick_params(left=False, labelleft=False, bottom=False, labelbottom=False)
+            ax.set_ylabel(""); ax.set_xlabel("")
+        else:
+            # full/general path: a faint bottom+left L with labelled axes.
+            for side, sp in ax.spines.items():
+                sp.set_visible(side in ("left", "bottom")); sp.set_color(GRID_LINE)
+            ax.tick_params(colors=SUBINK, labelsize=8, length=2.5)
+            ax.set_ylabel(f"{band}\ncells", color=SUBINK, fontsize=9.5)
         for txt in ax.texts:                     # recolour the event labels for the dark theme
-            txt.set_color(INK); txt.set_fontsize(6.5)
-    ax_mp.set_xlabel("")
-    ax_mm.set_xlabel("snapshot (tumour time)", color=SUBINK, fontsize=7.5)
+            txt.set_color(INK); txt.set_fontsize(8.5)
+    if not splash:
+        ax_mp.set_xlabel(""); ax_mp.tick_params(labelbottom=False)   # only the bottom Muller carries x
+        ax_mm.set_xlabel("tumour time (snapshot) — seeding · resection · chemotherapy annotated",
+                         color=SUBINK, fontsize=9.5)
     if ax_mp.legend_:
         ax_mp.legend_.remove()
     return fig, axp, axm, ax_mp, ax_mm, xmax
 
 
-def draw_grid(ax, sub, gsz, colors, title, n_cells):
+def draw_grid(ax, sub, gsz, colors, title):
+    """Render one cell-resolution grid. ``title`` is used verbatim (the caller formats it — with a cell
+    count for the general path, or just "Primary"/"Metastasis" for the splash)."""
+    # empty background == the page colour so the grid has NO card/seam: only the cells are non-page
+    # pixels and the tumour reads as growing directly on the splash.
     viz.plot_grid(sub, gsz, None, None, color=["cell_type"], ax=ax, expand_demes=True,
-                  section_frac=0.85, cancer_color=None, type_cmap=colors, empty_color=PANEL)
+                  section_frac=0.85, cancer_color=None, type_cmap=colors, empty_color=BG)
     if ax.legend_:
         ax.legend_.remove()
-    ax.set_title(f"{title}   ({n_cells:,} cells)", color=INK, fontsize=9, pad=4)
+    ax.set_title(title, color=INK, fontsize=12, pad=5)
     ax.set_xticks([]); ax.set_yticks([])
-    ax.set_facecolor(PANEL)
-    for sp in ax.spines.values():
-        sp.set_color(GRID_LINE)
+    ax.set_facecolor(BG)
+    for sp in ax.spines.values():          # no frame around the grid
+        sp.set_visible(False)
 
 
-def main():
+def main(splash=False):
+    """Render the arc to a GIF. ``splash=True`` -> the minimal HERO variant written to
+    ``docs/assets/landing_hero.gif`` (label-light: no clone legend, no cell counts, no phase caption,
+    no Muller y labels/ticks, "Time" x label; keeps the event vlines + annotations). ``splash=False``
+    (default) -> the fully-labelled general animation written to ``notebooks/example_out/``."""
     t0 = time.time()
     t, frames, marks = grow_arc()
     colors = story_colors(t)
-    mark_x = {lbl: x for x, lbl in marks}
 
-    fig, axp, axm, ax_mp, ax_mm, xmax = build_figure(t, marks, colors)
+    fig, axp, axm, ax_mp, ax_mm, xmax = build_figure(t, marks, colors, splash=splash)
 
-    # a single stage legend + a phase caption, drawn on the figure
-    legend_handles = [Patch(facecolor=STAGE_COL[s], edgecolor="none", label=f"{i+1}. {STAGE_LABEL[s]}")
-                      for i, s in enumerate(STAGE_ORDER)]
-    fig.legend(handles=legend_handles, loc="upper center", bbox_to_anchor=(0.5, 0.935),
-               ncol=5, fontsize=6.8, frameon=False, labelcolor=INK, handlelength=1.0,
-               columnspacing=1.1, handletextpad=0.4)
-    title = fig.text(0.5, 0.986, "iscc  —  one tumour: a primary seeds a clonally-linked metastasis",
-                     ha="center", va="top", color=INK, fontsize=11.5, weight="bold")
-    caption = fig.text(0.5, 0.882, "", ha="center", va="top", color=SUBINK, fontsize=8.5)
+    caption = None
+    if not splash:
+        # the shared clone legend + a per-phase caption (the general/default path keeps all labels)
+        legend_handles = [Patch(facecolor=STAGE_COL[s], edgecolor="none", label=f"{i+1}. {STAGE_LABEL[s]}")
+                          for i, s in enumerate(STAGE_ORDER)]
+        fig.legend(handles=legend_handles, loc="upper center", bbox_to_anchor=(0.5, 0.985),
+                   ncol=5, fontsize=9.5, frameon=False, labelcolor=INK, handlelength=1.1,
+                   columnspacing=1.6, handletextpad=0.5)
+        caption = fig.text(0.5, 0.918, "", ha="center", va="top", color=SUBINK, fontsize=10.5)
 
+    grid_titles = {"primary": "Primary", "metastasis": "Metastasis"} if splash else \
+                  {"primary": "primary duct field", "metastasis": "metastasis"}
     cursor_artists = []
     representative = {}  # phase -> frame index, for saved PNGs
 
@@ -241,24 +275,26 @@ def main():
         comp = cd["cell_compartment"]["compartment"].to_numpy()
         for ax in (axp, axm):
             ax.clear()
-        for ax, val, gsz, ttl in ((axp, 0, t.grid_size, "primary duct field"),
+        for ax, val, gsz, key in ((axp, 0, t.grid_size, "primary"),
                                   (axm, 1, t.met_grid_size, "metastasis")):
             mask = comp == val
             sub = {k: df[mask] for k, df in cd.items()}
-            draw_grid(ax, sub, gsz, colors, ttl, int(mask.sum()))
+            title = grid_titles[key] if splash else f"{grid_titles[key]}   ({int(mask.sum()):,} cells)"
+            draw_grid(ax, sub, gsz, colors, title)
         # progressive reveal cursor over the static Muller
         for a in cursor_artists:
             a.remove()
         cursor_artists.clear()
         for ax in (ax_mp, ax_mm):
             cursor_artists.append(ax.axvspan(tl, xmax, color=BG, alpha=0.82, zorder=5))
-            cursor_artists.append(ax.axvline(tl, color="#f0f6fc", lw=1.3, alpha=0.95, zorder=6))
-        cap = {"growth": "① proliferation in the ducts (DCIS)",
-               "metastatic seeding": "①→② breach the duct wall, survive the stroma, seed the met (IDC)",
-               "resection": "the primary is surgically resected",
-               "chemotherapy": "systemic chemotherapy — the sensitive metastasis regresses",
-               "relapse": "④ resistant clones relapse the metastasis"}[phase]
-        caption.set_text(cap)
+            cursor_artists.append(ax.axvline(tl, color="#f0f6fc", lw=1.8, alpha=0.95, zorder=6))
+        if caption is not None:
+            caption.set_text({
+                "growth": "① proliferation in the ducts (DCIS)",
+                "metastatic seeding": "①→② breach the duct wall, survive the stroma, seed the met (IDC)",
+                "resection": "the primary is surgically resected",
+                "chemotherapy": "systemic chemotherapy — the sensitive metastasis regresses",
+                "relapse": "④ resistant clones relapse the metastasis"}[phase])
         fig.canvas.draw()
         buf = np.asarray(fig.canvas.buffer_rgba())[:, :, :3].copy()
         representative.setdefault(phase, fi)
@@ -270,22 +306,30 @@ def main():
         imgs.append(render(fi))
         if fi % 10 == 0:
             print(f"  frame {fi+1}/{len(frames)}  ({time.time()-t0:.0f}s)")
-    per = [170] * len(imgs)
-    per[0] = 900          # linger on the DCIS start
-    per[-1] = 1900        # linger on the relapsed metastasis before looping
+    if splash:
+        # UNIFORM slow cadence (~3 fps, ~17 s loop): every frame the same duration so the loop is
+        # seamless — no dwell at the DCIS start or the relapsed end.
+        per = [450] * len(imgs)
+    else:
+        # general path: ~6 fps with a short hold on the first/last frames so the loop reads.
+        per = [170] * len(imgs)
+        per[0] = 900
+        per[-1] = 1900
 
-    gif_path = os.path.join(ASSETS, "landing_hero.gif")
+    stem = "landing_hero" if splash else "landing_full"
+    out_dir = ASSETS if splash else os.path.join(HERE, "example_out")
+    gif_path = os.path.join(out_dir, f"{stem}.gif")
     imageio.mimsave(gif_path, imgs, format="GIF", duration=per, loop=0)  # ~6 fps + holds
     size_mb = os.path.getsize(gif_path) / 1e6
-    dur = sum(per) / 1000.0
-    print(f"wrote {gif_path}  ({size_mb:.2f} MB, {len(imgs)} frames, ~{dur:.1f}s)")
+    print(f"wrote {gif_path}  ({size_mb:.2f} MB, {len(imgs)} frames, ~{sum(per)/1000.0:.1f}s, "
+          f"{'splash/minimal' if splash else 'full-labelled'})")
 
     # poster PNG (final state) + representative frames for the report
-    poster = os.path.join(ASSETS, "landing_hero_poster.png")
+    poster = os.path.join(out_dir, f"{stem}_poster.png")
     imageio.imwrite(poster, imgs[-1])
     print("wrote", poster)
     for phase, fi in representative.items():
-        p = os.path.join(FRAMES, f"frame_{fi:02d}_{phase.replace(' ', '_')}.png")
+        p = os.path.join(FRAMES, f"{stem}_{fi:02d}_{phase.replace(' ', '_')}.png")
         imageio.imwrite(p, imgs[fi])
         print("  representative:", p)
     plt.close("all")
@@ -293,4 +337,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--splash", action="store_true",
+                    help="render the minimal HERO variant to docs/assets/landing_hero.gif "
+                         "(default: the fully-labelled general animation to notebooks/example_out/)")
+    main(splash=ap.parse_args().splash)

@@ -197,8 +197,32 @@ def _cancer_only(traces, genotypes_parents):
     return genotype_counts, genotype_parents
 
 
+def _sym_stackplot(ax, pop_df, anc_df, color_by, colormap, normalize, smoothing_std):
+    """pymuller.muller's stackplot but with a SYMMETRIC (centered) baseline — the classic Noble-style
+    "fish"/stream Muller (Noble et al., Nat Ecol Evol 2021), where the population grows outward from a
+    central horizontal midline in both directions. Same y-layout (``_get_y_values``) and colour mapping
+    (``color_by`` -> ``colormap``) as ``pymuller._muller_plot``; only ``baseline="sym"`` differs."""
+    import sys as _sys
+    pop = pop_df.copy()
+    if normalize:
+        pop["Population"] = pop.groupby("Generation")["Population"].transform(
+            lambda v: v / v.sum() if v.sum() else v)
+    x = pop["Generation"].unique()
+    _old = _sys.getrecursionlimit()
+    try:
+        _sys.setrecursionlimit(max(_old, 20000))
+        yt = pymuller.logic._get_y_values(pop, anc_df, smoothing_std)
+    finally:
+        _sys.setrecursionlimit(_old)
+    cmap = plt.get_cmap(colormap)
+    ordered = color_by.copy().loc[yt.columns.values]
+    norm = matplotlib.colors.Normalize(vmin=np.min(ordered), vmax=np.max(ordered))
+    ax.stackplot(x, yt.to_numpy().T, colors=cmap(norm(ordered.values)), baseline="sym")
+    return ax
+
+
 def plot_muller(traces, genotypes_parents, ax=None, colormap="gnuplot", normalize=True,
-                smoothing_std=0.1, show_axes=True, min_freq=None, driver_map=None):
+                smoothing_std=0.1, show_axes=True, min_freq=None, driver_map=None, centered=False):
     """Muller plot of clonal dynamics.
 
     ``driver_map`` ({genotype_id -> hashable driver signature}, supplied by the engine) colours by
@@ -207,7 +231,11 @@ def plot_muller(traces, genotypes_parents, ax=None, colormap="gnuplot", normaliz
     driver clones). ``min_freq`` (a fraction) additionally merges clones whose subtree never reaches
     that share of the grown cancer population into their nearest ancestor (Noble-style sensitivity
     threshold). The two compose: driver-collapse first, then the size threshold. Both default off, in
-    which case every genotype is a clone (the historical behaviour)."""
+    which case every genotype is a clone (the historical behaviour).
+
+    ``centered`` (default False) stacks the clone bands SYMMETRICALLY around a central horizontal axis
+    (the Noble "fish"/stream layout, ``baseline="sym"``) instead of upward from zero; the default is the
+    historical zero-based pymuller layout, byte-identical."""
     genotype_counts, genotype_parents = _cancer_only(traces, genotypes_parents)
     # FULL parent map used to reconnect ancestry; replaced by the driver-tree edges after a collapse.
     merge_parents = genotypes_parents
@@ -233,8 +261,11 @@ def plot_muller(traces, genotypes_parents, ax=None, colormap="gnuplot", normaliz
     _old_limit = _sys.getrecursionlimit()
     try:
         _sys.setrecursionlimit(max(_old_limit, 20000))
-        pymuller.muller(pop_df, anc_df, color_by, ax=ax, colorbar=False, colormap=colormap,
-                        normalize=normalize, background_strain=False, smoothing_std=smoothing_std)
+        if centered:
+            _sym_stackplot(ax, pop_df, anc_df, color_by, colormap, normalize, smoothing_std)
+        else:
+            pymuller.muller(pop_df, anc_df, color_by, ax=ax, colorbar=False, colormap=colormap,
+                            normalize=normalize, background_strain=False, smoothing_std=smoothing_std)
     finally:
         _sys.setrecursionlimit(_old_limit)
     if show_axes:
@@ -576,9 +607,11 @@ def stage_legend(present=None):
 
 
 def _draw_muller_panel(ax, pop_df, anc, band_colors, normalize, smoothing_std,
-                       default=(0.82, 0.82, 0.82, 1.0)):
+                       default=(0.82, 0.82, 0.82, 1.0), centered=False):
     """Draw ONE Muller panel with EXPLICIT per-band colours, bypassing pymuller's colormap
-    normalisation so a categorical palette maps exactly. Mirrors pymuller._muller_plot's layout."""
+    normalisation so a categorical palette maps exactly. Mirrors pymuller._muller_plot's layout.
+    ``centered=True`` uses a symmetric (``baseline="sym"``) baseline — the Noble "fish"/stream layout,
+    bands growing outward from a central midline; default is the historical zero-based stack."""
     import sys as _sys
     pop = pop_df.copy()
     if normalize:
@@ -592,14 +625,15 @@ def _draw_muller_panel(ax, pop_df, anc, band_colors, normalize, smoothing_std,
     finally:
         _sys.setrecursionlimit(_old)
     colors = [band_colors.get(str(c), default) for c in yt.columns.values]
-    ax.stackplot(x, yt.to_numpy().T, colors=colors)
+    ax.stackplot(x, yt.to_numpy().T, colors=colors, baseline=("sym" if centered else "zero"))
     return ax
 
 
 def plot_muller_compartments(traces, genotypes_parents, axes=None, colormap="gnuplot",
                              normalize=False, smoothing_std=0.1, labels=("primary", "metastasis"),
                              mark_generations=None, driver_map=None, min_freq=None,
-                             star_genotype=None, star_gen=None, clone_colors=None, color_legend=None):
+                             star_genotype=None, star_gen=None, clone_colors=None, color_legend=None,
+                             centered=False):
     """Two stacked Muller panels — primary (top) and metastasis (bottom) — that SHARE ONE colormap, so
     a clone keeps its colour across both bands (and matches plot_grid_compartments / plot_muller). The
     met founder therefore appears in the met band with the SAME colour as its — usually minor — parent
@@ -650,7 +684,10 @@ def plot_muller_compartments(traces, genotypes_parents, axes=None, colormap="gnu
         pop_df = (comp.melt(id_vars=["Generation"], value_name="Population", var_name="Identity")
                   .sort_values("Generation").reset_index(drop=True))
         if band_colors is not None:
-            _draw_muller_panel(ax, pop_df, anc_full, band_colors, normalize, smoothing_std)
+            _draw_muller_panel(ax, pop_df, anc_full, band_colors, normalize, smoothing_std,
+                               centered=centered)
+        elif centered:
+            _sym_stackplot(ax, pop_df, anc_full, color_by, colormap, normalize, smoothing_std)
         else:
             _old = _sys.getrecursionlimit()
             try:
