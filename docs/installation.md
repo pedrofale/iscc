@@ -4,10 +4,6 @@
 pip install insilico-cancer-center
 ```
 
-The distribution is published on PyPI as **`insilico-cancer-center`**; in Python you still
-`import iscc`, and the command-line tools are unchanged (`isccsim`, `isccsample`, …). Requires
-**Python 3.10–3.12**.
-
 Graph drawing uses `pygraphviz`, which needs the system **Graphviz** library installed first
 (e.g. `brew install graphviz`, `apt-get install graphviz graphviz-dev`, or `conda install -c conda-forge graphviz`).
 
