@@ -123,8 +123,10 @@ class TumorSimulator:
             vec, self.names = summary_vector(t, include_snv=self.include_snv)
             vecs.append(vec)
         if not vecs:
-            n = len(summary_vector(self.simulate_tumor(theta, seed=base))[1])
-            return np.full(n, np.nan)
+            # every replicate went extinct: still record the (data-independent) feature
+            # names so callers can rely on ``self.names`` after any call.
+            _, self.names = summary_vector(self.simulate_tumor(theta, seed=base))
+            return np.full(len(self.names), np.nan)
         with warnings.catch_warnings():        # all-nan column (e.g. sfs_rsq) -> nan, not a warning
             warnings.simplefilter("ignore", RuntimeWarning)
             return np.nanmean(np.vstack(vecs), axis=0)
