@@ -32,8 +32,10 @@ LAYOUT_OFFSET_PROGRAMS = 101       # expression gene programs (R13, DESIGN_expre
 LAYOUT_OFFSET_F8_PROGRAMS = 102    # F8 microenvironment programs (DESIGN_features §H): the
                                    # hypoxia-responsive + CCI-target gene sets
 LAYOUT_OFFSET_EPISTASIS = 201      # the epistasis E matrix / dependency DAG (R14, DESIGN_epistasis.md)
+LAYOUT_OFFSET_MET = 301            # metastasis module (R9): the host-parenchyma baseline expression
+                                   # profile for the metastatic deposit (celltype_exps["host"])
 
-normal_cmap = {'epithelial': 'green', 'immune': 'yellow', 'stromal': 'pink'}
+normal_cmap = {'epithelial': 'green', 'immune': 'yellow', 'stromal': 'pink', 'host': 'lightgray'}
 normal_names = list(normal_cmap.keys())
 normal_colors = list(normal_cmap.values())
 normal_colors_rgba = np.array([np.array(mcolors.to_rgba(color)) for color in normal_colors])

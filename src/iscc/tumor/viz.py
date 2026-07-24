@@ -256,7 +256,7 @@ def cell_type_colors(traces, genotypes_parents, colormap="gnuplot"):
 
 
 def _expanded_cell_grid(cell_data, grid_size, traces, genotypes_parents, section_frac, seed,
-                        cancer_color):
+                        cancer_color, type_cmap=None):
     """Cell-resolution image of the grid: each deme becomes an ``s×s`` block of its INDIVIDUAL cells.
 
     Normal cells take their type colour; cancer cells take ``cancer_color`` (a single colour — the
@@ -283,7 +283,7 @@ def _expanded_cell_grid(cell_data, grid_size, traces, genotypes_parents, section
         deme_rc[d] = (int(crd[i, 0]), int(crd[i, 1]))
     max_sec = max((max(1, int(round(section_frac * len(v)))) for v in deme_cells.values()), default=1)
     s = max(1, int(np.ceil(np.sqrt(max_sec))))
-    type_cmap = cell_type_colors(traces, genotypes_parents)
+    type_cmap = type_cmap if type_cmap is not None else cell_type_colors(traces, genotypes_parents)
     fixed_cancer = None if cancer_color is None else np.asarray(matplotlib.colors.to_rgb(cancer_color))
     fallback = np.array([0.84, 0.15, 0.16])                     # cancer red if a clone is uncoloured
 
@@ -311,7 +311,7 @@ def _expanded_cell_grid(cell_data, grid_size, traces, genotypes_parents, section
 
 def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap="viridis",
               ax=None, figsize=(10, 10), dpi=100, expand_demes=False, section_frac=1.0, expand_seed=0,
-              cancer_color="#d62728"):
+              cancer_color="#d62728", type_cmap=None):
     if color is None:
         color = ["cell_type"]
     if ax is None:
@@ -324,7 +324,7 @@ def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap=
             # cell-resolution (deme-expanded) view — each deme is a block of its individual cells,
             # section-sampled to `section_frac` of the deme's depth. See _expanded_cell_grid.
             img, s, type_cmap = _expanded_cell_grid(cell_data, grid_size, traces, genotypes_parents,
-                                                    section_frac, expand_seed, cancer_color)
+                                                    section_frac, expand_seed, cancer_color, type_cmap)
             ax.imshow(img, interpolation="nearest")
             present = set(cell_data["cell_type"]["cell_id"].values)
             legend_patches = [mpatches.Patch(color=type_cmap[n], label=n)
@@ -339,7 +339,7 @@ def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap=
             ax.set_xticks([]); ax.set_yticks([])
             continue
         if color_key == "cell_type":
-            type_cmap = cell_type_colors(traces, genotypes_parents)
+            type_cmap = type_cmap if type_cmap is not None else cell_type_colors(traces, genotypes_parents)
             base = cell_data["cell_deme"].join(cell_data["cell_crd"])
             base["val"] = cell_data["cell_type"]["cell_id"].values
             deme_data = base.groupby(["deme_id"]).agg(lambda x: x.mode().iloc[0])
@@ -392,3 +392,345 @@ def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap=
         ax.set_title(color_key)
     plt.axis("off")
     return ax
+
+
+# --- metastasis: two-compartment views sharing one clone colormap (R9) -------------------------
+
+def _compartment_cancer_counts(traces, key, all_cols):
+    """Per-generation cancer counts for ONE compartment as a (generations x all_cols) frame, zero-
+    filled to the GLOBAL cancer clone set (`all_cols`) so it shares the global ancestry/colour basis.
+    Normal-cell columns in the per-compartment snapshot are dropped by the reindex."""
+    df = pd.DataFrame([t.get(key, {}) for t in traces]).fillna(0)
+    df.columns = df.columns.astype(str)
+    return df.reindex(columns=all_cols, fill_value=0.0)
+
+
+def _driver_band_map(cols, full_parents, driver_map):
+    """{gid -> band id}: each genotype maps to the founder of its maximal same-signature ancestor chain
+    (its 'driver/functional clone'). The SAME contraction ``_collapse_by_drivers`` uses, exposed so the
+    two-compartment Muller can aggregate each compartment's per-genotype counts into the SAME bands."""
+    fp = {str(k): str(v) for k, v in dict(full_parents).items()}
+    sig, band = driver_map, {}
+
+    def band_of(g):
+        path, x = [], g
+        while x not in band:
+            p = fp.get(x)
+            if p is None or sig.get(p) != sig.get(x) or x in path:
+                band[x] = x
+                break
+            path.append(x)
+            x = p
+        b = band[x]
+        for y in path:
+            band[y] = b
+        return b
+
+    return {c: band_of(c) for c in cols if driver_map.get(c) is not None}
+
+
+def _aggregate_by_map(comp_df, gmap, basis_cols):
+    """Sum a per-genotype count frame's columns into basis columns (bands) via ``gmap`` (gid -> band)."""
+    out = pd.DataFrame(0.0, index=comp_df.index, columns=[str(c) for c in basis_cols])
+    for g in comp_df.columns:
+        b = str(gmap.get(g, g))
+        if b in out.columns:
+            out[b] = out[b].values + comp_df[g].values
+    return out
+
+
+def _merge_shown_map(genotype_counts, full_parents, min_freq):
+    """{col -> the SHOWN clone it merges into} under the min_freq size threshold (Noble sensitivity),
+    mirroring ``_merge_small_clones`` so per-compartment counts and grid colours aggregate into the
+    same shown clones the Muller draws. Cols never reaching min_freq of the grown population fold into
+    their nearest surviving ancestor."""
+    from collections import defaultdict
+    cols = [c for c in genotype_counts.columns if c != "Generation"]
+    if len(cols) <= 1:
+        return {c: c for c in cols}
+    present = set(cols)
+    fp = {str(k): str(v) for k, v in dict(full_parents).items()}
+    eff = {}
+    for c in cols:
+        path, x = [], fp.get(c)
+        while x is not None and x not in present and x not in eff:
+            path.append(x); x = fp.get(x)
+        res = eff.get(x, x) if (x is not None and x not in present) else (x if x in present else None)
+        for p in path:
+            eff[p] = res
+        eff[c] = res
+    epar = {c: eff.get(c) for c in cols}
+    children = defaultdict(list)
+    for c in cols:
+        if epar[c] in present:
+            children[epar[c]].append(c)
+    order, seen = [], set()
+    for r in [c for c in cols if epar[c] not in present]:
+        stack = [(r, False)]
+        while stack:
+            x, done = stack.pop()
+            if done:
+                order.append(x); continue
+            if x in seen:
+                continue
+            seen.add(x); stack.append((x, True))
+            for ch in children.get(x, []):
+                stack.append((ch, False))
+    order += [c for c in cols if c not in seen]
+    subtree = {c: genotype_counts[c].to_numpy(float).copy() for c in cols}
+    for c in order:
+        for ch in children.get(c, []):
+            subtree[c] += subtree[ch]
+    total = genotype_counts[cols].to_numpy(float).sum(axis=1)
+    ok = total > 0
+    ref = float(total[ok].max()) if ok.any() else 1.0
+    shown = {c for c in cols if epar[c] not in present
+             or (ok.any() and float(np.max(subtree[c][ok])) / ref >= min_freq)}
+
+    def nearest(c):
+        x = c
+        while x is not None and x not in shown:
+            x = epar.get(x)
+        return x
+
+    return {c: nearest(c) for c in cols}
+
+
+def _display_basis(traces, genotypes_parents, driver_map=None, min_freq=None):
+    """The clone basis a Muller/grid is drawn on, plus the map from each raw genotype to its basis
+    clone. Optionally collapses genotypes to FUNCTIONAL clones (``driver_map``) and/or merges clones
+    below a size threshold (``min_freq``). Returns (basis_counts, basis_parents, gid->clone map,
+    basis_cols) — the map lets each compartment's counts and the grid colours aggregate into the SAME
+    clones, so colours stay shared across both Muller bands and both grids."""
+    gcounts, gparents = _cancer_only(traces, genotypes_parents)
+    all_gids = [c for c in gcounts.columns if c != "Generation"]
+    counts = gcounts.copy()
+    counts["Generation"] = np.arange(gcounts.shape[0])
+    if driver_map:
+        gmap = {str(g): str(b) for g, b in _driver_band_map(all_gids, genotypes_parents, driver_map).items()}
+        counts, parents = _collapse_by_drivers(counts, genotypes_parents, driver_map)
+        merge_parents = {c: parents[c].iloc[0] for c in parents.columns}
+    else:
+        gmap = {str(g): str(g) for g in all_gids}
+        parents, merge_parents = gparents, genotypes_parents
+    if min_freq:
+        smap = _merge_shown_map(counts, merge_parents, min_freq)
+        counts, parents = _merge_small_clones(counts, merge_parents, min_freq)
+        gmap = {g: str(smap.get(b, b)) for g, b in gmap.items()}
+    basis_cols = [c for c in counts.columns if c != "Generation"]
+    return counts, parents, gmap, basis_cols
+
+
+def functional_clone_colors(traces, genotypes_parents, driver_map=None, colormap="gnuplot", min_freq=None):
+    """{gid -> rgba} where each cancer genotype takes the colour of its display clone (functional clone
+    and/or size-merged), plus the normal-type colours. Matches the clone colours
+    ``plot_muller_compartments`` draws for the same (driver_map, min_freq), so the two grids and both
+    Muller bands share one palette."""
+    basis_counts, basis_parents, gmap, _ = _display_basis(traces, genotypes_parents, driver_map, min_freq)
+    pop_df, anc, color_by = _prepare(basis_counts.copy(), basis_parents)
+    band_colors, band_order = _get_colormap(pop_df, anc, color_by, colormap)
+    band_cmap = dict(zip([str(b) for b in band_order], band_colors))
+    out = {g: band_cmap[str(gmap.get(g, g))] for g in gmap if str(gmap.get(g, g)) in band_cmap}
+    for name in normal_names:
+        out[name] = normal_cmap_rgba[name]
+    return out
+
+
+def _band_y_at(pop_df, anc, band_id, gen, smoothing_std):
+    """Stacked y-centre of ``band_id``'s band at generation ``gen`` in the pymuller stackplot built
+    from (pop_df, anc) — for placing a marker exactly on a clone's band. Returns (x, y) or None."""
+    yt = pymuller.logic._get_y_values(pop_df, anc, smoothing_std)   # index=generation, cols=strain slots
+    order = [str(c) for c in yt.columns]
+    if str(band_id) not in order:
+        return None
+    gens = list(yt.index)
+    gi = min(range(len(gens)), key=lambda i: abs(gens[i] - gen))
+    heights = yt.to_numpy()[gi].astype(float)
+    bottoms = np.concatenate([[0.0], np.cumsum(heights)])
+    idxs = [i for i, c in enumerate(order) if c == str(band_id)]
+    return gens[gi], float((bottoms[idxs[0]] + bottoms[idxs[-1] + 1]) / 2.0)
+
+
+def plot_muller_compartments(traces, genotypes_parents, axes=None, colormap="gnuplot",
+                             normalize=False, smoothing_std=0.1, labels=("primary", "metastasis"),
+                             mark_generations=None, driver_map=None, min_freq=None,
+                             star_genotype=None, star_gen=None):
+    """Two stacked Muller panels — primary (top) and metastasis (bottom) — that SHARE ONE colormap, so
+    a clone keeps its colour across both bands (and matches plot_grid_compartments / plot_muller). The
+    met founder therefore appears in the met band with the SAME colour as its — usually minor — parent
+    clone in the primary band.
+
+    ``driver_map`` ({gid -> hashable signature}) colours by DISTINCT functional clones (Noble's demon
+    convention) rather than by genotype, and ``min_freq`` (a fraction) additionally merges clones whose
+    subtree never reaches that share of the grown population into their nearest ancestor. Without them
+    an infinite-sites tumour spawns thousands of near-identically-coloured genotype bands and no
+    selective sweep is visible; WITH the functional signature + a size threshold the DCIS→IDC breach
+    sweep, the met founder, and the post-chemo resistant escape each show as a band. The collapse is
+    applied to the global basis and the SAME clone map aggregates each compartment's counts, so colours
+    stay shared.
+
+    `mark_generations` is an optional list of (generation, label) drawn as vlines (seeding / resection /
+    chemo start+end)."""
+    gcounts, _gp = _cancer_only(traces, genotypes_parents)
+    all_gids = [c for c in gcounts.columns if c != "Generation"]
+    basis_counts, basis_parents, gmap, basis_cols = _display_basis(
+        traces, genotypes_parents, driver_map, min_freq)
+    # shared colour basis: color_by + the shared ancestry over the (collapsed) clone set
+    pop_full, anc_full, color_by = _prepare(basis_counts.copy(), basis_parents)
+    # the clone that seeded the met -> its display band, starred in BOTH panels at the seeding moment,
+    # in the band's OWN colour (matching its Muller band + the grids) with a black edge for visibility.
+    star_band = str(gmap.get(str(star_genotype))) if star_genotype is not None else None
+    star_color = "gold"
+    if star_band is not None:
+        _bcolors, _border = _get_colormap(pop_full, anc_full, color_by, colormap)
+        star_color = dict(zip([str(b) for b in _border], _bcolors)).get(str(star_band), "gold")
+    if axes is None:
+        _, axes = plt.subplots(2, 1, figsize=(11, 8), sharex=True)
+    import sys as _sys
+    for ax, key, label in zip(axes, ("primary_counts", "met_counts"), labels):
+        comp = _aggregate_by_map(_compartment_cancer_counts(traces, key, all_gids), gmap, basis_cols)
+        if comp.values.sum() == 0 or anc_full.shape[0] == 0 or not basis_cols:
+            ax.axis("off")
+            ax.text(0.5, 0.5, f"no {label} clones", ha="center", va="center", transform=ax.transAxes)
+            continue
+        comp = comp.copy()
+        comp["Generation"] = np.arange(comp.shape[0])
+        pop_df = (comp.melt(id_vars=["Generation"], value_name="Population", var_name="Identity")
+                  .sort_values("Generation").reset_index(drop=True))
+        _old = _sys.getrecursionlimit()
+        try:
+            _sys.setrecursionlimit(max(_old, 20000))
+            pymuller.muller(pop_df, anc_full, color_by, ax=ax, colorbar=False, colormap=colormap,
+                            normalize=normalize, background_strain=False, smoothing_std=smoothing_std)
+        finally:
+            _sys.setrecursionlimit(_old)
+        ax.set_ylabel(f"{label}\n" + ("frequency" if normalize else "cells"))
+        ax.set_xlabel("")  # clear pymuller's per-panel "Time" label; only the bottom panel is labelled
+        for spec in (mark_generations or []):
+            gen, lbl = spec[0], spec[1]
+            ax.axvline(gen, color="k", ls="--", lw=1, alpha=0.7)
+            ax.text(gen, ax.get_ylim()[1] * 0.98, str(lbl), rotation=90, va="top", ha="right", fontsize=7)
+        if star_band is not None and star_gen is not None:
+            xy = _band_y_at(pop_df, anc_full, star_band, star_gen, smoothing_std)
+            if xy is not None:
+                ax.plot(xy[0], xy[1], marker="*", markersize=20, markerfacecolor=star_color,
+                        markeredgecolor="black", markeredgewidth=1.2, zorder=6, linestyle="none",
+                        label="seeding clone")
+                ax.legend(loc="upper left", fontsize=8)
+    axes[-1].set_xlabel("snapshot")
+    return axes
+
+
+def plot_grid_compartments(cell_data, primary_grid_size, met_grid_size, traces, genotypes_parents,
+                           color=None, axes=None, figsize=(16, 7), dpi=100,
+                           labels=("primary", "metastasis"), driver_map=None, min_freq=None, **kwargs):
+    """Two spatial grids side by side — primary and metastasis — sharing ONE clone colormap, so the
+    same clone is the same colour in both grids (and matches plot_muller_compartments). Splits
+    cell_data by cell_compartment (0 = primary, 1 = met); the met panel uses the met-local coords and
+    met_grid_size, so the two grids are never overlaid. ``driver_map`` / ``min_freq`` colour by
+    functional clone (matching the driver-collapsed Muller) instead of by genotype."""
+    if "cell_compartment" not in cell_data:
+        raise ValueError("plot_grid_compartments needs cell_compartment (grow with met_grid_size > 0)")
+    shared = (functional_clone_colors(traces, genotypes_parents, driver_map, min_freq=min_freq)
+              if (driver_map or min_freq) else cell_type_colors(traces, genotypes_parents))
+    comp = cell_data["cell_compartment"]["compartment"].to_numpy()
+    if axes is None:
+        _, axes = plt.subplots(1, 2, figsize=figsize, dpi=dpi)
+    for ax, val, gs, label in zip(axes, (0, 1), (primary_grid_size, met_grid_size), labels):
+        mask = comp == val
+        sub = {k: df[mask] for k, df in cell_data.items()}
+        plot_grid(sub, gs, traces, genotypes_parents, color=color, ax=ax, type_cmap=shared, **kwargs)
+        ax.set_title(f"{label} ({int(mask.sum())} cells)")
+    return axes
+
+
+def plot_muller_founders(traces, genotypes_parents, founder_gids, functional_map, ax=None,
+                         colormap=None, smoothing_std=0.1, mark_generations=None,
+                         highlight="crimson", other="0.82"):
+    """A SINGLE Muller of the PRIMARY tumour with the clone(s) that seeded the metastasis HIGHLIGHTED
+    (in ``highlight``) against a grey background of the rest, so you can read off which — usually
+    minor — primary population founds the met. A primary clone is a 'founder' iff it shares a
+    FUNCTIONAL signature with a met seeding genotype (``founder_gids``). No size-merge, so a minor
+    founder shows as a thin band (the confound's point). ``mark_generations`` draws event vlines."""
+    import matplotlib
+    from matplotlib.patches import Patch
+    gcounts, gparents = _cancer_only(traces, genotypes_parents)
+    all_gids = [c for c in gcounts.columns if c != "Generation"]
+    founder_sigs = {functional_map.get(str(g)) for g in founder_gids if str(g) in functional_map}
+    comp = _compartment_cancer_counts(traces, "primary_counts", all_gids).copy()
+    comp["Generation"] = np.arange(comp.shape[0])
+    pop_df = (comp.melt(id_vars=["Generation"], value_name="Population", var_name="Identity")
+              .sort_values("Generation").reset_index(drop=True))
+    _, anc, _ = _prepare(gcounts.copy(), gparents)
+    ids = pop_df["Identity"].unique()
+    color_by = pd.Series([1.0 if functional_map.get(str(i)) in founder_sigs else 0.0 for i in ids],
+                         index=ids)
+    cmap = colormap or matplotlib.colors.ListedColormap([other, highlight])
+    if ax is None:
+        _, ax = plt.subplots(figsize=(11, 4.2))
+    import sys as _sys
+    _old = _sys.getrecursionlimit()
+    try:
+        _sys.setrecursionlimit(max(_old, 20000))
+        pymuller.muller(pop_df, anc, color_by, ax=ax, colorbar=False, colormap=cmap,
+                        normalize=False, background_strain=False, smoothing_std=smoothing_std)
+    finally:
+        _sys.setrecursionlimit(_old)
+    ax.set_xlabel("snapshot")
+    ax.set_ylabel("primary cells")
+    for spec in (mark_generations or []):
+        gen, lbl = spec[0], spec[1]
+        ax.axvline(gen, color="k", ls="--", lw=1, alpha=0.7)
+        ax.text(gen, ax.get_ylim()[1] * 0.98, str(lbl), rotation=90, va="top", ha="right", fontsize=7)
+    ax.legend(handles=[Patch(color=highlight, label="seeds the metastasis"),
+                       Patch(color=other, label="other primary clones")], fontsize=8, loc="upper left")
+    return ax
+
+
+def plot_clone_grid_series(tumor, panels, driver_map=None, min_freq=None, ncols=4, figsize=None):
+    """A SERIES of spatial grids from per-deme snapshots captured during a run, each coloured by its
+    DOMINANT CLONE using the SAME clone colormap as the Muller plots — so a clone keeps one colour
+    across every panel and both compartments.
+
+    ``tumor.arc_snapshots`` must hold ``{label: [per-deme {gid: count}]}`` (see
+    ``base_sim.grow_metastasis_tumor``). ``panels`` is a list of ``(label, compartment, title)`` with
+    compartment in {"primary", "met"}. A deme is coloured by its dominant CANCER clone when any cancer
+    is present (so a minority deposit stays visible), else by its dominant resident type."""
+    cmap = (functional_clone_colors(tumor.traces, tumor.genotypes_parents, driver_map, min_freq=min_freq)
+            if (driver_map or min_freq) else cell_type_colors(tumor.traces, tumor.genotypes_parents))
+    snaps = getattr(tumor, "arc_snapshots", {}) or {}
+    n = len(panels)
+    ncols = min(ncols, n) or 1
+    nrows = int(np.ceil(n / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize or (3.1 * ncols, 3.7 * nrows))
+    axes = np.atleast_1d(axes).ravel()
+    fig.subplots_adjust(hspace=0.35)   # room for the 2-line per-panel titles
+    for ax, (label, comp, title) in zip(axes, panels):
+        deme_counts = snaps.get(label)
+        if deme_counts is None:
+            ax.axis("off")
+            ax.set_title(f"{title}\n(no snapshot)", fontsize=8)
+            continue
+        if comp == "primary":
+            lo, hi, G = 0, tumor.n_primary_demes, tumor.grid_size
+        else:
+            lo, hi, G = tumor.n_primary_demes, len(deme_counts), tumor.met_grid_size
+        img = np.ones((G, G, 4))
+        n_cancer = 0
+        for i in range(lo, min(hi, len(deme_counts))):
+            d = deme_counts[i]
+            if not d:
+                continue
+            r, c = tumor.deme_coords[i]
+            cancer = {g: v for g, v in d.items() if g not in normal_names}
+            pick = max(cancer, key=cancer.get) if cancer else max(d, key=d.get)
+            n_cancer += sum(cancer.values())
+            col = cmap.get(pick)
+            if col is not None:
+                img[r, c] = col
+        ax.imshow(img, interpolation="nearest")
+        ax.set_xticks([]); ax.set_yticks([])
+        ax.set_title(f"{title}\n{n_cancer} cancer cells", fontsize=8)
+    for ax in axes[n:]:
+        ax.axis("off")
+    return axes

@@ -7,9 +7,9 @@ from ...constants import DEFAULT_LAYOUT_SEED, LAYOUT_OFFSET_EPISTASIS
 class Selection(object):
     def __init__(self, n_segments=10, segment_size=1000, segment_sizes=None,
                  prop_driver=0.1, prop_dispersal=0.1, prop_treatment_resistance=0.1, prop_immune_resistance=0.1,
-                 prop_breach=0.0, prop_stromal_survival=0.0,
+                 prop_breach=0.0, prop_stromal_survival=0.0, prop_met_survival=0.0,
                  driver_effects=1.1, dispersal_effects=1.1, treatment_resistant_effects=1.1, immune_resistant_effects=1.1,
-                 breach_effects=1.1, stromal_survival_effects=1.1,
+                 breach_effects=1.1, stromal_survival_effects=1.1, met_survival_effects=1.1,
                  selection_mode="gene", s_arm=None, arm_baseline=2.0,
                  max_ploidy=6, max_cn=12, max_nullisomy=2, max_mut_drivers=1000, rng=None,
                  epistasis_params=None, dependency_params=None, layout_seed=None, ):
@@ -38,6 +38,11 @@ class Selection(object):
         # empty axis -> N_*=0 -> update_* returns 1 -> trait 0 -> zero death terms -> byte-identical).
         self.prop_breach = prop_breach
         self.prop_stromal_survival = prop_stromal_survival
+        # Metastatic-host survival (R9, metastasis module): a further gene-based heritable axis, exact
+        # analogue of stromal_survival, that attenuates the metastatic host-tissue hazard (_met_hazard)
+        # and biases transit survival on the primary->met migration hop. OFF by default (prop 0 -> empty
+        # axis -> N_ms=0 -> update_met_survival returns 1 -> trait 0 -> zero met terms -> byte-identical).
+        self.prop_met_survival = prop_met_survival
 
         # Fixed about fitness
         self.driver_effects = driver_effects
@@ -46,6 +51,7 @@ class Selection(object):
         self.immune_resistant_effects = immune_resistant_effects
         self.breach_effects = breach_effects
         self.stromal_survival_effects = stromal_survival_effects
+        self.met_survival_effects = met_survival_effects
 
         # Selection model. "gene" (default) = the abstract CINner gene-driver model
         # (oncogene/TSG mutation + copy-number fitness via n_wt/n_mut counts). "arm" = the
@@ -78,6 +84,7 @@ class Selection(object):
         self.make_immune_resistant()
         self.make_breach()
         self.make_stromal_survival()
+        self.make_met_survival()
         self.make_expmap()
 
         # Total number of genes in each category, used to make fitness *relative* to the
@@ -90,6 +97,7 @@ class Selection(object):
         self.N_tr = sum(len(x) for x in self.treatment_resistance)
         self.N_breach = sum(len(x) for x in self.breach)
         self.N_ss = sum(len(x) for x in self.stromal_survival)
+        self.N_ms = sum(len(x) for x in self.met_survival)
         self.update_dict = {'viability': self.update_viability,
                             'division_rate': self.update_division_rate,
                             'dispersal_rate': self.update_dispersal_rate,
@@ -97,6 +105,7 @@ class Selection(object):
                             'treatment_resistance': self.update_treatment_resistance,
                             'breach': self.update_breach,
                             'stromal_survival': self.update_stromal_survival,
+                            'met_survival': self.update_met_survival,
                             'death_rate': self.update_death_rate,}
         
         self.gene_names = self.get_gene_names()
@@ -180,6 +189,14 @@ class Selection(object):
             self.stromal_survival_types.append(confers_survival)
             self.stromal_survival.append(np.where(confers_survival == 1)[0])
 
+    def make_met_survival(self): # select sites that if mutated let the cell survive in the metastatic host tissue
+        self.met_survival_types = []
+        self.met_survival = []
+        for seg in range(self.n_segments):
+            confers_survival = self.rng.binomial(1, self.prop_met_survival, size=self.segment_sizes[seg])
+            self.met_survival_types.append(confers_survival)
+            self.met_survival.append(np.where(confers_survival == 1)[0])
+
     def make_expmap(self):
         # Effect of snv on exp: up or down depending on wether tsg or og, and also if immune resistance-inducing, overexpress
         self.mut_effects = []
@@ -190,6 +207,7 @@ class Selection(object):
             mut_effects[np.where(self.immune_resistance_types[seg] == 1)] = 2. # if mutated immune resistance, increase exp
             mut_effects[np.where(self.breach_types[seg] == 1)] = 2. # if mutated breach gene, increase exp
             mut_effects[np.where(self.stromal_survival_types[seg] == 1)] = 2. # if mutated stromal-survival gene, increase exp
+            mut_effects[np.where(self.met_survival_types[seg] == 1)] = 2. # if mutated met-survival gene, increase exp
             self.mut_effects.append(mut_effects)
 
     def get_tsgs(self):
@@ -244,6 +262,14 @@ class Selection(object):
         genes = []
         for seg in range(self.n_segments):
             idx = np.where(self.stromal_survival_types[seg] == 1)[0]
+            genes.append(idx + self._seg_offsets[seg])
+        genes = np.concatenate(genes)
+        return genes
+
+    def get_met_survival(self):
+        genes = []
+        for seg in range(self.n_segments):
+            idx = np.where(self.met_survival_types[seg] == 1)[0]
             genes.append(idx + self._seg_offsets[seg])
         genes = np.concatenate(genes)
         return genes
@@ -343,6 +369,11 @@ class Selection(object):
         return self._rel_fitness(genome_summary['n_wt_ss'], genome_summary['n_mut_ss'],
                                  genome_summary['ploidy'], self.N_ss, e, e**2)
 
+    def update_met_survival(self, genome_summary, **kwargs):
+        e = self.met_survival_effects
+        return self._rel_fitness(genome_summary['n_wt_ms'], genome_summary['n_mut_ms'],
+                                 genome_summary['ploidy'], self.N_ms, e, e**2)
+
     def get_gene_names(self, gene_prefix='G'):
         gene_names = []
         for segment in range(self.n_segments):
@@ -363,9 +394,11 @@ class Selection(object):
         immune_resistance_types = np.concatenate(self.immune_resistance_types)
         breach_types = np.concatenate(self.breach_types)
         stromal_survival_types = np.concatenate(self.stromal_survival_types)
+        met_survival_types = np.concatenate(self.met_survival_types)
         return dict(driver_types=pd.DataFrame(driver_types, index=gene_names),
                     dispersal_types=pd.DataFrame(dispersal_types, index=gene_names),
                     treatment_resistance_types=pd.DataFrame(treatment_resistance_types, index=gene_names),
                     immune_resistance_types=pd.DataFrame(immune_resistance_types, index=gene_names),
                     breach_types=pd.DataFrame(breach_types, index=gene_names),
-                    stromal_survival_types=pd.DataFrame(stromal_survival_types, index=gene_names))
+                    stromal_survival_types=pd.DataFrame(stromal_survival_types, index=gene_names),
+                    met_survival_types=pd.DataFrame(met_survival_types, index=gene_names))

@@ -9,7 +9,7 @@ class Treatment(object):
     def __init__(self, adaptive=False, start=0, duration=None,
                  dosage_decay=0.5, rounds=4,
                  rate_multiplier=2., toxicity=0.1, effectiveness=0.9,
-                 kill_rate=1.5, max_tumor_size=100_000):
+                 kill_rate=1.5, max_tumor_size=100_000, sites="both"):
         self.adaptive = adaptive
         self.start = start
         self.duration = duration
@@ -23,9 +23,19 @@ class Treatment(object):
         self.dosage_decay = dosage_decay
         self.rounds = rounds
         self.max_tumor_size = max_tumor_size
+        # Which compartment(s) the therapy acts on (metastasis module, R9): "both" (systemic, default),
+        # "met" (adjuvant after primary resection), or "primary" (neoadjuvant / local). The engine
+        # gates the per-genotype death/immune override by the deme's compartment (GenotypeTumor._death_rate).
+        self.sites = sites
         self.dosage_trace = []  # list of (step, dosage) for every queried step
 
     def _apply(self, cell):
+        pass
+
+    def discrete_event(self, tumor, step):
+        """One-shot state edits that are NOT rate modifiers (e.g. surgical resection). The base
+        treatment does nothing; `Surgery` overrides this. The engine calls it once per step, so
+        chemo-only / no-surgery runs stay byte-identical (no state change, no rng draw)."""
         pass
 
     def is_target(self, cell, **kwargs):

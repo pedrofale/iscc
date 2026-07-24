@@ -28,10 +28,10 @@ import yaml
 
 from ..components.selection import Selection
 from ..components.epistasis import bits_to_events
-from ..components.cell import CancerCell, EpithelialCell, StromalCell, ImmuneCell
+from ..components.cell import CancerCell, EpithelialCell, StromalCell, ImmuneCell, HostCell
 from .glandular import bresenham_circumference, get_inside
 from ..programs import ProgramModel
-from ...constants import normal_names, DEFAULT_LAYOUT_SEED, LAYOUT_OFFSET_F8_PROGRAMS
+from ...constants import normal_names, DEFAULT_LAYOUT_SEED, LAYOUT_OFFSET_F8_PROGRAMS, LAYOUT_OFFSET_MET
 
 CELLTYPES = ["cancer", "epithelial", "stromal", "immune"]
 
@@ -40,6 +40,7 @@ class GenotypeTumor:
     def __init__(self, config=None, seed=42, genome_params=None, selection_params=None,
                  cancer_cell_params=None, deme_params=None, spatial_params=None,
                  epithelial_cell_params=None, stromal_cell_params=None, immune_cell_params=None,
+                 host_cell_params=None,
                  genome_mode="abstract", genome_spec=None,
                  update_mode="exact", tau=1.0, snapshot_every=1, microenv_params=None,
                  layout_seed=None, expression_params=None):
@@ -94,6 +95,7 @@ class GenotypeTumor:
             epithelial_cell_params = cp.get("epithelial", {})
             stromal_cell_params = cp.get("stromal", {})
             immune_cell_params = cp.get("immune", {})
+            host_cell_params = cp.get("host", {})
             self.update_mode = cfg.get("update_mode", update_mode)
             self.tau = cfg.get("tau", tau)
             self.snapshot_every = cfg.get("snapshot_every", snapshot_every)
@@ -128,6 +130,7 @@ class GenotypeTumor:
             "epithelial": (EpithelialCell, epithelial_cell_params or {}),
             "stromal": (StromalCell, stromal_cell_params or {}),
             "immune": (ImmuneCell, immune_cell_params or {}),
+            "host": (HostCell, host_cell_params or {}),
         }
 
         # ``layout_seed`` is handed over (as well as ``layout_rng``) so the optional epistasis network
@@ -194,6 +197,7 @@ class GenotypeTumor:
         self._immune_prob_kill = (immune_cell_params or {}).get("prob_kill", 0.01)
         self._tx_death_add = {}
         self._tx_immune_resist = {}
+        self._tx_sites = "both"  # active treatment's target compartment(s): both / met / primary (R9)
         # Compartment-dependent selection (v1, DESIGN_phenotype_plasticity.md §2). Two local hazards,
         # each contributed by a resident normal compartment the gland geometry seeds and each
         # attenuated by a MATCHING heritable trait (breach / stromal_survival), exactly the shape of
@@ -213,6 +217,7 @@ class GenotypeTumor:
             n_tr=len(self.selection.get_treatment_resistant()),
             n_breach=len(self.selection.get_breach()),
             n_ss=len(self.selection.get_stromal_survival()),
+            n_ms=len(self.selection.get_met_survival()),
             **cancer_cell_params,
         )
         founder.set_genotype_id()
@@ -291,7 +296,33 @@ class GenotypeTumor:
         # (can't over-seed a deme past its capacity) and left uncapped in the well-mixed regime.
         self._n_founder = max(1, min(self.initial_cancer_cells, self._cap)
                               if self._crowding else self.initial_cancer_cells)
+        # Metastasis module (R9): a SECOND deme-grid — the metastatic deposit — appended to
+        # self.demes, sharing the genotype registry + genotypes_parents genealogy + Selection with the
+        # primary (so a clone keeps ONE identity/colour across both grids, enabling the 2-band Muller).
+        # The met is a homogeneous met_grid_size x met_grid_size lattice filled with immortal `host`
+        # parenchyma; one fixed `vessel` deme is the migration entry point (and O2 point-source).
+        # OFF by default (met_grid_size=0 -> _seed_met is a no-op -> nothing appended -> byte-identical).
+        self.met_grid_size = int(spatial_params.get("met_grid_size", 0))
+        self._met_enabled = self.met_grid_size > 0
+        self._cap_met = int(spatial_params.get("K_met", self._cap)) if self._crowding else 1
+        self._host_fill_frac = float(spatial_params.get("host_fill_frac", 1.0))
+        _mv = spatial_params.get("met_vessel")
+        self.met_vessel = (tuple(_mv) if _mv is not None
+                           else (self.met_grid_size // 2, self.met_grid_size // 2))
+        self.met_vessel_idx = None
+        # Host-tissue death hazard (attenuated by met_survival; used in _death_rate, Step 3) and the
+        # migration knobs (seed rate + transit-survival floor; used in the dispersal branch, Step 4).
+        # All default to 0 -> inert -> byte-identical.
+        self._met_hazard = spatial_params.get("met_hazard", 0.0)
+        self._met_seed_kappa = float(spatial_params.get("met_seed_kappa", 0.0))
+        self._met_transit_floor = float(spatial_params.get("met_transit_floor", 0.0))
+        # Discrete-event annotation log (met seeding, resection, chemo windows) -> events.csv, used to
+        # annotate the 2-band Muller. Each entry is a dict with at least step/time/event.
+        self.events = []
+        self._has_host = False
+
         n_demes = self.grid_size * self.grid_size
+        self.n_primary_demes = n_demes
         self.demes = [dict() for _ in range(n_demes)]
         self.deme_coords = [(i // self.grid_size, i % self.grid_size) for i in range(n_demes)]
         # Per-deme carrying capacity (DESIGN_ductal_field.md §3): uniform = carrying_capacity by
@@ -318,17 +349,23 @@ class GenotypeTumor:
             imm = self._normal_genotype("immune")
             for i in range(n_demes):
                 self._add(i, imm, n_immune)
+        # Metastasis: seed the second (met) grid AFTER primary immune seeding, so immune stays
+        # primary-only and the met demes are appended at the tail. A no-op when met is off.
+        self._seed_met()
         # Whether any immune cells exist (static: only seeded here). When false, the immune-killing
         # term is always zero, so the per-genotype death-rate can skip the O(#genotypes-in-deme)
         # immune sum entirely — a big win for the clone-heavy tau-leaping path (see _immune_fraction).
         self._has_immune = "immune" in self.genotypes
+        # Whether the metastatic deposit's host parenchyma exists (seeded iff met_grid_size>0). Same
+        # fast-path role as _has_immune for the met host hazard / _host_fraction scan.
+        self._has_host = "host" in self.genotypes
         # Whether the gland's resident compartments exist (seeded iff structure_radius>0). When a
         # compartment is absent its fraction is identically zero, so the matching death term can skip
         # the O(#genotypes-in-deme) composition scan — the same optimisation as _has_immune.
         self._has_epithelial = "epithelial" in self.genotypes
         self._has_stromal = "stromal" in self.genotypes
 
-        self.deme_rates = np.array([self._deme_rate(i) for i in range(n_demes)], dtype=float)
+        self.deme_rates = np.array([self._deme_rate(i) for i in range(len(self.demes))], dtype=float)
         self.traces = []
         self.step = 0
         self.cell_data = None
@@ -460,6 +497,46 @@ class GenotypeTumor:
                     if n_stroma > 0:
                         self._add(di, stroma, n_stroma)
 
+    def _seed_met(self):
+        """Seed the metastatic deposit (R9): a met_grid_size x met_grid_size lattice appended to
+        self.demes, every deme filled to K_met with immortal/static `host` parenchyma, plus one fixed
+        `vessel` deme (the migration entry point and O2 point-source). No internal structure. A no-op
+        when met_grid_size == 0 (nothing appended -> byte-identical)."""
+        if not self._met_enabled:
+            return
+        G = self.met_grid_size
+        n_met = G * G
+        base = self.n_primary_demes
+        self.demes.extend(dict() for _ in range(n_met))
+        # met demes carry met-LOCAL coords (their position in the met lattice), so _neighbors and
+        # make_cell_data address them within the met grid, not the concatenated global index.
+        self.deme_coords.extend((i // G, i % G) for i in range(n_met))
+        if self._deme_capacity is not None:
+            self._deme_capacity = np.concatenate(
+                [self._deme_capacity, np.full(n_met, self._cap_met, dtype=float)])
+        # Host tissue has no glands: extend the ground-truth gland label with -1 for every met deme so
+        # gland_id stays index-aligned with self.demes (make_cell_data and the stromal-gating in the
+        # migration operator both index it).
+        if self.gland_id is not None:
+            self.gland_id = np.concatenate([self.gland_id, np.full(n_met, -1, dtype=int)])
+        vr, vc = self.met_vessel
+        self.met_vessel_idx = base + vr * G + vc
+        # Host baseline expression from a DEDICATED layout sub-stream (NOT by adding "host" to
+        # CELLTYPES, which would draw an extra layout_rng.beta and shift the shared landscape). Off-met
+        # runs never reach here, so the landscape is byte-identical whether or not the met exists.
+        mrng = np.random.default_rng(self.layout_seed + LAYOUT_OFFSET_MET)
+        exp = mrng.beta(0.1, 1.0, size=self.n_genes)
+        exp[self.selection.get_tsgs()] = 0.8
+        exp[self.selection.get_oncogenes()] = 0.01
+        self.celltype_exps["host"] = exp
+        # Fill each met deme with immortal/static host cells at host_fill_frac * K_met (leave headroom
+        # for the invading deposit, like stroma_fill_frac).
+        host = self._normal_genotype("host")
+        n_host = int(round(self._host_fill_frac * self._cap_met))
+        if n_host > 0:
+            for i in range(base, base + n_met):
+                self._add(i, host, n_host)
+
     # --- count bookkeeping ---------------------------------------------------
     def _add(self, deme_idx, gid, n):
         deme = self.demes[deme_idx]
@@ -498,12 +575,28 @@ class GenotypeTumor:
         lumen = self.gland_lumen_demes[g]
         return lumen[int(rng.integers(0, len(lumen)))]
 
+    def _transit_prob(self, met_survival):
+        """Probability a migrating daughter survives transit to the met (R9), biased by the clone's
+        heritable met_survival: met_transit_floor + (1 - met_transit_floor) * met_survival. A low floor
+        makes wild-type cells (met_survival 0) rarely survive and high-met_survival clones survive often,
+        so the deposit's founders are ENRICHED for met_survival — the transit bottleneck that makes the
+        met a non-representative, often-minor sample of the primary's clones."""
+        return self._met_transit_floor + (1.0 - self._met_transit_floor) * met_survival
+
     def _neighbors(self, deme_idx):
+        # Compartment-aware von Neumann neighbourhood: neighbours stay within the SAME grid. Met demes
+        # are a contiguous tail block with their own met_grid_size lattice and met-local coords, so a
+        # cancer cell dispersing inside the deposit never leaks into the primary (and vice versa). When
+        # met is off every deme_idx < n_primary_demes, so this is the original primary-grid computation.
+        if deme_idx < self.n_primary_demes:
+            G, base = self.grid_size, 0
+        else:
+            G, base = self.met_grid_size, self.n_primary_demes
         r, c = self.deme_coords[deme_idx]
         out = []
         for rr, cc in [(r - 1, c), (r, c + 1), (r + 1, c), (r, c - 1)]:
-            if 0 <= rr < self.grid_size and 0 <= cc < self.grid_size:
-                out.append(rr * self.grid_size + cc)
+            if 0 <= rr < G and 0 <= cc < G:
+                out.append(base + rr * G + cc)
         return out
 
     # --- rates (mirror Deme.get_cancer_death_rate) ---------------------------
@@ -543,6 +636,19 @@ class GenotypeTumor:
         stro = sum(cnt for gid, cnt in deme.items() if self.genotypes[gid].type == "stromal")
         return stro / total
 
+    def _host_fraction(self, deme, total=None):
+        # Fraction of the deme that is (still) metastatic-host parenchyma — the met analogue of
+        # _stromal_fraction. Guarded by _has_host so the O(#genotypes) scan is skipped entirely when no
+        # met deposit exists (the same fast-path optimisation as _immune_fraction / _stromal_fraction).
+        if not getattr(self, "_has_host", False):
+            return 0.0
+        if total is None:
+            total = sum(deme.values())
+        if total == 0:
+            return 0.0
+        host = sum(cnt for gid, cnt in deme.items() if self.genotypes[gid].type == "host")
+        return host / total
+
     def _compartment_fields(self):
         """Per-deme epithelial / stromal LIVE fractions, as two (n_demes,) arrays — the compartment
         as a niche field for R13 route-3 (DESIGN_phenotype_plasticity.md §2, Part D). The SAME clone
@@ -559,6 +665,15 @@ class GenotypeTumor:
             epi[i] = self._epithelial_fraction(deme, total)
             stro[i] = self._stromal_fraction(deme, total)
         return epi, stro
+
+    def _tx_applies(self, deme_idx):
+        """Whether the active treatment's per-genotype override acts in this deme's compartment
+        (Treatment.sites: 'both' / 'met' / 'primary'). 'both' (the default) is byte-identical to the
+        pre-metastasis, ungated behaviour."""
+        if self._tx_sites == "both":
+            return True
+        is_met = deme_idx >= self.n_primary_demes
+        return is_met if self._tx_sites == "met" else (not is_met)
 
     def _death_rate(self, gid, deme_idx, total=None):
         """Cancer death rate = crowding-modulated baseline + local immune killing + treatment.
@@ -613,7 +728,10 @@ class GenotypeTumor:
             death = base
         death = min(death, self.maximum_death_rate)
 
-        ir = self._tx_immune_resist.get(gid, rep.evolutionary_parameters["immune_resistance"])
+        # Immune resistance may be transiently stripped by immunotherapy; that override is gated to the
+        # treated compartment(s) (R9), so an untreated site keeps the clone's baseline resistance.
+        base_ir = rep.evolutionary_parameters["immune_resistance"]
+        ir = self._tx_immune_resist.get(gid, base_ir) if self._tx_applies(deme_idx) else base_ir
         ir = min(max(ir, 0.0), 1.0)
         death += self._immune_prob_kill * self._immune_fraction(deme, total) * (1.0 - ir)
 
@@ -627,21 +745,37 @@ class GenotypeTumor:
         if self._stromal_hazard:
             ss = min(max(rep.evolutionary_parameters["stromal_survival"], 0.0), 1.0)
             death += self._stromal_hazard * self._stromal_fraction(deme, total) * (1.0 - ss)
+        # Metastatic host-tissue hazard (R9): the met analogue of the stromal hazard — the deposit's
+        # immortal host parenchyma adds a local death hazard to invading cancer, attenuated by the
+        # clone's heritable met_survival trait (clamped [0,1] like the others). Default 0.0 -> += 0.0
+        # -> byte-identical whether met is off or on-with-hazard-0.
+        if self._met_hazard:
+            ms = min(max(rep.evolutionary_parameters["met_survival"], 0.0), 1.0)
+            death += self._met_hazard * self._host_fraction(deme, total) * (1.0 - ms)
 
-        death += self._tx_death_add.get(gid, 0.0)
+        # Chemo/targeted death hazard, gated to the treated compartment(s) (R9): systemic ('both')
+        # hits everywhere, 'met'/'primary' only their site. 'both' is byte-identical to before.
+        if self._tx_applies(deme_idx):
+            death += self._tx_death_add.get(gid, 0.0)
         return death
 
     def _cancer_gids(self, deme):
         return [gid for gid in deme if self._is_cancer(gid)]
 
     def _deme_rate(self, deme_idx):
-        """Total event rate of a deme. Only cancer genotypes are dynamic; normals are static."""
+        """Total event rate of a deme. Cancer genotypes are always dynamic; NORMAL genotypes become
+        (death-only) dynamic in a treated compartment under the off-target chemo toxicity hazard.
+        Untreated (``_tx_death_add`` empty) -> the normal term vanishes -> byte-identical."""
         deme = self.demes[deme_idx]
         total = sum(deme.values())
         rate = 0.0
         for gid in self._cancer_gids(deme):
             div = self.genotypes[gid].evolutionary_parameters["division_rate"]
             rate += deme[gid] * (div + self._death_rate(gid, deme_idx, total))
+        if self._tx_death_add and self._tx_applies(deme_idx):
+            for gid, cnt in deme.items():
+                if gid in self._tx_death_add and not self._is_cancer(gid):
+                    rate += cnt * self._tx_death_add[gid]
         return rate
 
     def _refresh_rate(self, deme_idx):
@@ -657,6 +791,26 @@ class GenotypeTumor:
     def get_cancer_size(self):
         return int(sum(c for g, c in self.genotypes_counts.items() if self._is_cancer(g)))
 
+    def _compartment_counts(self):
+        """Split the live genotype counts by compartment for the 2-band Muller: returns
+        (primary_counts, met_counts) dicts over the primary vs met deme blocks (which share the one
+        genotypes_parents genealogy, so a clone keeps its identity/colour across both)."""
+        prim, met = Counter(), Counter()
+        for i, deme in enumerate(self.demes):
+            tgt = met if i >= self.n_primary_demes else prim
+            for gid, c in deme.items():
+                tgt[gid] += c
+        return dict(prim), dict(met)
+
+    def _trace_snapshot(self):
+        """One trace snapshot: the global genotype counts (back-compat) plus, when the met is enabled,
+        the per-compartment counts. Met-off snapshots keep the single `genotypes_counts` key, so
+        existing plot_muller / write / traces consumers are byte-identical."""
+        snap = dict(genotypes_counts=dict(self.genotypes_counts))
+        if self._met_enabled:
+            snap["primary_counts"], snap["met_counts"] = self._compartment_counts()
+        return snap
+
     def update(self, rng):
         if self.is_extinct():
             return
@@ -666,12 +820,25 @@ class GenotypeTumor:
         # ordered by creation ordinal (NOT the id()-based genotype_id) for reproducibility
         gids = sorted(self._cancer_gids(deme), key=lambda g: self.genotypes[g].ord)
         total = sum(deme.values())
-        weights = np.array([
+        weights = [
             deme[gid] * (self.genotypes[gid].evolutionary_parameters["division_rate"]
                          + self._death_rate(gid, di, total))
             for gid in gids
-        ])
-        gid = gids[int(rng.choice(len(gids), p=weights / weights.sum()))]
+        ]
+        # NORMAL cells become death-only candidates under off-target chemo toxicity in a treated deme.
+        # tox_gids is empty unless a therapy is active, so this is byte-identical to before untreated.
+        tox_gids = []
+        if self._tx_death_add and self._tx_applies(di):
+            tox_gids = sorted((g for g in deme if g in self._tx_death_add and not self._is_cancer(g)),
+                              key=lambda g: self.genotypes[g].ord)
+            weights += [deme[g] * self._tx_death_add[g] for g in tox_gids]
+        weights = np.array(weights)
+        pick = int(rng.choice(len(gids) + len(tox_gids), p=weights / weights.sum()))
+        if pick >= len(gids):
+            self._remove(di, tox_gids[pick - len(gids)], 1)   # a normal cell dies from toxicity
+            self._refresh_rate(di)
+            return
+        gid = gids[pick]
         rep = self.genotypes[gid]
         div = rep.evolutionary_parameters["division_rate"]
         death = self._death_rate(gid, di, total)
@@ -695,19 +862,38 @@ class GenotypeTumor:
                     # no-op mutation (saturated allele): same genotype, grows in place
                     self._add(di, rep.genotype_id, 1)
             else:
-                # dispersal: a low fraction (~kappa) of gland-resident daughters take an island hop
-                # to another gland's lumen (bypassing the wall); the rest disperse to a local
-                # neighbour. kappa=0 short-circuits before any extra rng draw -> byte-identical.
+                # dispersal. Three routes, mutually exclusive by SOURCE compartment:
+                #  - met seeding (primary STROMAL deme = an invaded IDC cell): a fraction ~met_seed_kappa
+                #    of daughters attempt the hop to the metastatic deposit;
+                #  - cross-gland island hop (gland-resident cell): a fraction ~cross_gland_kappa;
+                #  - local: a uniformly random von-Neumann neighbour in the same compartment.
+                # Each guarded branch short-circuits before its rng draw when off -> byte-identical.
                 src_g = self.gland_id[di] if self.gland_id is not None else -1
-                tgt = None
-                if (self.cross_gland_kappa > 0 and src_g != -1
-                        and rng.random() < self.cross_gland_kappa / (1.0 + self.cross_gland_kappa)):
-                    tgt = self._cross_gland_target(src_g, rng)
-                if tgt is None:
-                    nbrs = self._neighbors(di)
-                    tgt = nbrs[int(rng.choice(len(nbrs)))] if nbrs else di
-                self._add(tgt, gid, 1)
-                affected.append(tgt)
+                took_met = False
+                # Met seeding is eligible ONLY from a primary stromal deme (src_g == -1 and di in the
+                # primary block), so DCIS confined to glands cannot seed but IDC in the stroma can — the
+                # clinical fact emerges from geometry, not a flag.
+                if (self._met_enabled and self._met_seed_kappa > 0 and di < self.n_primary_demes
+                        and src_g == -1
+                        and rng.random() < self._met_seed_kappa / (1.0 + self._met_seed_kappa)):
+                    took_met = True
+                    ms = min(max(rep.evolutionary_parameters["met_survival"], 0.0), 1.0)
+                    if rng.random() < self._transit_prob(ms):
+                        self._add(self.met_vessel_idx, gid, 1)
+                        self.events.append(dict(step=self.step, time=self.time, event="seeding",
+                                                from_deme=int(di), genotype=gid, n=1))
+                        affected.append(self.met_vessel_idx)
+                    # else: the daughter dies in transit — parent stays, the division is still consumed.
+                if not took_met:
+                    tgt = None
+                    if (self.cross_gland_kappa > 0 and src_g != -1
+                            and rng.random() < self.cross_gland_kappa / (1.0 + self.cross_gland_kappa)):
+                        tgt = self._cross_gland_target(src_g, rng)
+                    if tgt is None:
+                        nbrs = self._neighbors(di)
+                        tgt = nbrs[int(rng.choice(len(nbrs)))] if nbrs else di
+                    self._add(tgt, gid, 1)
+                    affected.append(tgt)
 
         for idx in affected:
             self._refresh_rate(idx)
@@ -739,37 +925,89 @@ class GenotypeTumor:
         """
         self._tx_death_add = {}
         self._tx_immune_resist = {}
+        self._tx_sites = getattr(treatment, "sites", "both") if treatment is not None else "both"
         if treatment is None or dosage <= 0:
             return
         affects = getattr(treatment, "affects", "death_rate")
         kill_rate = getattr(treatment, "kill_rate", 0.8)
         for gid in list(self.genotypes_counts):
-            if not self._is_cancer(gid):
-                continue
+            is_cancer = self._is_cancer(gid)
             rep = self.genotypes[gid]
-            target = self._is_treatment_target(treatment, rep)
-            tr = rep.evolutionary_parameters["treatment_resistance"]
-            p = treatment.effectiveness if target else treatment.toxicity
-            intensity = dosage * p * (1.0 - min(max(tr, 0.0), 1.0))  # in [0, 1]
-            if intensity <= 0:
-                continue
             if affects == "immune_resistance":
+                # immunotherapy strips a clone's immune resistance -- only meaningful for cancer.
+                if not is_cancer:
+                    continue
+                target = self._is_treatment_target(treatment, rep)
+                tr = rep.evolutionary_parameters["treatment_resistance"]
+                p = treatment.effectiveness if target else treatment.toxicity
+                intensity = dosage * p * (1.0 - min(max(tr, 0.0), 1.0))
+                if intensity <= 0:
+                    continue
                 ir = rep.evolutionary_parameters["immune_resistance"]
                 self._tx_immune_resist[gid] = ir * (1.0 - intensity)
             else:
+                # Death-rate therapy (chemo / targeted). Cancer TARGET cells take `effectiveness`;
+                # everything OFF-TARGET -- non-target cancer clones AND normal/host tissue -- takes
+                # `toxicity` (one knob: toxicity = off-target anything). Normal cells carry no treatment
+                # resistance; giving them a `_tx_death_add` is what makes chemo's systemic toxicity kill
+                # normal tissue (they become death-only participants in the dynamics -- see _deme_rate /
+                # update / _tau_substep). Cancer entries are unchanged, so the cancer path is byte-identical.
+                if is_cancer:
+                    target = self._is_treatment_target(treatment, rep)
+                    tr = rep.evolutionary_parameters["treatment_resistance"]
+                    p = treatment.effectiveness if target else treatment.toxicity
+                else:
+                    tr, p = 0.0, treatment.toxicity
+                intensity = dosage * p * (1.0 - min(max(tr, 0.0), 1.0))  # in [0, 1]
+                if intensity <= 0:
+                    continue
                 base = rep.evolutionary_parameters["death_rate"]
                 self._tx_death_add[gid] = intensity * max(kill_rate - base, 0.0)
+
+    def _resect(self, site="primary"):
+        """Surgical resection (R9): remove EVERY cell (cancer + immortal residents) from the target
+        compartment's demes and refresh their rates to 0, so the shared-deme_rates Gillespie fires only
+        the remaining compartment afterward (and primary->met seeding stops with no primary cancer
+        left). Deterministic — no rng draw. The genealogy is NOT pruned, so a 2-band Muller still shows
+        the resected band cliff to 0. ``site`` is "primary" or "met"."""
+        if site == "primary":
+            lo, hi = 0, self.n_primary_demes
+        elif site == "met":
+            lo, hi = self.n_primary_demes, len(self.demes)
+        else:
+            raise ValueError(f"unknown resection site {site!r}")
+        removed = 0
+        for di in range(lo, hi):
+            deme = self.demes[di]
+            for gid in list(deme):
+                removed += deme[gid]
+                self._remove(di, gid, deme[gid])
+            self._refresh_rate(di)
+        self.events.append(dict(step=self.step, time=self.time, event="resection",
+                                site=site, n=int(removed)))
+        return removed
+
+    def _clear_treatment_overrides(self):
+        """Drop any residual per-step treatment overrides left by a PRIOR treated grow, so a subsequent
+        grow with no active treatment (or an inactive window) sees no stale hazard on cancer OR normal
+        tissue. Refreshes the rate vector only when it actually clears something, so it is a byte-
+        identical no-op whenever there was nothing left over (e.g. a fresh or never-treated tumour)."""
+        if self._tx_death_add or self._tx_immune_resist:
+            self._tx_death_add, self._tx_immune_resist, self._tx_sites = {}, {}, "both"
+            self.deme_rates = np.array([self._deme_rate(i) for i in range(len(self.demes))], dtype=float)
 
     def grow(self, n_steps=1000, seed=None, treatment=None, **kwargs):
         if self.update_mode == "tau":
             return self._grow_tau(n_steps=n_steps, seed=seed, treatment=treatment, **kwargs)
         if seed is None:
             seed = self.seed
-        self.traces.append(dict(genotypes_counts=dict(self.genotypes_counts)))
+        self._clear_treatment_overrides()
+        self.traces.append(self._trace_snapshot())
         prev_dose = 0.0
         for local_step in range(n_steps - 1):
             rng = np.random.default_rng(seed + self.step + local_step)
             if treatment is not None:
+                treatment.discrete_event(self, self.step + local_step)  # e.g. surgical resection (R9)
                 dose = treatment.get_dosage(self.step + local_step, self.get_tumor_size())
                 self._apply_treatment(treatment, dose)
                 # death rates changed for every genotype while a dose is on (or just turned
@@ -779,7 +1017,7 @@ class GenotypeTumor:
                         [self._deme_rate(i) for i in range(len(self.demes))], dtype=float)
                 prev_dose = dose
             self.update(rng)
-            self.traces.append(dict(genotypes_counts=dict(self.genotypes_counts)))
+            self.traces.append(self._trace_snapshot())
         self.step += n_steps
         self.make_cell_data()
         return self.traces
@@ -824,6 +1062,14 @@ class GenotypeTumor:
                         mutants.append((di, gid, n_mut))
                     if n_disp:
                         dispersals.append((di, gid, n_disp))
+            # NORMAL cells die under off-target chemo toxicity in a treated compartment (they are
+            # otherwise static). Empty unless a therapy is active -> no extra draws -> byte-identical.
+            if self._tx_death_add and self._tx_applies(di):
+                for gid in sorted((g for g in deme if g in self._tx_death_add and not self._is_cancer(g)),
+                                  key=lambda g: self.genotypes[g].ord):
+                    n_death = int(rng.poisson(self._tx_death_add[gid] * deme[gid] * dt))
+                    if n_death:
+                        deaths.append((di, gid, n_death))
 
         # deaths first, capped at the pre-step count so a clone never goes negative
         for di, gid, n in deaths:
@@ -852,10 +1098,24 @@ class GenotypeTumor:
         # kappa=0 draws no binomial and leaves the neighbour draw untouched -> byte-identical.
         for di, gid, n in dispersals:
             src_g = self.gland_id[di] if self.gland_id is not None else -1
+            # met seeding: a fraction (~met_seed_kappa) of daughters from a primary STROMAL deme attempt
+            # the hop to the met, each surviving transit w.p. _transit_prob(met_survival). A disabled met
+            # (or a non-stromal / met source) draws no binomial and leaves n untouched -> byte-identical.
+            n_met = 0
+            if self._met_enabled and self._met_seed_kappa > 0 and di < self.n_primary_demes and src_g == -1:
+                n_met = int(rng.binomial(n, self._met_seed_kappa / (1.0 + self._met_seed_kappa)))
+            if n_met:
+                ms = min(max(self.genotypes[gid].evolutionary_parameters["met_survival"], 0.0), 1.0)
+                n_survive = int(rng.binomial(n_met, self._transit_prob(ms)))
+                if n_survive:
+                    self._add(self.met_vessel_idx, gid, n_survive)
+                    self.events.append(dict(step=self.step, time=self.time, event="seeding",
+                                            from_deme=int(di), genotype=gid, n=int(n_survive)))
+            n_rest = n - n_met
             n_cross = 0
             if self.cross_gland_kappa > 0 and src_g != -1:
-                n_cross = int(rng.binomial(n, self.cross_gland_kappa / (1.0 + self.cross_gland_kappa)))
-            n_local = n - n_cross
+                n_cross = int(rng.binomial(n_rest, self.cross_gland_kappa / (1.0 + self.cross_gland_kappa)))
+            n_local = n_rest - n_cross
             if n_local > 0:
                 nbrs = self._neighbors(di)
                 if not nbrs:
@@ -892,7 +1152,7 @@ class GenotypeTumor:
         self.step += 1
         self.time += tau
         if self.step % self.snapshot_every == 0:
-            self.traces.append(dict(genotypes_counts=dict(self.genotypes_counts)))
+            self.traces.append(self._trace_snapshot())
             self.trace_times.append(self.time)
 
     def _grow_tau(self, n_steps=1000, seed=None, treatment=None, tau=None, **kwargs):
@@ -904,14 +1164,16 @@ class GenotypeTumor:
         if tau is None:
             tau = self.tau
         rng = np.random.default_rng(seed + self.step)
+        self._clear_treatment_overrides()
         # snapshot at t=0 (matches the exact engine's initial trace)
-        self.traces.append(dict(genotypes_counts=dict(self.genotypes_counts)))
+        self.traces.append(self._trace_snapshot())
         self.trace_times.append(self.time)
         prev_dose = 0.0
         for _ in range(n_steps):
             if self.get_cancer_size() == 0:
                 break
             if treatment is not None:
+                treatment.discrete_event(self, self.step)  # e.g. surgical resection (R9)
                 dose = treatment.get_dosage(self.step, self.get_tumor_size())
                 self._apply_treatment(treatment, dose)
                 prev_dose = dose
@@ -1022,6 +1284,7 @@ class GenotypeTumor:
                                     self.selection.get_immune_resistant(),
                                     self.selection.get_treatment_resistant())
         breach_idx, ss_idx = self.selection.get_breach(), self.selection.get_stromal_survival()
+        ms_idx = self.selection.get_met_survival()
         snv_cache, cnv_cache, exp_cache, evo_cache = {}, {}, {}, {}
         # R13: per-genotype allele-resolved expression + the per-clone program drive (routes 1+2).
         # Both are per-CLONE, so they belong in this cache; the per-CELL `z` is drawn later.
@@ -1067,6 +1330,7 @@ class GenotypeTumor:
             evo["n_mut_tr"] = int((snv[tr_idx] > 0).sum())
             evo["n_mut_breach"] = int((snv[breach_idx] > 0).sum())
             evo["n_mut_ss"] = int((snv[ss_idx] > 0).sum())
+            evo["n_mut_ms"] = int((snv[ms_idx] > 0).sum())
             evo_cache[gid] = evo
 
         # F8: per-deme expression modifier (None -> disabled -> exp is bit-identical to the base
@@ -1197,6 +1461,15 @@ class GenotypeTumor:
             self.cell_data["cell_gland"] = pd.DataFrame(
                 {"gland_id": self.gland_id[gcol] if gcol.size else np.array([], dtype=int)}, index=idx)
 
+        # Metastasis ground truth (R9): the compartment each cell sits in (0 = primary, 1 = met). Only
+        # added when the met is enabled (base schema unchanged otherwise). Flows through the sample/data
+        # glob loaders automatically, so an assay can subset to a single site.
+        if self._met_enabled:
+            ccol = np.asarray(demes_col, dtype=int)
+            self.cell_data["cell_compartment"] = pd.DataFrame(
+                {"compartment": ((ccol >= self.n_primary_demes).astype(int) if ccol.size
+                                 else np.array([], dtype=int))}, index=idx)
+
         # R13: the allele layers + the RNA BAF, and the per-cell program activity. Only added when
         # the program layer is on, so the base schema is unchanged.
         if P is not None:
@@ -1246,12 +1519,79 @@ class GenotypeTumor:
             out[str(gid)] = tuple(int(i) for i in driver_idx[vafs[driver_idx] > 0])
         return out
 
+    def _functional_signatures(self):
+        """Map every cancer genotype id -> a hashable signature of its mutated FUNCTIONAL genes: ALL the
+        selection axes (oncogene/TSG + dispersal + immune/treatment resistance + breach/stromal/met
+        survival) carrying an SNV. Unlike ``_driver_signatures`` (onc/TSG only), sharing a signature
+        means sharing the mutations selection acts on, so a sweep on ANY axis (breach, met_survival,
+        treatment_resistance, ...) becomes one functional clone -> one Muller band -> visible selection."""
+        s = self.selection
+        parts = [s.get_oncogenes(), s.get_tsgs(), s.get_dispersal_genes(), s.get_immune_resistant(),
+                 s.get_treatment_resistant(), s.get_breach(), s.get_stromal_survival(),
+                 s.get_met_survival()]
+        parts = [np.asarray(p, dtype=int) for p in parts if len(p)]
+        if not parts:
+            return {}
+        func_idx = np.unique(np.concatenate(parts))
+        out = {}
+        for gid, rep in self.genotypes.items():
+            if gid in normal_names or not hasattr(rep, "get_snvs"):
+                continue
+            vafs = rep.get_snvs()
+            out[str(gid)] = tuple(int(i) for i in func_idx[vafs[func_idx] > 0])
+        return out
+
     def plot_grid(self, color=None, ax=None, **kwargs):
         from .. import viz
         if self.cell_data is None or self.cell_data["cell_type"].shape[0] != self.get_tumor_size():
             self.make_cell_data()
+        # With the metastatic deposit enabled, `plot_grid()` shows BOTH grids (primary + met) side by
+        # side with a shared clone colormap, so the same clone is the same colour across compartments.
+        # (Pass an explicit `ax` to force the single-panel primary view instead.)
+        if self._met_enabled and ax is None and "cell_compartment" in self.cell_data:
+            return self.plot_grid_compartments(color=color, **kwargs)
         return viz.plot_grid(self.cell_data, self.grid_size, self.traces,
                              self.genotypes_parents, color=color, ax=ax, **kwargs)
+
+    def plot_grid_compartments(self, color=None, axes=None, by_drivers=False, **kwargs):
+        """Two spatial grids (primary + met) side by side, shared clone colormap (R9). ``by_drivers``
+        colours by functional clone (matching the driver-collapsed 2-band Muller); pass ``min_freq`` to
+        also merge below-threshold clones."""
+        from .. import viz
+        if self.cell_data is None or self.cell_data["cell_type"].shape[0] != self.get_tumor_size():
+            self.make_cell_data()
+        driver_map = self._functional_signatures() if by_drivers else None
+        return viz.plot_grid_compartments(self.cell_data, self.grid_size, self.met_grid_size,
+                                          self.traces, self.genotypes_parents, color=color,
+                                          axes=axes, driver_map=driver_map, **kwargs)
+
+    def plot_muller_compartments(self, axes=None, by_drivers=False, star_seeder=True, **kwargs):
+        """Two-band Muller (primary over met) sharing one colormap with the grids (R9). ``by_drivers``
+        collapses genotypes to FUNCTIONAL clones and ``min_freq`` (a fraction) merges below-threshold
+        clones, so selective sweeps (DCIS→IDC breach, the met founder, post-chemo resistant escape) show
+        as bands instead of a passenger rainbow. ``star_seeder`` stars the first met-seeding clone's band
+        in BOTH panels at the seeding moment (so a minor founder is findable)."""
+        from .. import viz
+        driver_map = self._functional_signatures() if by_drivers else None
+        if star_seeder and "star_genotype" not in kwargs:
+            seeders = [e for e in self.events if e.get("event") == "seeding"]
+            if seeders:
+                kwargs["star_genotype"] = str(seeders[0]["genotype"])
+                for i, tr in enumerate(self.traces):
+                    if any(str(g) not in normal_names for g in tr.get("met_counts", {})):
+                        kwargs["star_gen"] = i
+                        break
+        return viz.plot_muller_compartments(self.traces, self.genotypes_parents, axes=axes,
+                                            driver_map=driver_map, **kwargs)
+
+    def plot_muller_founders(self, ax=None, **kwargs):
+        """A SINGLE primary Muller highlighting the clone(s) that seeded the metastasis (R9), so you can
+        see which — usually minor — primary population founds the met. Founders are read from the
+        seeding events; a primary clone is highlighted iff it shares a functional signature with one."""
+        from .. import viz
+        founders = {e["genotype"] for e in self.events if e.get("event") == "seeding"}
+        return viz.plot_muller_founders(self.traces, self.genotypes_parents, founders,
+                                        self._functional_signatures(), ax=ax, **kwargs)
 
     def get_genotype_frequencies(self, normalize=True):
         gids = [g for g in self.genotypes_counts if g not in normal_names]
@@ -1321,9 +1661,20 @@ class GenotypeTumor:
         if self.traces:
             pd.DataFrame([t["genotypes_counts"] for t in self.traces]).fillna(0).to_csv(
                 os.path.join(output_path, "trace_counts.csv"))
+            # Per-compartment abundance (R9): only present when the met is enabled (the snapshots then
+            # carry primary_counts / met_counts). Both share the one parents.csv genealogy -> the
+            # 2-band Muller.
+            if self._met_enabled and "primary_counts" in self.traces[0]:
+                pd.DataFrame([t["primary_counts"] for t in self.traces]).fillna(0).to_csv(
+                    os.path.join(output_path, "trace_counts_primary.csv"))
+                pd.DataFrame([t.get("met_counts", {}) for t in self.traces]).fillna(0).to_csv(
+                    os.path.join(output_path, "trace_counts_met.csv"))
             pd.DataFrame([self.genotypes_parents]).to_csv(os.path.join(output_path, "parents.csv"))
             gids, _ = self.get_genotype_frequencies()
             pd.DataFrame(gids).to_csv(os.path.join(output_path, "genotypes.csv"))
+        # Discrete-event annotations (seeding / resection / chemo windows), for the Muller/animation.
+        if self.events:
+            pd.DataFrame(self.events).to_csv(os.path.join(output_path, "events.csv"), index=False)
 
         gene_data = self.selection.get_gene_data()
         Path(os.path.join(output_path, "gene_data")).mkdir(parents=True, exist_ok=True)

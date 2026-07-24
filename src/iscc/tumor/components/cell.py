@@ -28,6 +28,7 @@ class Cell(object):
         n_tr=0,
         n_breach=0,
         n_ss=0,
+        n_ms=0,
     ):
         self.n_segments = n_segments
         # Segments may have unequal sizes (real-genome mode: segment size proportional to
@@ -49,6 +50,7 @@ class Cell(object):
         self.n_tr = n_tr
         self.n_breach = n_breach
         self.n_ss = n_ss
+        self.n_ms = n_ms
         self.type = "healthy"
         self.parent = parent
         if parent is None:
@@ -73,6 +75,8 @@ class Cell(object):
                                     'n_mut_breach': 0,
                                     'n_wt_ss': n_ss * 2,
                                     'n_mut_ss': 0,
+                                    'n_wt_ms': n_ms * 2,
+                                    'n_mut_ms': 0,
                                     'ploidy': 2,
                                     'highest_cn': 2,
                                     'nullisomy_count': 0,
@@ -127,6 +131,7 @@ class Cell(object):
         self.evolutionary_parameters['immune_resistance'] = 0.     # wild-type: no immune escape
         self.evolutionary_parameters['breach'] = 0.                # wild-type: cannot breach the epithelial ring
         self.evolutionary_parameters['stromal_survival'] = 0.      # wild-type: no stromal survival advantage
+        self.evolutionary_parameters['met_survival'] = 0.          # wild-type: no metastatic-host survival advantage
         self.evolutionary_parameters['viability'] = 1.
 
     def update_evolutionary_parameters(self, selection):
@@ -163,6 +168,8 @@ class Cell(object):
             0.0, 1.0 - 1.0 / selection.update_breach(gs))
         self.evolutionary_parameters['stromal_survival'] = max(
             0.0, 1.0 - 1.0 / selection.update_stromal_survival(gs))
+        self.evolutionary_parameters['met_survival'] = max(
+            0.0, 1.0 - 1.0 / selection.update_met_survival(gs))
 
     def _recount_seg_drivers(self, selection, seg):
         """Refresh this segment's contribution to ``n_mutated_drivers``: the number of DISTINCT
@@ -225,6 +232,10 @@ class Cell(object):
         self.genome_summary['n_mut_ss'] += n_new_ss
         self.genome_summary['n_wt_ss'] -= n_new_ss
 
+        n_new_ms = int(mut_bits[selection.met_survival[seg]].sum())
+        self.genome_summary['n_mut_ms'] += n_new_ms
+        self.genome_summary['n_wt_ms'] -= n_new_ms
+
         # Epistasis events: an event fires when >= 1 SNV lands in its gene module. Only event_bits is
         # touched here — the TIED group is closed once per division by mutate(), because this method
         # runs once per (segment, allele) and that loop walks segments in index order: grouping here
@@ -277,6 +288,11 @@ class Cell(object):
         n_wt_ss = len(selection.stromal_survival[seg]) - n_mut_ss
         self.genome_summary['n_mut_ss'] += sign*n_mut_ss
         self.genome_summary['n_wt_ss'] += sign*n_wt_ss
+
+        n_mut_ms = int(allele_bits[selection.met_survival[seg]].sum())
+        n_wt_ms = len(selection.met_survival[seg]) - n_mut_ms
+        self.genome_summary['n_mut_ms'] += sign*n_mut_ms
+        self.genome_summary['n_wt_ms'] += sign*n_wt_ms
 
         self.genome_summary['seg_cns'][seg] += sign
         seg_cns = self.genome_summary['seg_cns']
@@ -486,6 +502,14 @@ class ImmuneCell(Cell):
         super(ImmuneCell, self).__init__(**cell_kwargs)
         self.prob_kill = prob_kill # probability of killing a neighboring cancer cell
         self.type = "immune"
+        self.genotype_id = self.type
+
+class HostCell(Cell):
+    # Metastatic-deposit host parenchyma (R9): the generic resident tissue the invading cancer must
+    # displace in the met grid — immortal/static like epithelial/stromal, only diluted, never cleared.
+    def __init__(self, **cell_kwargs):
+        super(HostCell, self).__init__(**cell_kwargs)
+        self.type = "host"
         self.genotype_id = self.type
 
 class CancerCell(Cell):
