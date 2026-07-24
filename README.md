@@ -1,5 +1,9 @@
 # iscc — in silico cancer center
 
+[![Tests](https://github.com/pedrofale/iscc/actions/workflows/main.yaml/badge.svg)](https://github.com/pedrofale/iscc/actions/workflows/main.yaml)
+[![PyPI version](https://img.shields.io/pypi/v/insilico-cancer-center)](https://pypi.org/project/insilico-cancer-center/)
+[![Python versions](https://img.shields.io/pypi/pyversions/insilico-cancer-center)](https://pypi.org/project/insilico-cancer-center/)
+
 Simulate tumor growth, treatment, and multi-modal molecular data generation under different
 evolutionary models. `iscc` aims to be a standard data simulator for computational
 tumor-evolution methods: grow a spatially structured tumor under a CINner-style
@@ -15,7 +19,7 @@ MkDocs Material. Build locally with `pip install -r docs/requirements.txt && mkd
 ## Installation
 
 ```bash
-$ pip install iscc        # or: poetry install
+$ pip install insilico-cancer-center    # installs the `iscc` package; or: poetry install
 ```
 
 ## Pipeline

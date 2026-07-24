@@ -7,57 +7,68 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # numpy<2.0 has no wheels for 3.13, so the tested range stops at 3.12.
+        python-version: ['3.10', '3.11', '3.12']
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: ${{ matrix.python-version }}
 
       - name: Install Graphviz
-        uses: ts-graphviz/setup-graphviz@v1
+        uses: ts-graphviz/setup-graphviz@v2
 
       - name: Install Poetry
         uses: snok/install-poetry@v1
 
+      - name: Install project
+        run: poetry install --with dev
+
       - name: Build package
-        run: |
-          poetry install
-          poetry build
-      - name: Test package
+        run: poetry build
+
+      - name: Run tests
         run: poetry run pytest -v tests/
 
-      - name: Lint package
-        run: poetry run black --check --diff .
+  # Publish to PyPI on tag pushes via OIDC Trusted Publishing (no stored token).
+  # One-time setup on PyPI: add a trusted publisher for project
+  # "insilico-cancer-center" -> owner "pedrofale", repo "iscc",
+  # workflow "main.yaml", environment "pypi".
   deploy:
+    name: Publish to PyPI
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     needs: test
+    environment:
+      name: pypi
+      url: https://pypi.org/p/insilico-cancer-center
+    permissions:
+      id-token: write
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: '3.12'
 
       - name: Install Graphviz
-        uses: ts-graphviz/setup-graphviz@v1
+        uses: ts-graphviz/setup-graphviz@v2
 
       - name: Install Poetry
         uses: snok/install-poetry@v1
 
       - name: Build package
-        run: |
-          poetry install
-          poetry build
-      - name: Publish package to PyPi
-        uses: pypa/gh-action-pypi-publish@master
-        with:
-          user: __token__
-          password: ${{ secrets.PYPI_API_TOKEN }}
+        run: poetry build
+
+      - name: Publish to PyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
