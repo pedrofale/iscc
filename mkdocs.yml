@@ -7,6 +7,12 @@ repo_name: pedrofale/iscc
 edit_uri: edit/dev/docs/
 docs_dir: docs
 
+# Not published yet (kept in docs/ to finish privately): the Guide + Tutorials pages.
+exclude_docs: |
+  parameters.md
+  schema.md
+  tutorials/
+
 theme:
   name: material
   custom_dir: overrides
@@ -58,18 +64,10 @@ plugins:
       include_source: true
       execute: false
 
+# Guide and Tutorials are intentionally NOT published yet — their pages stay in docs/
+# (excluded from the build via `exclude_docs` above) so they can be finished privately,
+# then re-added to the nav (and un-excluded) when they're ready to go public.
 nav:
   - Home: index.md
   - Overview: overview.md
   - Installation: installation.md
-  - Guide:
-      - Parameters & defaults: parameters.md
-      - Output schema: schema.md
-  - Tutorials:
-      - Pipeline walkthrough: tutorials/01_pipeline_walkthrough.ipynb
-      - Tumor growth: tutorials/02_tumor_growth.ipynb
-      - Data overview: tutorials/03_data_overview.ipynb
-      - "Assay — bulk & single-cell DNA": tutorials/assay_dna.ipynb
-      - "Assay — single-cell RNA": tutorials/assay_scrna.ipynb
-      - "Assay — spatial transcriptomics": tutorials/assay_spatial.ipynb
-      - Emitting sequencing reads: tutorials/reads.ipynb

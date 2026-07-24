@@ -35,14 +35,5 @@ pip install iscc
 isccsim --sim-config config.yaml --steps 2000 --random-seed 0 -o sim_out
 ```
 
-The shipped defaults produce a realistic multi-clone tumor. See
-[Parameters & defaults](parameters.md) for each knob's default, valid range, and what going out of
-range does — plus `tumor.diagnose()`, which flags a degenerate tumor after growth and tells you which
-knob to turn.
-
-## Where to next
-
-- [Installation](installation.md)
-- [Parameters & defaults](parameters.md) — defaults, valid ranges, and the built-in QC diagnostic
-- [Output schema](schema.md) — what each stage writes
-- **Tutorials** — start with the [pipeline walkthrough](tutorials/01_pipeline_walkthrough.ipynb)
+The shipped defaults produce a realistic multi-clone tumor, and `tumor.diagnose()` flags a degenerate
+tumor after growth and tells you which knob to turn.

@@ -25,4 +25,4 @@ Installing `iscc` provides the pipeline entry points:
 | `isccdata` | generate DNA/RNA/spatial assay data |
 | `isccfig`, `isccgif` | figures and animations |
 
-Once installed, head to the [pipeline walkthrough](tutorials/01_pipeline_walkthrough.ipynb).
+Once installed, see the [Overview](overview.md) for the pipeline and a quickstart.
