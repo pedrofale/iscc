@@ -200,18 +200,24 @@ def grow_arc():
 
     capture("growth")
     seeding_snap = None
+    gi = 0
     while True:
         p, m = compartment_cancer(t)
-        # grow the met to a decent PURPLE deposit before resection: the met_survival clone keeps
-        # outcompeting the transient green stromal seeders as it grows (55%->60%+ met by ~500 cells),
-        # so a bigger deposit reads clearly as the purple establishment sweep. Bounded by p+m so the
-        # primary doesn't run away (its met_survival drift would eventually re-purple it).
-        if m >= 500 or p + m >= 8500:
+        # grow the met to a SUBSTANTIAL purple deposit before resection: the met_survival clone keeps
+        # outcompeting the transient green stromal seeders as it grows (stays ~75% met, ~8% green up to
+        # ~1200 cells) while the primary stays stromal-dominant, so a bigger deposit reads clearly as the
+        # purple establishment sweep and fills the met grid. Bounded by p+m so the primary can't run away.
+        if m >= 800 or p + m >= 11000:
             break
-        t.grow(n_steps=1, seed=SEED)            # fine cadence -> a smooth DCIS -> IDC -> seeding arc
+        t.grow(n_steps=1, seed=SEED)            # dynamics ALWAYS advance one generation (calibration-stable)
         if seeding_snap is None and compartment_cancer(t)[1] > 0:
             seeding_snap = len(t.traces)
-        capture("growth" if seeding_snap is None else "metastatic seeding")
+        gi += 1
+        # cadence trim (NOT a dynamics change): capture only every 2nd generation while the met has not
+        # yet seeded (primary-only duct-filling — low interest, near-empty met grid), keeping the file
+        # small; capture EVERY generation once the met exists so establishment/growth stays smooth.
+        if seeding_snap is not None or gi % 2 == 0:
+            capture("growth" if seeding_snap is None else "metastatic seeding")
 
     resect_snap = len(t.traces)
     t.grow(n_steps=1, seed=SEED, treatment=Surgery(start=t.step, site="primary"))
@@ -231,8 +237,8 @@ def grow_arc():
         t.grow(n_steps=1, seed=SEED, treatment=chemo)
         capture("chemotherapy")
     chemo_end_snap = len(t.traces)
-    for _ in range(16):                         # relapse: the single resistant clone re-expands (red)
-        t.grow(n_steps=1, seed=SEED)
+    for _ in range(26):                         # relapse: the single resistant (red) clone re-expands
+        t.grow(n_steps=1, seed=SEED)            # for a good stretch, refilling the met grid
         capture("relapse")
 
     marks = [(seeding_snap, "seeding"), (resect_snap, "resection"),
@@ -308,6 +314,11 @@ def build_figure(t, marks, colors, splash=False):
             ln.set_color(SPLASH_LABEL if splash else SUBINK); ln.set_alpha(0.75)
         for txt in ax.texts:                     # event labels: neutral grey (no blue cast) for the splash
             txt.set_color(SPLASH_LABEL if splash else INK); txt.set_fontsize(9 if splash else 8.5)
+            if splash:
+                # legibility: a semi-opaque panel-bg box behind each label so it reads over the coloured
+                # streams (e.g. "resection" on the primary fish, "chemo start/end" on the met fish).
+                txt.set_bbox(dict(facecolor=PANEL, alpha=0.82, edgecolor="none", pad=1.8))
+                txt.set_zorder(4)                # above the stream bands, below the reveal cursor
         if splash:
             ax.axis("off")                       # NO axis chrome whatsoever (no spines/ticks/labels);
             #                                      the bands + event vlines + their text still render.
