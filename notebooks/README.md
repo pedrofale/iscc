@@ -71,15 +71,3 @@ phenotype/niche-coupled gene programs on), re-grown deterministically by the imp
   cohort (MHN + TreeMHN, or an in-core fallback).
 
 The production-tool benchmarks these point to live under `validation/`.
-
-## Backlog (analysis demos — not yet implemented)
-
-These are title-only stubs, kept as a roadmap:
-
-- `dna_mhn.ipynb` — Mutual Hazard Networks from DNA-seq (see `cohort_mhn_recurrence.ipynb`)
-- `visium_niches.ipynb` — niche identification from Visium
-- `scrna_batch_effects.ipynb` — technical/biological batch effects
-- `real_data_comparison.ipynb` — simulated vs real data
-
-> The legacy `tumor_growth.ipynb` and `data_overview.ipynb` (old `tumorevo` API) are superseded
-> by `02_`/`03_` and can be removed.
