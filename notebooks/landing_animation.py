@@ -47,10 +47,18 @@ GENOME = {"n_segments": 12, "segment_size": 50}
 # treatment_resistance ~0.64) so that at chemo time only a SMALL subclone of the metastasis is resistant.
 # Strong chemo (see grow_arc) then kills the sensitive bulk -> the met visibly regresses to that one
 # resistant subclone, which relapses after chemo as essentially one clone (one colour, red).
+#
+# met_survival is made RARE (prop 0.015) and STRONG (effects 3.0): because met_survival is spatially
+# gated (neutral in the primary — see stage_of), a high prop lets it DRIFT to saturation across the
+# primary, painting the whole primary purple and erasing the met-establishment sweep. Keeping it rare
+# holds the primary at the breach/stromal (green/orange) invasion clones, so only a rare clone reaches
+# met_survival-high — and the strong met-host bottleneck (met_hazard + met_transit_floor, see SPATIAL)
+# is what lets THAT clone found and win the metastasis, a genuine PURPLE selective sweep distinct from
+# the primary's dominant invasion clone.
 SELECTION = {"prop_driver": 0.04, "prop_dispersal": 0.0, "prop_immune_resistance": 0.02,
              "prop_treatment_resistance": 0.001, "prop_breach": 0.012, "prop_stromal_survival": 0.03,
-             "prop_met_survival": 0.05, "breach_effects": 2.2, "stromal_survival_effects": 2.2,
-             "met_survival_effects": 2.5, "treatment_resistant_effects": 2.8}
+             "prop_met_survival": 0.015, "breach_effects": 2.2, "stromal_survival_effects": 2.2,
+             "met_survival_effects": 3.0, "treatment_resistant_effects": 2.8}
 CANCER = {"division_rate": 0.7, "death_rate": 0.05, "max_birth_rate": 0.95, "mutation_rate": 0.6,
           "dispersal_rate": 0.35, "cnv_prob": 0.15, "wgd_rate": 0.05}
 DEME = {"carrying_capacity": 20, "initial_cancer_cells": 8, "resident_pressure_ref": 0.2}
@@ -60,13 +68,30 @@ DEME = {"carrying_capacity": 20, "initial_cancer_cells": 8, "resident_pressure_r
 SPATIAL = {"grid_size": 26, "structure_radius": 3, "n_glands": 4, "gland_radius": 3, "min_gland_sep": 8,
            "K_duct": 40, "K_stroma": 26, "stroma_fill_frac": 0.3, "cross_gland_kappa": 0.06,
            "epithelial_barrier": 6.0, "stromal_hazard": 0.7,
-           "met_grid_size": 26, "K_met": 40, "host_fill_frac": 0.35,
-           "met_seed_kappa": 0.02, "met_hazard": 0.45, "met_transit_floor": 0.02}
+           # met establishment as a genuine selective bottleneck: a STRONG met-host hazard (3.5) heavily
+           # kills invading cells that LACK met_survival, and a near-zero transit floor (0.001) makes
+           # seeding the deposit essentially REQUIRE met_survival (transit_prob = floor + (1-floor)*ms).
+           # host_fill_frac 0.5 keeps the met host fraction high so that hazard keeps biting even as the
+           # deposit fills, so stray stromal (green) seeders that drifted some met_survival are still
+           # killed rather than growing in the deposit. Net: the met is founded and DOMINATED by a
+           # met_survival (purple) clone with only a small green transient (~9%, declining post-seeding),
+           # distinct from the primary's green/orange invasion; met_seed_kappa 0.03 gives enough seeding
+           # attempts for such a clone to arrive after stromal invasion.
+           "met_grid_size": 26, "K_met": 40, "host_fill_frac": 0.5,
+           "met_seed_kappa": 0.03, "met_hazard": 3.5, "met_transit_floor": 0.001}
 
-MIN_FREQ = 0.05   # clone size-merge threshold — MUST match between story_colors() and the Muller draw
+# clone size-merge threshold — MUST match between story_colors() and the Muller draw. 0.02 (not 0.05)
+# so the resistant relapse subclones each keep their OWN red band instead of being merged into their
+# met_survival (purple) FOUNDER's band: at 0.05 the post-chemo met read ~21% purple (merged resistant
+# subclones coloured by their purple ancestor), at 0.02 it reads ~95% red = essentially one red clone.
+MIN_FREQ = 0.02
 
 # ---- dark hero aesthetic -----------------------------------------------------------------------
 BG, PANEL, INK, SUBINK, GRID_LINE = "#0d1117", "#161b22", "#e6edf3", "#9aa4b2", "#30363d"
+# NEUTRAL grey in-GIF text for the SPLASH (no blue cast, unlike INK/SUBINK): grid titles a lighter
+# near-neutral grey, event annotations + their vlines a mid grey. Splash-only; the general path keeps
+# INK/SUBINK.
+SPLASH_TITLE, SPLASH_LABEL = "#e0e0e0", "#b3b3b3"
 # the four selective sweeps + proliferation + none (the shared clone colormap)
 STAGE_COL = {
     "none":       (0.50, 0.53, 0.60, 1.0),   # grey
@@ -161,10 +186,11 @@ def grow_arc():
     # phases below scale their step counts (and the chemo duration) by 1/tau to keep the clinical arc's
     # real-time length: #steps * tau stays constant vs the tau=1.0 tuning.
     TAU = 0.5
-    # seed=2 is the reproducible draw where treatment resistance stays a SMALL late subclone of the met
-    # (~10% at chemo time) rather than sweeping early, so strong chemo can visibly wipe the sensitive bulk
-    # and leave that one resistant clone to relapse (see grow_arc header / SELECTION).
-    SEED = 2
+    # seed=3 is the reproducible draw giving the full clean arc: a met_survival clone founds a PURPLE
+    # metastasis (distinct from the primary's green/orange invasion), treatment resistance stays a tiny
+    # subclone of it, and strong chemo wipes the sensitive purple bulk (~90%+) so the lone resistant
+    # clone relapses red (see grow_arc header / SELECTION / SPATIAL).
+    SEED = 3
     t = GenotypeTumor(seed=SEED, genome_params=GENOME, selection_params=SELECTION, cancer_cell_params=CANCER,
                       deme_params=DEME, spatial_params=SPATIAL, update_mode="tau", tau=TAU)
     frames = []
@@ -176,7 +202,11 @@ def grow_arc():
     seeding_snap = None
     while True:
         p, m = compartment_cancer(t)
-        if m >= 260 or p + m >= 5600:
+        # grow the met to a decent PURPLE deposit before resection: the met_survival clone keeps
+        # outcompeting the transient green stromal seeders as it grows (55%->60%+ met by ~500 cells),
+        # so a bigger deposit reads clearly as the purple establishment sweep. Bounded by p+m so the
+        # primary doesn't run away (its met_survival drift would eventually re-purple it).
+        if m >= 500 or p + m >= 8500:
             break
         t.grow(n_steps=1, seed=SEED)            # fine cadence -> a smooth DCIS -> IDC -> seeding arc
         if seeding_snap is None and compartment_cancer(t)[1] > 0:
@@ -190,18 +220,18 @@ def grow_arc():
         t.grow(n_steps=1, seed=SEED)
         capture("resection")
 
-    # STRONG systemic chemo over a long window: kill_rate (2.8) is well above the birth cap and
-    # effectiveness ~1, so every SENSITIVE clone regresses hard; the lone resistant subclone
-    # (treatment_resistance ~0.64) is only partly hit, dips, then rebounds once chemo stops. 20 steps
-    # (vs 12) give the regression room to read on-screen as a dramatic shrink-to-one-clone.
+    # STRONG systemic chemo: kill_rate (2.8) is well above the birth cap and effectiveness ~1, so every
+    # SENSITIVE clone regresses hard; the lone resistant subclone (treatment_resistance ~0.64) is only
+    # partly hit, dips, then rebounds once chemo stops. 16 steps span the visible shrink (trough ~step 8)
+    # plus a brief hold — enough for the regression to read without a long dead plateau.
     chemo_snap = len(t.traces)
-    chemo = Chemotherapy(start=t.step, duration=20, kill_rate=2.8, effectiveness=0.98,
+    chemo = Chemotherapy(start=t.step, duration=16, kill_rate=2.8, effectiveness=0.98,
                          toxicity=0.12, sites="both")
-    for _ in range(20):
+    for _ in range(16):
         t.grow(n_steps=1, seed=SEED, treatment=chemo)
         capture("chemotherapy")
     chemo_end_snap = len(t.traces)
-    for _ in range(24):                         # relapse: the single resistant clone re-expands (red)
+    for _ in range(16):                         # relapse: the single resistant clone re-expands (red)
         t.grow(n_steps=1, seed=SEED)
         capture("relapse")
 
@@ -225,7 +255,10 @@ def build_figure(t, marks, colors, splash=False):
     an x label of just "Time", and (in ``main``) no clone legend / cell counts / phase caption; only the
     event vertical lines + their annotations remain. The Mullers are drawn ONCE; each frame only moves
     the reveal cursor over them (no band flicker)."""
-    fig = plt.figure(figsize=(12.6, 7.1), dpi=170)          # ~2140 x 1210 px -> crisp when shown large
+    # splash renders at a slightly lower dpi (1890x1065, still crisp — the hero displays well under
+    # 1200px CSS on the docs page) purely to hold the many-frame GIF under the ~6 MB size budget without
+    # dropping frames or coarsening the palette; the general path keeps the full 2142x1207.
+    fig = plt.figure(figsize=(12.6, 7.1), dpi=150 if splash else 170)
     fig.patch.set_facecolor(BG)
     if splash:
         # Manual, SYMMETRIC placement: two EQUAL square grids in the left column, two wide Mullers in
@@ -254,13 +287,27 @@ def build_figure(t, marks, colors, splash=False):
                                  clone_colors=colors, mark_generations=marks, star_genotype=None,
                                  centered=splash)
     xmax = len(t.traces) - 1
+    # splash: make the clinical-event lines PANEL-SPECIFIC to where the intervention acts — resection
+    # removes the primary (primary panel only); chemo's visible effect is on the deposit (met panel
+    # only); seeding is the shared branch point (both). The general path keeps all marks on both.
+    keep_marks = {"primary": {"seeding", "resection"},
+                  "metastasis": {"seeding", "chemo start", "chemo end"}}
     for ax, band in ((ax_mp, "primary"), (ax_mm, "metastasis")):
         ax.set_facecolor(BG)                     # axes background == the page colour (no card/seam)
         ax.set_xlim(0, xmax)
+        if splash:
+            for txt in list(ax.texts):           # drop the marks not applicable to this panel (line+label)
+                if txt.get_text() not in keep_marks[band]:
+                    xpos = txt.get_position()[0]
+                    for ln in list(ax.lines):
+                        xd = ln.get_xdata()
+                        if len(xd) and abs(float(xd[0]) - xpos) < 1e-6:
+                            ln.remove()
+                    txt.remove()
         for ln in ax.lines:                      # event vlines -> visible dashed grey on the dark page
-            ln.set_color(SUBINK); ln.set_alpha(0.75)
-        for txt in ax.texts:                     # recolour the event labels for the dark theme
-            txt.set_color(INK); txt.set_fontsize(9 if splash else 8.5)
+            ln.set_color(SPLASH_LABEL if splash else SUBINK); ln.set_alpha(0.75)
+        for txt in ax.texts:                     # event labels: neutral grey (no blue cast) for the splash
+            txt.set_color(SPLASH_LABEL if splash else INK); txt.set_fontsize(9 if splash else 8.5)
         if splash:
             ax.axis("off")                       # NO axis chrome whatsoever (no spines/ticks/labels);
             #                                      the bands + event vlines + their text still render.
@@ -278,33 +325,49 @@ def build_figure(t, marks, colors, splash=False):
     return fig, axp, axm, ax_mp, ax_mm, xmax
 
 
-def draw_grid(ax, sub, gsz, colors, title):
+def draw_grid(ax, sub, gsz, colors, title, title_color=INK):
     """Render one cell-resolution grid. ``title`` is used verbatim (the caller formats it — with a cell
-    count for the general path, or just "Primary"/"Metastasis" for the splash)."""
+    count for the general path, or just "Primary"/"Metastasis" for the splash). ``title_color`` lets the
+    splash use a neutral grey (no blue cast)."""
     # empty background == the page colour so the grid has NO card/seam: only the cells are non-page
     # pixels and the tumour reads as growing directly on the splash.
     viz.plot_grid(sub, gsz, None, None, color=["cell_type"], ax=ax, expand_demes=True,
                   section_frac=0.85, cancer_color=None, type_cmap=colors, empty_color=BG)
     if ax.legend_:
         ax.legend_.remove()
-    ax.set_title(title, color=INK, fontsize=12, pad=5)
+    ax.set_title(title, color=title_color, fontsize=12, pad=5)
     ax.set_xticks([]); ax.set_yticks([])
     ax.set_facecolor(BG)
     for sp in ax.spines.values():          # no frame around the grid
         sp.set_visible(False)
 
 
+# NEUTRAL-grey chrome anchors reserved in every palette so the small (size-budgeted) palette can't
+# blue-shift or dim the grey titles/labels: the adaptive median-cut otherwise spends its few slots on
+# the vivid clone bands and maps near-white text onto a bluish band colour. Exact text greys + an
+# antialiasing ramp + the page colour guarantee the text quantises to true grey.
+_CHROME_ANCHORS = [(13, 17, 23), (224, 224, 224), (179, 179, 179), (255, 255, 255),
+                   (150, 150, 150), (96, 96, 96), (48, 48, 48)]
+
+
 def _save_gif_pillow(gif_path, imgs, per, budget_mb=5.95, candidates=(48, 32, 24, 20)):
-    """Write ``imgs`` as an optimised GIF via Pillow with ONE global adaptive palette (see caller).
-    Tries palette sizes largest-first and keeps the largest whose file is <= ``budget_mb`` (falls back
-    to the smallest if none fit). Returns the written size in MB."""
+    """Write ``imgs`` as an optimised GIF via Pillow with ONE global palette = neutral chrome anchors
+    (``_CHROME_ANCHORS``, so grey text stays grey) + an adaptive fill from a montage of representative
+    frames. Tries palette sizes largest-first and keeps the largest whose file is <= ``budget_mb``
+    (falls back to the smallest if none fit). Returns the written size in MB."""
     from PIL import Image
     idxs = sorted({0, len(imgs) // 3, 2 * len(imgs) // 3, len(imgs) - 1})
     montage = np.concatenate([imgs[i] for i in idxs], axis=1)   # palette sees the whole arc + chrome
     best = None
     for ncol in candidates:
-        pal = Image.fromarray(montage).convert("P", palette=Image.ADAPTIVE, colors=ncol)
-        pframes = [Image.fromarray(a).quantize(palette=pal, dither=Image.Dither.NONE) for a in imgs]
+        n_fill = max(1, ncol - len(_CHROME_ANCHORS))
+        base = Image.fromarray(montage).convert("P", palette=Image.ADAPTIVE, colors=n_fill)
+        pal = base.getpalette()[:3 * n_fill]                    # adaptive colours ...
+        for c in _CHROME_ANCHORS:                               # ... + reserved neutral chrome
+            pal += list(c)
+        pal += [0] * (3 * 256 - len(pal))
+        palimg = Image.new("P", (1, 1)); palimg.putpalette(pal)
+        pframes = [Image.fromarray(a).quantize(palette=palimg, dither=Image.Dither.NONE) for a in imgs]
         pframes[0].save(gif_path, save_all=True, append_images=pframes[1:], duration=per, loop=0,
                         optimize=True, disposal=2)
         mb = os.path.getsize(gif_path) / 1e6
@@ -355,7 +418,7 @@ def main(splash=False):
             mask = comp == val
             sub = {k: df[mask] for k, df in cd.items()}
             title = grid_titles[key] if splash else f"{grid_titles[key]}   ({int(mask.sum()):,} cells)"
-            draw_grid(ax, sub, gsz, colors, title)
+            draw_grid(ax, sub, gsz, colors, title, title_color=SPLASH_TITLE if splash else INK)
         # progressive reveal cursor over the static Muller
         for a in cursor_artists:
             a.remove()
