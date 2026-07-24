@@ -42,10 +42,11 @@ The default engine is the fast genotype-level (count-based) `genotype` model; a 
 $ isccsim --sim-config config.yaml --steps 2000 --random-seed 0 -o sim_out
 ```
 
-The shipped defaults produce a realistic multi-clone tumour, and `tumor.diagnose()` flags a
+The shipped defaults produce a realistic multi-clone tumour. **See `PARAMETERS.md`** for each knob's
+default, valid range, and what going out of range does — plus `tumor.diagnose()`, which flags a
 degenerate tumour after growth and tells you which knob to turn.
 
-This writes: `cell_data/` (per-cell ground truth),
+This writes (see `SCHEMA.md` for the full layout): `cell_data/` (per-cell ground truth),
 `trace_counts.csv`, `parents.csv`, `genotypes.csv`, `gene_data/`, and `grid.csv` (spatial modes).
 
 ### Applying treatment
@@ -81,6 +82,14 @@ against established results:
 - `validate_inference_recovery.py` — ABC recovers known CNA/SNV rates from synthetic tumours (parameter recovery)
 
 Run the test suite with `python -m pytest`.
+
+## Status & roadmap
+
+Working: spatial growth (glandular), CINner-style selection, treatment, multi-cell observation,
+single-cell/bulk DNA & RNA and Visium-like data, and the validation suite above. In progress
+(see `DESIGN_inference.md`): a parameter-estimation/inference layer (ABC for the tumor module;
+Splatter-style `estimate()` for the assays). Not yet implemented: read-level (FASTQ/BAM) output,
+non-spatial/boundary spatial modes, and realistic biopsy/dissociation noise (see `AUDIT.md`).
 
 ## License
 

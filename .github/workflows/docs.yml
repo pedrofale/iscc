@@ -9,6 +9,8 @@ on:
       - 'docs/**'
       - 'notebooks/**'
       - 'mkdocs.yml'
+      - 'PARAMETERS.md'
+      - 'SCHEMA.md'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
