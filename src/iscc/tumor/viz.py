@@ -551,10 +551,51 @@ def _band_y_at(pop_df, anc, band_id, gen, smoothing_std):
     return gens[gi], float((bottoms[idxs[0]] + bottoms[idxs[-1] + 1]) / 2.0)
 
 
+# Stage-dominant driver colouring (todo #14): a clone is coloured by the HIGHEST arc-stage driver it
+# carries, so the selection cascade reads as a few categories rather than a per-clone rainbow. Order:
+# proliferation (onc/TSG, in the ducts) -> invasion (breach/stromal_survival, in the stroma) ->
+# met survival (in the deposit) -> chemo resistance (under treatment). GenotypeTumor._stage_colors maps
+# each genotype to STAGE_PALETTE[stage]; here we only own the palette + drawing.
+STAGE_NAMES = ["no driver", "proliferation (onc/TSG)", "invasion (breach/stromal)",
+               "met survival", "chemo resistance"]
+STAGE_PALETTE = [(0.80, 0.80, 0.80, 1.0),   # none — grey
+                 (0.27, 0.45, 0.71, 1.0),   # proliferation — blue
+                 (0.33, 0.66, 0.41, 1.0),   # invasion — green
+                 (0.55, 0.42, 0.72, 1.0),   # met survival — purple
+                 (0.79, 0.28, 0.28, 1.0)]   # chemo resistance — red
+
+
+def stage_legend(present=None):
+    """(label, colour) pairs for the stage palette (optionally only the stage indices in ``present``)."""
+    idxs = range(len(STAGE_NAMES)) if present is None else sorted(set(present))
+    return [(STAGE_NAMES[i], STAGE_PALETTE[i]) for i in idxs]
+
+
+def _draw_muller_panel(ax, pop_df, anc, band_colors, normalize, smoothing_std,
+                       default=(0.82, 0.82, 0.82, 1.0)):
+    """Draw ONE Muller panel with EXPLICIT per-band colours, bypassing pymuller's colormap
+    normalisation so a categorical palette maps exactly. Mirrors pymuller._muller_plot's layout."""
+    import sys as _sys
+    pop = pop_df.copy()
+    if normalize:
+        pop["Population"] = pop.groupby("Generation")["Population"].transform(
+            lambda v: v / v.sum() if v.sum() else v)
+    x = pop["Generation"].unique()
+    _old = _sys.getrecursionlimit()
+    try:
+        _sys.setrecursionlimit(max(_old, 20000))
+        yt = pymuller.logic._get_y_values(pop, anc, smoothing_std)
+    finally:
+        _sys.setrecursionlimit(_old)
+    colors = [band_colors.get(str(c), default) for c in yt.columns.values]
+    ax.stackplot(x, yt.to_numpy().T, colors=colors)
+    return ax
+
+
 def plot_muller_compartments(traces, genotypes_parents, axes=None, colormap="gnuplot",
                              normalize=False, smoothing_std=0.1, labels=("primary", "metastasis"),
                              mark_generations=None, driver_map=None, min_freq=None,
-                             star_genotype=None, star_gen=None):
+                             star_genotype=None, star_gen=None, clone_colors=None, color_legend=None):
     """Two stacked Muller panels — primary (top) and metastasis (bottom) — that SHARE ONE colormap, so
     a clone keeps its colour across both bands (and matches plot_grid_compartments / plot_muller). The
     met founder therefore appears in the met band with the SAME colour as its — usually minor — parent
@@ -581,7 +622,14 @@ def plot_muller_compartments(traces, genotypes_parents, axes=None, colormap="gnu
     # in the band's OWN colour (matching its Muller band + the grids) with a black edge for visibility.
     star_band = str(gmap.get(str(star_genotype))) if star_genotype is not None else None
     star_color = "gold"
-    if star_band is not None:
+    # explicit per-clone colours (e.g. stage-dominant driver): a band takes its founder gid's colour,
+    # drawn via the manual panel drawer so a categorical palette maps exactly.
+    band_colors = None
+    if clone_colors is not None:
+        band_colors = {str(b): clone_colors.get(str(b), (0.82, 0.82, 0.82, 1.0)) for b in basis_cols}
+        if star_band is not None:
+            star_color = band_colors.get(str(star_band), star_color)
+    elif star_band is not None:
         _bcolors, _border = _get_colormap(pop_full, anc_full, color_by, colormap)
         star_color = dict(zip([str(b) for b in _border], _bcolors)).get(str(star_band), "gold")
     if axes is None:
@@ -597,13 +645,16 @@ def plot_muller_compartments(traces, genotypes_parents, axes=None, colormap="gnu
         comp["Generation"] = np.arange(comp.shape[0])
         pop_df = (comp.melt(id_vars=["Generation"], value_name="Population", var_name="Identity")
                   .sort_values("Generation").reset_index(drop=True))
-        _old = _sys.getrecursionlimit()
-        try:
-            _sys.setrecursionlimit(max(_old, 20000))
-            pymuller.muller(pop_df, anc_full, color_by, ax=ax, colorbar=False, colormap=colormap,
-                            normalize=normalize, background_strain=False, smoothing_std=smoothing_std)
-        finally:
-            _sys.setrecursionlimit(_old)
+        if band_colors is not None:
+            _draw_muller_panel(ax, pop_df, anc_full, band_colors, normalize, smoothing_std)
+        else:
+            _old = _sys.getrecursionlimit()
+            try:
+                _sys.setrecursionlimit(max(_old, 20000))
+                pymuller.muller(pop_df, anc_full, color_by, ax=ax, colorbar=False, colormap=colormap,
+                                normalize=normalize, background_strain=False, smoothing_std=smoothing_std)
+            finally:
+                _sys.setrecursionlimit(_old)
         ax.set_ylabel(f"{label}\n" + ("frequency" if normalize else "cells"))
         ax.set_xlabel("")  # clear pymuller's per-panel "Time" label; only the bottom panel is labelled
         for spec in (mark_generations or []):
@@ -614,25 +665,34 @@ def plot_muller_compartments(traces, genotypes_parents, axes=None, colormap="gnu
             xy = _band_y_at(pop_df, anc_full, star_band, star_gen, smoothing_std)
             if xy is not None:
                 ax.plot(xy[0], xy[1], marker="*", markersize=20, markerfacecolor=star_color,
-                        markeredgecolor="black", markeredgewidth=1.2, zorder=6, linestyle="none",
-                        label="seeding clone")
-                ax.legend(loc="upper left", fontsize=8)
+                        markeredgecolor="black", markeredgewidth=1.2, zorder=6, linestyle="none")
     axes[-1].set_xlabel("snapshot")
+    # one legend on the top panel: the colour categories (if any) + the seeding-star marker
+    from matplotlib.lines import Line2D
+    handles = [mpatches.Patch(color=c, label=l) for l, c in (color_legend or [])]
+    if star_band is not None and star_gen is not None:
+        handles.append(Line2D([], [], marker="*", markerfacecolor=star_color, markeredgecolor="black",
+                              linestyle="none", markersize=12, label="seeding clone"))
+    if handles:
+        axes[0].legend(handles=handles, fontsize=7, loc="upper left")
     return axes
 
 
 def plot_grid_compartments(cell_data, primary_grid_size, met_grid_size, traces, genotypes_parents,
                            color=None, axes=None, figsize=(16, 7), dpi=100,
-                           labels=("primary", "metastasis"), driver_map=None, min_freq=None, **kwargs):
+                           labels=("primary", "metastasis"), driver_map=None, min_freq=None,
+                           clone_colors=None, color_legend=None, **kwargs):
     """Two spatial grids side by side — primary and metastasis — sharing ONE clone colormap, so the
     same clone is the same colour in both grids (and matches plot_muller_compartments). Splits
     cell_data by cell_compartment (0 = primary, 1 = met); the met panel uses the met-local coords and
-    met_grid_size, so the two grids are never overlaid. ``driver_map`` / ``min_freq`` colour by
-    functional clone (matching the driver-collapsed Muller) instead of by genotype."""
+    met_grid_size, so the two grids are never overlaid. ``clone_colors`` ({gid -> rgba}, e.g. stage-
+    dominant driver) overrides the palette; else ``driver_map`` / ``min_freq`` colour by functional
+    clone, else by genotype."""
     if "cell_compartment" not in cell_data:
         raise ValueError("plot_grid_compartments needs cell_compartment (grow with met_grid_size > 0)")
-    shared = (functional_clone_colors(traces, genotypes_parents, driver_map, min_freq=min_freq)
-              if (driver_map or min_freq) else cell_type_colors(traces, genotypes_parents))
+    shared = clone_colors if clone_colors is not None else (
+        functional_clone_colors(traces, genotypes_parents, driver_map, min_freq=min_freq)
+        if (driver_map or min_freq) else cell_type_colors(traces, genotypes_parents))
     comp = cell_data["cell_compartment"]["compartment"].to_numpy()
     if axes is None:
         _, axes = plt.subplots(1, 2, figsize=figsize, dpi=dpi)
@@ -641,6 +701,9 @@ def plot_grid_compartments(cell_data, primary_grid_size, met_grid_size, traces, 
         sub = {k: df[mask] for k, df in cell_data.items()}
         plot_grid(sub, gs, traces, genotypes_parents, color=color, ax=ax, type_cmap=shared, **kwargs)
         ax.set_title(f"{label} ({int(mask.sum())} cells)")
+    if color_legend:
+        axes[0].legend(handles=[mpatches.Patch(color=c, label=l) for l, c in color_legend],
+                       fontsize=7, loc="upper left")
     return axes
 
 
@@ -687,7 +750,8 @@ def plot_muller_founders(traces, genotypes_parents, founder_gids, functional_map
     return ax
 
 
-def plot_clone_grid_series(tumor, panels, driver_map=None, min_freq=None, ncols=4, figsize=None):
+def plot_clone_grid_series(tumor, panels, driver_map=None, min_freq=None, ncols=4, figsize=None,
+                           clone_colors=None, color_legend=None):
     """A SERIES of spatial grids from per-deme snapshots captured during a run, each coloured by its
     DOMINANT CLONE using the SAME clone colormap as the Muller plots — so a clone keeps one colour
     across every panel and both compartments.
@@ -695,9 +759,11 @@ def plot_clone_grid_series(tumor, panels, driver_map=None, min_freq=None, ncols=
     ``tumor.arc_snapshots`` must hold ``{label: [per-deme {gid: count}]}`` (see
     ``base_sim.grow_metastasis_tumor``). ``panels`` is a list of ``(label, compartment, title)`` with
     compartment in {"primary", "met"}. A deme is coloured by its dominant CANCER clone when any cancer
-    is present (so a minority deposit stays visible), else by its dominant resident type."""
-    cmap = (functional_clone_colors(tumor.traces, tumor.genotypes_parents, driver_map, min_freq=min_freq)
-            if (driver_map or min_freq) else cell_type_colors(tumor.traces, tumor.genotypes_parents))
+    is present (so a minority deposit stays visible), else by its dominant resident type.
+    ``clone_colors`` ({gid -> rgba}, e.g. stage-dominant driver) overrides the palette."""
+    cmap = clone_colors if clone_colors is not None else (
+        functional_clone_colors(tumor.traces, tumor.genotypes_parents, driver_map, min_freq=min_freq)
+        if (driver_map or min_freq) else cell_type_colors(tumor.traces, tumor.genotypes_parents))
     snaps = getattr(tumor, "arc_snapshots", {}) or {}
     n = len(panels)
     ncols = min(ncols, n) or 1
@@ -705,6 +771,9 @@ def plot_clone_grid_series(tumor, panels, driver_map=None, min_freq=None, ncols=
     fig, axes = plt.subplots(nrows, ncols, figsize=figsize or (3.1 * ncols, 3.7 * nrows))
     axes = np.atleast_1d(axes).ravel()
     fig.subplots_adjust(hspace=0.35)   # room for the 2-line per-panel titles
+    if color_legend:
+        fig.legend(handles=[mpatches.Patch(color=c, label=l) for l, c in color_legend],
+                   fontsize=7, loc="lower center", ncol=len(color_legend))
     for ax, (label, comp, title) in zip(axes, panels):
         deme_counts = snaps.get(label)
         if deme_counts is None:

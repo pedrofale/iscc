@@ -354,3 +354,20 @@ def test_clone_grid_series_renders(met_tumor):
     axes2 = viz.plot_clone_grid_series(met_tumor, panels[:2],
                                        driver_map=met_tumor._functional_signatures(), min_freq=0.05)
     assert len(axes2) >= 2
+
+
+def test_stage_dominant_coloring(met_tumor):
+    """The stage-dominant-driver colouring maps each cancer clone to its highest arc stage and renders
+    on the Muller + grids on one categorical palette (todo #14)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    from iscc.tumor import viz
+    colors, present = met_tumor._stage_colors()
+    # every cancer genotype gets a stage colour from the palette; normals keep their type colour
+    assert colors and set(present).issubset(set(range(len(viz.STAGE_PALETTE))))
+    assert all(tuple(c) in {tuple(p) for p in viz.STAGE_PALETTE} or g in normal_names
+               for g, c in colors.items())
+    axes = met_tumor.plot_muller_compartments(by_stage=True, min_freq=0.05)
+    assert len(axes) == 2
+    met_tumor.make_cell_data()
+    assert len(met_tumor.plot_grid_compartments(by_stage=True)) == 2

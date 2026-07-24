@@ -1541,6 +1541,37 @@ class GenotypeTumor:
             out[str(gid)] = tuple(int(i) for i in func_idx[vafs[func_idx] > 0])
         return out
 
+    def _stage_colors(self):
+        """{gid -> rgba} colouring each CANCER genotype by its STAGE-DOMINANT driver — the highest arc
+        stage it has activated (from its heritable traits): 1 proliferation (division rate raised by an
+        onc/TSG mutation), 2 invasion (breach or stromal_survival), 3 met survival, 4 chemo resistance;
+        0 = no driver. Normal cells keep their type colours. This is the todo #14 categorical view: a
+        few colours tracking the selection cascade instead of a per-clone functional rainbow.
+
+        Returns the map plus the sorted set of stages actually present, for the legend."""
+        from .. import viz
+        from ...constants import normal_cmap_rgba
+        out, present = {}, set()
+        for gid, rep in self.genotypes.items():
+            if getattr(rep, "type", None) != "cancer":
+                out[str(gid)] = normal_cmap_rgba.get(rep.type, (0.8, 0.8, 0.8, 1.0))
+                continue
+            ep = rep.evolutionary_parameters
+            base_div = getattr(rep, "baseline_rates", {}).get("division_rate", ep["division_rate"])
+            if ep.get("treatment_resistance", 0) > 0:
+                s = 4
+            elif ep.get("met_survival", 0) > 0:
+                s = 3
+            elif ep.get("breach", 0) > 0 or ep.get("stromal_survival", 0) > 0:
+                s = 2
+            elif ep["division_rate"] > base_div + 1e-9:
+                s = 1
+            else:
+                s = 0
+            out[str(gid)] = viz.STAGE_PALETTE[s]
+            present.add(s)
+        return out, sorted(present)
+
     def plot_grid(self, color=None, ax=None, **kwargs):
         from .. import viz
         if self.cell_data is None or self.cell_data["cell_type"].shape[0] != self.get_tumor_size():
@@ -1553,26 +1584,36 @@ class GenotypeTumor:
         return viz.plot_grid(self.cell_data, self.grid_size, self.traces,
                              self.genotypes_parents, color=color, ax=ax, **kwargs)
 
-    def plot_grid_compartments(self, color=None, axes=None, by_drivers=False, **kwargs):
+    def plot_grid_compartments(self, color=None, axes=None, by_drivers=False, by_stage=False, **kwargs):
         """Two spatial grids (primary + met) side by side, shared clone colormap (R9). ``by_drivers``
-        colours by functional clone (matching the driver-collapsed 2-band Muller); pass ``min_freq`` to
-        also merge below-threshold clones."""
+        colours by functional clone (matching the driver-collapsed 2-band Muller); ``by_stage`` colours
+        by the stage-dominant driver (todo #14); pass ``min_freq`` to also merge below-threshold clones."""
         from .. import viz
         if self.cell_data is None or self.cell_data["cell_type"].shape[0] != self.get_tumor_size():
             self.make_cell_data()
+        if by_stage:
+            colors, present = self._stage_colors()
+            kwargs.setdefault("clone_colors", colors)
+            kwargs.setdefault("color_legend", viz.stage_legend(present))
         driver_map = self._functional_signatures() if by_drivers else None
         return viz.plot_grid_compartments(self.cell_data, self.grid_size, self.met_grid_size,
                                           self.traces, self.genotypes_parents, color=color,
                                           axes=axes, driver_map=driver_map, **kwargs)
 
-    def plot_muller_compartments(self, axes=None, by_drivers=False, star_seeder=True, **kwargs):
+    def plot_muller_compartments(self, axes=None, by_drivers=False, by_stage=False, star_seeder=True,
+                                 **kwargs):
         """Two-band Muller (primary over met) sharing one colormap with the grids (R9). ``by_drivers``
         collapses genotypes to FUNCTIONAL clones and ``min_freq`` (a fraction) merges below-threshold
         clones, so selective sweeps (DCIS→IDC breach, the met founder, post-chemo resistant escape) show
-        as bands instead of a passenger rainbow. ``star_seeder`` stars the first met-seeding clone's band
-        in BOTH panels at the seeding moment (so a minor founder is findable)."""
+        as bands instead of a passenger rainbow. ``by_stage`` instead colours by the STAGE-DOMINANT
+        driver (todo #14). ``star_seeder`` stars the first met-seeding clone's band in BOTH panels at the
+        seeding moment (so a minor founder is findable)."""
         from .. import viz
         driver_map = self._functional_signatures() if by_drivers else None
+        if by_stage:
+            colors, present = self._stage_colors()
+            kwargs.setdefault("clone_colors", colors)
+            kwargs.setdefault("color_legend", viz.stage_legend(present))
         if star_seeder and "star_genotype" not in kwargs:
             seeders = [e for e in self.events if e.get("event") == "seeding"]
             if seeders:
