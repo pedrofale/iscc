@@ -1,10 +1,15 @@
 # Installation
 
 ```bash
-pip install iscc          # or: poetry install
+pip install insilico-cancer-center
 ```
 
-`iscc` requires **Python 3.10–3.13**.
+The distribution is published on PyPI as **`insilico-cancer-center`**; in Python you still
+`import iscc`, and the command-line tools are unchanged (`isccsim`, `isccsample`, …). Requires
+**Python 3.10–3.12**.
+
+Graph drawing uses `pygraphviz`, which needs the system **Graphviz** library installed first
+(e.g. `brew install graphviz`, `apt-get install graphviz graphviz-dev`, or `conda install -c conda-forge graphviz`).
 
 ## From source
 
@@ -16,7 +21,7 @@ poetry install
 
 ## Command-line tools
 
-Installing `iscc` provides the pipeline entry points:
+Installing the package provides the pipeline entry points:
 
 | Tool | Stage |
 |---|---|

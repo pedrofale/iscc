@@ -7,11 +7,9 @@ repo_name: pedrofale/iscc
 edit_uri: edit/dev/docs/
 docs_dir: docs
 
-# Not published yet (kept in docs/ to finish privately): the Tutorials pages,
-# and Installation (until the package is on PyPI).
+# Not published yet (kept in docs/ to finish privately): the Tutorials pages.
 exclude_docs: |
   tutorials/
-  installation.md
 
 theme:
   name: material
@@ -66,9 +64,9 @@ plugins:
       include_source: true
       execute: false
 
-# Guide and Tutorials are intentionally NOT published yet — their pages stay in docs/
-# (excluded from the build via `exclude_docs` above) so they can be finished privately,
-# then re-added to the nav (and un-excluded) when they're ready to go public.
+# Tutorials are intentionally NOT published yet — their pages stay in docs/ (excluded from the
+# build via `exclude_docs` above) so they can be finished privately, then re-added when ready.
 nav:
   - Home: index.md
   - Overview: overview.md
+  - Installation: installation.md
