@@ -7,6 +7,27 @@
   image + the top menu. The rest of the docs use the default Material layout.
 -->
 
+{% block extrahead %}
+  {{ super() }}
+  <style>
+    /* Home splash ONLY (this <style> ships only on the page rendered from home.html):
+       a transparent header + tab bar over a dark, full-bleed hero. Content pages keep
+       the solid (black) header. */
+    .md-header,
+    .md-tabs {
+      background-color: transparent !important;
+      box-shadow: none !important;
+    }
+    body,
+    .md-container,
+    .md-main {
+      background-color: #0d1117;
+    }
+    .mdx-hero__title { color: #f0f6fc; }
+    .mdx-hero__tagline { color: #9aa4b2; }
+  </style>
+{% endblock %}
+
 {% block tabs %}
   {{ super() }}
   <section class="mdx-hero">
