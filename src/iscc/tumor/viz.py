@@ -256,7 +256,7 @@ def cell_type_colors(traces, genotypes_parents, colormap="gnuplot"):
 
 
 def _expanded_cell_grid(cell_data, grid_size, traces, genotypes_parents, section_frac, seed,
-                        cancer_color, type_cmap=None):
+                        cancer_color, type_cmap=None, empty_color=None):
     """Cell-resolution image of the grid: each deme becomes an ``s×s`` block of its INDIVIDUAL cells.
 
     Normal cells take their type colour; cancer cells take ``cancer_color`` (a single colour — the
@@ -269,7 +269,9 @@ def _expanded_cell_grid(cell_data, grid_size, traces, genotypes_parents, section
     section_thickness / column_depth) is the fraction of each deme's cells sampled UNIFORMLY at random
     into the section (1.0 = the whole column). Cells are scattered within the deme's block — the count
     engine tracks per-deme COUNTS, not sub-deme positions, so the intra-deme layout is cosmetic while
-    the composition (and the sampled section depth) is exact. Returns ``(rgb, s, type_cmap)``.
+    the composition (and the sampled section depth) is exact. ``empty_color`` recolours the empty
+    background (empty demes + unfilled positions); ``None`` keeps the historical white. Returns
+    ``(rgb, s, type_cmap)``.
     """
     from collections import defaultdict
     rng = np.random.default_rng(seed)
@@ -295,13 +297,14 @@ def _expanded_cell_grid(cell_data, grid_size, traces, genotypes_parents, section
         col = type_cmap.get(g)
         return fallback if col is None else np.asarray(col)[:3]
 
-    img = np.ones((grid_size * s, grid_size * s, 3))
+    bg = None if empty_color is None else np.asarray(matplotlib.colors.to_rgb(empty_color))
+    img = np.ones((grid_size * s, grid_size * s, 3)) if bg is None else np.tile(bg, (grid_size * s, grid_size * s, 1))
     for d, cells in deme_cells.items():
         n_sec = min(s * s, int(round(section_frac * len(cells))))
         sample = ([cells[i] for i in rng.choice(len(cells), size=n_sec, replace=False)]
                   if cells and n_sec else [])
         r, c = deme_rc[d]
-        block = np.ones((s * s, 3))
+        block = np.ones((s * s, 3)) if bg is None else np.tile(bg, (s * s, 1))
         if sample:
             for p, g in zip(rng.choice(s * s, size=len(sample), replace=False), sample):
                 block[p] = cell_col(g)
@@ -311,7 +314,7 @@ def _expanded_cell_grid(cell_data, grid_size, traces, genotypes_parents, section
 
 def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap="viridis",
               ax=None, figsize=(10, 10), dpi=100, expand_demes=False, section_frac=1.0, expand_seed=0,
-              cancer_color="#d62728", type_cmap=None):
+              cancer_color="#d62728", type_cmap=None, empty_color=None):
     if color is None:
         color = ["cell_type"]
     if ax is None:
@@ -324,7 +327,8 @@ def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap=
             # cell-resolution (deme-expanded) view — each deme is a block of its individual cells,
             # section-sampled to `section_frac` of the deme's depth. See _expanded_cell_grid.
             img, s, type_cmap = _expanded_cell_grid(cell_data, grid_size, traces, genotypes_parents,
-                                                    section_frac, expand_seed, cancer_color, type_cmap)
+                                                    section_frac, expand_seed, cancer_color, type_cmap,
+                                                    empty_color=empty_color)
             ax.imshow(img, interpolation="nearest")
             present = set(cell_data["cell_type"]["cell_id"].values)
             legend_patches = [mpatches.Patch(color=type_cmap[n], label=n)

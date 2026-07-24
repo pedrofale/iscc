@@ -508,6 +508,15 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   (3) `gene_programs` NMF on **log1p(CPM)** (0.38→0.45). Also added `base_sim.expanded_tissue_rgb` — a
   fast, pymuller-free cell-resolution grid (the `plot_grid(expand_demes)` per-clone Muller colormap is
   O(#genotypes) and hangs at ~10^4 genotypes).
+- **DONE (2026-07-24) — docs landing-page growth ANIMATION** (`handoffs/landing_animation.md`).
+  `notebooks/landing_animation.py` renders the full metastatic arc (DCIS → breach → stromal → seeding →
+  resection → chemo → resistant relapse) as the docs Home hero: two CELL-RESOLUTION deme-grids (primary +
+  met) over a full-width 2-band Muller, ALL on one shared clone colormap keyed by the stage-dominant
+  selective trait (blue proliferation / orange duct-escape / green stromal / purple met / red chemo
+  resistance). All four sweeps read spatially + as Muller bands, events annotated. Output
+  `docs/assets/landing_hero.gif` (~1.25 MB, 38 frames, ~9 s); hero `<img>` in `overrides/home.html`
+  repointed off the placeholder. `viz.plot_grid`/`_expanded_cell_grid` gained a back-compatible
+  `empty_color` (dark hero background); the clone-colour expand path (`cancer_color=None`) was already wired.
 
 ## Paper 2 — the experimental-design RECOMMENDER (separate paper)
 - **LATER** — full scoping in `DESIGN_recommender.md`. Two modes (generative + recommender); fit

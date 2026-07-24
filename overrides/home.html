@@ -23,8 +23,6 @@
     .md-main {
       background-color: #0d1117;
     }
-    .mdx-hero__title { color: #f0f6fc; }
-    .mdx-hero__tagline { color: #9aa4b2; }
   </style>
 {% endblock %}
 
@@ -32,15 +30,10 @@
   {{ super() }}
   <section class="mdx-hero">
     <div class="mdx-hero__inner">
-      <h1 class="mdx-hero__title">in silico cancer center</h1>
-      <p class="mdx-hero__tagline">
-        An internally-consistent, multi-modal tumor-evolution data simulator — one tumor,
-        every modality, all sharing the same ground truth.
-      </p>
       <img
         class="mdx-hero__image"
-        src="{{ 'assets/landing_hero_placeholder.png' | url }}"
-        alt="A primary tumor seeds a clonally-linked metastasis; both deme-grids grow alongside their Muller plot."
+        src="{{ 'assets/landing_hero.gif' | url }}"
+        alt="A primary tumor grows through its ducts, breaches into the stroma and seeds a clonally-linked metastasis; after resection and chemotherapy a resistant subclone relapses the deposit. Two cell-resolution deme-grids grow above a 2-band Muller on one shared clone colormap."
       />
     </div>
   </section>
