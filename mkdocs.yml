@@ -16,6 +16,7 @@ exclude_docs: |
 theme:
   name: material
   custom_dir: overrides
+  favicon: assets/favicon.svg
   icon:
     repo: fontawesome/brands/github
   palette:
