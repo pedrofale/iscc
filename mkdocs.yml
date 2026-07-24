@@ -7,11 +7,13 @@ repo_name: pedrofale/iscc
 edit_uri: edit/dev/docs/
 docs_dir: docs
 
-# Not published yet (kept in docs/ to finish privately): the Guide + Tutorials pages.
+# Not published yet (kept in docs/ to finish privately): the Guide + Tutorials pages,
+# and Installation (until the package is on PyPI).
 exclude_docs: |
   parameters.md
   schema.md
   tutorials/
+  installation.md
 
 theme:
   name: material
@@ -72,4 +74,3 @@ plugins:
 nav:
   - Home: index.md
   - Overview: overview.md
-  - Installation: installation.md

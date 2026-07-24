@@ -5,8 +5,6 @@ selection-driven, spatially-structured tumor, optionally treats it, samples it (
 dissociation), and generates single-cell and bulk **DNA / RNA / spatial** data — down to sequencing
 reads — all sharing the *same* ground truth.
 
-It is the rename and expansion of the earlier `tumorevo` package.
-
 ## Why iscc
 
 - **One consistent tumor, every modality.** DNA, RNA, and spatial data are emitted from the *same*
