@@ -9,6 +9,7 @@ docs_dir: docs
 
 theme:
   name: material
+  custom_dir: overrides
   icon:
     repo: fontawesome/brands/github
   palette:
@@ -27,12 +28,16 @@ theme:
         icon: material/weather-sunny
         name: Switch to light mode
   features:
+    - navigation.tabs
     - navigation.tracking
     - navigation.sections
     - navigation.top
     - toc.follow
     - search.suggest
     - content.code.copy
+
+extra_css:
+  - stylesheets/extra.css
 
 markdown_extensions:
   - admonition
@@ -53,6 +58,7 @@ plugins:
 
 nav:
   - Home: index.md
+  - Overview: overview.md
   - Installation: installation.md
   - Guide:
       - Parameters & defaults: parameters.md

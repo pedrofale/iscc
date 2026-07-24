@@ -1,0 +1,28 @@
+{% extends "main.html" %}
+
+<!--
+  Splash landing page for iscc (used only by docs/index.md via `template: home.html`).
+  Injects a full-width hero into the `tabs` block (which renders right under the top
+  navigation bar) and blanks the normal article `content`, so Home is just the hero
+  image + the top menu. The rest of the docs use the default Material layout.
+-->
+
+{% block tabs %}
+  {{ super() }}
+  <section class="mdx-hero">
+    <div class="mdx-hero__inner">
+      <h1 class="mdx-hero__title">in silico cancer center</h1>
+      <p class="mdx-hero__tagline">
+        An internally-consistent, multi-modal tumor-evolution data simulator — one tumor,
+        every modality, all sharing the same ground truth.
+      </p>
+      <img
+        class="mdx-hero__image"
+        src="{{ 'assets/landing_hero_placeholder.png' | url }}"
+        alt="A primary tumor seeds a clonally-linked metastasis; both deme-grids grow alongside their Muller plot."
+      />
+    </div>
+  </section>
+{% endblock %}
+
+{% block content %}{% endblock %}
