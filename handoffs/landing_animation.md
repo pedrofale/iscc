@@ -35,7 +35,20 @@ panels growing together over the tumour's life:
      inherits its primary clone's colour). It appears only after the seeding event, then grows.
   3. MULLER — the clonal dynamics revealed progressively up to the current time (a growing Muller, or the full
      2-band primary-over-metastasis Muller with a moving time cursor). Same clone colours as the grids.
-Optionally annotate the key events over time (seeding -> resection -> chemo -> relapse), as metastasis_demo.py does.
+
+THE STORY THE ANIMATION MUST TELL (non-negotiable — this IS the deliverable, not decoration). The four
+selection episodes of the metastatic arc must each be clearly legible, both as spatial progression in the grids
+AND as selective sweeps in the Muller:
+  1. ESCAPE THE DUCT — a `breach` subclone sweeps and cancer crosses the epithelial wall out of the gland lumen
+     into the stroma (the DCIS -> IDC transition).
+  2. SURVIVE THE STROMA — a `stromal_survival` subclone sweeps as cancer traverses the hostile stroma.
+  3. ESTABLISH IN THE METASTASIS — a `met_survival` (prop_met_survival) subclone seeds the second grid and grows
+     the metastatic deposit.
+  4. ESCAPE CHEMO — after the primary is resected and systemic chemo regresses the met, a treatment-resistant /
+     persister subclone survives and the met relapses.
+Annotate all four events on the timeline (seeding, resection, chemo start/end), as metastasis_demo.py does. If
+any of the four is not visibly readable in the finished animation, it has failed its purpose — tune the config
+(selection strengths, event timing, size, grow duration) until all four read.
 
 API (all in metastasis_demo.py + src/iscc/tumor/viz.py — reuse, don't reinvent)
 - Grow with the demo's config: GenotypeTumor(spatial_params=SPATIAL, ...) where SPATIAL carries BOTH the ductal
@@ -62,8 +75,15 @@ Grow the arc in small steps; at each step render one combined figure (the 3 pane
 colormap) and capture it as a frame. Concretely: build the config -> loop { t.grow(n_steps=1 or 2); t.make_cell_data();
 render primary grid + met grid + Muller-so-far into a 16:5-ish figure; append the frame }. Cover the arc through
 seeding, growth, resection, chemo, relapse (as in the demo). Hold a few frames on the final state so the loop reads.
-Keep the tumour SMALL enough to render many frames fast (the demo uses grid_size=26, met_grid_size=12 — good for a
-web hero; do NOT scale to 10k-cell notebook sizes here, this is a visual, not a benchmark).
+
+SIZE FOR THE STORY, NOT FOR SPEED. The tumour must be large enough and run long enough that all FOUR selective
+sweeps above are clearly legible — that is the whole point (showing iscc's power and a plausible metastatic-
+evolution story). Start from metastasis_demo.py's config and SCALE UP (grid_size / met_grid_size, K, grow
+duration, and the selection strengths that make each sweep visible) as needed until the four sweeps read; do NOT
+shrink the biology to save render time. Manage the WEB asset's weight instead through frame count, fps,
+resolution, and encoding (see OUTPUT below) — it is a one-off OFFLINE render, not interactive, so a larger tumour
+over more frames is fine. If render time becomes painful, coarsen the frame cadence (grow more steps per frame),
+not the tumour.
 
 OUTPUT FORMAT (decide, then wire it in)
 Two good options — pick one and update overrides/home.html accordingly:
@@ -87,8 +107,10 @@ config + the compartment viz); the animation asset(s) under docs/assets/; the ov
 at it; a one-line note in BACKLOG.md. Full suite green; commit on `dev`.
 
 HONEST NOTES: the shared clone colormap across primary grid + met grid + Muller is the single most important thing
-— if a clone is a different colour in different panels the scene is misleading. Keep the tumour small (web hero,
-fast render). If a seamless loop is hard, hold on the final frame instead. Keep the asset self-contained under
+— if a clone is a different colour in different panels the scene is misleading. Size the tumour for the STORY: all
+four selective sweeps (duct escape, stromal survival, met establishment, chemo escape) must be legible — that,
+not a small file, is the deliverable; manage web weight via encoding / frames / resolution instead. If a seamless
+loop is hard, hold on the final frame instead. Keep the asset self-contained under
 docs/assets/ (no external URLs — the site is offline-buildable). Report the real file size; if a GIF blows past a
 few MB, switch to option B rather than shipping a huge GIF.
 ```
