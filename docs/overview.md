@@ -39,19 +39,25 @@ tumor after growth and tells you which knob to turn.
 
 The animation on the home page is one simulated tumor carried through the whole clinical arc — a
 primary ductal lesion fills the ducts (DCIS), a subclone breaches into the stroma (IDC), it seeds a
-metastasis, and a resistant clone relapses after chemotherapy. From a clone of the repository:
+metastasis, and a resistant clone relapses after chemotherapy. It is reproducible from the ordinary
+iscc CLI — a committed config plus the two standard commands:
 
 ```bash
-# minimal hero variant -> docs/assets/landing_hero.gif
-python notebooks/landing_animation.py --splash
+# 1. run the whole clinical arc (grow -> resect the primary -> chemo -> relapse) and write the
+#    compartment trajectory the renderer consumes
+isccsim --sim-config configs/landing.yaml -o out
 
-# fully-labelled version (legend + axes) -> notebooks/example_out/
-python notebooks/landing_animation.py
+# 2a. minimal hero variant -> docs/assets/landing_hero.gif
+isccgif out --compartment --splash -o docs/assets/landing_hero.gif
+
+# 2b. fully-labelled version (clone legend + axes + per-phase caption)
+isccgif out --compartment -o landing_full.gif
 ```
 
-The exact parameters (genome, selection, ductal-field and treatment settings) are at the top of
-`notebooks/landing_animation.py`. Clones are coloured by their **dominant selective trait** — the same
-colour in the grids and the Muller plots:
+`configs/landing.yaml` holds the exact parameters (genome, selection, ductal-field, metastasis and
+treatment settings) and the timed treatment `schedule:` (the multi-phase arc, including the surgical
+resection). Clones are coloured by their **dominant selective trait** — the same colour in the grids
+and the Muller plots:
 
 | Colour | Trait |
 |---|---|

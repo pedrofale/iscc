@@ -10,12 +10,14 @@ Inspired by Noble et al, 2019; selection follows a CINner-style copy-number mode
 from .models.glandular import GlandularTumor
 from .models.mixed import MixedTumor
 from .models.count import GenotypeTumor
+from . import arc as arc_mod
 from ..treatment.chemotherapy import Chemotherapy
 from ..treatment.targeted import TargetedTherapy
 from ..treatment.immunotherapy import Immunotherapy
 
 import click
 import logging
+import os
 import yaml
 
 # Map the `mode` field in the sim-config to a tumor model.
@@ -98,24 +100,48 @@ def main(sim_config, steps, random_seed, batch_size, treatment_kind, adaptive,
             "The 'mixed' (non-spatial) model is not yet implemented; use 'genotype' or 'glandular'."
         )
 
-    logging.info("Building %s tumor from %s", mode, sim_config)
-    tumor = TUMOR_MODELS[mode](config=sim_config, seed=random_seed)
+    # A config-driven timed treatment SCHEDULE (metastasis module, R9): a multi-phase clinical arc
+    # (grow -> surgery/resection -> chemotherapy -> relapse) that also captures a compartment
+    # trajectory for `isccgif --compartment`. When present it REPLACES the single-`--treatment` grow
+    # (which stays the default, unchanged, when there is no schedule). Only the genotype (count) engine
+    # drives the metastasis compartments.
+    schedule = config.get("schedule")
+    if schedule is not None:
+        if mode != "genotype":
+            raise click.ClickException(
+                "A `schedule:` block (the metastasis clinical arc) requires mode: genotype.")
+        arc_seed = int(schedule.get("seed", random_seed))
+        logging.info("Building %s tumor from %s (arc seed=%d)", mode, sim_config, arc_seed)
+        tumor = TUMOR_MODELS[mode](config=sim_config, seed=arc_seed)
 
-    treatment = build_treatment(treatment_kind, tumor, adaptive, treatment_start,
-                                treatment_duration, max_tumor_size)
-    if treatment is not None:
-        logging.info("Applying %s therapy (adaptive=%s, start=%d)",
-                     treatment_kind, adaptive, treatment_start)
+        logging.info("Running clinical-arc schedule (%d phases)", len(schedule.get("phases", [])))
+        frames, marks, arc_seed, min_freq = arc_mod.execute_schedule(tumor, schedule)
+        trajectory = arc_mod.build_trajectory(tumor, frames, marks, min_freq)
+        traj_path = arc_mod.write_trajectory(output_path, trajectory)
 
-    logging.info("Growing for %d steps (seed=%d)", steps, random_seed)
-    tumor.grow(n_steps=steps, seed=random_seed, batch_size=batch_size, treatment=treatment)
+        tumor.write(output_path)
+        logging.info("Saved tumor (size=%d) + trajectory to %s", tumor.get_tumor_size(), output_path)
+        print(f"Simulation ({mode}) finished: {tumor.get_tumor_size()} cells -> {output_path} "
+              f"[schedule: {len(frames)} frames, {len(marks)} events -> {os.path.basename(traj_path)}]")
+    else:
+        logging.info("Building %s tumor from %s", mode, sim_config)
+        tumor = TUMOR_MODELS[mode](config=sim_config, seed=random_seed)
 
-    tumor.write(output_path)
-    logging.info("Saved tumor (size=%d) to %s", tumor.get_tumor_size(), output_path)
-    msg = f"Simulation ({mode}) finished: {tumor.get_tumor_size()} cells -> {output_path}"
-    if treatment is not None:
-        msg += f" [treatment: {treatment_kind}]"
-    print(msg)
+        treatment = build_treatment(treatment_kind, tumor, adaptive, treatment_start,
+                                    treatment_duration, max_tumor_size)
+        if treatment is not None:
+            logging.info("Applying %s therapy (adaptive=%s, start=%d)",
+                         treatment_kind, adaptive, treatment_start)
+
+        logging.info("Growing for %d steps (seed=%d)", steps, random_seed)
+        tumor.grow(n_steps=steps, seed=random_seed, batch_size=batch_size, treatment=treatment)
+
+        tumor.write(output_path)
+        logging.info("Saved tumor (size=%d) to %s", tumor.get_tumor_size(), output_path)
+        msg = f"Simulation ({mode}) finished: {tumor.get_tumor_size()} cells -> {output_path}"
+        if treatment is not None:
+            msg += f" [treatment: {treatment_kind}]"
+        print(msg)
 
     # Operating-envelope QC: warn (opt-out) if the run produced a degenerate tumor, or surface a
     # size advisory (e.g. "grow to a realistic size"). Read-only — it never touches the simulation
