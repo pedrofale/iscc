@@ -43,18 +43,27 @@ GENOME = {"n_segments": 12, "segment_size": 50}
 # breach is rarer + the epithelial barrier is HIGH, so the ducts pack full (DCIS) for a good stretch
 # before a breach subclone escapes into the stroma (IDC); met seeding is delayed (met_seed_kappa) so it
 # follows stromal invasion. On-screen order: ducts fill -> breach -> stroma -> met seeding -> chemo -> relapse.
+# treatment_resistance is made RARE (one site, prop 0.001) and STRONG (effects 2.8 -> resistant
+# treatment_resistance ~0.64) so that at chemo time only a SMALL subclone of the metastasis is resistant.
+# Strong chemo (see grow_arc) then kills the sensitive bulk -> the met visibly regresses to that one
+# resistant subclone, which relapses after chemo as essentially one clone (one colour, red).
 SELECTION = {"prop_driver": 0.04, "prop_dispersal": 0.0, "prop_immune_resistance": 0.02,
-             "prop_treatment_resistance": 0.03, "prop_breach": 0.012, "prop_stromal_survival": 0.03,
+             "prop_treatment_resistance": 0.001, "prop_breach": 0.012, "prop_stromal_survival": 0.03,
              "prop_met_survival": 0.05, "breach_effects": 2.2, "stromal_survival_effects": 2.2,
-             "met_survival_effects": 2.5}
+             "met_survival_effects": 2.5, "treatment_resistant_effects": 2.8}
 CANCER = {"division_rate": 0.7, "death_rate": 0.05, "max_birth_rate": 0.95, "mutation_rate": 0.6,
           "dispersal_rate": 0.35, "cnv_prob": 0.15, "wgd_rate": 0.05}
 DEME = {"carrying_capacity": 20, "initial_cancer_cells": 8, "resident_pressure_ref": 0.2}
+# met_grid_size == grid_size and K_met == K_duct so the two grids have IDENTICAL cell granularity: same
+# number of demes AND the same per-deme carrying capacity -> the same expanded block size, so neither
+# grid looks coarser/finer than the other. (A met is still a smaller deposit; only the resolution matches.)
 SPATIAL = {"grid_size": 26, "structure_radius": 3, "n_glands": 4, "gland_radius": 3, "min_gland_sep": 8,
            "K_duct": 40, "K_stroma": 26, "stroma_fill_frac": 0.3, "cross_gland_kappa": 0.06,
            "epithelial_barrier": 6.0, "stromal_hazard": 0.7,
-           "met_grid_size": 12, "K_met": 18, "host_fill_frac": 0.35,
+           "met_grid_size": 26, "K_met": 40, "host_fill_frac": 0.35,
            "met_seed_kappa": 0.02, "met_hazard": 0.45, "met_transit_floor": 0.02}
+
+MIN_FREQ = 0.05   # clone size-merge threshold — MUST match between story_colors() and the Muller draw
 
 # ---- dark hero aesthetic -----------------------------------------------------------------------
 BG, PANEL, INK, SUBINK, GRID_LINE = "#0d1117", "#161b22", "#e6edf3", "#9aa4b2", "#30363d"
@@ -105,13 +114,33 @@ def stage_of(rep, B=0.70, S=0.80, M=0.92, R=0.55):
 
 
 def story_colors(t):
-    """{gid -> rgba} colouring every cancer clone by its stage-dominant sweep and every normal by its
-    (muted) type — ONE map, so a clone is the same colour in every panel."""
+    """{gid -> rgba}: ONE shared clone colormap for the grids AND the Mullers.
+
+    The bug this fixes: the cell-grids used to colour each cancer cell by its OWN genotype's stage,
+    while the Muller colours a band by the stage of its FUNCTIONAL-CLONE founder — two different
+    groupings, so the same cell got different colours in the grid and the Muller. Here every cancer
+    genotype is instead routed through the SAME display basis the Muller draws on (functional clone via
+    ``driver_map``, size-merged at ``MIN_FREQ``) and takes ITS BAND's colour. A band's colour is the
+    stage-dominant sweep of the band's founder — exactly what the Muller keys on — so a clone is
+    literally the same colour in the primary grid, the met grid, and both Muller bands. Normals keep
+    their muted type colour."""
+    by_str = {str(gid): rep for gid, rep in t.genotypes.items()}
+    driver_map = t._functional_signatures()
+    _, _, gmap, basis_cols = viz._display_basis(t.traces, t.genotypes_parents,
+                                                driver_map=driver_map, min_freq=MIN_FREQ)
+    # each display band -> the stage colour of its founder genotype (what the Muller already keys on)
+    band_col = {}
+    for b in basis_cols:
+        st = stage_of(by_str.get(str(b)))
+        band_col[str(b)] = STAGE_COL["none" if st is None else st]
     out = {}
-    for gid, rep in t.genotypes.items():
+    for sgid, rep in by_str.items():
+        if getattr(rep, "type", None) != "cancer":
+            out[sgid] = NORMAL_MUTED.get(getattr(rep, "type", None), (0.7, 0.7, 0.7, 1.0))
+            continue
+        b = str(gmap.get(sgid, sgid))                       # this genotype's display band
         st = stage_of(rep)
-        out[str(gid)] = NORMAL_MUTED.get(getattr(rep, "type", None), (0.7, 0.7, 0.7, 1.0)) \
-            if st is None else STAGE_COL[st]
+        out[sgid] = band_col.get(b, STAGE_COL["none" if st is None else st])
     for n in normal_names:
         out[n] = NORMAL_MUTED[n]
     return out
@@ -127,8 +156,17 @@ def compartment_cancer(t):
 def grow_arc():
     """Grow the whole arc, capturing a (demes, genotype_counts, trace_len, phase) frame at each step,
     plus the clinical-event snapshot indices."""
-    t = GenotypeTumor(seed=3, genome_params=GENOME, selection_params=SELECTION, cancer_cell_params=CANCER,
-                      deme_params=DEME, spatial_params=SPATIAL, update_mode="tau", tau=1.0)
+    # tau=0.5 (half a generation per captured frame) -> ~2x the frames of tau=1.0, so the growth reads
+    # as a smooth sweep instead of discrete jumps. Treatment windows are in STEP units, so the fixed
+    # phases below scale their step counts (and the chemo duration) by 1/tau to keep the clinical arc's
+    # real-time length: #steps * tau stays constant vs the tau=1.0 tuning.
+    TAU = 0.5
+    # seed=2 is the reproducible draw where treatment resistance stays a SMALL late subclone of the met
+    # (~10% at chemo time) rather than sweeping early, so strong chemo can visibly wipe the sensitive bulk
+    # and leave that one resistant clone to relapse (see grow_arc header / SELECTION).
+    SEED = 2
+    t = GenotypeTumor(seed=SEED, genome_params=GENOME, selection_params=SELECTION, cancer_cell_params=CANCER,
+                      deme_params=DEME, spatial_params=SPATIAL, update_mode="tau", tau=TAU)
     frames = []
 
     def capture(phase):
@@ -140,26 +178,31 @@ def grow_arc():
         p, m = compartment_cancer(t)
         if m >= 260 or p + m >= 5600:
             break
-        t.grow(n_steps=1, seed=3)               # fine cadence -> a smooth DCIS -> IDC -> seeding arc
+        t.grow(n_steps=1, seed=SEED)            # fine cadence -> a smooth DCIS -> IDC -> seeding arc
         if seeding_snap is None and compartment_cancer(t)[1] > 0:
             seeding_snap = len(t.traces)
         capture("growth" if seeding_snap is None else "metastatic seeding")
 
     resect_snap = len(t.traces)
-    t.grow(n_steps=1, seed=3, treatment=Surgery(start=t.step, site="primary"))
+    t.grow(n_steps=1, seed=SEED, treatment=Surgery(start=t.step, site="primary"))
     capture("resection")
-    t.grow(n_steps=1, seed=3)
-    capture("resection")
+    for _ in range(3):                          # settle after resection (2 -> 4 frames at TAU=0.5)
+        t.grow(n_steps=1, seed=SEED)
+        capture("resection")
 
+    # STRONG systemic chemo over a long window: kill_rate (2.8) is well above the birth cap and
+    # effectiveness ~1, so every SENSITIVE clone regresses hard; the lone resistant subclone
+    # (treatment_resistance ~0.64) is only partly hit, dips, then rebounds once chemo stops. 20 steps
+    # (vs 12) give the regression room to read on-screen as a dramatic shrink-to-one-clone.
     chemo_snap = len(t.traces)
-    chemo = Chemotherapy(start=t.step, duration=6, kill_rate=1.4, effectiveness=0.95,
+    chemo = Chemotherapy(start=t.step, duration=20, kill_rate=2.8, effectiveness=0.98,
                          toxicity=0.12, sites="both")
-    for _ in range(6):
-        t.grow(n_steps=1, seed=3, treatment=chemo)
+    for _ in range(20):
+        t.grow(n_steps=1, seed=SEED, treatment=chemo)
         capture("chemotherapy")
     chemo_end_snap = len(t.traces)
-    for _ in range(10):
-        t.grow(n_steps=1, seed=3)
+    for _ in range(24):                         # relapse: the single resistant clone re-expands (red)
+        t.grow(n_steps=1, seed=SEED)
         capture("relapse")
 
     marks = [(seeding_snap, "seeding"), (resect_snap, "resection"),
@@ -207,7 +250,7 @@ def build_figure(t, marks, colors, splash=False):
     # rainbow so the sweeps read as bands). Founder-coloured bands -> a band's colour is its clone's.
     # splash uses the CENTERED (Noble "fish"/stream) baseline — bands grow outward from a midline.
     viz.plot_muller_compartments(t.traces, t.genotypes_parents, axes=(ax_mp, ax_mm),
-                                 driver_map=t._functional_signatures(), min_freq=0.05,
+                                 driver_map=t._functional_signatures(), min_freq=MIN_FREQ,
                                  clone_colors=colors, mark_generations=marks, star_genotype=None,
                                  centered=splash)
     xmax = len(t.traces) - 1
@@ -249,6 +292,27 @@ def draw_grid(ax, sub, gsz, colors, title):
     ax.set_facecolor(BG)
     for sp in ax.spines.values():          # no frame around the grid
         sp.set_visible(False)
+
+
+def _save_gif_pillow(gif_path, imgs, per, budget_mb=5.95, candidates=(48, 32, 24, 20)):
+    """Write ``imgs`` as an optimised GIF via Pillow with ONE global adaptive palette (see caller).
+    Tries palette sizes largest-first and keeps the largest whose file is <= ``budget_mb`` (falls back
+    to the smallest if none fit). Returns the written size in MB."""
+    from PIL import Image
+    idxs = sorted({0, len(imgs) // 3, 2 * len(imgs) // 3, len(imgs) - 1})
+    montage = np.concatenate([imgs[i] for i in idxs], axis=1)   # palette sees the whole arc + chrome
+    best = None
+    for ncol in candidates:
+        pal = Image.fromarray(montage).convert("P", palette=Image.ADAPTIVE, colors=ncol)
+        pframes = [Image.fromarray(a).quantize(palette=pal, dither=Image.Dither.NONE) for a in imgs]
+        pframes[0].save(gif_path, save_all=True, append_images=pframes[1:], duration=per, loop=0,
+                        optimize=True, disposal=2)
+        mb = os.path.getsize(gif_path) / 1e6
+        print(f"  palette={ncol}: {mb:.2f} MB")
+        best = (ncol, mb)
+        if mb <= budget_mb:
+            break
+    return best[1]
 
 
 def main(splash=False):
@@ -318,9 +382,11 @@ def main(splash=False):
         if fi % 10 == 0:
             print(f"  frame {fi+1}/{len(frames)}  ({time.time()-t0:.0f}s)")
     if splash:
-        # UNIFORM slow cadence, ~17 s loop regardless of frame count: every frame the same duration so
-        # the loop is seamless — no dwell at the DCIS start or the relapsed end.
-        per = [max(300, round(17000 / len(imgs)))] * len(imgs)
+        # UNIFORM cadence, ~17 s loop regardless of frame count: per-frame = loop / frame-count, so more
+        # frames -> shorter per-frame -> smoother playback (NOT a longer loop). Every frame the same
+        # duration so the loop is seamless — no dwell at the DCIS start or the relapsed end.
+        LOOP_MS = 17000
+        per = [max(40, round(LOOP_MS / len(imgs)))] * len(imgs)
     else:
         # general path: ~6 fps with a short hold on the first/last frames so the loop reads.
         per = [170] * len(imgs)
@@ -330,8 +396,17 @@ def main(splash=False):
     stem = "landing_hero" if splash else "landing_full"
     out_dir = ASSETS if splash else os.path.join(HERE, "example_out")
     gif_path = os.path.join(out_dir, f"{stem}.gif")
-    imageio.mimsave(gif_path, imgs, format="GIF", duration=per, loop=0)  # ~6 fps + holds
-    size_mb = os.path.getsize(gif_path) / 1e6
+    if splash:
+        # imageio's GIF writer ignores palettesize/subrectangles, so quantise with Pillow directly to
+        # keep the finer-cadence (many-frame) GIF small WITHOUT dropping frames or lowering the pixel
+        # size. ONE global adaptive palette is built from a montage of representative frames (early
+        # rainbow primary + late single-clone met + the neutral titles/labels present in every frame),
+        # so the chrome stays crisp and every arc colour is represented; dithering is OFF (it only adds
+        # incompressible noise here). Pick the LARGEST palette that stays within the size budget.
+        size_mb = _save_gif_pillow(gif_path, imgs, per, budget_mb=5.95)
+    else:
+        imageio.mimsave(gif_path, imgs, format="GIF", duration=per, loop=0)
+        size_mb = os.path.getsize(gif_path) / 1e6
     print(f"wrote {gif_path}  ({size_mb:.2f} MB, {len(imgs)} frames, ~{sum(per)/1000.0:.1f}s, "
           f"{'splash/minimal' if splash else 'full-labelled'})")
 
