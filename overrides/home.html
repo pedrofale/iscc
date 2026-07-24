@@ -23,6 +23,7 @@
     .md-main {
       background-color: #0d1117;
     }
+    .mdx-hero__title { color: #f0f6fc; }
   </style>
 {% endblock %}
 
@@ -30,6 +31,7 @@
   {{ super() }}
   <section class="mdx-hero">
     <div class="mdx-hero__inner">
+      <h1 class="mdx-hero__title">in silico cancer center</h1>
       <img
         class="mdx-hero__image"
         src="{{ 'assets/landing_hero.gif' | url }}"
