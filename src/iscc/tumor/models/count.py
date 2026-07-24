@@ -1634,6 +1634,20 @@ class GenotypeTumor:
         return viz.plot_muller_founders(self.traces, self.genotypes_parents, founders,
                                         self._functional_signatures(), ax=ax, **kwargs)
 
+    def plot_clone_tree(self, ax=None, by_stage=False, by_drivers=False, **kwargs):
+        """Ground-truth clone tree (R9, todo #14): the TRUE genotypes_parents genealogy collapsed to the
+        display clones, each node at its true mutational depth, sized by peak population and coloured by
+        ``by_stage`` (stage-dominant driver) or ``by_drivers`` (functional clone). Pass ``min_freq`` to
+        set the collapse threshold (default 0.02)."""
+        from .. import viz
+        if by_stage:
+            colors, present = self._stage_colors()
+            kwargs.setdefault("clone_colors", colors)
+            kwargs.setdefault("color_legend", viz.stage_legend(present))
+        driver_map = self._functional_signatures() if by_drivers else None
+        return viz.plot_clone_tree(self.traces, self.genotypes_parents, driver_map=driver_map,
+                                   ax=ax, **kwargs)
+
     def get_genotype_frequencies(self, normalize=True):
         gids = [g for g in self.genotypes_counts if g not in normal_names]
         counts = np.array([self.genotypes_counts[g] for g in gids], dtype=float)

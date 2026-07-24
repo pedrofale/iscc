@@ -371,3 +371,18 @@ def test_stage_dominant_coloring(met_tumor):
     assert len(axes) == 2
     met_tumor.make_cell_data()
     assert len(met_tumor.plot_grid_compartments(by_stage=True)) == 2
+
+
+def test_clone_tree_renders(met_tumor):
+    """The ground-truth clone tree renders (stage + functional colourings) and degrades on an empty
+    clone set."""
+    import matplotlib
+    matplotlib.use("Agg")
+    from iscc.tumor import viz
+    ax = met_tumor.plot_clone_tree(by_stage=True, min_freq=0.03)
+    assert ax is not None
+    ax2 = met_tumor.plot_clone_tree(by_drivers=True, min_freq=0.05)
+    assert ax2 is not None
+    # empty degrades gracefully
+    ax3 = viz.plot_clone_tree([{"genotypes_counts": {}}], {}, min_freq=0.1)
+    assert ax3 is not None

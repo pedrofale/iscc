@@ -803,3 +803,73 @@ def plot_clone_grid_series(tumor, panels, driver_map=None, min_freq=None, ncols=
     for ax in axes[n:]:
         ax.axis("off")
     return axes
+
+
+def plot_clone_tree(traces, genotypes_parents, clone_colors=None, driver_map=None, min_freq=0.02,
+                    ax=None, color_legend=None, title=None, size_scale=1.0):
+    """Ground-truth clone TREE: the true ``genotypes_parents`` genealogy collapsed to the display clones
+    (functional ``driver_map`` and/or ``min_freq`` size threshold). Each node is a clone placed at its
+    TRUE mutational depth from the founder (x), sized by its PEAK population, and coloured by
+    ``clone_colors`` (e.g. the stage-dominant driver) — so the lineage relationships are read directly
+    from the truth rather than inferred from the Muller. Elbow edges join a clone to its parent clone."""
+    from collections import defaultdict
+    basis_counts, basis_parents, _gmap, basis_cols = _display_basis(
+        traces, genotypes_parents, driver_map, min_freq)
+    present = [str(c) for c in basis_cols]
+    if ax is None:
+        _, ax = plt.subplots(figsize=(9, 4))
+    if not present:
+        ax.axis("off"); ax.text(0.5, 0.5, "no clones", ha="center", va="center", transform=ax.transAxes)
+        return ax
+    pmap = ({str(c): str(basis_parents.iloc[0][c]) for c in basis_parents.columns}
+            if basis_parents.shape[1] else {})
+    presset = set(present)
+    children, roots = defaultdict(list), []
+    for c in present:
+        p = pmap.get(c)
+        (children[p].append(c) if (p in presset and p != c) else roots.append(c))
+    # TRUE mutational depth of each clone from the founder, over the FULL genealogy
+    fp = {str(k): str(v) for k, v in dict(genotypes_parents).items()}
+
+    def true_depth(g):
+        d, cur, seen = 0, str(g), set()
+        while cur in fp and fp[cur] != cur and cur not in seen:
+            seen.add(cur); cur = fp[cur]; d += 1
+        return d
+
+    xpos = {c: true_depth(c) for c in present}
+    peak = {c: float(basis_counts[c].max()) if c in basis_counts else 0.0 for c in present}
+    pmax = max(peak.values()) or 1.0
+    ypos, leaf = {}, [0.0]
+
+    def place(node):
+        ch = sorted(children.get(node, []), key=lambda z: xpos.get(z, 0))
+        if not ch:
+            y = leaf[0]; leaf[0] += 1.0
+        else:
+            y = float(np.mean([place(c) for c in ch]))
+        ypos[node] = y
+        return y
+
+    for r in sorted(roots, key=lambda z: xpos.get(z, 0)):
+        place(r)
+    ax.figure.set_size_inches(9, max(3.0, 0.32 * max(leaf[0], 1)))
+    cc, default = (clone_colors or {}), (0.6, 0.6, 0.6, 1.0)
+    for c in present:                                   # elbow edges: parent clone -> child clone
+        p = pmap.get(c)
+        if p in presset and p in ypos:
+            ax.plot([xpos[p], xpos[p], xpos[c]], [ypos[p], ypos[c], ypos[c]], color="0.7", lw=0.8, zorder=1)
+    for c in present:
+        s = (30 + 320 * np.sqrt(peak.get(c, 0) / pmax)) * size_scale
+        ax.scatter([xpos[c]], [ypos[c]], s=s, color=cc.get(c, default), edgecolor="black",
+                   linewidth=0.5, zorder=2)
+    ax.set_yticks([]); ax.set_xlabel("mutational distance from founder")
+    ax.set_ylim(leaf[0], -1)
+    for sp in ("top", "right", "left"):
+        ax.spines[sp].set_visible(False)
+    if title:
+        ax.set_title(title)
+    if color_legend:
+        ax.legend(handles=[mpatches.Patch(color=c, label=l) for l, c in color_legend],
+                  fontsize=7, loc="lower right")
+    return ax
