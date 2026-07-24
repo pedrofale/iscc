@@ -60,6 +60,18 @@ unchanged otherwise), so a `cell_data/` directory may additionally contain:
 | `cell_exp_p.csv`, `cell_exp_m.csv` | allele-specific dosage on (`allele_specific=True`) | paternal / maternal homolog expression per gene |
 | `cell_rna_baf.csv` | allele-specific dosage on | RNA B-allele fraction per gene (allele imbalance) |
 | `cell_gland.csv` | a ductal field is seeded (`n_glands` set) | `gland_id` per cell (which gland, `-1` = stroma) |
+| `cell_compartment.csv` | a metastatic deposit is seeded (`met_grid_size > 0`) | per-cell `compartment` (0 = primary, 1 = metastasis; R9) |
+
+When a metastatic deposit is enabled (`met_grid_size > 0`, R9) the tumor directory additionally
+carries per-compartment abundance and a discrete-event log — both keyed to the **same** `parents.csv`
+genealogy, so the primary and the metastasis share one clone identity/colour (the 2-band Muller). The
+metastasis is a second deme-grid appended to the primary's lattice; `cell_compartment` disambiguates
+the two, and met cells' `cell_crd` are in the met grid's own coordinate space.
+
+| Path | Written when | Contents |
+|---|---|---|
+| `trace_counts_primary.csv`, `trace_counts_met.csv` | `met_grid_size > 0` | genotype counts per step, split by compartment |
+| `events.csv` | any discrete event occurred | seeding / resection / chemo-window annotations (`step`, `time`, `event`, …) |
 
 ## Stage 2 — `isccsample` (biopsy / dissociation)
 

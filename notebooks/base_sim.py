@@ -358,3 +358,120 @@ def thin_section(t, per_deme_cap=8, seed=0):
     keep_pos = np.sort(np.asarray(keep_pos))
     keep_ids = ids[keep_pos]
     return {k: (v.loc[keep_ids] if hasattr(v, "loc") else v) for k, v in t.cell_data.items()}
+
+
+# ==================================================================================================
+# Metastasis module (R9) — OPT-IN. The 8 DCIS->IDC science notebooks use grow_base_tumor (no met) and
+# are unchanged; grow_metastasis_tumor() adds a second (met) grid, the heritable met-establishment
+# axis, and runs the full clinical arc:  grow -> seed -> resect -> chemo -> relapse.
+# ==================================================================================================
+
+# On top of the base DCIS->IDC config: the met deposit + establishment axis, and RARE + STRONG
+# treatment resistance (one resistance mutation flips survival) so systemic chemo cleanly partitions
+# susceptible vs resistant clones instead of leaving a graded, half-resistant smear.
+MET_SELECTION = {"prop_met_survival": 0.06, "met_survival_effects": 2.5,
+                 "prop_treatment_resistance": 0.005, "treatment_resistant_effects": 4.0}
+# A LOWER mutation load for the arc (than the base >=10k config): resistance genes still exist in the
+# layout, but a clone rarely ACQUIRES one, so the met is mostly SUSCEPTIBLE before chemo — chemo then
+# crashes it to a rare resistant remnant that relapses (instead of a met that is already resistant).
+# It also keeps the clone count legible for the Muller.
+MET_CANCER = {"mutation_rate": 0.35, "n_snvs_per_allele": 0.15}
+# The arc is a legibility demo, so it grows a SMALLER field than the >=10k base config (fewer/smaller
+# glands, lower seeding rate for a cleaner founder read) — identical mechanism, just quicker.
+MET_SPATIAL = {"grid_size": 24, "structure_radius": 3, "gland_radius": 3, "min_gland_sep": 7,
+               "K_duct": 36, "K_stroma": 22,
+               "met_grid_size": 11, "K_met": 16, "host_fill_frac": 0.35,
+               "met_seed_kappa": 0.04, "met_hazard": 0.45, "met_transit_floor": 0.02}
+
+
+def compartment_cancer(t):
+    """(primary_cancer, met_cancer) live cancer-cell counts."""
+    p = sum(c for i in range(t.n_primary_demes) for g, c in t.demes[i].items() if t._is_cancer(g))
+    m = sum(c for i in range(t.n_primary_demes, len(t.demes)) for g, c in t.demes[i].items() if t._is_cancer(g))
+    return p, m
+
+
+def met_cancer(t, resistant=None):
+    """Met cancer-cell count; ``resistant=True/False`` filters by treatment_resistance >= 0.5."""
+    n = 0
+    for i in range(t.n_primary_demes, len(t.demes)):
+        for g, c in t.demes[i].items():
+            if t._is_cancer(g):
+                if resistant is None:
+                    n += c
+                elif (t.genotypes[g].evolutionary_parameters["treatment_resistance"] >= 0.5) == resistant:
+                    n += c
+    return n
+
+
+def normal_totals(t):
+    """Per-snapshot total NORMAL (host/epithelial/stromal/immune) cell counts (primary, met), read from
+    the per-compartment traces — for the chemo-toxicity-on-normal-tissue plot."""
+    from iscc.constants import normal_names
+    prim, met = [], []
+    for tr in t.traces:
+        pc, mc = tr.get("primary_counts", tr["genotypes_counts"]), tr.get("met_counts", {})
+        prim.append(sum(v for k, v in pc.items() if k in normal_names))
+        met.append(sum(v for k, v in mc.items() if k in normal_names))
+    return np.array(prim), np.array(met)
+
+
+def grow_metastasis_tumor(seed=BASE_SEED, met_target=220, primary_cap=3200, max_chemo_gens=40,
+                          chemo_toxicity=0.1, verbose=False):
+    """Grow the DCIS->IDC ductal field WITH a metastatic deposit and run the full clinical arc:
+
+        grow (DCIS->IDC)  ->  seed the met  ->  resect the primary  ->  systemic chemo (which also
+        kills off-target normal tissue) run UNTIL the susceptible clones are eliminated  ->  relapse of
+        the surviving resistant clones.
+
+    Reuses the base GENOME / CANCER / DEME / SELECTION + the compartment axes, adding MET_SELECTION and
+    MET_SPATIAL. Returns ``(tumour, marks)`` with ``marks`` a dict of snapshot indices
+    {seeding, resection, chemo_start, chemo_end} for annotating the Muller plots."""
+    from iscc.tumor.models import GenotypeTumor
+    from iscc.treatment import Surgery, Chemotherapy
+    spatial = {**SPATIAL, **MET_SPATIAL}
+    selection = {**SELECTION, **MET_SELECTION}
+    t = GenotypeTumor(seed=seed, genome_params=GENOME, selection_params=selection,
+                      cancer_cell_params={**CANCER, **MET_CANCER}, deme_params=DEME,
+                      spatial_params=spatial, update_mode="tau", tau=1.0)
+    marks = {}
+    # per-deme spatial snapshots at each stage of the arc (the traces only hold COUNTS, so the spatial
+    # composition has to be captured as we go) -> attached as t.arc_snapshots for plot_clone_grid_series.
+    snaps = {}
+
+    def _snap(label):
+        snaps[label] = [dict(d) for d in t.demes]
+
+    while True:
+        p, m = compartment_cancer(t)
+        if m >= met_target or p + m >= primary_cap:
+            break
+        t.grow(2, seed=seed)
+        if "seeding" not in marks and met_cancer(t) > 0:
+            marks["seeding"] = len(t.traces)
+            _snap("seeding")
+        if verbose:
+            print(f"  grow: primary={p} met={m}", flush=True)
+    marks["resection"] = len(t.traces)
+    _snap("pre_resection")
+    t.grow(6, seed=seed, treatment=Surgery(start=t.step, site="primary"))
+    # systemic chemo run until the SUSCEPTIBLE met clones are gone (or a generation cap / cure)
+    marks["chemo_start"] = len(t.traces)
+    _snap("pre_chemo")
+    chemo = Chemotherapy(start=t.step, duration=10 ** 6, kill_rate=1.6, effectiveness=0.98,
+                         toxicity=chemo_toxicity, sites="both")
+    for k in range(max_chemo_gens):
+        if met_cancer(t) == 0:
+            break                                             # cured
+        if k > 2 and met_cancer(t, resistant=False) == 0:
+            break                                             # susceptible eliminated
+        t.grow(2, seed=seed, treatment=chemo)
+        if verbose:
+            print(f"  chemo {k}: sensitive={met_cancer(t, False)} resistant={met_cancer(t, True)}", flush=True)
+    marks["chemo_end"] = len(t.traces)
+    _snap("chemo_end")
+    t.grow(14, seed=seed)                                     # relapse of the surviving resistant clones
+    _snap("end")
+    t.arc_snapshots = snaps
+    t.make_cell_data()
+    return t, marks
