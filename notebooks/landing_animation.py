@@ -291,6 +291,10 @@ def build_figure(t, marks, colors, splash=False):
     viz.plot_muller_compartments(t.traces, t.genotypes_parents, axes=(ax_mp, ax_mm),
                                  driver_map=t._functional_signatures(), min_freq=MIN_FREQ,
                                  clone_colors=colors, mark_generations=marks, star_genotype=None,
+                                 # match the CLI (iscc.visualization.compartment): 3.0 generations of
+                                 # Gaussian smoothing removes the per-step band-edge wobble without
+                                 # blurring the chemo bottleneck / resection / multi-clone structure.
+                                 smoothing_std=3.0,
                                  centered=splash)
     xmax = len(t.traces) - 1
     # splash: make the clinical-event lines PANEL-SPECIFIC to where the intervention acts — resection

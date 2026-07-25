@@ -95,6 +95,12 @@ def build_figure(traj, splash=False):
     viz.plot_muller_compartments(traces, parents, axes=(ax_mp, ax_mm),
                                  driver_map=traj["driver_map"], min_freq=traj["min_freq"],
                                  clone_colors=colors, mark_generations=marks, star_genotype=None,
+                                 # smoothing_std is a Gaussian width in GENERATIONS: the pymuller default
+                                 # (0.1) is ~no smoothing, so the stacked band edges kink at every step.
+                                 # 3.0 is small vs the ~230-generation arc — it removes the per-step wobble
+                                 # while KEEPING the sharp chemo bottleneck, the resection mark, the
+                                 # multi-clone bands, and the DCIS-fills-before-invasion ordering readable.
+                                 smoothing_std=3.0,
                                  centered=splash)
     xmax = len(traces) - 1
     # splash: make the clinical-event lines PANEL-SPECIFIC to where the intervention acts — resection
