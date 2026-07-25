@@ -606,12 +606,51 @@ def stage_legend(present=None):
     return [(STAGE_NAMES[i], STAGE_PALETTE[i]) for i in idxs]
 
 
+def _get_y_values_hardcut(populations_df, adjacency_df, smoothing_std, cutoff_gen):
+    """``pymuller.logic._get_y_values`` but with a HARD discontinuity at ``cutoff_gen`` (the primary's
+    resection generation): a discrete removal that must NOT be eased away by the Gaussian kernel.
+
+    pymuller smooths every strain with a single *centered* Gaussian rolling mean over the whole time
+    axis, so near resection the kernel averages across the boundary into the post-resection zeros —
+    which both pulls the pre-resection bands DOWN early and rounds the drop to 0 over several
+    generations. Here the smoothing is applied to the PRE-cutoff block IN ISOLATION with
+    edge-preserving ('nearest') boundary handling, so the kernel never reaches past ``cutoff_gen`` and
+    the bands keep their full pre-resection width right up to it; every generation strictly after
+    ``cutoff_gen`` is forced to 0, so the fan drops to 0 in one step (a vertical cliff / flat
+    centerline afterward). Ordering + leaf-doubling mirror ``_get_y_values`` so the band colours line
+    up exactly with the ordinarily-smoothed (non-cut) panels."""
+    import scipy.ndimage as _ndi
+    ordering = pymuller.logic._get_strains_ordering(adjacency_df)
+    population_size_max = populations_df.groupby("Generation")["Population"].sum().max()
+    pivot = populations_df.pivot(index="Generation", columns="Identity",
+                                 values="Population").sort_index()
+    smoothed = pivot.copy()
+    pre_idx = pivot.index[pivot.index <= cutoff_gen]
+    post_idx = pivot.index[pivot.index > cutoff_gen]
+    if len(pre_idx) > 1:
+        block = _ndi.gaussian_filter1d(pivot.loc[pre_idx].to_numpy(dtype=float),
+                                       sigma=smoothing_std, axis=0, mode="nearest")
+        smoothed.loc[pre_idx, pivot.columns] = block
+    smoothed.loc[post_idx, pivot.columns] = 0.0          # hard cliff: nothing survives resection
+    smoothed = smoothed.clip(0, population_size_max)
+    Y = smoothed[ordering] / 2
+    keep = [0]
+    for i, c in enumerate(Y.columns[1:], 1):
+        if c == Y.columns[i - 1]:
+            Y.iloc[:, i] *= 2
+            keep.pop()
+        keep.append(i)
+    return Y.iloc[:, keep]
+
+
 def _draw_muller_panel(ax, pop_df, anc, band_colors, normalize, smoothing_std,
-                       default=(0.82, 0.82, 0.82, 1.0), centered=False):
+                       default=(0.82, 0.82, 0.82, 1.0), centered=False, hard_cutoff_gen=None):
     """Draw ONE Muller panel with EXPLICIT per-band colours, bypassing pymuller's colormap
     normalisation so a categorical palette maps exactly. Mirrors pymuller._muller_plot's layout.
     ``centered=True`` uses a symmetric (``baseline="sym"``) baseline — the Noble "fish"/stream layout,
-    bands growing outward from a central midline; default is the historical zero-based stack."""
+    bands growing outward from a central midline; default is the historical zero-based stack.
+    ``hard_cutoff_gen`` (e.g. the primary's resection generation) makes the transition to 0 at that
+    generation a hard cliff rather than a smoothed taper (see ``_get_y_values_hardcut``)."""
     import sys as _sys
     pop = pop_df.copy()
     if normalize:
@@ -621,7 +660,10 @@ def _draw_muller_panel(ax, pop_df, anc, band_colors, normalize, smoothing_std,
     _old = _sys.getrecursionlimit()
     try:
         _sys.setrecursionlimit(max(_old, 20000))
-        yt = pymuller.logic._get_y_values(pop, anc, smoothing_std)
+        if hard_cutoff_gen is not None:
+            yt = _get_y_values_hardcut(pop, anc, smoothing_std, hard_cutoff_gen)
+        else:
+            yt = pymuller.logic._get_y_values(pop, anc, smoothing_std)
     finally:
         _sys.setrecursionlimit(_old)
     colors = [band_colors.get(str(c), default) for c in yt.columns.values]
@@ -633,7 +675,7 @@ def plot_muller_compartments(traces, genotypes_parents, axes=None, colormap="gnu
                              normalize=False, smoothing_std=0.1, labels=("primary", "metastasis"),
                              mark_generations=None, driver_map=None, min_freq=None,
                              star_genotype=None, star_gen=None, clone_colors=None, color_legend=None,
-                             centered=False):
+                             centered=False, primary_resection_gen=None):
     """Two stacked Muller panels — primary (top) and metastasis (bottom) — that SHARE ONE colormap, so
     a clone keeps its colour across both bands (and matches plot_grid_compartments / plot_muller). The
     met founder therefore appears in the met band with the SAME colour as its — usually minor — parent
@@ -649,7 +691,11 @@ def plot_muller_compartments(traces, genotypes_parents, axes=None, colormap="gnu
     stay shared.
 
     `mark_generations` is an optional list of (generation, label) drawn as vlines (seeding / resection /
-    chemo start+end)."""
+    chemo start+end).
+
+    ``primary_resection_gen`` (a generation) renders the PRIMARY panel's resection as a hard cliff —
+    full width up to that generation, then 0 instantly — instead of a Gaussian-eased taper. Only the
+    primary panel is cut; the metastasis panel (incl. its smoothed chemo bottleneck) is untouched."""
     gcounts, _gp = _cancer_only(traces, genotypes_parents)
     all_gids = [c for c in gcounts.columns if c != "Generation"]
     basis_counts, basis_parents, gmap, basis_cols = _display_basis(
@@ -684,8 +730,11 @@ def plot_muller_compartments(traces, genotypes_parents, axes=None, colormap="gnu
         pop_df = (comp.melt(id_vars=["Generation"], value_name="Population", var_name="Identity")
                   .sort_values("Generation").reset_index(drop=True))
         if band_colors is not None:
+            # resection is a discrete removal of the PRIMARY only -> hard cliff on that panel; the met
+            # panel (and its SMOOTHED chemo bottleneck) keeps the ordinary cross-time Gaussian.
+            cutoff = primary_resection_gen if key == "primary_counts" else None
             _draw_muller_panel(ax, pop_df, anc_full, band_colors, normalize, smoothing_std,
-                               centered=centered)
+                               centered=centered, hard_cutoff_gen=cutoff)
         elif centered:
             _sym_stackplot(ax, pop_df, anc_full, color_by, colormap, normalize, smoothing_std)
         else:

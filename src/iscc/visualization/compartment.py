@@ -72,6 +72,10 @@ def build_figure(traj, splash=False):
     parents = traj["genotypes_parents"]
     colors = traj["colors"]
     marks = traj["marks"]
+    # resection is a DISCRETE removal of the primary -> its Muller must drop to 0 in one step, not be
+    # eased away by the cross-time Gaussian; hand plot_muller_compartments the generation so it hard-
+    # cuts ONLY the primary panel (the met panel + its smoothed chemo bottleneck stay untouched).
+    resection_gen = next((g for g, lbl in marks if lbl == "resection"), None)
     fig = plt.figure(figsize=(12.6, 7.1), dpi=150 if splash else 170)
     fig.patch.set_facecolor(BG)
     if splash:
@@ -101,6 +105,7 @@ def build_figure(traj, splash=False):
                                  # while KEEPING the sharp chemo bottleneck, the resection mark, the
                                  # multi-clone bands, and the DCIS-fills-before-invasion ordering readable.
                                  smoothing_std=3.0,
+                                 primary_resection_gen=resection_gen,
                                  centered=splash)
     xmax = len(traces) - 1
     # splash: make the clinical-event lines PANEL-SPECIFIC to where the intervention acts — resection
