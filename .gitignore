@@ -3,7 +3,6 @@ dist/
 build/
 out/
 *.egg-info/
-poetry.lock
 notebooks/.ipynb_checkpoints
 notebooks/notebook_example/
 notebooks/example_out/
