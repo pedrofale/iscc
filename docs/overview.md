@@ -7,7 +7,7 @@
 [![Tests](https://github.com/pedrofale/iscc/actions/workflows/main.yaml/badge.svg)](https://github.com/pedrofale/iscc/actions/workflows/main.yaml)
 [![Docs](https://github.com/pedrofale/iscc/actions/workflows/docs.yml/badge.svg)](https://pedrofale.github.io/iscc/)
 
-`iscc` (in silico cancer center) is a multi-modal tumor-evolution data simulator. It grows one
+`iscc` (in silico cancer center) is a multi-modal tumor evolution data simulator. It grows one
 selection-driven, spatially-structured tumor, optionally treats it, samples it, and generates
 single-cell and bulk DNA, RNA, and spatial data, down to sequencing reads. Because every run knows
 the true clones, mutations, copy numbers, cell states, spatial niches, and lineages, `iscc` provides
@@ -15,8 +15,7 @@ a realistic ground truth for benchmarking computational tumor evolution methods.
 
 ## Main features
 
-- **One consistent tumor, every modality.** DNA, RNA, and spatial data are emitted from the same
-  evolving cells, so cross-modal relationships are coherent by construction.
+- **Multi-modal data generation.** DNA, RNA, and spatial data are emitted from the same evolving cells, so cross-modal relationships are coherent by construction.
 - **Ground truth for benchmarking.** Every run knows the true clones, copy numbers, mutations, cell
   states, spatial niches, and lineage.
 - **Calibrated to real data.** Assay parameters can be fit from a pilot dataset, and the defaults were pre-tuned to fit real data.
