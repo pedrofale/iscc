@@ -53,7 +53,7 @@ metastasis, and a resistant clone relapses after chemotherapy. It is reproducibl
 #    compartment trajectory the renderer consumes
 isccsim --sim-config configs/landing.yaml -o out
 
-# 2. fully-labelled version (sue --splash to drop the annotations)
+# 2. fully-labelled version (use --splash to drop the annotations as in the home page)
 isccgif out --compartment -o landing_full.gif
 ```
 
