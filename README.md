@@ -3,7 +3,7 @@
 </div>
 <p></p>
 
-[![PyPI](https://img.shields.io/pypi/v/insilico-cancer-center.svg?style=flat)](https://pypi.org/project/insilico-cancer-center/)
+[![PyPI](https://img.shields.io/pypi/v/insilico-cancer-center)](https://pypi.org/project/insilico-cancer-center/)
 [![Tests](https://github.com/pedrofale/iscc/actions/workflows/main.yaml/badge.svg)](https://github.com/pedrofale/iscc/actions/workflows/main.yaml)
 [![Docs](https://github.com/pedrofale/iscc/actions/workflows/docs.yml/badge.svg)](https://pedrofale.github.io/iscc/)
 
