@@ -288,6 +288,9 @@ def build_figure(t, marks, colors, splash=False):
     # draw the full-arc 2-band Muller once (semantic clone colours; min_freq collapses the passenger
     # rainbow so the sweeps read as bands). Founder-coloured bands -> a band's colour is its clone's.
     # splash uses the CENTERED (Noble "fish"/stream) baseline — bands grow outward from a midline.
+    # resection is a discrete removal of the primary -> hard-cut that panel to 0 at the resection
+    # generation (the met panel + its smoothed chemo bottleneck stay untouched); mirrors the CLI path.
+    resection_gen = next((g for g, lbl in marks if lbl == "resection"), None)
     viz.plot_muller_compartments(t.traces, t.genotypes_parents, axes=(ax_mp, ax_mm),
                                  driver_map=t._functional_signatures(), min_freq=MIN_FREQ,
                                  clone_colors=colors, mark_generations=marks, star_genotype=None,
@@ -295,6 +298,7 @@ def build_figure(t, marks, colors, splash=False):
                                  # Gaussian smoothing removes the per-step band-edge wobble without
                                  # blurring the chemo bottleneck / resection / multi-clone structure.
                                  smoothing_std=3.0,
+                                 primary_resection_gen=resection_gen,
                                  centered=splash)
     xmax = len(t.traces) - 1
     # splash: make the clinical-event lines PANEL-SPECIFIC to where the intervention acts — resection
