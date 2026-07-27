@@ -70,10 +70,12 @@ plugins:
           paths: [src]          # griffe reads docstrings statically from src/ (no import needed)
           options:
             show_root_heading: true
+            show_root_full_path: false
             show_source: false
             members_order: source
+            docstring_section_style: table
             filters: ["!^_"]
-            heading_level: 3
+            heading_level: 1
 
 # Tutorials = a few fundamental notebooks; API Reference is generated from src/ via mkdocstrings.
 # (The full science/benchmark notebooks live in notebooks/ and can be published later.)
@@ -87,8 +89,21 @@ nav:
       - Data overview: tutorials/03_data_overview.ipynb
   - API Reference:
       - Overview: reference/index.md
-      - Tumor: reference/tumor.md
-      - Treatment: reference/treatment.md
-      - Sample: reference/sample.md
-      - Data: reference/data.md
-      - Inference: reference/inference.md
+      - Tumor:
+          - GenotypeTumor: reference/GenotypeTumor.md
+          - GlandularTumor: reference/GlandularTumor.md
+      - Treatment:
+          - Chemotherapy: reference/Chemotherapy.md
+          - TargetedTherapy: reference/TargetedTherapy.md
+          - Immunotherapy: reference/Immunotherapy.md
+          - Surgery: reference/Surgery.md
+      - Sample:
+          - Biopsy: reference/Biopsy.md
+          - Dissociation: reference/Dissociation.md
+      - Data:
+          - scDNA: reference/scDNA.md
+          - bulkDNA: reference/bulkDNA.md
+          - scRNA: reference/scRNA.md
+          - Visium: reference/Visium.md
+      - Inference:
+          - ABC: reference/ABC.md
