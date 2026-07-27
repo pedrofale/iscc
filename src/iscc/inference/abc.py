@@ -154,8 +154,29 @@ def _regression_adjust(theta_acc, S_acc, obs):
 
 # --- engine -----------------------------------------------------------------
 class ABC:
+    """Approximate Bayesian Computation engine for fitting model parameters.
+
+    Model-agnostic and dependency-light (numpy + scikit-learn + scipy — no JAX, no R).
+    Given a ``Prior`` and a ``simulate(theta) -> summary_vector`` callback, it builds a
+    reference table, keeps the ``accept_frac`` closest draws to the observed summary, and
+    returns a ``Posterior`` — with optional Beaumont et al. (2002) local-linear regression
+    adjustment and a Random-Forest point estimate (the Python analogue of CINner's
+    ABC-rf). For the tumour model, ``inference.tumor`` wires up the ``simulate`` callback.
+    Call ``run`` with the observed summary vector to obtain the posterior.
+
+    Parameters
+    ----------
+    prior : Prior
+        Product prior over the named parameters to infer (see ``Prior``).
+    simulate : callable
+        ``dict(name -> value) -> summary vector``; a single forward simulation of the model.
+    n_workers : int, optional
+        Number of processes used to parallelise the simulations (default 1 = serial).
+    seed : int, optional
+        Seed for the engine's random generator (default 0).
+    """
+
     def __init__(self, prior, simulate, n_workers=1, seed=0):
-        """``prior``: a :class:`Prior`. ``simulate``: ``dict(name->value) -> summary vector``."""
         self.prior = prior
         self.simulate = simulate
         self.n_workers = n_workers

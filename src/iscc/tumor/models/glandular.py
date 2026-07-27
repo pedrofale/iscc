@@ -54,6 +54,44 @@ def get_inside(border):
     return points
 
 class GlandularTumor(Tumor):
+    """Cell-level (one-object-per-cell) glandular tumour engine on a deme grid.
+
+    The reference implementation of the iscc growth process: every cell is an explicit
+    ``Cell`` object, so it is the most faithful model (and the ground truth the count
+    engine is validated against), but it does not scale to large tumours — prefer
+    ``GenotypeTumor`` for anything big. Cells live in demes on a square grid; with
+    ``structure_radius > 0`` the founder is seeded inside a ring-shaped gland and
+    spreads outward, otherwise it starts as a micro-lesion in the centre deme.
+
+    Accepts a single ``config`` YAML path or the individual parameter blocks (forwarded
+    to the ``Tumor`` base). Every knob, with its default and valid range, is documented
+    in ``PARAMETERS.md``.
+
+    Parameters
+    ----------
+    n_structures : int, optional
+        Number of glandular structures to seed (default 1). Read from
+        ``spatial_params.n_structures`` when a ``config`` is given.
+    structure_radius : int, optional
+        Radius of the glandular ring in demes (default 0 = no gland; the founder is
+        seeded in the centre deme). Read from ``spatial_params.structure_radius`` under
+        a ``config``.
+    grid_size : int, optional
+        Side length of the square deme grid (default 10). Read from
+        ``spatial_params.grid_size`` under a ``config``.
+    config : str or pathlib.Path, optional
+        YAML config defining ``genome_params``, ``selection_params``, ``deme_params``,
+        ``spatial_params`` and ``cell_params``; overrides the individual blocks.
+    genome_params, selection_params, deme_params, cancer_cell_params, epithelial_cell_params, stromal_cell_params, immune_cell_params : dict, optional
+        The same nested parameter blocks as ``GenotypeTumor``, forwarded to the
+        ``Tumor`` base (see ``PARAMETERS.md``).
+    seed : int, optional
+        EVOLUTION seed (default 42), driving the per-run dynamics and spatial seeding.
+    layout_seed : int, optional
+        GENOME-LAYOUT seed, shared across runs of the same config so a cohort is
+        comparable by construction (defaults to the fixed ``DEFAULT_LAYOUT_SEED``).
+    """
+
     def __init__(self, n_structures=1, structure_radius=0, grid_size=10, **tumor_kwargs):
         super(GlandularTumor, self).__init__(**tumor_kwargs)
         self.type = 'glandular'

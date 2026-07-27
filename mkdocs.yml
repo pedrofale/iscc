@@ -69,6 +69,12 @@ plugins:
         python:
           paths: [src]          # griffe reads docstrings statically from src/ (no import needed)
           options:
+            docstring_style: numpy   # the codebase documents params NumPy-style (Parameters\n----------)
+            docstring_options:
+              # Several public classes (treatments, GlandularTumor) intentionally forward
+              # constructor args through **kwargs to a base class; we still document those
+              # params on the subclass page, so don't warn that they aren't literal signature params.
+              warn_unknown_params: false
             show_root_heading: true
             show_root_full_path: false
             show_bases: true
