@@ -7,12 +7,11 @@ repo_name: pedrofale/iscc
 edit_uri: edit/dev/docs/
 docs_dir: docs
 
-# Not published yet (kept in docs/ to finish privately): the Guide + Tutorials pages,
-# and Installation (until the package is on PyPI).
+# Not published yet (kept in docs/ to finish privately): the Guide pages (parameters/schema)
+# and Installation.
 exclude_docs: |
   parameters.md
   schema.md
-  tutorials/
   installation.md
 
 theme:
@@ -68,9 +67,26 @@ plugins:
       include_source: true
       execute: false
 
-# Guide and Tutorials are intentionally NOT published yet — their pages stay in docs/
-# (excluded from the build via `exclude_docs` above) so they can be finished privately,
-# then re-added to the nav (and un-excluded) when they're ready to go public.
+# The Guide pages (parameters/schema) and Installation are still excluded (see exclude_docs).
+# Tutorials = the mechanics tours; Benchmarks = the science notebooks backing the paper's results.
 nav:
   - Home: index.md
   - Overview: overview.md
+  - Tutorials:
+      - Pipeline walkthrough: tutorials/01_pipeline_walkthrough.ipynb
+      - Tumor growth: tutorials/02_tumor_growth.ipynb
+      - Data overview: tutorials/03_data_overview.ipynb
+      - "Assay: DNA": tutorials/assay_dna.ipynb
+      - "Assay: scRNA": tutorials/assay_scrna.ipynb
+      - "Assay: spatial": tutorials/assay_spatial.ipynb
+      - Read-level output: tutorials/reads.ipynb
+  - Benchmarks:
+      - Shared tumour substrate: benchmarks/base_simulation.ipynb
+      - Compartment & niche confound: benchmarks/compartment_selection_confound.ipynb
+      - Multi-modal integration: benchmarks/combining_scdna_scrna.ipynb
+      - WGD & the allele layer: benchmarks/wgd_allele_cna.ipynb
+      - Gene-program confound: benchmarks/gene_programs.ipynb
+      - Phylogeny from DNA: benchmarks/tree_inference_dna.ipynb
+      - Spatial deconvolution: benchmarks/scrna_visium_integration.ipynb
+      - Cohort shared programs: benchmarks/cohort_shared_programs.ipynb
+      - Cohort recurrence & MHN: benchmarks/cohort_mhn_recurrence.ipynb
