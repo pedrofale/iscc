@@ -1,5 +1,5 @@
 """
-Genotype-level (count-based) tumor engine — phase 3b of DESIGN_scalability.md.
+Genotype-level (count-based) tumor engine.
 
 Instead of one Python object per cell, the population is represented as **per-deme genotype
 counts** over a shared **genotype registry**. A "cell" is a unit of count in a (genotype,
@@ -50,8 +50,7 @@ class GenotypeTumor:
     The constructor takes **either** a single ``config`` YAML path (the usual entry point;
     see ``notebooks/example_config.yaml``) **or** the individual nested-dict parameter
     blocks below. Only the top-level blocks are summarised here — every knob, with its
-    default, valid range and effect, is documented in ``PARAMETERS.md`` (the Parameters
-    guide).
+    default, valid range and effect, is covered in the parameter documentation.
 
     Parameters
     ----------
@@ -100,10 +99,10 @@ class GenotypeTumor:
         Under tau-leaping, record a full per-clone snapshot every ``k`` generations
         (default 1) so the Muller / grid plots keep working.
     microenv_params : dict, optional
-        F8 microenvironment layer (hypoxia field + cell-cell communication). Off by
+        Microenvironment layer (hypoxia field + cell-cell communication). Off by
         default; a pure readout that never changes growth.
     expression_params : dict, optional
-        R13 gene-program expression layer (``program_params``, ``activity_params``,
+        Gene-program expression layer (``program_params``, ``activity_params``,
         ``coupling_params``, ``dosage_params``, ``snv_effect_params``). Off by default;
         a readout only.
     layout_seed : int, optional
@@ -1683,9 +1682,9 @@ class GenotypeTumor:
                              self.genotypes_parents, color=color, ax=ax, **kwargs)
 
     def plot_grid_compartments(self, color=None, axes=None, by_drivers=False, by_stage=False, **kwargs):
-        """Two spatial grids (primary + met) side by side, shared clone colormap (R9). ``by_drivers``
+        """Two spatial grids (primary + met) side by side, shared clone colormap. ``by_drivers``
         colours by functional clone (matching the driver-collapsed 2-band Muller); ``by_stage`` colours
-        by the stage-dominant driver (todo #14); pass ``min_freq`` to also merge below-threshold clones."""
+        by the stage-dominant driver; pass ``min_freq`` to also merge below-threshold clones."""
         from .. import viz
         if self.cell_data is None or self.cell_data["cell_type"].shape[0] != self.get_tumor_size():
             self.make_cell_data()
@@ -1700,11 +1699,11 @@ class GenotypeTumor:
 
     def plot_muller_compartments(self, axes=None, by_drivers=False, by_stage=False, star_seeder=True,
                                  **kwargs):
-        """Two-band Muller (primary over met) sharing one colormap with the grids (R9). ``by_drivers``
+        """Two-band Muller (primary over met) sharing one colormap with the grids. ``by_drivers``
         collapses genotypes to FUNCTIONAL clones and ``min_freq`` (a fraction) merges below-threshold
         clones, so selective sweeps (DCIS→IDC breach, the met founder, post-chemo resistant escape) show
         as bands instead of a passenger rainbow. ``by_stage`` instead colours by the STAGE-DOMINANT
-        driver (todo #14). ``star_seeder`` stars the first met-seeding clone's band in BOTH panels at the
+        driver. ``star_seeder`` stars the first met-seeding clone's band in BOTH panels at the
         seeding moment (so a minor founder is findable)."""
         from .. import viz
         driver_map = self._functional_signatures() if by_drivers else None
@@ -1724,7 +1723,7 @@ class GenotypeTumor:
                                             driver_map=driver_map, **kwargs)
 
     def plot_muller_founders(self, ax=None, **kwargs):
-        """A SINGLE primary Muller highlighting the clone(s) that seeded the metastasis (R9), so you can
+        """A SINGLE primary Muller highlighting the clone(s) that seeded the metastasis, so you can
         see which — usually minor — primary population founds the met. Founders are read from the
         seeding events; a primary clone is highlighted iff it shares a functional signature with one."""
         from .. import viz
@@ -1733,7 +1732,7 @@ class GenotypeTumor:
                                         self._functional_signatures(), ax=ax, **kwargs)
 
     def plot_clone_tree(self, ax=None, by_stage=False, by_drivers=False, **kwargs):
-        """Ground-truth clone tree (R9, todo #14): the TRUE genotypes_parents genealogy collapsed to the
+        """Ground-truth clone tree: the TRUE genotypes_parents genealogy collapsed to the
         display clones, each node at its true mutational depth, sized by peak population and coloured by
         ``by_stage`` (stage-dominant driver) or ``by_drivers`` (functional clone). Pass ``min_freq`` to
         set the collapse threshold (default 0.02)."""
@@ -1803,7 +1802,7 @@ class GenotypeTumor:
         overridable threshold: extinct / monoclonal / hypermutated / well-mixed /
         no-microenvironment-gradient / CNA-runaway / trivial-genome. Returns a ``TumorDiagnosis``.
         Read-only — it never draws from ``self.rng`` or changes the counts, so it cannot alter
-        simulation output (like the F8 ground truth)."""
+        simulation output (like the microenvironment ground truth)."""
         from ..diagnostics import diagnose
         return diagnose(self, thresholds=thresholds, verbose=verbose)
 

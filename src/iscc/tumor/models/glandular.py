@@ -64,8 +64,8 @@ class GlandularTumor(Tumor):
     spreads outward, otherwise it starts as a micro-lesion in the centre deme.
 
     Accepts a single ``config`` YAML path or the individual parameter blocks (forwarded
-    to the ``Tumor`` base). Every knob, with its default and valid range, is documented
-    in ``PARAMETERS.md``.
+    to the ``Tumor`` base). Every knob, with its default and valid range, is covered in
+    the parameter documentation.
 
     Parameters
     ----------
@@ -84,7 +84,7 @@ class GlandularTumor(Tumor):
         ``spatial_params`` and ``cell_params``; overrides the individual blocks.
     genome_params, selection_params, deme_params, cancer_cell_params, epithelial_cell_params, stromal_cell_params, immune_cell_params : dict, optional
         The same nested parameter blocks as ``GenotypeTumor``, forwarded to the
-        ``Tumor`` base (see ``PARAMETERS.md``).
+        ``Tumor`` base (see the parameter documentation).
     seed : int, optional
         EVOLUTION seed (default 42), driving the per-run dynamics and spatial seeding.
     layout_seed : int, optional
