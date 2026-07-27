@@ -249,7 +249,7 @@ class DNA(Assay):
 
 class bulkDNA(DNA):
     """Bulk DNA-seq: pool the sampled cells, high read budget, large-kappa compositional
-    depth, Binomial allele layer (DESIGN_features F4).
+    depth, Binomial allele layer.
 
     Coverage at a locus ∝ the POOLED total copy number (Σ_c CN_cl) × per-locus efficiency,
     so amplified segments draw proportionally more reads, and at a fixed budget compositionally
@@ -349,7 +349,7 @@ class cfDNA(DNA):
 
 class scDNA(DNA):
     """Single-cell DNA-seq: per-cell low budget, small-kappa (lumpy amplification) depth
-    nested in the run batch, Beta-Binomial alleles + explicit ADO + doublets (F5).
+    nested in the run batch, Beta-Binomial alleles + explicit ADO + doublets.
 
     Each cell gets its own DM draw (the per-cell amplification profile, the dominant
     single-cell noise) on weights ∝ that cell's copy number. ADO (one allele lost at a het

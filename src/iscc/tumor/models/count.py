@@ -1,5 +1,5 @@
 """
-Genotype-level (count-based) tumor engine — phase 3b of DESIGN_scalability.md.
+Genotype-level (count-based) tumor engine.
 
 Instead of one Python object per cell, the population is represented as **per-deme genotype
 counts** over a shared **genotype registry**. A "cell" is a unit of count in a (genotype,
@@ -37,6 +37,80 @@ CELLTYPES = ["cancer", "epithelial", "stromal", "immune"]
 
 
 class GenotypeTumor:
+    """Genotype-level (count-based) tumour engine — the default, scalable iscc growth model.
+
+    Represents the population as **per-deme genotype counts** over a shared genotype
+    registry rather than one Python object per cell, so every birth / death / mutation /
+    dispersal event is O(1) integer arithmetic on counts. It realises the same
+    evolutionary process as the cell-level ``GlandularTumor`` (statistically equivalent,
+    roughly two orders of magnitude faster) and is the class most users should reach for.
+    Typical flow: construct, call ``grow`` to run the dynamics, then read the per-cell
+    ground truth off ``make_cell_data`` and quality-check it with ``diagnose``.
+
+    The constructor takes **either** a single ``config`` YAML path (the usual entry point;
+    see ``notebooks/example_config.yaml``) **or** the individual nested-dict parameter
+    blocks below. Only the top-level blocks are summarised here — every knob, with its
+    default, valid range and effect, is covered in the parameter documentation.
+
+    Parameters
+    ----------
+    config : str or pathlib.Path, optional
+        Path to a YAML config that defines all of the parameter blocks below (keys
+        ``genome_params``, ``selection_params``, ``deme_params``, ``spatial_params``,
+        ``cell_params`` and any optional layers). When given it **overrides** the
+        individual arguments. This is the recommended entry point.
+    seed : int, optional
+        EVOLUTION seed (default 42): drives the per-run stochastic dynamics and the
+        spatial seeding. Two runs differing only in ``seed`` are two patients with the
+        same genome landscape but different evolution.
+    genome_params : dict, optional
+        Genome geometry — ``n_segments`` × ``segment_size`` set the gene count
+        (default 5 × 200 = 1000 genes).
+    selection_params : dict, optional
+        The CINner fitness model — driver / dispersal / resistance proportions and
+        effect sizes, viability limits, and the optional ``epistasis_params`` /
+        ``dependency_params`` network layers.
+    cancer_cell_params : dict, optional
+        Cancer-cell dynamics — ``division_rate``, ``death_rate``, ``mutation_rate``,
+        ``n_snvs_per_allele``, ``snv_prob`` / ``cnv_prob``, ``amp_prob``, ``wgd_rate``.
+    deme_params : dict, optional
+        Per-deme demography — ``initial_cancer_cells``, ``carrying_capacity``,
+        ``maximum_death_rate`` and the density-dependent crowding law.
+    spatial_params : dict, optional
+        Grid and tissue geometry — ``grid_size``, ``dispersal_rate``,
+        ``structure_radius`` / ``n_structures`` (glandular substrate), and the optional
+        compartment-selection hazards (``epithelial_barrier``, ``stromal_hazard``).
+    epithelial_cell_params, stromal_cell_params, immune_cell_params, host_cell_params : dict, optional
+        Seeding parameters for each non-cancer (static) cell type — the tissue
+        structure, cell-type labels and local immune density that the cancer death
+        rate reads.
+    genome_mode : {"abstract", "real"}, optional
+        ``"abstract"`` (default) uses a random gene-driver layout; ``"real"`` wires the
+        genome from human chromosome-arm data and requires ``genome_spec``.
+    genome_spec : GenomeSpec, optional
+        Real-genome specification (required when ``genome_mode="real"``).
+    update_mode : {"exact", "tau"}, optional
+        ``"exact"`` (default) is the reference one-event-per-update Gillespie engine;
+        ``"tau"`` is tau-leaping (``tau`` sets the generation length), whose cost scales
+        with number-of-clones × number-of-generations instead of number-of-cells.
+    tau : float, optional
+        Tau-leaping generation length, used only when ``update_mode="tau"`` (default 1.0).
+    snapshot_every : int, optional
+        Under tau-leaping, record a full per-clone snapshot every ``k`` generations
+        (default 1) so the Muller / grid plots keep working.
+    microenv_params : dict, optional
+        Microenvironment layer (hypoxia field + cell-cell communication). Off by
+        default; a pure readout that never changes growth.
+    expression_params : dict, optional
+        Gene-program expression layer (``program_params``, ``activity_params``,
+        ``coupling_params``, ``dosage_params``, ``snv_effect_params``). Off by default;
+        a readout only.
+    layout_seed : int, optional
+        GENOME-LAYOUT seed (config-determined, shared across runs of the same config):
+        fixes driver identities and baseline expression so a cohort is comparable by
+        construction. Defaults to the fixed ``DEFAULT_LAYOUT_SEED``.
+    """
+
     def __init__(self, config=None, seed=42, genome_params=None, selection_params=None,
                  cancer_cell_params=None, deme_params=None, spatial_params=None,
                  epithelial_cell_params=None, stromal_cell_params=None, immune_cell_params=None,
@@ -997,6 +1071,29 @@ class GenotypeTumor:
             self.deme_rates = np.array([self._deme_rate(i) for i in range(len(self.demes))], dtype=float)
 
     def grow(self, n_steps=1000, seed=None, treatment=None, **kwargs):
+        """Advance the tumour by ``n_steps`` update steps and materialise the result.
+
+        Runs the birth / death / mutation / dispersal process (exact Gillespie or
+        tau-leaping, per ``update_mode``), appending a population snapshot to
+        ``self.traces`` each step, and finally calls ``make_cell_data`` to build the
+        per-cell ground truth.
+
+        Parameters
+        ----------
+        n_steps : int, optional
+            Number of update steps to run (default 1000).
+        seed : int, optional
+            Evolution seed for this call; defaults to the tumour's construction ``seed``.
+        treatment : Treatment, optional
+            A therapy (e.g. ``Chemotherapy``, ``TargetedTherapy``, ``Immunotherapy``,
+            ``Surgery``) whose dosing schedule and rate modifiers are applied each step;
+            ``None`` (default) grows the tumour untreated.
+
+        Returns
+        -------
+        list
+            ``self.traces`` — the list of per-step population snapshots.
+        """
         if self.update_mode == "tau":
             return self._grow_tau(n_steps=n_steps, seed=seed, treatment=treatment, **kwargs)
         if seed is None:
@@ -1585,9 +1682,9 @@ class GenotypeTumor:
                              self.genotypes_parents, color=color, ax=ax, **kwargs)
 
     def plot_grid_compartments(self, color=None, axes=None, by_drivers=False, by_stage=False, **kwargs):
-        """Two spatial grids (primary + met) side by side, shared clone colormap (R9). ``by_drivers``
+        """Two spatial grids (primary + met) side by side, shared clone colormap. ``by_drivers``
         colours by functional clone (matching the driver-collapsed 2-band Muller); ``by_stage`` colours
-        by the stage-dominant driver (todo #14); pass ``min_freq`` to also merge below-threshold clones."""
+        by the stage-dominant driver; pass ``min_freq`` to also merge below-threshold clones."""
         from .. import viz
         if self.cell_data is None or self.cell_data["cell_type"].shape[0] != self.get_tumor_size():
             self.make_cell_data()
@@ -1602,11 +1699,11 @@ class GenotypeTumor:
 
     def plot_muller_compartments(self, axes=None, by_drivers=False, by_stage=False, star_seeder=True,
                                  **kwargs):
-        """Two-band Muller (primary over met) sharing one colormap with the grids (R9). ``by_drivers``
+        """Two-band Muller (primary over met) sharing one colormap with the grids. ``by_drivers``
         collapses genotypes to FUNCTIONAL clones and ``min_freq`` (a fraction) merges below-threshold
         clones, so selective sweeps (DCIS→IDC breach, the met founder, post-chemo resistant escape) show
         as bands instead of a passenger rainbow. ``by_stage`` instead colours by the STAGE-DOMINANT
-        driver (todo #14). ``star_seeder`` stars the first met-seeding clone's band in BOTH panels at the
+        driver. ``star_seeder`` stars the first met-seeding clone's band in BOTH panels at the
         seeding moment (so a minor founder is findable)."""
         from .. import viz
         driver_map = self._functional_signatures() if by_drivers else None
@@ -1626,7 +1723,7 @@ class GenotypeTumor:
                                             driver_map=driver_map, **kwargs)
 
     def plot_muller_founders(self, ax=None, **kwargs):
-        """A SINGLE primary Muller highlighting the clone(s) that seeded the metastasis (R9), so you can
+        """A SINGLE primary Muller highlighting the clone(s) that seeded the metastasis, so you can
         see which — usually minor — primary population founds the met. Founders are read from the
         seeding events; a primary clone is highlighted iff it shares a functional signature with one."""
         from .. import viz
@@ -1635,7 +1732,7 @@ class GenotypeTumor:
                                         self._functional_signatures(), ax=ax, **kwargs)
 
     def plot_clone_tree(self, ax=None, by_stage=False, by_drivers=False, **kwargs):
-        """Ground-truth clone tree (R9, todo #14): the TRUE genotypes_parents genealogy collapsed to the
+        """Ground-truth clone tree: the TRUE genotypes_parents genealogy collapsed to the
         display clones, each node at its true mutational depth, sized by peak population and coloured by
         ``by_stage`` (stage-dominant driver) or ``by_drivers`` (functional clone). Pass ``min_freq`` to
         set the collapse threshold (default 0.02)."""
@@ -1705,7 +1802,7 @@ class GenotypeTumor:
         overridable threshold: extinct / monoclonal / hypermutated / well-mixed /
         no-microenvironment-gradient / CNA-runaway / trivial-genome. Returns a ``TumorDiagnosis``.
         Read-only — it never draws from ``self.rng`` or changes the counts, so it cannot alter
-        simulation output (like the F8 ground truth)."""
+        simulation output (like the microenvironment ground truth)."""
         from ..diagnostics import diagnose
         return diagnose(self, thresholds=thresholds, verbose=verbose)
 

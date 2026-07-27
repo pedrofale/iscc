@@ -2,6 +2,46 @@ from .treatment import Treatment
 import numpy as np
 
 class Immunotherapy(Treatment):
+    """Immunotherapy: strips a cancer cell's immune resistance so the local immune
+    microenvironment can kill it.
+
+    Unlike the death-rate therapies it does not kill directly — it *lowers*
+    ``immune_resistance`` (by ``rate_multiplier ** -(1 - treatment_resistance)``, so
+    cells that are also treatment-resistant are stripped less), and the killing is done
+    by the local immune density in the death-rate model. With no ``immune_checkpoints``
+    given it acts on every cancer cell; otherwise only on cells expressing the listed
+    checkpoints. Pass an instance to ``GenotypeTumor.grow(..., treatment=it)``.
+
+    Parameters
+    ----------
+    immune_checkpoints : list
+        Checkpoint sites a cell must express to be targeted; empty = broad (every
+        cancer cell is a target).
+    adaptive : bool, optional
+        If ``True``, dose only while the tumour exceeds ``max_tumor_size``; else dose
+        continuously within the window (default ``False``).
+    start : int, optional
+        First step at which the therapy is active (default 0).
+    duration : int, optional
+        Number of steps the therapy stays active (default ``None`` = until the run ends).
+    dosage_decay : float, optional
+        Between-round dose decay factor (default 0.5).
+    rounds : int, optional
+        Number of dosing rounds (default 4).
+    rate_multiplier : float, optional
+        Strength of the immune-resistance reduction under full dose (default 2.0).
+    toxicity : float, optional
+        Per-step probability of off-target action on a non-cancer cell (default 0.1).
+    effectiveness : float, optional
+        Per-step probability the therapy acts on a targeted cell (default 0.9).
+    kill_rate : float, optional
+        Baseline per-cell kill hazard in the genotype engine (default 1.5).
+    max_tumor_size : int, optional
+        Size threshold that gates dosing when ``adaptive=True`` (default 100000).
+    sites : {"both", "primary", "met"}, optional
+        Compartment(s) the therapy acts on (default ``"both"`` = systemic).
+    """
+
     # Immunotherapy works by lowering the cell's immune resistance; the actual killing
     # is then done by the local immune microenvironment (see the death-rate model).
     affects = "immune_resistance"

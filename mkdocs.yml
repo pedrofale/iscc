@@ -7,8 +7,11 @@ repo_name: pedrofale/iscc
 edit_uri: edit/dev/docs/
 docs_dir: docs
 
-# Not published yet (kept in docs/ to finish privately): the Tutorials pages.
+# Not published yet (kept in docs/ to finish privately): the Guide pages (parameters/schema)
+# and the Tutorials notebooks.
 exclude_docs: |
+  parameters.md
+  schema.md
   tutorials/
 
 theme:
@@ -63,10 +66,54 @@ plugins:
   - mkdocs-jupyter:
       include_source: true
       execute: false
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]          # griffe reads docstrings statically from src/ (no import needed)
+          options:
+            docstring_style: numpy   # the codebase documents params NumPy-style (Parameters\n----------)
+            docstring_options:
+              # Several public classes (treatments, GlandularTumor) intentionally forward
+              # constructor args through **kwargs to a base class; we still document those
+              # params on the subclass page, so don't warn that they aren't literal signature params.
+              warn_unknown_params: false
+            show_root_heading: true
+            show_root_full_path: false
+            show_bases: true
+            show_source: false
+            merge_init_into_class: true
+            docstring_section_style: table
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            summary: true
+            members_order: source
+            filters: ["!^_"]
+            heading_level: 1
 
-# Tutorials are intentionally NOT published yet — their pages stay in docs/ (excluded from the
-# build via `exclude_docs` above) so they can be finished privately, then re-added when ready.
+# Tutorials stay in docs/ but are not published yet (excluded above). API Reference is
+# generated from src/ docstrings via mkdocstrings.
 nav:
   - Home: index.md
   - Overview: overview.md
   - Installation: installation.md
+  - API Reference:
+      - Overview: reference/index.md
+      - Tumor:
+          - GenotypeTumor: reference/GenotypeTumor.md
+          - GlandularTumor: reference/GlandularTumor.md
+      - Treatment:
+          - Chemotherapy: reference/Chemotherapy.md
+          - TargetedTherapy: reference/TargetedTherapy.md
+          - Immunotherapy: reference/Immunotherapy.md
+          - Surgery: reference/Surgery.md
+      - Sample:
+          - Biopsy: reference/Biopsy.md
+          - Dissociation: reference/Dissociation.md
+      - Data:
+          - scDNA: reference/scDNA.md
+          - bulkDNA: reference/bulkDNA.md
+          - scRNA: reference/scRNA.md
+          - Visium: reference/Visium.md
+      - Inference:
+          - ABC: reference/ABC.md
