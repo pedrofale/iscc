@@ -2,7 +2,7 @@ from .treatment import Treatment
 
 
 class Surgery(Treatment):
-    """Surgical resection (metastasis module, R9): a ONE-SHOT removal of an entire compartment at a
+    """Surgical resection: a ONE-SHOT removal of an entire compartment at a
     fixed step — not a rate modifier. At (or after) ``start`` every cell in ``site`` (default
     ``"primary"``) is removed and the simulation continues on the remaining compartment(s).
 
