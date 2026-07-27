@@ -1544,8 +1544,23 @@ each validated by the correspondingly named scripts.
 
 
 \section*{Code availability}
-\texttt{iscc} is freely available as a Python package at \url{https://github.com/pedrofale/iscc}.
-Detailed documentation and examples are available at \url{https://pedrofale.github.io/iscc}.
+\texttt{iscc} is free and open-source (MIT license). The source code is available at
+\url{https://github.com/pedrofale/iscc}, and the released version used in this study is tagged
+\texttt{v0.1.2}. The package is distributed on PyPI as \texttt{insilico-cancer-center}
+(\texttt{pip install insilico-cancer-center}); it is imported as \texttt{iscc} and exposes the
+command-line tools \texttt{isccsim}, \texttt{isccsample}, and \texttt{isccdata}. Detailed
+documentation and examples are available at \url{https://pedrofale.github.io/iscc}.
+
+\section*{Data availability}
+All data analyzed in this study are generated \emph{in silico} and are fully reproducible from the
+released code and the configurations in the repository. The real reference datasets used to calibrate
+and validate the assay models are publicly available: the pan-cancer whole-genome copy-number and
+whole-genome-duplication landscape from PCAWG~\cite{pcawg_2020}; the 10x~Genomics PBMC3k single-cell
+RNA-seq dataset (RNA count realism); a 10x~Genomics Visium breast-cancer section (spatial realism);
+the GIAB HG002 benchmark genome~\cite{zook_giab_2019}, a Mission~Bio Tapestri single-cell DNA panel,
+and the DLP+ single-cell whole-genome-sequencing data of Laks~et~al.~\cite{laks_dlp_2019} (DNA); and
+the PEtracer spatial lineage-tracing tumors of Koblan~et~al.~\cite{koblan_petracer_2025} (spatial
+lineage).
 
 \section*{Competing interests}
 The authors declare that they have no competing interests.
