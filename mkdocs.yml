@@ -7,12 +7,10 @@ repo_name: pedrofale/iscc
 edit_uri: edit/dev/docs/
 docs_dir: docs
 
-# Not published yet (kept in docs/ to finish privately): the Guide pages (parameters/schema)
-# and Installation.
+# Not published yet (kept in docs/ to finish privately): the Guide pages (parameters/schema).
 exclude_docs: |
   parameters.md
   schema.md
-  installation.md
 
 theme:
   name: material
@@ -82,8 +80,15 @@ plugins:
 nav:
   - Home: index.md
   - Overview: overview.md
+  - Installation: installation.md
   - Tutorials:
       - Pipeline walkthrough: tutorials/01_pipeline_walkthrough.ipynb
       - Tumor growth: tutorials/02_tumor_growth.ipynb
       - Data overview: tutorials/03_data_overview.ipynb
-  - API Reference: reference.md
+  - API Reference:
+      - Overview: reference/index.md
+      - Tumor: reference/tumor.md
+      - Treatment: reference/treatment.md
+      - Sample: reference/sample.md
+      - Data: reference/data.md
+      - Inference: reference/inference.md
