@@ -1,1 +1,1 @@
-::: iscc.inference.abc.ABC
+::: iscc.inference.ABC

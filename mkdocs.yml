@@ -38,11 +38,13 @@ theme:
         name: Switch to light mode
   features:
     - navigation.tabs
+    - navigation.indexes
     - navigation.footer
     - navigation.tracking
     - navigation.sections
     - navigation.top
     - toc.follow
+    - toc.integrate      # fold the page TOC into the left sidebar → a single left nav (dynestyx-style)
     - search.suggest
     - content.code.copy
 
@@ -78,7 +80,7 @@ plugins:
               # params on the subclass page, so don't warn that they aren't literal signature params.
               warn_unknown_params: false
             show_root_heading: true
-            show_root_full_path: false
+            show_root_full_path: true   # show the full call path, e.g. iscc.data.scDNA
             show_bases: true
             show_source: false
             merge_init_into_class: true
@@ -98,7 +100,7 @@ nav:
   - Overview: overview.md
   - Installation: installation.md
   - API Reference:
-      - Overview: reference/index.md
+      - reference/index.md
       - Tumor:
           - GenotypeTumor: reference/GenotypeTumor.md
           - GlandularTumor: reference/GlandularTumor.md

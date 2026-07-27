@@ -115,7 +115,28 @@ class scRNA(Assay):
 
     # -- run ---------------------------------------------------------------------------
     def run(self, cell_data, cell_subset=None, **kwargs):
-        """Realize one batch on `cell_data`. `cell_subset` fixes the cells (shared biology)."""
+        """Assay single-cell RNA expression for the sampled cells.
+
+        Draws per-cell UMI counts from each cell's expression state through one
+        sequencing batch: per-gene capture factor, library size, negative-binomial
+        overdispersion, ambient soup, dropout, and doublets.
+
+        Parameters
+        ----------
+        cell_data : dict
+            Per-cell ground-truth tables from the sampling stage; uses the expression
+            table ``cell_exp``.
+        cell_subset : array-like of cell IDs, optional
+            Fix the assayed cells so that several batches share the same biology. By
+            default every sampled cell is used.
+
+        Returns
+        -------
+        scRNA
+            ``self``, with the cell-by-gene UMI matrix in ``observed_counts`` and the
+            QC/ground-truth table in ``obs``. Call ``to_anndata`` or ``write`` to
+            export.
+        """
         cell_states = cell_data["cell_exp"]
         target_cells = self._select_cells(cell_states, cell_subset)
         self.n_cells = len(target_cells)

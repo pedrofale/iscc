@@ -1,1 +1,1 @@
-::: iscc.tumor.models.glandular.GlandularTumor
+::: iscc.tumor.GlandularTumor

@@ -1,1 +1,1 @@
-::: iscc.tumor.models.count.GenotypeTumor
+::: iscc.tumor.GenotypeTumor

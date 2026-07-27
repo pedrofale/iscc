@@ -1,1 +1,1 @@
-::: iscc.sample.dissociation.dissociation.Dissociation
+::: iscc.sample.Dissociation

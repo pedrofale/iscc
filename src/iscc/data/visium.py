@@ -146,7 +146,27 @@ class Visium(Assay):
 
     # -- run ---------------------------------------------------------------------------
     def run(self, cell_data, grid_side):
-        """Realize one Visium section on `cell_data` over a `grid_side` x `grid_side` section."""
+        """Assay a 10x Visium spatial-transcriptomics section over the sampled cells.
+
+        Lays out a ``grid_side`` x ``grid_side`` grid of spots, pools each spot's
+        cells, applies lateral mRNA diffusion and a smooth spatial capture field, and
+        draws per-spot UMI counts.
+
+        Parameters
+        ----------
+        cell_data : dict
+            Per-cell ground-truth tables from the sampling stage; uses the expression
+            table ``cell_exp`` and the spatial coordinates ``cell_crd``.
+        grid_side : int
+            Number of spots along each side of the (square) section.
+
+        Returns
+        -------
+        Visium
+            ``self``, with the spot-by-gene UMI matrix in ``spot_counts``, spot
+            coordinates in ``spot_coords``, and the per-spot ground-truth/QC table in
+            ``obs``. Call ``to_anndata`` or ``write`` to export.
+        """
         cell_exp = cell_data["cell_exp"]
         cell_crd = cell_data["cell_crd"]
         genes = cell_exp.columns

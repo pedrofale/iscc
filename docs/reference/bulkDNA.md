@@ -1,1 +1,1 @@
-::: iscc.data.dna.bulkDNA
+::: iscc.data.bulkDNA

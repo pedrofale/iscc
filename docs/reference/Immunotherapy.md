@@ -1,1 +1,1 @@
-::: iscc.treatment.immunotherapy.Immunotherapy
+::: iscc.treatment.Immunotherapy
