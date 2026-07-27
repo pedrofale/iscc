@@ -71,9 +71,15 @@ plugins:
           options:
             show_root_heading: true
             show_root_full_path: false
+            show_bases: true
             show_source: false
-            members_order: source
+            merge_init_into_class: true
             docstring_section_style: table
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            summary: true
+            members_order: source
             filters: ["!^_"]
             heading_level: 1
 
