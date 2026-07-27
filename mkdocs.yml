@@ -66,9 +66,19 @@ plugins:
   - mkdocs-jupyter:
       include_source: true
       execute: false
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]          # griffe reads docstrings statically from src/ (no import needed)
+          options:
+            show_root_heading: true
+            show_source: false
+            members_order: source
+            filters: ["!^_"]
+            heading_level: 3
 
-# The Guide pages (parameters/schema) and Installation are still excluded (see exclude_docs).
-# Tutorials = the mechanics tours; Benchmarks = the science notebooks backing the paper's results.
+# Tutorials = a few fundamental notebooks; API Reference is generated from src/ via mkdocstrings.
+# (The full science/benchmark notebooks live in notebooks/ and can be published later.)
 nav:
   - Home: index.md
   - Overview: overview.md
@@ -76,17 +86,4 @@ nav:
       - Pipeline walkthrough: tutorials/01_pipeline_walkthrough.ipynb
       - Tumor growth: tutorials/02_tumor_growth.ipynb
       - Data overview: tutorials/03_data_overview.ipynb
-      - "Assay: DNA": tutorials/assay_dna.ipynb
-      - "Assay: scRNA": tutorials/assay_scrna.ipynb
-      - "Assay: spatial": tutorials/assay_spatial.ipynb
-      - Read-level output: tutorials/reads.ipynb
-  - Benchmarks:
-      - Shared tumour substrate: benchmarks/base_simulation.ipynb
-      - Compartment & niche confound: benchmarks/compartment_selection_confound.ipynb
-      - Multi-modal integration: benchmarks/combining_scdna_scrna.ipynb
-      - WGD & the allele layer: benchmarks/wgd_allele_cna.ipynb
-      - Gene-program confound: benchmarks/gene_programs.ipynb
-      - Phylogeny from DNA: benchmarks/tree_inference_dna.ipynb
-      - Spatial deconvolution: benchmarks/scrna_visium_integration.ipynb
-      - Cohort shared programs: benchmarks/cohort_shared_programs.ipynb
-      - Cohort recurrence & MHN: benchmarks/cohort_mhn_recurrence.ipynb
+  - API Reference: reference.md
