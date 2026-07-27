@@ -1,1 +1,1 @@
-::: iscc.data.visium.Visium
+::: iscc.data.Visium

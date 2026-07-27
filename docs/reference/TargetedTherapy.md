@@ -1,1 +1,1 @@
-::: iscc.treatment.targeted.TargetedTherapy
+::: iscc.treatment.TargetedTherapy

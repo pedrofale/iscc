@@ -1,1 +1,1 @@
-::: iscc.sample.biopsy.biopsy.Biopsy
+::: iscc.sample.Biopsy

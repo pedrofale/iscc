@@ -1,1 +1,1 @@
-::: iscc.treatment.chemotherapy.Chemotherapy
+::: iscc.treatment.Chemotherapy

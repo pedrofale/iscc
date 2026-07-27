@@ -266,6 +266,26 @@ class bulkDNA(DNA):
                     beta_binom_conc=200.0, doublet_rate=0.0)
 
     def run(self, cell_data, cell_subset=None, **kwargs):
+        """Assay a pooled bulk-DNA sample from the sampled cells.
+
+        Pools the selected cells into a single bulk library and emits, per locus, the
+        read depth, alternate-allele counts, VAF, and a GC/mappability-corrected
+        copy-number ``log2`` ratio.
+
+        Parameters
+        ----------
+        cell_data : dict
+            Per-cell ground-truth tables from the sampling stage; uses the SNV table
+            ``cell_snv`` and the copy-number ground truth.
+        cell_subset : array-like of cell IDs, optional
+            Restrict the pool to these cells. By default every sampled cell is pooled.
+
+        Returns
+        -------
+        bulkDNA
+            ``self``, with the per-locus results in ``observed_data``. Call
+            ``to_anndata`` or ``write`` to export.
+        """
         snv = cell_data["cell_snv"]
         cells = np.asarray(list(cell_subset)) if cell_subset is not None else np.asarray(snv.index)
         genes_all = list(snv.columns)
@@ -404,6 +424,28 @@ class scDNA(DNA):
         return cnv, af, is_doublet
 
     def run(self, cell_data, cell_subset=None, **kwargs):
+        """Assay single-cell DNA (copy number and SNVs) for the sampled cells.
+
+        Emits, per cell and per observed locus, the read depth, alternate-allele
+        counts, and VAF, applying doublets, allelic dropout (ADO), and Beta-Binomial
+        allele noise. In ``"binary"`` data mode a genotype call is produced in
+        ``observed_snvs`` instead of counts.
+
+        Parameters
+        ----------
+        cell_data : dict
+            Per-cell ground-truth tables from the sampling stage; uses the SNV table
+            ``cell_snv`` and the copy-number ground truth.
+        cell_subset : array-like of cell IDs, optional
+            Restrict the assay to these cells. By default every sampled cell is used.
+
+        Returns
+        -------
+        scDNA
+            ``self``, with per-cell tables in ``coverage``, ``alt_counts``, ``vaf``,
+            and ``true_cn``, and the QC/ground-truth table in ``obs``. Call
+            ``to_anndata`` or ``write`` to export.
+        """
         snv = cell_data["cell_snv"]
         cells = self._select_cells(snv.index, cell_subset)
         self.n_cells = len(cells)

@@ -1,1 +1,1 @@
-::: iscc.treatment.surgery.Surgery
+::: iscc.treatment.Surgery
