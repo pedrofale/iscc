@@ -1,7 +1,7 @@
-"""Method-of-moments / 1-D MLE ``estimate_dna()`` for the DNA assay (DESIGN_inference §C.1, M4).
+"""Method-of-moments / 1-D MLE ``estimate_dna()`` for the DNA assay.
 
-The DNA analogue of the scRNA ``estimate()`` (``estimate.py``, M2): fits the technical
-hyper-parameters of the DESIGN_features §D DNA batch model (``DNABatchHyperParams`` in
+The DNA analogue of the scRNA ``estimate()``: fits the technical
+hyper-parameters of the DNA batch model (``DNABatchHyperParams`` in
 ``batch.py``) from a real DNA-seq dataset reduced to **counts-level summary statistics** —
 per-locus coverage, alt/ref counts, and a **per-locus called copy number** — so realistic
 technical magnitudes are *learned, not guessed*. The fitted ``DNABatchHyperParams`` drive
@@ -15,8 +15,8 @@ Conditional on called copy number (the one wrinkle).  Our depth model is copy-nu
 (1) run a CN caller (ASCAT/Sequenza for bulk; Ginkgo/HMMcopy for single-cell) to get per-locus CN,
 then (2) estimate the *residual technical noise given that CN*. We are explicit that the technical
 params are fit **conditional on the caller's CN** — exactly the CN regime re-injected when
-simulating. This is the DNA analogue of M2's library-size de-biasing of the dispersion: separate
-the technical layer from the part that is really biology.
+simulating. This is the DNA analogue of the scRNA estimator's library-size de-biasing of the
+dispersion: separate the technical layer from the part that is really biology.
 
 What is fit (and from what), per modality:
 
@@ -35,7 +35,7 @@ What is fit (and from what), per modality:
     doublet_rate      NOT identifiable from counts -> prior-only (flagged)  (carried from preset)
     breadth, depth_model  chosen, not estimated (you know the assay)
 
-The ``_PRIOR_ONLY`` escape that §B's ``estimate()`` uses (ambient/doublet) carries the genuinely
+The ``_PRIOR_ONLY`` escape that the scRNA ``estimate()`` uses (ambient/doublet) carries the genuinely
 unidentifiable fields honestly instead of pretending to fit them. ``ado_rate`` /
 ``beta_binom_conc`` are the per-cell amplification/dropout layer — fittable only from single-cell
 data; they are flagged not-fit (and carried from the preset) on bulk data, and ``kappa`` means
@@ -376,7 +376,7 @@ def _fit_depth_batch_sigma(batch_depths):
 def estimate_dna(coverage, alt_counts, called_cn, *, modality="bulk", breadth="wgs",
                  depth_model="dm", gc=None, mappability=None, ct_sites=None,
                  variant_mask=None, het_mask=None, batch_depths=None):
-    """Fit ``DNABatchHyperParams`` from counts-level DNA summary statistics (MoM/MLE; M4 §C.1).
+    """Fit ``DNABatchHyperParams`` from counts-level DNA summary statistics (MoM/MLE).
 
     Parameters
     ----------

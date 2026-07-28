@@ -1,8 +1,8 @@
-"""Method-of-moments ``estimate_visium()`` for the Visium assay (DESIGN_inference §C.2, M4).
+"""Method-of-moments ``estimate_visium()`` for the Visium assay.
 
-The spatial analogue of the scRNA ``estimate()`` (``estimate.py``, M2) and DNA ``estimate_dna()``
-(``estimate_dna.py``, M4 DNA half): fits the technical hyper-parameters of the DESIGN_features §D
-spatial batch model (``VisiumBatchHyperParams`` in ``batch.py``) from a real Visium AnnData reduced
+The spatial analogue of the scRNA ``estimate()`` and DNA ``estimate_dna()``: fits the technical
+hyper-parameters of the spatial batch model (``VisiumBatchHyperParams`` in ``batch.py``) from a
+real Visium AnnData reduced
 to **per-spot counts + spot coordinates** — so realistic spatial-technical magnitudes are *learned,
 not guessed*. The fitted ``VisiumBatchHyperParams`` drive ``Visium`` directly (same field names).
 
@@ -28,14 +28,14 @@ depth noise. So the variance of ``log(total)`` splits into a SPATIAL part (the f
 the autocorrelation amplitude ``a`` at zero lag) and a NON-SPATIAL nugget (the i.i.d. noise,
 ``1-a``):  ``field_sigma = sqrt(a * Var[log total])``, ``sigma_counts = sqrt((1-a) * Var[log total])``.
 This is exactly what separates the spatial technical layer from the per-spot depth noise — the
-spatial analogue of M2's library-size de-biasing of the dispersion.
+spatial analogue of the scRNA estimator's library-size de-biasing of the dispersion.
 
 The ``_PRIOR_ONLY`` escape (as in ``estimate``/``estimate_dna``) carries the genuinely
 unidentifiable-from-one-section fields honestly: ``ambient_frac`` (needs off-tissue/background
 spots), ``edge_sigma`` and ``diffusion_sigma`` (confounded with biology in a single section), and
 ``sigma_batch`` on single-section data (the per-gene factor is constant within a section, so it is
-confounded with the true expression — identifiable only across >=2 sections, exactly as M2 needs
->=2 batches).
+confounded with the true expression — identifiable only across >=2 sections, exactly as the scRNA
+estimator needs >=2 batches).
 
 numpy / scipy only (no JAX / R); stateless and config-driven.
 """
@@ -278,7 +278,7 @@ def _fit_sigma_batch(counts, labels):
 # --------------------------------------------------------------------------------------
 def estimate_visium(adata, *, count_model="dm", coords=None, section_labels=None,
                     occupied_fraction=None):
-    """Fit ``VisiumBatchHyperParams`` from a real Visium AnnData (MoM / curve-fit; M4 §C.2).
+    """Fit ``VisiumBatchHyperParams`` from a real Visium AnnData (MoM / curve-fit).
 
     Parameters
     ----------

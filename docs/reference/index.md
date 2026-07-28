@@ -47,12 +47,36 @@ Generate single-cell and bulk molecular data from the sampled cells.
 | [`iscc.data.scRNA`](scRNA.md) | Single-cell RNA expression. |
 | [`iscc.data.Visium`](Visium.md) | 10x Visium spatial transcriptomics. |
 
+## Reads
+
+Generate sequencing reads (FASTQ, optionally aligned BAM) from the assayed counts. DNA reads
+use DWGSIM/ART; RNA reads use a synthetic 10x transcriptome or the scReadSim template. These
+call external read simulators, so the corresponding binaries must be installed.
+
+| | |
+|---|---|
+| [`iscc.data.reads.emit_reads`](emit_reads.md) | Bulk / single-cell DNA reads (→ FASTQ, optional BAM). |
+| [`iscc.data.reads.emit_scrna_reads`](emit_scrna_reads.md) | Mutation-aware single-cell RNA reads. |
+| [`iscc.data.reads.emit_visium_reads`](emit_visium_reads.md) | Spatial (Visium) reads. |
+
 ## Inference
 
-Fit `iscc`'s parameters to real data.
+Fit the **tumor's evolutionary parameters** (division / mutation / dispersal / selection rates)
+to real data by Approximate Bayesian Computation over the growth simulator.
 
 | | |
 |---|---|
 | [`iscc.inference.ABC`](ABC.md) | Approximate Bayesian computation over evolutionary rates. |
 | [`iscc.inference.Prior`](Prior.md) | Product prior over the named parameters to infer. |
 | [`iscc.inference.Posterior`](Posterior.md) | Result of an ABC run — samples and point estimates. |
+
+## Calibration
+
+Fit each **assay's technical parameters** (library size, dispersion, dropout, capture field, …)
+to a real reference dataset, so simulated data matches a target platform.
+
+| | |
+|---|---|
+| [`iscc.data.estimate`](estimate.md) | Calibrate the scRNA assay from a real count matrix. |
+| [`iscc.data.estimate_dna`](estimate_dna.md) | Calibrate the DNA assay from coverage / allele statistics. |
+| [`iscc.data.estimate_visium`](estimate_visium.md) | Calibrate the Visium assay from a real section. |

@@ -66,9 +66,77 @@ def resolve_protocol(protocol):
 class scRNA(Assay):
     """scRNA-seq assay: applies a protocol-keyed `Batch` to a sample's `cell_exp`.
 
-    Backward-compatible with the previous signature (`n_reads`, `n_cells`, `lib_size_sigma`,
-    `dispersion`); these map onto the new hyper-parameters (`n_reads`->`mu_lib`,
-    `lib_size_sigma`->`sigma_lib`). Any preset value can be overridden explicitly.
+    The ``protocol`` preset sets typical magnitudes for every technical knob below; any of
+    them can be overridden explicitly (``None`` keeps the preset value). Legacy aliases are
+    accepted: ``n_reads`` maps onto ``mu_lib`` and ``lib_size_sigma`` onto ``sigma_lib``.
+
+    Parameters
+    ----------
+    protocol : str, default "10x"
+        Hyper-parameter preset selecting which technical components dominate: ``"10x"``
+        (droplet / UMI / 3': prominent ambient RNA + doublets, moderate depth) or
+        ``"smartseq3"`` (plate / 5' UMI + full-length: higher sensitivity, lower dropout and
+        amplification noise, extra well-in-plate nesting). Common spellings are accepted
+        (``"10X"``, ``"tenx"``, ``"droplet"``; ``"smart-seq3"``, ``"ss3"``, ``"plate"``).
+        Sets the defaults of every hyper-parameter below.
+    n_cells : int, default 100
+        Number of cells to sample and assay, capped at the number available. Ignored when
+        ``cell_subset`` is passed to ``run``.
+    count_model : str, default "nb"
+        Final count-emission model: ``"nb"`` negative-binomial (independent per-gene
+        overdispersion, what ``estimate`` fits) or ``"dm"`` Dirichlet-multinomial (a fixed
+        library total with gene-gene competition for reads).
+    batch_label : str, optional
+        Label recorded for this batch/realization; defaults to ``f"batch{seed}"``.
+    n_reads : float, optional
+        Legacy alias for ``mu_lib`` (mean library size).
+    lib_size_sigma : float, optional
+        Legacy alias for ``sigma_lib`` (per-cell library-size LogNormal sd).
+    dispersion : float, optional
+        Negative-binomial overdispersion phi (``var = mu + phi*mu^2``); used only when
+        ``count_model="nb"`` (phi <= 0 collapses to Poisson). Default None -> preset
+        (10x: 0.30, smartseq3: 0.15).
+    sigma_batch : float, optional
+        Per-gene batch-factor LogNormal sd; ``beta_gb ~ LogNormal(0, sigma_batch^2)`` is
+        shared across cells and reshapes the per-gene composition (Splatter ``batch.facScale``).
+        Larger -> stronger batch effect. Default None -> preset (0.10).
+    mu_lib : float, optional
+        Mean library size (UMIs / cell) = sequencing depth; per-cell library
+        ``ell_c ~ LogNormal(log mu_lib_b, sigma_lib^2)``. Default None -> preset
+        (10x: 4000, smartseq3: 8000).
+    sigma_lib : float, optional
+        Per-cell library-size LogNormal sd (cell-to-cell depth variation). Default None ->
+        preset (10x: 0.35, smartseq3: 0.45).
+    ambient_frac : float, optional
+        Fraction of each cell's library drawn as ambient "soup" — Poisson counts from the
+        pooled expression profile added to every cell. Default None -> preset
+        (10x: 0.05, smartseq3: 0.005).
+    doublet_rate : float, optional
+        Fraction of barcodes merged with a random partner cell (two cells combined into one).
+        Default None -> preset (10x: 0.05, smartseq3: 0.01).
+    dropout_mid : float, optional
+        Logistic dropout midpoint in expected-count space (Splatter-style zero-inflation keyed
+        to mean count); 0 disables dropout. Default None -> preset (10x: 1.5, smartseq3: 0.0,
+        i.e. disabled).
+    dropout_shape : float, optional
+        Logistic dropout steepness (active only when ``dropout_mid > 0``). Default None ->
+        preset (1.0).
+    well_sigma : float, optional
+        Per-cell "well" / plate-position LogNormal sd — an extra per-cell multiplier nesting a
+        plate-position effect inside the batch (Smart-seq3); 0 disables. Default None ->
+        preset (10x: 0.0, smartseq3: 0.15).
+    depth_batch_sigma : float, optional
+        Per-batch depth-shift LogNormal sd, so different seeds (batches) differ in realized
+        depth. Default None -> preset (0.05).
+    kappa : float, optional
+        Dirichlet concentration for the ``"dm"`` count model only: large kappa -> proportions
+        ~ composition (multinomial/Poisson-like), small kappa -> lumpy, over-dispersed
+        proportions. Default None -> preset (50.0).
+    seed : int, default 42
+        RNG seed. Fixes both the technical signature of the batch (per-gene factor, depth,
+        ambient soup) and the sampled-cell selection; two instances with the same
+        hyper-parameters and different seeds are two batches (same biology, different
+        technical noise).
     """
 
     def __init__(self, protocol="10x", n_cells=100, count_model="nb", batch_label=None,
