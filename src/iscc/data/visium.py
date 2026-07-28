@@ -67,10 +67,64 @@ def morans_i(values, coords, lengthscale=None):
 class Visium(Assay):
     """Visium spatial assay: lays spots over the section, aggregates cells, applies a `VisiumBatch`.
 
-    Backward-compatible with the previous stub signature (`n_reads`, `n_spots_x`, `n_spots_y`,
-    `spot_radius`): `n_reads` maps onto `mu_counts`, and a spot-grid given as `n_spots_x/y` is
-    honoured by deriving `spot_pitch` from `grid_side` at run time. Any hyper-parameter can be
-    overridden explicitly.
+    Any hyper-parameter below can be overridden explicitly (``None`` keeps the default, which
+    is calibrated to a real 10x Visium section). Legacy aliases are accepted: ``n_reads`` maps
+    onto ``mu_counts``, and a spot grid requested via ``n_spots_x`` / ``n_spots_y`` derives
+    ``spot_pitch`` from ``grid_side`` at run time. The number of spots (and cells per spot)
+    follows from ``grid_side`` (passed to ``run``) and the sampled ``cell_data``, so there is
+    no ``n_cells``.
+
+    Parameters
+    ----------
+    count_model : str, default "dm"
+        Final count-emission model: ``"dm"`` Dirichlet-multinomial (compositional per-spot
+        capture, the Visium default) or ``"nb"`` negative-binomial (independent per-gene).
+    batch_label : str, optional
+        Section/batch label; defaults to ``f"visium{seed}"``.
+    n_reads : float, optional
+        Legacy alias for ``mu_counts`` (mean per-spot library size).
+    spot_pitch : float, default 2.0
+        Spot centre-to-centre spacing (coordinate units); sets spot density / number of spots.
+        Overridden at run time if ``n_spots_x`` / ``n_spots_y`` are given.
+    spot_radius : float, default 1.0
+        Spot capture radius: cells within this distance of a spot centre are pooled into it
+        (~1-10 cells / spot).
+    mu_counts : float, default 20000.0
+        Mean per-spot library size (total UMIs / spot); ``ell_s ~ LogNormal(log mu_counts,
+        sigma_counts^2) × capture_field``.
+    sigma_counts : float, default 0.45
+        Per-spot library-size LogNormal sd (spot-to-spot depth variation).
+    field_lengthscale : float, default 18.0
+        Spatial autocorrelation length of the capture-efficiency field (the squared-exponential
+        GP length-scale, in coordinate units); larger -> smoother field -> higher Moran's I.
+    field_sigma : float, default 0.70
+        Capture-field strength (log-space sd of the smooth positive field); 0 -> flat field
+        (no spatial capture bias).
+    edge_sigma : float, default 0.30
+        Tissue-boundary capture falloff: the very edge of the section is reduced by this
+        fraction, the interior stays ~1. 0 disables; a value < 1 keeps efficiency positive.
+    diffusion_sigma : float, default 0.0
+        Lateral mRNA-bleed Gaussian kernel sd, spreading each spot's expression into its
+        neighbours before counting; 0 disables (no bleed).
+    sigma_batch : float, default 0.10
+        Per-gene batch-factor LogNormal sd, shared across spots (Splatter ``batch.facScale``).
+    ambient_frac : float, default 0.05
+        Fraction of each spot's library drawn as ambient "soup" contamination.
+    kappa : float, default 50.0
+        Dirichlet-multinomial concentration (only for ``count_model="dm"``); large -> ~
+        multinomial, small -> lumpy proportions.
+    nb_dispersion : float, default 0.30
+        Negative-binomial overdispersion phi (``var = mu + phi*mu^2``; only for
+        ``count_model="nb"``).
+    n_spots_x : int, optional
+        Legacy alias: request a fixed spot-grid width. When both ``n_spots_x`` and
+        ``n_spots_y`` are set, the pitch is derived as ``grid_side / max(n_spots_x, n_spots_y)``
+        at run time instead of using ``spot_pitch``.
+    n_spots_y : int, optional
+        Legacy alias: request a fixed spot-grid height (see ``n_spots_x``).
+    seed : int, default 42
+        RNG seed. Fixes the technical signature (per-gene batch factor, spatial capture field,
+        per-spot depth) and is reproducible.
     """
 
     def __init__(self, count_model="dm", batch_label=None, n_reads=None,
