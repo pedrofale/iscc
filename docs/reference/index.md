@@ -6,12 +6,15 @@ as `import iscc`; see the [Overview](../overview.md) for how the stages connect.
 
 ## Tumor
 
-Grow a spatially-structured, selection-driven tumor.
+Grow a selection-driven tumor on a grid of **demes** — small tissue patches, each holding up to a
+carrying capacity of cells. Both engines are spatially explicit at the deme level and simulate the
+same process (birth, death, mutation, and dispersal under a CINner fitness model); they differ only
+in how the cell population is represented.
 
 | | |
 |---|---|
-| [`iscc.tumor.GenotypeTumor`](GenotypeTumor.md) | Fast genotype-level (count-based) engine — the default. |
-| [`iscc.tumor.GlandularTumor`](GlandularTumor.md) | Cell-level engine with explicit glandular structure. |
+| [`iscc.tumor.GenotypeTumor`](GenotypeTumor.md) | Represents each deme as genotype **counts**. Fast and scalable — the default. |
+| [`iscc.tumor.GlandularTumor`](GlandularTumor.md) | Represents each cell as its own **object**. Exact, but does not scale to large tumors. |
 
 ## Treatment
 
@@ -51,3 +54,5 @@ Fit `iscc`'s parameters to real data.
 | | |
 |---|---|
 | [`iscc.inference.ABC`](ABC.md) | Approximate Bayesian computation over evolutionary rates. |
+| [`iscc.inference.Prior`](Prior.md) | Product prior over the named parameters to infer. |
+| [`iscc.inference.Posterior`](Posterior.md) | Result of an ABC run — samples and point estimates. |

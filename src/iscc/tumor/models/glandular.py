@@ -59,7 +59,7 @@ class GlandularTumor(Tumor):
     The reference implementation of the iscc growth process: every cell is an explicit
     ``Cell`` object, so it is the most faithful model (and the ground truth the count
     engine is validated against), but it does not scale to large tumours — prefer
-    ``GenotypeTumor`` for anything big. Cells live in demes on a square grid; with
+    [`GenotypeTumor`][iscc.tumor.GenotypeTumor] for anything big. Cells live in demes on a square grid; with
     ``structure_radius > 0`` the founder is seeded inside a ring-shaped gland and
     spreads outward, otherwise it starts as a micro-lesion in the centre deme.
 
@@ -83,7 +83,7 @@ class GlandularTumor(Tumor):
         YAML config defining ``genome_params``, ``selection_params``, ``deme_params``,
         ``spatial_params`` and ``cell_params``; overrides the individual blocks.
     genome_params, selection_params, deme_params, cancer_cell_params, epithelial_cell_params, stromal_cell_params, immune_cell_params : dict, optional
-        The same nested parameter blocks as ``GenotypeTumor``, forwarded to the
+        The same nested parameter blocks as [`GenotypeTumor`][iscc.tumor.GenotypeTumor], forwarded to the
         ``Tumor`` base (see the parameter documentation).
     seed : int, optional
         EVOLUTION seed (default 42), driving the per-run dynamics and spatial seeding.
@@ -232,6 +232,17 @@ class GlandularTumor(Tumor):
 
 
     def write(self, output_path):
+        """Write the tumour to ``output_path``, adding the spatial layout to the base output.
+
+        Extends the base ``Tumor.write`` with the per-deme spatial files: the
+        most-frequent-genotype grid (``grid.csv``) and the per-deme genotype counts
+        (``genotype_counts_demes.csv``).
+
+        Parameters
+        ----------
+        output_path : str or pathlib.Path
+            Directory to create and write into.
+        """
         super().write(output_path)
 
         # if tumor is spatial, write spatial info
@@ -257,6 +268,33 @@ class GlandularTumor(Tumor):
         figsize=(10, 10),
         dpi=100,
     ):
+        """Plot the deme grid, colouring each deme by one or more per-cell attributes.
+
+        Rebuilds the per-cell data if stale, then draws one panel per entry in ``color``.
+        ``"cell_type"`` shades each deme by its dominant genotype / cell type with a legend;
+        an evolutionary-parameter name, or a ``snv_`` / ``cnv_`` / ``exp_`` + gene key, shades
+        by the per-deme mean value with a colorbar.
+
+        Parameters
+        ----------
+        color : list of str, optional
+            Attribute keys to plot (default ``["cell_type"]``).
+        cmap : str, optional
+            Matplotlib colormap for the scalar (non ``cell_type``) panels (default ``"viridis"``).
+        expand_demes : bool, optional
+            Unused placeholder (default ``False``).
+        ax : matplotlib.axes.Axes, optional
+            Axes to draw into; a new figure is created when ``None``.
+        figsize : tuple, optional
+            Figure size when a new figure is created (default ``(10, 10)``).
+        dpi : int, optional
+            Figure resolution when a new figure is created (default 100).
+
+        Returns
+        -------
+        matplotlib.axes.Axes
+            The axes drawn into.
+        """
         if self.cell_data is None:
             self.make_cell_data()
         else:

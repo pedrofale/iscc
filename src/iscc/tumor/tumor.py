@@ -112,6 +112,19 @@ class Tumor(object):
             self.celltype_exps[celltype] = exp
 
     def get_genotype_frequencies(self, normalize=True):
+        """Frequencies of the cancer genotypes (normal cell types excluded).
+
+        Parameters
+        ----------
+        normalize : bool, optional
+            If ``True`` (default) the counts are divided by their sum to give proportions;
+            otherwise raw cell counts are returned.
+
+        Returns
+        -------
+        tuple of (list, numpy.ndarray)
+            An (unused) ``snvs`` list and the array of per-genotype frequencies.
+        """
         # Get unique genotypes and their frequencies
         genotypes = list(self.genotypes_counts.keys())
         snvs = []
@@ -180,6 +193,7 @@ class Tumor(object):
         self.genotypes_parents[child_id] = parent_id
 
     def is_extinct(self):
+        """Whether the tumour has died out — ``True`` when the total deme event rate is zero."""
         return self.deme_rates.sum() == 0
 
     def update(self, treat=False, treatment=None, rng=None, batch_size=1):
@@ -199,6 +213,31 @@ class Tumor(object):
         # (register_birth/death/parent), so no full rebuild is needed here.
 
     def grow(self, n_steps=10, seed=42, treatment=None, batch_size=1, **kwargs):
+        """Advance the tumour by ``n_steps`` update steps and materialise the result.
+
+        Each step samples demes proportionally to their event rates and applies the
+        birth / death / mutation / dispersal process, appending a population snapshot to
+        ``self.traces``; treatment dosing is applied per step when a ``treatment`` is given.
+        Finally calls ``make_cell_data`` to build the per-cell ground truth.
+
+        Parameters
+        ----------
+        n_steps : int, optional
+            Number of update steps to run (default 10).
+        seed : int, optional
+            Evolution seed for this call (default 42); each step draws a fresh generator
+            from ``seed`` plus the elapsed step count.
+        treatment : Treatment, optional
+            A therapy whose dosing schedule and rate modifiers are applied each step;
+            ``None`` (default) grows the tumour untreated.
+        batch_size : int, optional
+            Number of demes updated per step (default 1).
+
+        Returns
+        -------
+        list
+            The per-step population snapshots recorded during this call.
+        """
         new_traces = [dict(genotypes_counts=deepcopy(self.genotypes_counts))]
 
         for local_step in tqdm(range(n_steps - 1)):
@@ -219,6 +258,7 @@ class Tumor(object):
         return deepcopy(self)
 
     def get_tumor_size(self):
+        """Total number of live cells across all genotypes (cancer and normal)."""
         return sum(self.genotypes_counts.values())
 
     def set_cell_exps(self):
@@ -312,6 +352,18 @@ class Tumor(object):
         return self.selection.get_gene_data(**kwargs)
 
     def write(self, output_path):
+        """Write the tumour to ``output_path`` in the canonical iscc layout.
+
+        Creates the directory and writes the population traces (``trace_counts.csv``,
+        ``parents.csv``, ``genotypes.csv``), the per-gene ``gene_data`` matrices and the
+        per-cell ``cell_data`` matrices, so the sampling and data-generation stages can
+        consume it.
+
+        Parameters
+        ----------
+        output_path : str or pathlib.Path
+            Directory to create and write into.
+        """
         # Make output directory
         Path(output_path).mkdir(parents=True, exist_ok=True)
 
@@ -377,6 +429,24 @@ class Tumor(object):
         return color_list, final_order
 
     def plot_muller(self, ax=None, colormap='gnuplot', normalize=True, smoothing_std=0.1, show_axes=True):
+        """Render a Muller plot of the clonal dynamics (cancer genotype frequencies over steps).
+
+        Stacks each cancer genotype's abundance through the recorded traces, nested by
+        ancestry; normal cell types are excluded.
+
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes, optional
+            Axes to draw into; a new figure is created when ``None``.
+        colormap : str, optional
+            Matplotlib colormap name for the clones (default ``'gnuplot'``).
+        normalize : bool, optional
+            Plot frequencies (``True``, default) or absolute cell counts (``False``).
+        smoothing_std : float, optional
+            Standard deviation of the band smoothing (default 0.1).
+        show_axes : bool, optional
+            Draw axis labels (``True``, default) or hide the axes (``False``).
+        """
         # Prepare plot data
         # Keep only cancer cell statistics
         genotype_counts = pd.DataFrame([t["genotypes_counts"] for t in self.traces]).fillna(0)

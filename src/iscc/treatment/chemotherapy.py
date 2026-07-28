@@ -8,8 +8,8 @@ class Chemotherapy(Treatment):
     ``toxicity``). A treated cell's death rate is multiplied by
     ``rate_multiplier ** (1 - treatment_resistance)``, so resistant clones
     (``treatment_resistance`` → 1) escape while sensitive clones regress. Pass an
-    instance to ``GenotypeTumor.grow(..., treatment=chemo)``; resistance is meant to
-    **emerge** under this pressure rather than be pre-seeded.
+    instance to [`GenotypeTumor`][iscc.tumor.GenotypeTumor]`.grow(..., treatment=chemo)`;
+    resistance is meant to **emerge** under this pressure rather than be pre-seeded.
 
     Parameters
     ----------
