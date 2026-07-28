@@ -78,9 +78,10 @@ class GenotypeTumor:
         Per-deme demography — ``initial_cancer_cells``, ``carrying_capacity``,
         ``maximum_death_rate`` and the density-dependent crowding law.
     spatial_params : dict, optional
-        Grid and tissue geometry — ``grid_size``, ``dispersal_rate``,
-        ``structure_radius`` / ``n_structures`` (glandular substrate), and the optional
-        compartment-selection hazards (``epithelial_barrier``, ``stromal_hazard``).
+        Grid and tissue geometry, given as keys of this dict (not as individual
+        constructor arguments): ``grid_size``, ``dispersal_rate``, ``structure_radius`` /
+        ``n_structures`` (glandular substrate), and the optional compartment-selection
+        hazards (``epithelial_barrier``, ``stromal_hazard``).
     epithelial_cell_params, stromal_cell_params, immune_cell_params, host_cell_params : dict, optional
         Seeding parameters for each non-cancer (static) cell type — the tissue
         structure, cell-type labels and local immune density that the cancer death

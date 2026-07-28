@@ -343,6 +343,21 @@ def _expanded_cell_grid(cell_data, grid_size, traces, genotypes_parents, section
     return img, s, type_cmap
 
 
+def _cancer_colorbar(ax, colors, label="cancer"):
+    """Discrete colorbar of the per-clone cancer colours actually drawn — one swatch per
+    genotype, in colormap order — shown in place of a per-clone legend when cancer cells or
+    demes are coloured by genotype from a colormap."""
+    from matplotlib.colors import ListedColormap, BoundaryNorm
+    n = len(colors)
+    sm = plt.cm.ScalarMappable(cmap=ListedColormap(list(colors)),
+                               norm=BoundaryNorm(np.arange(n + 1), n))
+    sm.set_array([])
+    cbar = plt.colorbar(sm, ax=ax, fraction=0.046, pad=0.04, ticks=[])
+    cbar.set_label(label)
+    cbar.outline.set_visible(False)
+    return cbar
+
+
 def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap="viridis",
               ax=None, figsize=(10, 10), dpi=100, expand_demes=False, section_frac=1.0, expand_seed=0,
               cancer_color="#d62728", type_cmap=None, empty_color=None):
@@ -364,12 +379,20 @@ def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap=
             present = set(cell_data["cell_type"]["cell_id"].values)
             legend_patches = [mpatches.Patch(color=type_cmap[n], label=n)
                               for n in normal_names if n in present and n in type_cmap]
-            n_clones = sum(1 for g in present if g not in normal_names)
-            if n_clones:
-                lbl = "cancer" if cancer_color is not None else f"cancer ({n_clones} clones, by colour)"
-                legend_patches.append(mpatches.Patch(
-                    color=cancer_color if cancer_color is not None else (0.84, 0.15, 0.16), label=lbl))
-            ax.legend(handles=legend_patches, loc="upper right", fontsize=7, framealpha=0.8)
+            cancer_present = [g for g in type_cmap if g not in normal_names and g in present]
+            if cancer_color is not None:
+                # single-colour cancer view -> one legend entry
+                if cancer_present:
+                    legend_patches.append(mpatches.Patch(color=cancer_color, label="cancer"))
+                if legend_patches:
+                    ax.legend(handles=legend_patches, loc="upper right", fontsize=7, framealpha=0.8)
+            else:
+                # per-clone colours -> normals in the legend, cancer clones in a discrete colorbar
+                if legend_patches:
+                    ax.legend(handles=legend_patches, loc="upper right", fontsize=7, framealpha=0.8)
+                cancer_colors = [type_cmap[g] for g in cancer_present if g in type_cmap]
+                if cancer_colors:
+                    _cancer_colorbar(ax, cancer_colors)
             ax.set_title("cell_type (cells)")
             ax.set_xticks([]); ax.set_yticks([])
             continue
@@ -380,16 +403,22 @@ def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap=
             deme_data = base.groupby(["deme_id"]).agg(lambda x: x.mode().iloc[0])
             grid = np.ones((grid_size, grid_size, 4))
             legend_patches = []
+            cancer_colors = []  # per-clone cancer colours drawn, in colormap order
             for genotype, col in type_cmap.items():
                 mask = deme_data["val"] == genotype
                 rows = deme_data.loc[mask, "row"].astype(int).values
                 cols = deme_data.loc[mask, "col"].astype(int).values
                 if len(rows) > 0:
                     grid[rows, cols] = col
-                    label = genotype if genotype in normal_names else f"cancer ({str(genotype)[:6]}…)"
-                    legend_patches.append(mpatches.Patch(color=col, label=label))
+                    if genotype in normal_names:
+                        legend_patches.append(mpatches.Patch(color=col, label=genotype))
+                    else:
+                        cancer_colors.append(col)
             ax.imshow(grid)
-            ax.legend(handles=legend_patches, loc="upper right", fontsize=7, framealpha=0.8)
+            if legend_patches:
+                ax.legend(handles=legend_patches, loc="upper right", fontsize=7, framealpha=0.8)
+            if cancer_colors:
+                _cancer_colorbar(ax, cancer_colors)
         elif color_key == "cancer_frac":
             # per-deme fraction of cells that are cancer (minority cancer is invisible under the
             # mode-based cell_type view, so this exposes early multi-focal / intraductal spread).
