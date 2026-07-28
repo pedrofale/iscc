@@ -1,10 +1,10 @@
-"""Mutation-aware scRNA read/count emission (DESIGN_features §C, F7b).
+"""Mutation-aware scRNA read/count emission.
 
 Real scRNA reads carry a cell's *expressed* somatic mutations, so iscc can show that **SNV
 calling from scRNA is intrinsically hard**. This adapter reuses the shared `variants.inject`
-seam (total-preserving) and the F3 expression count matrix, under two hard constraints:
+seam (total-preserving) and the expression count matrix, under two hard constraints:
 
-  1. **UMI totals are conserved.** scRNA reads are DRIVEN by the F3 expression count matrix — we
+  1. **UMI totals are conserved.** scRNA reads are DRIVEN by the expression count matrix — we
      do NOT invent coverage. For each cell-gene the UMI total is fixed by the matrix; this layer
      only adds SEQUENCE CONTENT, splitting those UMIs into alt-carrying vs ref-carrying. So
      `alt + ref == expression count`, always, and an unexpressed gene (0 UMIs) is uncallable.
@@ -197,13 +197,13 @@ def emit_visium_reads(cell_data, grid_side=None, obs_fidelity=0.5, error_rate=0.
                       cell_subset=None, emit_fastq=False, read_length=90, transcriptome=None,
                       outdir="visium_reads_out", count_model="dm", genome_seed=20240601,
                       **visium_kwargs):
-    """End-to-end mutation-aware Visium reads (F6 reads, reuses F7b): spot counts -> alt/ref UMIs.
+    """End-to-end mutation-aware Visium reads: spot counts -> alt/ref UMIs.
 
-    Visium reads ARE scRNA reads barcoded by SPOT instead of cell, so this reuses the F7b seam
-    unchanged on the spot x gene axis (`observed_allele_counts` / `write_scrna_fastq` /
+    Visium reads ARE scRNA reads barcoded by SPOT instead of cell, so this reuses the scRNA
+    read/count seam unchanged on the spot x gene axis (`observed_allele_counts` / `write_scrna_fastq` /
     `SyntheticTranscriptome`) — the per-"cell" barcode index simply becomes the SPATIAL barcode.
 
-    Runs the F6 Visium assay to get the spot x gene expression count matrix (fixing UMI totals) and
+    Runs the Visium assay to get the spot x gene expression count matrix (fixing UMI totals) and
     the spot->cell membership it records, computes the NEW spot-level clone-mixture RNA-VAF (the
     expression-weighted mixture of member cells' `cell_rna_vaf`; see `spot_clone_mixture_vaf`), then
     splits each spot-gene's UMIs into alt/ref via `observed_allele_counts`. The SAME invariants as
@@ -292,9 +292,9 @@ def emit_scrna_reads(cell_data, obs_fidelity=0.5, protocol="10x", error_rate=0.0
                      seed=42, cell_subset=None, emit_fastq=False, read_length=90,
                      transcriptome=None, reference=None, template_bam=None,
                      outdir="scrna_reads_out", genome_seed=20240601, **scrna_kwargs):
-    """End-to-end mutation-aware scRNA: F3 counts -> observed alt/ref UMI matrices -> reads.
+    """End-to-end mutation-aware scRNA: counts -> observed alt/ref UMI matrices -> reads.
 
-    Runs the F3 scRNA assay to get the expression count matrix (fixing UMI totals), pulls the
+    Runs the scRNA assay to get the expression count matrix (fixing UMI totals), pulls the
     engine's `cell_rna_vaf`, and produces the count-level observed allele matrices via
     `observed_allele_counts`. Surfaces the true DNA-VAF (`cell_snv`) alongside, for the
     scDNA-vs-scRNA benchmark.

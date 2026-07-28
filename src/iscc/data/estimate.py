@@ -1,6 +1,6 @@
-"""Splatter-style `estimate()` for the scRNA assay (DESIGN_inference.md §B / milestone M2).
+"""Splatter-style `estimate()` for the scRNA assay.
 
-Fits the hyper-parameters of the DESIGN_features §B batch model (``BatchHyperParams`` in
+Fits the hyper-parameters of the batch model (``BatchHyperParams`` in
 ``batch.py``) from a real count matrix, so realistic technical magnitudes are *learned, not
 guessed*. The fitted ``BatchHyperParams`` (plus per-gene tables) drive ``scRNA`` /
 ``run_scrna_batches`` directly — same field names, no redefinition.
@@ -265,7 +265,7 @@ def _fit_batch_params(counts, labels):
 # Public entry point
 # --------------------------------------------------------------------------------------
 def estimate(adata, protocol="10x", batch_key=None, count_model="nb", fit_dropout=None):
-    """Fit ``BatchHyperParams`` from a real scRNA count matrix (Splatter-style; M2).
+    """Fit ``BatchHyperParams`` from a real scRNA count matrix (Splatter-style).
 
     Parameters
     ----------
