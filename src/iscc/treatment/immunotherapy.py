@@ -10,7 +10,7 @@ class Immunotherapy(Treatment):
     cells that are also treatment-resistant are stripped less), and the killing is done
     by the local immune density in the death-rate model. With no ``immune_checkpoints``
     given it acts on every cancer cell; otherwise only on cells expressing the listed
-    checkpoints. Pass an instance to ``GenotypeTumor.grow(..., treatment=it)``.
+    checkpoints. Pass an instance to [`GenotypeTumor`][iscc.tumor.GenotypeTumor]`.grow(..., treatment=it)`.
 
     Parameters
     ----------

@@ -83,6 +83,7 @@ plugins:
             show_root_full_path: true   # show the full call path, e.g. iscc.data.scDNA
             show_bases: true
             show_source: false
+            inherited_members: true   # e.g. GlandularTumor's API lives on the shared Tumor base
             merge_init_into_class: true
             docstring_section_style: table
             separate_signature: true
@@ -119,3 +120,5 @@ nav:
           - Visium: reference/Visium.md
       - Inference:
           - ABC: reference/ABC.md
+          - Prior: reference/Prior.md
+          - Posterior: reference/Posterior.md

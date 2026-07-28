@@ -39,10 +39,11 @@ CELLTYPES = ["cancer", "epithelial", "stromal", "immune"]
 class GenotypeTumor:
     """Genotype-level (count-based) tumour engine — the default, scalable iscc growth model.
 
-    Represents the population as **per-deme genotype counts** over a shared genotype
-    registry rather than one Python object per cell, so every birth / death / mutation /
-    dispersal event is O(1) integer arithmetic on counts. It realises the same
-    evolutionary process as the cell-level ``GlandularTumor`` (statistically equivalent,
+    The tumour grows on a grid of demes (lattice patches); each deme is represented as
+    **genotype counts** over a shared registry rather than one Python object per cell, so it
+    is spatially explicit at the deme level while every birth / death / mutation / dispersal
+    event is O(1) integer arithmetic on counts. It realises the same evolutionary process as
+    the cell-level [`GlandularTumor`][iscc.tumor.GlandularTumor] (statistically equivalent,
     roughly two orders of magnitude faster) and is the class most users should reach for.
     Typical flow: construct, call ``grow`` to run the dynamics, then read the per-cell
     ground truth off ``make_cell_data`` and quality-check it with ``diagnose``.
@@ -857,9 +858,11 @@ class GenotypeTumor:
 
     # --- simulation ----------------------------------------------------------
     def is_extinct(self):
+        """Whether the tumour has died out — ``True`` when the total deme event rate is zero."""
         return self.deme_rates.sum() == 0
 
     def get_tumor_size(self):
+        """Total number of live cells across all genotypes (cancer and normal)."""
         return int(sum(self.genotypes_counts.values()))
 
     def get_cancer_size(self):
@@ -1085,9 +1088,11 @@ class GenotypeTumor:
         seed : int, optional
             Evolution seed for this call; defaults to the tumour's construction ``seed``.
         treatment : Treatment, optional
-            A therapy (e.g. ``Chemotherapy``, ``TargetedTherapy``, ``Immunotherapy``,
-            ``Surgery``) whose dosing schedule and rate modifiers are applied each step;
-            ``None`` (default) grows the tumour untreated.
+            A therapy (e.g. [`Chemotherapy`][iscc.treatment.Chemotherapy],
+            [`TargetedTherapy`][iscc.treatment.TargetedTherapy],
+            [`Immunotherapy`][iscc.treatment.Immunotherapy],
+            [`Surgery`][iscc.treatment.Surgery]) whose dosing schedule and rate modifiers are
+            applied each step; ``None`` (default) grows the tumour untreated.
 
         Returns
         -------
@@ -1375,6 +1380,25 @@ class GenotypeTumor:
 
     # --- materialisation: counts -> per-cell matrices ------------------------
     def make_cell_data(self, cell_prefix="C", **kwargs):
+        """Expand the per-deme genotype counts into per-cell ground-truth tables.
+
+        Materialises one row per cell (each genotype's count becomes that many identical
+        cells) into ``self.cell_data`` — a dict of dataframes keyed by cell name:
+        evolutionary parameters, expression, SNV and CNV matrices, grid coordinates,
+        cell-type and deme labels, plus any optional layers that are enabled (compartment,
+        allele-resolved expression / RNA BAF, program activity). Called automatically at the
+        end of ``grow``.
+
+        Parameters
+        ----------
+        cell_prefix : str, optional
+            Prefix for the generated cell names (default ``"C"``).
+
+        Returns
+        -------
+        dict
+            ``self.cell_data`` — the per-cell dataframes.
+        """
         gene_names = self.selection.get_gene_names()
         onc_idx, tsg_idx = self.selection.get_oncogenes(), self.selection.get_tsgs()
         disp_idx, ir_idx, tr_idx = (self.selection.get_dispersal_genes(),
@@ -1590,9 +1614,12 @@ class GenotypeTumor:
 
     # --- plotting (shared, engine-agnostic) ----------------------------------
     def plot_muller(self, ax=None, by_drivers=False, **kwargs):
-        """Muller plot. ``by_drivers=True`` colours by distinct DRIVER-mutation combinations (Noble's
-        demon convention) instead of by genotype, collapsing passenger-only diversity; combine with
-        ``min_freq`` for a size threshold. See ``viz.plot_muller``."""
+        """Render a Muller plot of the clonal dynamics (clone frequencies over steps, nested by ancestry).
+
+        ``by_drivers=True`` colours by distinct DRIVER-mutation combinations (Noble's demon
+        convention) instead of by genotype, collapsing passenger-only diversity; combine with
+        ``min_freq`` for a size threshold. Additional keywords (``ax``, ``colormap``,
+        ``normalize``) select the target axes and control the styling."""
         from .. import viz
         driver_map = self._driver_signatures() if by_drivers else None
         return viz.plot_muller(self.traces, self.genotypes_parents, ax=ax,
@@ -1670,6 +1697,26 @@ class GenotypeTumor:
         return out, sorted(present)
 
     def plot_grid(self, color=None, ax=None, **kwargs):
+        """Plot the spatial deme grid, colouring each deme by a per-cell attribute.
+
+        Rebuilds the per-cell data if stale, then draws the grid coloured by ``color``
+        (default the dominant clone / cell type). When the metastatic compartment is enabled
+        and no explicit ``ax`` is passed, both the primary and met grids are drawn side by
+        side with a shared clone colormap.
+
+        Parameters
+        ----------
+        color : str or list of str, optional
+            Attribute key(s) to colour by; defaults to the dominant clone / cell type.
+        ax : matplotlib.axes.Axes, optional
+            Axes to draw into; forces the single-panel primary view. A new figure is created
+            when ``None``.
+
+        Returns
+        -------
+        matplotlib.axes.Axes
+            The axes drawn into.
+        """
         from .. import viz
         if self.cell_data is None or self.cell_data["cell_type"].shape[0] != self.get_tumor_size():
             self.make_cell_data()
@@ -1746,6 +1793,19 @@ class GenotypeTumor:
                                    ax=ax, **kwargs)
 
     def get_genotype_frequencies(self, normalize=True):
+        """Cancer-genotype ids and their frequencies (normal cell types excluded).
+
+        Parameters
+        ----------
+        normalize : bool, optional
+            If ``True`` (default) the counts are divided by their sum to give proportions;
+            otherwise raw cell counts are returned.
+
+        Returns
+        -------
+        tuple of (list, numpy.ndarray)
+            The cancer-genotype ids and their matching counts / frequencies.
+        """
         gids = [g for g in self.genotypes_counts if g not in normal_names]
         counts = np.array([self.genotypes_counts[g] for g in gids], dtype=float)
         if normalize and counts.sum() > 0:

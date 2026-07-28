@@ -3,11 +3,11 @@ from .treatment import Treatment
 class TargetedTherapy(Treatment):
     """Targeted therapy: kills only cancer cells that express a given set of target sites.
 
-    Like ``Chemotherapy`` it raises the death rate of sensitive cells (by
-    ``rate_multiplier ** (1 - treatment_resistance)``), but a cell is a target only if it
-    expresses the therapy's ``targets`` (mutated driver sites), modelling a
+    Like [`Chemotherapy`][iscc.treatment.Chemotherapy] it raises the death rate of sensitive
+    cells (by ``rate_multiplier ** (1 - treatment_resistance)``), but a cell is a target only
+    if it expresses the therapy's ``targets`` (mutated driver sites), modelling a
     biomarker-selected agent. Resistant clones escape and are selected for. Pass an
-    instance to ``GenotypeTumor.grow(..., treatment=tt)``.
+    instance to [`GenotypeTumor`][iscc.tumor.GenotypeTumor]`.grow(..., treatment=tt)`.
 
     Parameters
     ----------

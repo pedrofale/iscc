@@ -157,17 +157,18 @@ class ABC:
     """Approximate Bayesian Computation engine for fitting model parameters.
 
     Model-agnostic and dependency-light (numpy + scikit-learn + scipy — no JAX, no R).
-    Given a ``Prior`` and a ``simulate(theta) -> summary_vector`` callback, it builds a
-    reference table, keeps the ``accept_frac`` closest draws to the observed summary, and
-    returns a ``Posterior`` — with optional Beaumont et al. (2002) local-linear regression
-    adjustment and a Random-Forest point estimate (the Python analogue of CINner's
-    ABC-rf). For the tumour model, ``inference.tumor`` wires up the ``simulate`` callback.
+    Given a [`Prior`][iscc.inference.Prior] and a ``simulate(theta) -> summary_vector``
+    callback, it builds a reference table, keeps the ``accept_frac`` closest draws to the
+    observed summary, and returns a [`Posterior`][iscc.inference.Posterior] — with optional
+    Beaumont et al. (2002) local-linear regression adjustment and a Random-Forest point
+    estimate (the Python analogue of CINner's ABC-rf). The ``simulate`` callback is supplied
+    by the caller (for the tumour model, the ``iscc.inference`` package wires one up).
     Call ``run`` with the observed summary vector to obtain the posterior.
 
     Parameters
     ----------
     prior : Prior
-        Product prior over the named parameters to infer (see ``Prior``).
+        Product prior over the named parameters to infer (see [`Prior`][iscc.inference.Prior]).
     simulate : callable
         ``dict(name -> value) -> summary vector``; a single forward simulation of the model.
     n_workers : int, optional
@@ -193,7 +194,7 @@ class ABC:
 
     def run(self, observed, n_samples=1000, accept_frac=0.1, adjust=True,
             rf=True, project="rf", reference=None):
-        """Run ABC against ``observed`` -> :class:`Posterior`.
+        """Run ABC against ``observed`` -> [`Posterior`][iscc.inference.Posterior].
 
         ``reference`` optionally reuses a precomputed ``(theta, summaries)`` table (so the same
         sims can serve several observations). ``accept_frac`` sets the rejection tolerance.
