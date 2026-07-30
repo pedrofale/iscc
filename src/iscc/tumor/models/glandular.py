@@ -79,17 +79,10 @@ class GlandularTumor(Tumor):
     grid_size : int, optional
         Side length of the square deme grid (default 10). Read from
         ``spatial_params.grid_size`` under a ``config``.
-    config : str or pathlib.Path, optional
-        YAML config defining ``genome_params``, ``selection_params``, ``deme_params``,
-        ``spatial_params`` and ``cell_params``; overrides the individual blocks.
-    genome_params, selection_params, deme_params, cancer_cell_params, epithelial_cell_params, stromal_cell_params, immune_cell_params : dict, optional
-        The same nested parameter blocks as [`GenotypeTumor`][iscc.tumor.GenotypeTumor], forwarded to the
-        ``Tumor`` base (see the parameter documentation).
-    seed : int, optional
-        EVOLUTION seed (default 42), driving the per-run dynamics and spatial seeding.
-    layout_seed : int, optional
-        GENOME-LAYOUT seed, shared across runs of the same config so a cohort is
-        comparable by construction (defaults to the fixed ``DEFAULT_LAYOUT_SEED``).
+    **tumor_kwargs
+        Forwarded to the [`Tumor`][iscc.tumor.Tumor] base. See [`Tumor`][iscc.tumor.Tumor]
+        for the shared ``genome_params`` / ``selection_params`` / ``deme_params`` /
+        cell-type blocks (as well as ``config``, ``seed`` and ``layout_seed``).
     """
 
     def __init__(self, n_structures=1, structure_radius=0, grid_size=10, **tumor_kwargs):

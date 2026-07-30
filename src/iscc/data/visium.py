@@ -132,7 +132,7 @@ class Visium(Assay):
                  field_lengthscale=None, field_sigma=None, edge_sigma=None,
                  diffusion_sigma=None, sigma_batch=None, ambient_frac=None,
                  kappa=None, nb_dispersion=None,
-                 n_spots_x=None, n_spots_y=None, seed=42, **assay_kwargs):
+                 n_spots_x=None, n_spots_y=None, seed=42):
         super(Visium, self).__init__(seed=seed, protocol="visium")
         if count_model not in COUNT_MODELS:
             raise ValueError(f"unknown count_model {count_model!r}; choose {sorted(COUNT_MODELS)}")

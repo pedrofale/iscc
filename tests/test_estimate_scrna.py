@@ -1,7 +1,7 @@
 """Tests for the scRNA `estimate_rna()` (DESIGN_inference §B / milestone M2).
 
 Two pillars (cf. the PLOS Comp Bio bar, DESIGN_inference "Why this exists"):
-  * **Estimation recovery** — simulate with known ``BatchHyperParams`` -> estimate_rna -> recover
+  * **Estimation recovery** — simulate with known ``RNABatchHyperParams`` -> estimate_rna -> recover
     them within tolerance (no external data; the key methods-paper validation).
   * **Runs on realistic data** — estimate_rna on a realistic single-batch AnnData returns valid,
     plausible params.
@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from iscc.data import run_scrna_batches, concat_batches, estimate_rna, scRNA, BatchHyperParams
+from iscc.data import run_scrna_batches, concat_batches, estimate_rna, scRNA, RNABatchHyperParams
 
 
 # --------------------------------------------------------------------------------------

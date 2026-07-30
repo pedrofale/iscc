@@ -18,6 +18,48 @@ import pymuller
 from collections import Counter
 
 class Tumor(object):
+    """Shared base for the cell-level and count-based tumour engines; holds the common
+    construction parameters.
+
+    Both [`GlandularTumor`][iscc.tumor.GlandularTumor] (cell-level) and
+    [`GenotypeTumor`][iscc.tumor.GenotypeTumor] (count-based) share the construction
+    parameters below — a single ``config`` YAML path, or the individual nested-dict
+    parameter blocks — and forward them here.
+
+    Parameters
+    ----------
+    config : str or pathlib.Path, optional
+        Path to a YAML config that defines the parameter blocks below (keys
+        ``genome_params``, ``selection_params``, ``deme_params``, ``cell_params`` and,
+        for spatial engines, ``spatial_params``). When given it **overrides** the
+        individual arguments; this is the recommended entry point.
+    genome_params : dict, optional
+        Genome geometry — ``n_segments`` × ``segment_size`` set the gene count
+        (default 5 × 200 = 1000 genes).
+    selection_params : dict, optional
+        The CINner fitness model — driver / dispersal / resistance proportions and
+        effect sizes, viability limits, and the optional ``epistasis_params`` /
+        ``dependency_params`` network layers.
+    deme_params : dict, optional
+        Per-deme demography — ``initial_cancer_cells``, ``carrying_capacity``,
+        ``maximum_death_rate`` and the density-dependent crowding law.
+    cancer_cell_params : dict, optional
+        Cancer-cell dynamics — ``division_rate``, ``death_rate``, ``mutation_rate``,
+        ``n_snvs_per_allele``, ``snv_prob`` / ``cnv_prob``, ``amp_prob``, ``wgd_rate``.
+    epithelial_cell_params, stromal_cell_params, immune_cell_params : dict, optional
+        Seeding parameters for each non-cancer (static) cell type — the tissue
+        structure, cell-type labels and local immune density that the cancer death
+        rate reads.
+    seed : int, optional
+        EVOLUTION seed (default 42): drives the per-run stochastic dynamics and the
+        spatial seeding. Two runs differing only in ``seed`` are two patients with the
+        same genome landscape but different evolution.
+    layout_seed : int, optional
+        GENOME-LAYOUT seed (config-determined, shared across runs of the same config):
+        fixes driver identities and baseline expression so a cohort is comparable by
+        construction. Defaults to the fixed ``DEFAULT_LAYOUT_SEED``.
+    """
+
     def __init__(self, config=None, genome_params=dict(), cancer_cell_params=dict(), epithelial_cell_params=dict(), stromal_cell_params=dict(), immune_cell_params=dict(), deme_params=dict(), selection_params=dict(), seed=42, layout_seed=None):
         self.config = None
         # Two decoupled seeds (DESIGN_cohort.md §1). ``seed`` (EVOLUTION) drives the per-run

@@ -142,8 +142,50 @@ class DNA(Assay):
     the shared depth + allele layers. Subclasses set the amplification regime via
     `mode_defaults` (large-kappa Binomial for bulk; small-kappa Beta-Binomial + ADO for sc).
 
-    Legacy aliases are accepted: ``n_reads`` (the total read budget), ``target_genes``,
-    ``data_mode``, and ``fpr`` (maps to ``error_rate``); ``fnr`` is accepted but unused.
+    The canonical home for the shared constructor parameters below: both
+    [`bulkDNA`][iscc.data.bulkDNA] and [`scDNA`][iscc.data.scDNA] forward them here.
+
+    Parameters
+    ----------
+    breadth : str, default "wgs"
+        Capture breadth, one of ``"wgs"`` / ``"wes"`` / ``"panel"``. Sets the observed-locus
+        set, the depth regime (mean per-locus coverage: wgs ~30x / wes ~120x / panel ~1500x;
+        single-cell scales this down), and the dominant capture bias (wgs GC; wes per-target;
+        panel per-amplicon).
+    target_genes : {"all"} or list or float, default "all"
+        Overrides the breadth's default locus set. A list/array selects exactly those loci; a
+        float in (0, 1] a random fraction of loci; ``"all"`` defers to the breadth regime
+        (wgs = all loci, wes ~30%, panel = 30 drivers). Seeded, so stable across batches.
+    data_mode : str, default "counts"
+        Output mode. ``"counts"`` emits count-level results (coverage / alt-count / VAF /
+        log2 ratio); ``"binary"`` additionally produces a post-ADO genotype call (single-cell
+        only — bulk emits counts regardless).
+    depth_model : str, default "dm"
+        Per-locus depth-emission model: ``"dm"`` Dirichlet-multinomial (compositional, fixed
+        budget — high-CN segments steal reads from the rest) or ``"nb"`` independent
+        negative-binomial per locus (HMMcopy/CNVkit-style, no fixed-total coupling).
+    n_reads : int, optional
+        Total read budget. Bulk uses it for the pooled library (default ``None`` -> derived
+        as ``mu_depth × n_loci``); single-cell ignores it (each cell's budget is set from
+        ``mu_depth × n_loci``).
+    seed : int, default 42
+        RNG seed. Fixes the technical signature (GC->coverage curve, capture efficiency,
+        per-batch depth shift, error rates, and — single-cell — ADO / doublets) and the
+        cell/locus selection.
+    batch_label : str, optional
+        Batch/library/chip label; defaults to ``f"dnabatch{seed}"``.
+    fpr : float, optional
+        Legacy alias mapped to ``error_rate`` (per-base sequencing error) when ``error_rate``
+        is not otherwise supplied.
+    fnr : float, optional
+        Legacy parameter; accepted for signature parity but unused by the current model.
+    **hyper_overrides : float, optional
+        Any [`DNABatchHyperParams`][iscc.data.DNABatchHyperParams] field may be overridden
+        explicitly (e.g. ``mu_depth``, ``kappa``, ``ado_rate``, ``beta_binom_conc``,
+        ``doublet_rate``, ``gc_curve_sigma``, ``capture_sigma``, ``nb_dispersion``,
+        ``error_rate``, ``depth_batch_sigma``, ``ffpe_ct_rate``). The breadth preset and the
+        modality's ``mode_defaults`` set the starting values; see the subclasses for the
+        bulk / single-cell defaults.
     """
 
     mode = "bulk"
@@ -255,54 +297,12 @@ class bulkDNA(DNA):
     reduce the coverage of others (the DM coupling). The pooled true alt fraction is the
     copy-number-weighted mean of the per-cell VAFs.
 
-    Takes no constructor parameters of its own: it accepts the shared DNA parameters below and
-    pools every sampled cell (there is no ``n_cells``). Legacy aliases are accepted (``fpr`` ->
-    ``error_rate``; ``n_reads`` = total read budget; ``fnr`` is unused).
+    Takes no constructor parameters of its own: it pools every sampled cell (there is no
+    ``n_cells``). The bulk ``mode_defaults`` set a large-kappa amplification regime
+    (``kappa=2000`` ≈ un-amplified multinomial/Poisson) and leave the single-cell allele
+    knobs inert (``ado_rate=0``, ``doublet_rate=0``).
 
-    Parameters
-    ----------
-    breadth : str, default "wgs"
-        Capture breadth, one of ``"wgs"`` / ``"wes"`` / ``"panel"``. Sets the observed-locus
-        set, the depth regime (mean per-locus coverage: wgs ~30x / wes ~120x / panel ~1500x),
-        and the dominant capture bias (wgs GC; wes per-target; panel per-amplicon).
-    target_genes : {"all"} or list or float, default "all"
-        Overrides the breadth's default locus set. A list/array selects exactly those loci; a
-        float in (0, 1] a random fraction of loci; ``"all"`` defers to the breadth regime
-        (wgs = all loci, wes ~30%, panel = 30 drivers). Seeded, so stable across batches.
-    data_mode : str, default "counts"
-        Output mode. Bulk emits count-level results only (coverage / alt-count / VAF /
-        log2 ratio); accepted for signature parity, but only ``"counts"`` is meaningful here
-        (the ``"binary"`` genotype-call path is single-cell).
-    depth_model : str, default "dm"
-        Per-locus depth-emission model: ``"dm"`` Dirichlet-multinomial (compositional, fixed
-        budget — high-CN segments steal reads from the rest) or ``"nb"`` independent
-        negative-binomial per locus (HMMcopy/CNVkit-style, no fixed-total coupling).
-    n_reads : int, optional
-        Total read budget for the pooled bulk library. Default None -> derived as
-        ``mu_depth × n_loci``.
-    seed : int, default 42
-        RNG seed. Fixes the technical signature (GC->coverage curve, capture efficiency,
-        per-batch depth shift, error rates) and the locus selection.
-    batch_label : str, optional
-        Batch/library label; defaults to ``f"dnabatch{seed}"``.
-    fpr : float, optional
-        Legacy alias mapped to ``error_rate`` (per-base sequencing error) when ``error_rate``
-        is not otherwise supplied.
-    fnr : float, optional
-        Legacy parameter; accepted for signature parity but unused by the current model.
-    **hyper_overrides : float, optional
-        Any ``DNABatchHyperParams`` field may be overridden explicitly. The main knobs (bulk
-        defaults): ``mu_depth`` mean per-locus coverage (breadth-set: wgs 30 / wes 120 /
-        panel 1500); ``kappa`` DM concentration = amplification regime (2000, large ≈
-        un-amplified multinomial/Poisson); ``nb_dispersion`` NB per-bin overdispersion phi
-        (0.1; ``depth_model="nb"`` only); ``gc_curve_sigma`` per-batch GC->coverage bias
-        strength (breadth-set: wgs 0.20 / wes 0.12 / panel 0.05); ``capture_sigma`` per-target
-        (WES) / per-amplicon (panel) efficiency LogNormal sd (breadth-set: wgs 0.0 / wes 0.30 /
-        panel 0.45); ``error_rate`` per-base sequencing error (0.001); ``depth_batch_sigma``
-        per-batch depth-shift LogNormal sd (0.05); ``ffpe_ct_rate`` extra FFPE C>T deamination
-        error at C-sites (0.0); ``mappability_sigma`` unused placeholder (0.10). The
-        single-cell-only allele knobs (``ado_rate``, ``beta_binom_conc``, ``doublet_rate``)
-        default to inert bulk values (0.0 / 200.0 / 0.0).
+    See [`DNA`][iscc.data.DNA] for the constructor parameters.
     """
 
     mode = "bulk"
@@ -422,59 +422,18 @@ class scDNA(DNA):
     Each cell gets its own DM draw (the per-cell amplification profile, the dominant
     single-cell noise) on weights ∝ that cell's copy number. ADO (one allele lost at a het
     locus) is a separate Bernoulli layer — the dominant single-cell allele artifact — applied
-    before the Beta-Binomial alt-count draw.
-
-    Adds ``n_cells`` and forwards the remaining (shared DNA) parameters below. Legacy aliases
-    are accepted (``fpr`` -> ``error_rate``; ``fnr`` is unused).
+    before the Beta-Binomial alt-count draw. The single-cell ``mode_defaults`` set a small-kappa
+    amplification regime (``kappa=5`` lumpy MDA/MALBAC) plus ``ado_rate=0.20``,
+    ``beta_binom_conc=30``, ``doublet_rate=0.02``, and coverage is scaled ~0.3x the bulk depth.
 
     Parameters
     ----------
     n_cells : int, default 100
         Number of cells to sample and assay, capped at the number available. Ignored when
         ``cell_subset`` is passed to ``run``.
-    breadth : str, default "wgs"
-        Capture breadth, one of ``"wgs"`` / ``"wes"`` / ``"panel"``: observed-locus set +
-        depth regime + dominant capture bias (see ``bulkDNA``). Single-cell coverage is ~0.3x
-        the bulk depth for the same breadth.
-    target_genes : {"all"} or list or float, default "all"
-        Overrides the breadth's default locus set: a list/array selects those loci, a float in
-        (0, 1] a random fraction, ``"all"`` defers to the breadth regime. Seeded (stable across
-        batches).
-    data_mode : str, default "counts"
-        Output mode. ``"counts"`` emits coverage / alt-count / VAF per cell and locus;
-        ``"binary"`` additionally produces a post-ADO genotype call (flipped at the per-locus
-        ``error_rate``) in ``observed_snvs``.
-    depth_model : str, default "dm"
-        Per-cell depth-emission model: ``"dm"`` Dirichlet-multinomial (compositional, fixed
-        per-cell budget) or ``"nb"`` independent negative-binomial per locus.
-    n_reads : int, optional
-        Legacy read-budget knob; unused by single-cell (each cell's budget is set from
-        ``mu_depth × n_loci``).
-    seed : int, default 42
-        RNG seed. Fixes the technical signature (GC curve, capture efficiency, depth shift,
-        error, ADO, doublets) and the cell/locus selection.
-    batch_label : str, optional
-        Batch/chip label; defaults to ``f"dnabatch{seed}"``.
-    fpr : float, optional
-        Legacy alias mapped to ``error_rate`` (per-base sequencing error) when ``error_rate``
-        is not otherwise supplied.
-    fnr : float, optional
-        Legacy parameter; accepted but unused by the current model.
-    **hyper_overrides : float, optional
-        Any ``DNABatchHyperParams`` field may be overridden explicitly. The main knobs
-        (single-cell defaults): ``kappa`` DM concentration = amplification regime (5.0, small =
-        lumpy MDA/MALBAC amplification, the dominant single-cell noise); ``ado_rate``
-        allelic-dropout Bernoulli probability, one allele lost at a het locus (0.20);
-        ``beta_binom_conc`` allele-fraction overdispersion, small = lumpier allele balance
-        (30.0); ``doublet_rate`` fraction of cells merged with a random partner at the
-        copy-number level (0.02); ``mu_depth`` mean per-locus coverage (breadth-set, then
-        scaled ×0.3 for single-cell: wgs ~9); ``capture_sigma`` per-target/amplicon efficiency
-        LogNormal sd (breadth-set: wgs 0.0 / wes 0.30 / panel 0.45); ``gc_curve_sigma``
-        per-batch GC->coverage bias strength (breadth-set: wgs 0.20 / wes 0.12 / panel 0.05);
-        ``nb_dispersion`` NB per-bin overdispersion (0.5; ``depth_model="nb"`` only);
-        ``error_rate`` per-base sequencing error (0.001); ``depth_batch_sigma`` per-batch
-        depth-shift LogNormal sd (0.05); ``ffpe_ct_rate`` extra FFPE C>T deamination error at
-        C-sites (0.0); ``mappability_sigma`` unused placeholder (0.10).
+    **dna_kwargs
+        Forwarded to the [`DNA`][iscc.data.DNA] base. See [`DNA`][iscc.data.DNA] for the shared
+        ``breadth`` / ``data_mode`` / depth / hyper-parameters.
     """
 
     mode = "sc"

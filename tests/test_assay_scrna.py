@@ -30,23 +30,23 @@ def labelled_cell_data():
 # --------------------------------------------------------------------------------------
 class TestBatch:
     def test_beta_per_gene_shared_and_lognormal(self, labelled_cell_data):
-        from iscc.data.batch import Batch, BatchHyperParams
+        from iscc.data.batch import Batch, RNABatchHyperParams
         genes = labelled_cell_data["cell_exp"].columns
-        b = Batch(BatchHyperParams(sigma_batch=0.3), seed=1).realize(genes, np.ones(N_GENES))
+        b = Batch(RNABatchHyperParams(sigma_batch=0.3), seed=1).realize(genes, np.ones(N_GENES))
         assert b.beta.shape == (N_GENES,)
         assert (b.beta > 0).all()                       # lognormal -> strictly positive
 
     def test_library_factors_centered_on_depth(self):
-        from iscc.data.batch import Batch, BatchHyperParams
-        b = Batch(BatchHyperParams(mu_lib=5000.0, sigma_lib=0.3, depth_batch_sigma=0.0),
+        from iscc.data.batch import Batch, RNABatchHyperParams
+        b = Batch(RNABatchHyperParams(mu_lib=5000.0, sigma_lib=0.3, depth_batch_sigma=0.0),
                   seed=2).realize([f"g{i}" for i in range(5)], np.ones(5))
         lib = b.library_factors(5000)
         assert lib.std() > 0                            # varies cell to cell
         assert 0.8 * 5000 < lib.mean() < 1.25 * 5000    # centered on depth
 
     def test_composition_rows_sum_to_one(self):
-        from iscc.data.batch import Batch, BatchHyperParams
-        b = Batch(BatchHyperParams(), seed=3).realize([f"g{i}" for i in range(4)], np.ones(4))
+        from iscc.data.batch import Batch, RNABatchHyperParams
+        b = Batch(RNABatchHyperParams(), seed=3).realize([f"g{i}" for i in range(4)], np.ones(4))
         probs = np.array([[0.25, 0.25, 0.25, 0.25], [0.7, 0.1, 0.1, 0.1]])
         comp = b.composition(probs)
         assert np.allclose(comp.sum(axis=1), 1.0)
@@ -55,8 +55,8 @@ class TestBatch:
         # The DM seam is now implemented (F6 wired it for the Visium assay): a fixed library total
         # partitioned across genes via Dirichlet(kappa*comp) -> Multinomial, so each cell's counts
         # sum to round(lib) exactly (the compositional alternative to the independent-per-gene NB).
-        from iscc.data.batch import Batch, BatchHyperParams
-        b = Batch(BatchHyperParams(kappa=50.0), seed=4).realize([f"g{i}" for i in range(3)],
+        from iscc.data.batch import Batch, RNABatchHyperParams
+        b = Batch(RNABatchHyperParams(kappa=50.0), seed=4).realize([f"g{i}" for i in range(3)],
                                                                  np.ones(3))
         comp = np.full((2, 3), 1 / 3)
         counts = b.emit(comp, np.array([100.0, 100.0]), count_model="dm")
@@ -64,8 +64,8 @@ class TestBatch:
         assert np.all(counts.sum(axis=1) == 100)        # fixed total per cell (compositional)
 
     def test_unknown_count_model_raises(self):
-        from iscc.data.batch import Batch, BatchHyperParams
-        b = Batch(BatchHyperParams(), seed=5).realize(["g0"], np.ones(1))
+        from iscc.data.batch import Batch, RNABatchHyperParams
+        b = Batch(RNABatchHyperParams(), seed=5).realize(["g0"], np.ones(1))
         with pytest.raises(ValueError):
             b.emit(np.ones((1, 1)), np.array([10.0]), count_model="bogus")
 

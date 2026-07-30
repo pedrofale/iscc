@@ -17,29 +17,10 @@ class Immunotherapy(Treatment):
     immune_checkpoints : list
         Checkpoint sites a cell must express to be targeted; empty = broad (every
         cancer cell is a target).
-    adaptive : bool, optional
-        If ``True``, dose only while the tumour exceeds ``max_tumor_size``; else dose
-        continuously within the window (default ``False``).
-    start : int, optional
-        First step at which the therapy is active (default 0).
-    duration : int, optional
-        Number of steps the therapy stays active (default ``None`` = until the run ends).
-    dosage_decay : float, optional
-        Between-round dose decay factor (default 0.5).
-    rounds : int, optional
-        Number of dosing rounds (default 4).
-    rate_multiplier : float, optional
-        Strength of the immune-resistance reduction under full dose (default 2.0).
-    toxicity : float, optional
-        Per-step probability of off-target action on a non-cancer cell (default 0.1).
-    effectiveness : float, optional
-        Per-step probability the therapy acts on a targeted cell (default 0.9).
-    kill_rate : float, optional
-        Baseline per-cell kill hazard in the genotype engine (default 1.5).
-    max_tumor_size : int, optional
-        Size threshold that gates dosing when ``adaptive=True`` (default 100000).
-    sites : {"both", "primary", "met"}, optional
-        Compartment(s) the therapy acts on (default ``"both"`` = systemic).
+    **kwargs
+        Forwarded to the [`Treatment`][iscc.treatment.Treatment] base. See
+        [`Treatment`][iscc.treatment.Treatment] for the shared dosing / scheduling
+        parameters (``start``, ``duration``, ``rate_multiplier``, ``effectiveness``, ...).
     """
 
     # Immunotherapy works by lowering the cell's immune resistance; the actual killing
