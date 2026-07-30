@@ -235,11 +235,13 @@ def _cancer_only(traces, genotypes_parents):
     return genotype_counts, genotype_parents
 
 
-def _sym_stackplot(ax, pop_df, anc_df, color_by, colormap, normalize, smoothing_std):
-    """pymuller.muller's stackplot but with a SYMMETRIC (centered) baseline — the classic Noble-style
-    "fish"/stream Muller (Noble et al., Nat Ecol Evol 2021), where the population grows outward from a
-    central horizontal midline in both directions. Same y-layout (``_get_y_values``) and colour mapping
-    (``color_by`` -> ``colormap``) as ``pymuller._muller_plot``; only ``baseline="sym"`` differs."""
+def _muller_stackplot(ax, pop_df, anc_df, color_by, colormap, normalize, smoothing_std, baseline="zero"):
+    """Muller stackplot with pymuller's nested layout + colour mapping. ``baseline=0`` grows upward
+    from zero; ``baseline="sym"`` grows symmetrically from a central midline (the Noble et al. 2021
+    "fish"/stream layout). When ``normalize`` is set the bands are a proper 0-1 frequency at every
+    step: pymuller's ``_get_y_values`` draws each clone as two nested half-bands, so the raw stack
+    sums to a tree-dependent factor (1 for one clone, up to ~2 for a deep tree), which we divide out
+    per generation so the frequency axis stays in [0, 1]."""
     import sys as _sys
     pop = pop_df.copy()
     if normalize:
@@ -252,10 +254,12 @@ def _sym_stackplot(ax, pop_df, anc_df, color_by, colormap, normalize, smoothing_
         yt = pymuller.logic._get_y_values(pop, anc_df, smoothing_std)
     finally:
         _sys.setrecursionlimit(_old)
+    if normalize:
+        yt = yt.div(yt.sum(axis=1).replace(0, 1), axis=0)   # each generation sums to 1
     cmap = plt.get_cmap(colormap)
     ordered = color_by.copy().loc[yt.columns.values]
     norm = matplotlib.colors.Normalize(vmin=np.min(ordered), vmax=np.max(ordered))
-    ax.stackplot(x, yt.to_numpy().T, colors=cmap(norm(ordered.values)), baseline="sym")
+    ax.stackplot(x, yt.to_numpy().T, colors=cmap(norm(ordered.values)), baseline=baseline)
     return ax
 
 
@@ -299,11 +303,9 @@ def plot_muller(traces, genotypes_parents, ax=None, colormap="gnuplot", normaliz
     _old_limit = _sys.getrecursionlimit()
     try:
         _sys.setrecursionlimit(max(_old_limit, 20000))
-        if centered:
-            _sym_stackplot(ax, pop_df, anc_df, color_by, colormap, normalize, smoothing_std)
-        else:
-            pymuller.muller(pop_df, anc_df, color_by, ax=ax, colorbar=False, colormap=colormap,
-                            normalize=normalize, background_strain=False, smoothing_std=smoothing_std)
+        baseline = "sym" if centered else "zero"
+        _muller_stackplot(ax, pop_df, anc_df, color_by, colormap, normalize, smoothing_std,
+                          baseline=baseline)
     finally:
         _sys.setrecursionlimit(_old_limit)
     if show_axes:
