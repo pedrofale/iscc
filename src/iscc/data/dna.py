@@ -1,7 +1,6 @@
-"""Bulk + single-cell DNA-seq count/coverage simulation (DESIGN_features §C C1 / §D, F4+F5).
+"""Bulk + single-cell DNA-seq count/coverage simulation.
 
-Replaces the old uniform-multinomial + fpr/fnr placeholders with a realistic,
-**copy-number-scaled** coverage model shared by both modalities. The two assays differ only
+A realistic, **copy-number-scaled** coverage model shared by both modalities. The two assays differ only
 in the *regime* of the same shared core (see `batch.DNABatch`):
 
     BULK        — pool the sampled cells, one high read budget, large-kappa (≈ multinomial/
@@ -20,7 +19,8 @@ Ground truth consumed (per-locus, from the tumour engine, see `tumor.make_cell_d
   * `cell_snv[c, l]` — TRUE alt fraction (VAF) at locus l in cell c (0 / 0.5 / 1.0 / ...).
 
 Outputs are **count-level** matrices (coverage / alt-count / VAF / CNA log-ratio) plus the
-surfaced ground truth (true CN, true alt fraction, ADO mask). Raw FASTQ is F7 (out of scope).
+surfaced ground truth (true CN, true alt fraction, ADO mask). Raw sequencing reads (FASTQ/BAM)
+are produced separately by ``iscc.data.reads``.
 """
 from .assay import Assay
 from .batch import DNABatch, DNABatchHyperParams, DNA_DEPTH_MODELS
@@ -142,9 +142,8 @@ class DNA(Assay):
     the shared depth + allele layers. Subclasses set the amplification regime via
     `mode_defaults` (large-kappa Binomial for bulk; small-kappa Beta-Binomial + ADO for sc).
 
-    Backward-compatible with the old placeholder signature: `n_reads` (now the total read
-    budget), `target_genes`, `data_mode`, and `fpr` (now mapped to `error_rate`); `fnr` is
-    accepted but unused by the realistic model.
+    Legacy aliases are accepted: ``n_reads`` (the total read budget), ``target_genes``,
+    ``data_mode``, and ``fpr`` (maps to ``error_rate``); ``fnr`` is accepted but unused.
     """
 
     mode = "bulk"
