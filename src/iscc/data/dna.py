@@ -291,7 +291,7 @@ class bulkDNA(DNA):
     fnr : float, optional
         Legacy parameter; accepted for signature parity but unused by the current model.
     **hyper_overrides : float, optional
-        Any ``DNABatchHyperParams`` field may be overridden explicitly. The main knobs (bulk
+        Any [`DNABatchHyperParams`][iscc.data.DNABatchHyperParams] field may be overridden explicitly. The main knobs (bulk
         defaults): ``mu_depth`` mean per-locus coverage (breadth-set: wgs 30 / wes 120 /
         panel 1500); ``kappa`` DM concentration = amplification regime (2000, large ≈
         un-amplified multinomial/Poisson); ``nb_dispersion`` NB per-bin overdispersion phi
@@ -461,7 +461,7 @@ class scDNA(DNA):
     fnr : float, optional
         Legacy parameter; accepted but unused by the current model.
     **hyper_overrides : float, optional
-        Any ``DNABatchHyperParams`` field may be overridden explicitly. The main knobs
+        Any [`DNABatchHyperParams`][iscc.data.DNABatchHyperParams] field may be overridden explicitly. The main knobs
         (single-cell defaults): ``kappa`` DM concentration = amplification regime (5.0, small =
         lumpy MDA/MALBAC amplification, the dominant single-cell noise); ``ado_rate``
         allelic-dropout Bernoulli probability, one allele lost at a het locus (0.20);
@@ -480,8 +480,13 @@ class scDNA(DNA):
     mode = "sc"
     depth_scale = 0.3  # single-cell coverage is far shallower than bulk for the same breadth
 
-    def __init__(self, n_cells=100, **dna_kwargs):
-        super(scDNA, self).__init__(**dna_kwargs)
+    def __init__(self, breadth="wgs", target_genes="all", data_mode="counts",
+                 depth_model="dm", n_reads=None, seed=42, batch_label=None,
+                 fpr=None, fnr=None, n_cells=100, **hyper_overrides):
+        super(scDNA, self).__init__(
+            breadth=breadth, target_genes=target_genes, data_mode=data_mode,
+            depth_model=depth_model, n_reads=n_reads, seed=seed, batch_label=batch_label,
+            fpr=fpr, fnr=fnr, **hyper_overrides)
         self.n_cells = int(n_cells)
 
     def mode_defaults(self):

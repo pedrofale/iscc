@@ -90,7 +90,44 @@ COUNT_MODELS = {"nb": _emit_nb, "dm": _emit_dm}
 
 @dataclass
 class BatchHyperParams:
-    """Protocol-typical magnitudes for the scRNA batch model (the targets of `estimate()`)."""
+    """The scRNA assay's technical parameters — a defaults container.
+
+    Holds the protocol-typical magnitudes of the scRNA count model: the batch and
+    library-size scales, the NB overdispersion and logistic dropout curve, and the
+    ambient / doublet contamination rates. The [`scRNA`][iscc.data.scRNA] assay builds
+    one from its protocol preset and lets you override any field, and
+    [`estimate_rna`][iscc.data.estimate_rna] fits these same parameters from real data.
+
+    Attributes
+    ----------
+    protocol : str
+        Protocol preset the magnitudes come from (e.g. "10x", "smartseq3").
+    sigma_batch : float
+        Per-gene batch-factor LogNormal sd; beta_gb ~ LogNormal(0, sigma_batch^2), shared
+        across every cell of the batch.
+    mu_lib : float
+        Mean library size (counts / cell) — the sequencing depth.
+    sigma_lib : float
+        Per-cell library-size LogNormal sd.
+    dispersion : float
+        NB overdispersion phi (var = mu + phi*mu^2); used only by the "nb" count model
+        (phi <= 0 collapses to Poisson).
+    ambient_frac : float
+        Fraction of the library that is ambient ("soup") contamination.
+    doublet_rate : float
+        Fraction of barcodes that are doublets (two cells merged).
+    dropout_mid : float
+        Logistic dropout midpoint in expected-count space (0 disables dropout).
+    dropout_shape : float
+        Logistic dropout steepness (active only when dropout_mid > 0).
+    well_sigma : float
+        Per-cell "well" (plate-position) LogNormal sd (Smart-seq3 plate nesting).
+    depth_batch_sigma : float
+        Per-batch depth-shift LogNormal sd (so batches differ in depth).
+    kappa : float
+        Dirichlet concentration for the "dm" count model only (large kappa ->
+        multinomial/Poisson-like, small kappa -> lumpy over-dispersed proportions).
+    """
     # mu_lib / sigma_lib CALIBRATED to real 10x PBMC3k (`estimate(sc.datasets.pbmc3k())`) — the
     # scale-free library-size magnitudes transfer. `dispersion` and the dropout curve are NOT taken
     # from PBMC3k: they are gene-set / cell-type-heterogeneity dependent (PBMC's fit ~0.6 is inflated
@@ -290,22 +327,46 @@ DNA_DEPTH_MODELS = {"dm": _dna_depth_dm, "nb": _dna_depth_nb}
 
 @dataclass
 class DNABatchHyperParams:
-    """Protocol-typical magnitudes for the DNA batch model (the targets of `estimate()`).
+    """The DNA assay's technical parameters — a defaults container.
 
-        breadth          capture breadth {wgs, wes, panel} (sets locus set + depth regime)
-        depth_model      depth emission {"dm" (default), "nb"}
-        mu_depth         mean per-locus coverage (the depth regime; breadth sets it)
-        kappa            DM concentration = AMPLIFICATION REGIME (large=bulk, small=single-cell)
-        nb_dispersion    NB per-bin overdispersion phi (only for depth_model="nb")
-        gc_curve_sigma   per-batch GC->coverage curve strength (the GC bias a panel-of-normals fits)
-        mappability_sigma  unused placeholder kept for symmetry with the genome mappability field
-        capture_sigma    per-target (WES) / per-amplicon (panel) capture-efficiency LogNormal sd
-        error_rate       per-base sequencing error (false alt/ref on the allele layer)
-        depth_batch_sigma per-batch depth-shift LogNormal sd (batches differ in depth)
-        ado_rate         single-cell allelic dropout Bernoulli prob (one allele lost at a locus)
-        beta_binom_conc  single-cell allele-fraction overdispersion (Beta-Binomial concentration)
-        doublet_rate     single-cell doublet fraction
-        ffpe_ct_rate     optional FFPE C>T deamination extra-error at C-sites
+    Holds the protocol-typical magnitudes of the DNA coverage model: the depth emission
+    (capture breadth, mean coverage, and the DM/NB amplification regime), the
+    coverage-bias terms (GC curve, mappability, capture efficiency, depth shift), and the
+    allele layer (sequencing error, single-cell ADO, beta-binomial overdispersion,
+    doublets, FFPE C>T). The [`scDNA`][iscc.data.scDNA] / [`bulkDNA`][iscc.data.bulkDNA]
+    assays build one and let you override any field, and
+    [`estimate_dna`][iscc.data.estimate_dna] fits these same parameters from real data.
+
+    Attributes
+    ----------
+    breadth : str
+        Capture breadth {wgs, wes, panel} (sets the locus set + depth regime).
+    depth_model : str
+        Depth emission {"dm" (default), "nb"}.
+    mu_depth : float
+        Mean per-locus coverage (the depth regime; breadth sets it).
+    kappa : float
+        DM concentration = amplification regime (large = bulk, small = single-cell).
+    nb_dispersion : float
+        NB per-bin overdispersion phi (only for depth_model="nb").
+    gc_curve_sigma : float
+        Per-batch GC->coverage curve strength (the GC bias a panel-of-normals fits).
+    mappability_sigma : float
+        Unused placeholder kept for symmetry with the genome mappability field.
+    capture_sigma : float
+        Per-target (WES) / per-amplicon (panel) capture-efficiency LogNormal sd.
+    error_rate : float
+        Per-base sequencing error (false alt/ref on the allele layer).
+    depth_batch_sigma : float
+        Per-batch depth-shift LogNormal sd (batches differ in depth).
+    ado_rate : float
+        Single-cell allelic dropout Bernoulli prob (one allele lost at a locus).
+    beta_binom_conc : float
+        Single-cell allele-fraction overdispersion (Beta-Binomial concentration).
+    doublet_rate : float
+        Single-cell doublet fraction.
+    ffpe_ct_rate : float
+        Optional FFPE C>T deamination extra-error at C-sites.
     """
     breadth: str = "wgs"
     depth_model: str = "dm"
@@ -465,22 +526,47 @@ class DNABatch:
 # ======================================================================================
 @dataclass
 class VisiumBatchHyperParams:
-    """Protocol-typical magnitudes for the Visium batch model (the targets of `estimate_visium`).
+    """The Visium assay's technical parameters — a defaults container.
 
-        spot_pitch        spot centre-to-centre spacing (sets spot density / spots-per-tissue)
-        spot_radius       spot capture radius (sets spot->cell aggregation, ~1-10 cells/spot)
-        mu_counts         mean per-spot library size (total UMIs / spot)
-        sigma_counts      per-spot library-size LogNormal sd
-        field_lengthscale capture-field spatial autocorrelation scale (the SE-GP length-scale);
-                          larger -> smoother field -> higher Moran's I
-        field_sigma       capture-field strength (log-space sd of the smooth field)
-        edge_sigma        tissue-boundary capture-efficiency falloff (0 = none; <1 keeps it +ve)
-        diffusion_sigma   lateral mRNA bleed: Gaussian kernel sd spreading expression to neighbours
-        sigma_batch       per-gene batch-factor LogNormal sd (reuses §B.2; Splatter `batch.facScale`)
-        ambient_frac      fraction of the spot library that is ambient ("soup") contamination
-        count_model       count emission {"dm" (default, compositional capture), "nb"}
-        kappa             Dirichlet-Multinomial concentration (only for count_model="dm")
-        nb_dispersion     NB overdispersion phi (var = mu + phi*mu^2; only for count_model="nb")
+    Holds the protocol-typical magnitudes of the Visium spatial count model: the spot
+    geometry (pitch, radius), the per-spot library size, the spatially-correlated
+    capture-efficiency field (lengthscale, strength, tissue-edge falloff), lateral mRNA
+    diffusion, and the shared per-gene batch factor / ambient soup / pluggable count
+    model. The [`Visium`][iscc.data.Visium] assay builds one and lets you override any
+    field, and [`estimate_visium`][iscc.data.estimate_visium] fits these same parameters
+    from real data.
+
+    Attributes
+    ----------
+    protocol : str
+        Protocol preset the magnitudes come from (e.g. "visium").
+    spot_pitch : float
+        Spot centre-to-centre spacing (sets spot density / spots-per-tissue).
+    spot_radius : float
+        Spot capture radius (sets spot->cell aggregation, ~1-10 cells/spot).
+    mu_counts : float
+        Mean per-spot library size (total UMIs / spot).
+    sigma_counts : float
+        Per-spot library-size LogNormal sd.
+    field_lengthscale : float
+        Capture-field spatial autocorrelation scale (the SE-GP length-scale); larger ->
+        smoother field -> higher Moran's I.
+    field_sigma : float
+        Capture-field strength (log-space sd of the smooth field).
+    edge_sigma : float
+        Tissue-boundary capture-efficiency falloff (0 = none; <1 keeps it positive).
+    diffusion_sigma : float
+        Lateral mRNA bleed: Gaussian kernel sd spreading expression to neighbours.
+    sigma_batch : float
+        Per-gene batch-factor LogNormal sd.
+    ambient_frac : float
+        Fraction of the spot library that is ambient ("soup") contamination.
+    count_model : str
+        Count emission {"dm" (default, compositional capture), "nb"}.
+    kappa : float
+        Dirichlet-Multinomial concentration (only for count_model="dm").
+    nb_dispersion : float
+        NB overdispersion phi (var = mu + phi*mu^2; only for count_model="nb").
     """
     # Defaults CALIBRATED to a real 10x Visium breast-cancer section (estimate_visium on
     # `scanpy.datasets.visium_sge('V1_Breast_Cancer_Block_A_Section_1')`), so out-of-the-box Visium

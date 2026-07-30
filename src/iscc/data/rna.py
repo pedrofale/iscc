@@ -144,7 +144,7 @@ class scRNA(Assay):
                  sigma_batch=None, mu_lib=None, sigma_lib=None,
                  ambient_frac=None, doublet_rate=None, dropout_mid=None, dropout_shape=None,
                  well_sigma=None, depth_batch_sigma=None, kappa=None,
-                 seed=42, **assay_kwargs):
+                 seed=42):
         super(scRNA, self).__init__(seed=seed, protocol=resolve_protocol(protocol))
         self.n_cells = int(n_cells)
         if count_model not in COUNT_MODELS:
