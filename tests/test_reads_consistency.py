@@ -25,7 +25,7 @@ from iscc.data import genome_bases
 from iscc.data.dna import _segment_of, _TRANSITION, _TRANSVERSIONS
 from iscc.data.reads import (
     SyntheticReference, RealGenomeReference, SyntheticTranscriptome,
-    emit_reads, emit_scrna_reads, emit_visium_reads,
+    emit_dna_reads, emit_scrna_reads, emit_visium_reads,
 )
 from iscc.tumor.models import GenotypeTumor
 
@@ -233,7 +233,7 @@ class TestCrossModalityAlleles:
         # DNA: bulk per-cell FASTA (always written; no binary needed for the template).
         snv = cell_data["cell_snv"].values
         mutated_loci = list(np.where((snv > 0).any(axis=0))[0])
-        dna_res = emit_reads(cell_data, reference=dna_ref, modality="bulk", breadth="wgs",
+        dna_res = emit_dna_reads(cell_data, reference=dna_ref, modality="bulk", breadth="wgs",
                              seed=3, outdir=str(tmp_path / "dna"))
         dna = _dna_observed_alleles(dna_res["fasta"][0], dna_ref, mutated_loci)
 
