@@ -18,7 +18,7 @@ import pytest
 
 from iscc.data.reads import (
     inject, AlleleSplit, SyntheticReference, RealGenomeReference, build_cell_fasta,
-    coverage_budget, emit_reads, DwgsimAdapter, ArtAdapter, find_binary, run_binary,
+    coverage_budget, emit_dna_reads, DwgsimAdapter, ArtAdapter, find_binary, run_binary,
     MissingBinaryError,
 )
 from iscc.data.reads.dna import _segment_cn
@@ -263,7 +263,7 @@ class TestAlleleLayer:
         assert np.std(lumpy) > np.std(tight)         # small conc = lumpier allele balance
 
     def test_emit_wires_error_rate_into_command(self, tmp_path):
-        res = emit_reads(make_cell_data(amp_cn=6.0), modality="bulk", breadth="wgs",
+        res = emit_dna_reads(make_cell_data(amp_cn=6.0), modality="bulk", breadth="wgs",
                          outdir=str(tmp_path), seed=3)
         cmd = res["command"]
         assert "-e" in cmd and float(cmd[cmd.index("-e") + 1]) >= 0.0
@@ -343,7 +343,7 @@ class TestReferences:
 class TestEmitReads:
     def test_emit_skips_gracefully_without_binary(self, tmp_path):
         cd = make_cell_data(amp_cn=6.0)
-        res = emit_reads(cd, modality="bulk", breadth="wgs", outdir=str(tmp_path), seed=3)
+        res = emit_dna_reads(cd, modality="bulk", breadth="wgs", outdir=str(tmp_path), seed=3)
         # bespoke layers always produced:
         assert os.path.exists(res["fasta"][0])
         assert res["per_segment_coverage"][1] > res["per_segment_coverage"][0]
@@ -358,13 +358,13 @@ class TestEmitReads:
 
     def test_emit_sc_per_cell_fasta(self, tmp_path):
         cd = make_cell_data(amp_cn=4.0)
-        res = emit_reads(cd, modality="sc", breadth="wgs", outdir=str(tmp_path),
+        res = emit_dna_reads(cd, modality="sc", breadth="wgs", outdir=str(tmp_path),
                          seed=3, n_cells=5)
         assert len(res["fasta"]) == 5                    # one FASTA per cell
         assert all(os.path.exists(p) for p in res["fasta"])
 
     def test_allele_split_conserves_segment_budget(self, tmp_path):
         cd = make_cell_data(amp_cn=6.0)
-        res = emit_reads(cd, modality="bulk", outdir=str(tmp_path), seed=4)
+        res = emit_dna_reads(cd, modality="bulk", outdir=str(tmp_path), seed=4)
         for seg, (alt, ref) in res["allele_split"].items():
             assert alt + ref == res["per_segment_coverage"][seg]

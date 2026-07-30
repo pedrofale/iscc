@@ -27,7 +27,7 @@ statistics the estimate is fit to:
     model's elevated alt at those sites (bulk ≈ ffpe_ct_rate; single cells quantised by copy number).
 
 The external binaries are OPTIONAL: everything up to the shell-out (FASTA, coverage, command
-construction) runs with no tools installed, and `emit_reads` reports a graceful skip.
+construction) runs with no tools installed, and `emit_dna_reads` reports a graceful skip.
 """
 from __future__ import annotations
 
@@ -420,7 +420,7 @@ def _select_cells(cell_data, modality, n_cells, cell_subset, seed):
     return rng.choice(cells, size=n, replace=False)
 
 
-def emit_reads(cell_data, reference=None, simulator="dwgsim", breadth="wgs",
+def emit_dna_reads(cell_data, reference=None, simulator="dwgsim", breadth="wgs",
                modality="bulk", outdir="reads_out", seed=42, n_cells=20,
                cell_subset=None, mean_coverage=None, emit_bam=False,
                read_length=150, genome_seed=20240601, **dna_kwargs):
@@ -543,7 +543,7 @@ def emit_reads(cell_data, reference=None, simulator="dwgsim", breadth="wgs",
 
 
 class DNAReadEmitter:
-    """`ReadEmitter`-conforming wrapper around `emit_reads` (DESIGN_features §E protocol)."""
+    """`ReadEmitter`-conforming wrapper around `emit_dna_reads` (DESIGN_features §E protocol)."""
 
     def __init__(self, simulator="dwgsim", breadth="wgs", modality="bulk", **kwargs):
         self.simulator = simulator
@@ -552,6 +552,6 @@ class DNAReadEmitter:
         self.kwargs = kwargs
 
     def emit(self, matrix, reference, outdir):
-        return emit_reads(matrix, reference=reference, simulator=self.simulator,
+        return emit_dna_reads(matrix, reference=reference, simulator=self.simulator,
                           breadth=self.breadth, modality=self.modality, outdir=outdir,
                           **self.kwargs)

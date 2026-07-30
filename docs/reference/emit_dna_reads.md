@@ -1,1 +1,1 @@
-::: iscc.data.reads.emit_reads
+::: iscc.data.reads.emit_dna_reads
