@@ -42,10 +42,21 @@ Generate single-cell and bulk molecular data from the sampled cells.
 
 | | |
 |---|---|
-| [`iscc.data.scDNA`](scDNA.md) | Single-cell DNA (copy number + SNV). |
 | [`iscc.data.bulkDNA`](bulkDNA.md) | Bulk DNA-seq. |
+| [`iscc.data.scDNA`](scDNA.md) | Single-cell DNA (copy number + SNV). |
 | [`iscc.data.scRNA`](scRNA.md) | Single-cell RNA expression. |
 | [`iscc.data.Visium`](Visium.md) | 10x Visium spatial transcriptomics. |
+
+Each assay page also lists **technology presets** — the parameter settings that approximate named
+platforms (MALBAC / DLP / Tapestri for scDNA, WGS / WES / panel for bulk DNA, and 10x / Smart-seq3
+for scRNA). The assays' technical defaults live in these hyper-parameter containers (the targets of the
+[Calibration](#calibration) estimators, overridable per assay):
+
+| | |
+|---|---|
+| [`iscc.data.DNABatchHyperParams`](DNABatchHyperParams.md) | DNA technical parameters. |
+| [`iscc.data.BatchHyperParams`](BatchHyperParams.md) | scRNA technical parameters. |
+| [`iscc.data.VisiumBatchHyperParams`](VisiumBatchHyperParams.md) | Visium technical parameters. |
 
 ## Reads
 
@@ -77,6 +88,6 @@ to a real reference dataset, so simulated data matches a target platform.
 
 | | |
 |---|---|
-| [`iscc.data.estimate_rna`](estimate_rna.md) | Calibrate the scRNA assay from a real count matrix. |
 | [`iscc.data.estimate_dna`](estimate_dna.md) | Calibrate the DNA assay from coverage / allele statistics. |
+| [`iscc.data.estimate_rna`](estimate_rna.md) | Calibrate the scRNA assay from a real count matrix. |
 | [`iscc.data.estimate_visium`](estimate_visium.md) | Calibrate the Visium assay from a real section. |
