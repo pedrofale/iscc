@@ -20,13 +20,19 @@ CNV_CMAP = "bwr"
 
 
 def cnv_norm(values, center=2.0, floor=0.5):
-    """A symmetric ``Normalize`` for copy-number plots, so white sits at the diploid ``center``
-    (default 2) and an equal gain / loss get mirror-image reds / blues. The range is
-    ``center ± max(|values - center|, floor)``."""
+    """A diverging ``Normalize`` for copy-number plots: white sits at the diploid ``center``
+    (default 2), with the loss (blue) and gain (red) arms scaled independently to the data via
+    ``TwoSlopeNorm``, so the colour axis spans the real ``[min, max]`` and never goes below 0
+    (copy number is non-negative)."""
     v = np.asarray(values, dtype=float)
-    dev = np.nanmax(np.abs(v - center)) if np.isfinite(v).any() else floor
-    dev = max(float(dev), floor)
-    return matplotlib.colors.Normalize(vmin=center - dev, vmax=center + dev)
+    v = v[np.isfinite(v)]
+    lo = float(v.min()) if v.size else center - floor
+    hi = float(v.max()) if v.size else center + floor
+    if lo >= center:                 # all gains -> still give a (small) loss arm
+        lo = center - floor
+    if hi <= center:                 # all losses -> still give a (small) gain arm
+        hi = center + floor
+    return matplotlib.colors.TwoSlopeNorm(vcenter=center, vmin=lo, vmax=hi)
 
 
 # Per-quantity colormap convention, so different fields aren't confused when plotted:
