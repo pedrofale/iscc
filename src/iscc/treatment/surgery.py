@@ -10,6 +10,18 @@ class Surgery(Treatment):
     a run with no ``Surgery`` is byte-identical. ``get_dosage`` returns 0 always, so ``Surgery`` never
     contributes a death-rate modifier — its only effect is the discrete resection. The genealogy is
     not pruned, so a 2-band Muller still shows the resected compartment's band cliff to 0 at ``start``.
+
+    Parameters
+    ----------
+    site : {"primary", "met"}, optional
+        Compartment resected at ``start`` (default ``"primary"``).
+    start : int, optional
+        Step at (or after) which the one-shot resection fires (default 0).
+    **kwargs
+        Forwarded to the [`Treatment`][iscc.treatment.Treatment] base. See
+        [`Treatment`][iscc.treatment.Treatment] for the shared dosing / scheduling
+        parameters; note ``Surgery`` never doses (``get_dosage`` is always 0), so only
+        ``start`` is consulted for its schedule.
     """
 
     affects = "resection"

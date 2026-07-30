@@ -15,6 +15,7 @@ in how the cell population is represented.
 |---|---|
 | [`iscc.tumor.GenotypeTumor`](GenotypeTumor.md) | Represents each deme as genotype **counts**. Fast and scalable — the default. |
 | [`iscc.tumor.GlandularTumor`](GlandularTumor.md) | Represents each cell as its own **object**. Exact, but does not scale to large tumors. |
+| [`iscc.tumor.Tumor`](Tumor.md) | Shared base of the two engines — the common construction parameters. |
 
 ## Treatment
 
@@ -26,6 +27,7 @@ Therapies applied to the tumor during growth.
 | [`iscc.treatment.TargetedTherapy`](TargetedTherapy.md) | Therapy against a driver-defined subclone. |
 | [`iscc.treatment.Immunotherapy`](Immunotherapy.md) | Immune-cell–mediated killing in the microenvironment. |
 | [`iscc.treatment.Surgery`](Surgery.md) | Resect a compartment (e.g. the primary). |
+| [`iscc.treatment.Treatment`](Treatment.md) | Shared base of the therapies — dosing schedule + per-cell effect. |
 
 ## Sample
 
@@ -46,6 +48,7 @@ Generate single-cell and bulk molecular data from the sampled cells.
 | [`iscc.data.scDNA`](scDNA.md) | Single-cell DNA (copy number + SNV). |
 | [`iscc.data.scRNA`](scRNA.md) | Single-cell RNA expression. |
 | [`iscc.data.Visium`](Visium.md) | 10x Visium spatial transcriptomics. |
+| [`iscc.data.DNA`](DNA.md) | Shared base of the DNA assays — breadth + coverage core. |
 
 Each assay page also lists **technology presets** — the parameter settings that approximate named
 platforms (MALBAC / DLP / Tapestri for scDNA, WGS / WES / panel for bulk DNA, and 10x / Smart-seq3
@@ -55,7 +58,7 @@ for scRNA). The assays' technical defaults live in these hyper-parameter contain
 | | |
 |---|---|
 | [`iscc.data.DNABatchHyperParams`](DNABatchHyperParams.md) | DNA technical parameters. |
-| [`iscc.data.BatchHyperParams`](BatchHyperParams.md) | scRNA technical parameters. |
+| [`iscc.data.RNABatchHyperParams`](RNABatchHyperParams.md) | scRNA technical parameters. |
 | [`iscc.data.VisiumBatchHyperParams`](VisiumBatchHyperParams.md) | Visium technical parameters. |
 
 ## Reads

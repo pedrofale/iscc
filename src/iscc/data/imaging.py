@@ -22,7 +22,7 @@ Output is AnnData: `X` = cells x panel-genes counts, `obsm["spatial"]` = per-cel
 `.obs` = per-cell ground truth (clone / type / coords) + QC, `.uns` = hyperparams.
 """
 from .assay import Assay
-from .batch import Batch, BatchHyperParams, COUNT_MODELS
+from .batch import Batch, RNABatchHyperParams, COUNT_MODELS
 
 import os
 
@@ -97,7 +97,7 @@ class scSpatial(Assay):
         ).items():
             if val is not None:
                 params[name] = float(val)
-        self.hypers = BatchHyperParams(**params)
+        self.hypers = RNABatchHyperParams(**params)
         self.n_reads = self.hypers.mu_lib                      # convenience mirror
 
     # -- panel selection (transcriptome coverage) --------------------------------------

@@ -105,11 +105,13 @@ nav:
       - Tumor:
           - GenotypeTumor: reference/GenotypeTumor.md
           - GlandularTumor: reference/GlandularTumor.md
+          - Tumor (base): reference/Tumor.md
       - Treatment:
           - Chemotherapy: reference/Chemotherapy.md
           - TargetedTherapy: reference/TargetedTherapy.md
           - Immunotherapy: reference/Immunotherapy.md
           - Surgery: reference/Surgery.md
+          - Treatment (base): reference/Treatment.md
       - Sample:
           - Biopsy: reference/Biopsy.md
           - Dissociation: reference/Dissociation.md
@@ -118,8 +120,9 @@ nav:
           - scDNA: reference/scDNA.md
           - scRNA: reference/scRNA.md
           - Visium: reference/Visium.md
+          - DNA (base): reference/DNA.md
           - DNABatchHyperParams: reference/DNABatchHyperParams.md
-          - BatchHyperParams: reference/BatchHyperParams.md
+          - RNABatchHyperParams: reference/RNABatchHyperParams.md
           - VisiumBatchHyperParams: reference/VisiumBatchHyperParams.md
       - Reads:
           - emit_dna_reads: reference/emit_dna_reads.md

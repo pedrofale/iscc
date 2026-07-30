@@ -1,7 +1,7 @@
 """Assay batch-effect model (DESIGN_features.md §B).
 
 A **batch** is one realization of an assay instance — a single reaction / lane / plate
-keyed by a seed. The *hyper-parameters* (`BatchHyperParams`) are protocol-typical
+keyed by a seed. The *hyper-parameters* (`RNABatchHyperParams`) are protocol-typical
 magnitudes; one seed draws a concrete *realization* (`Batch`) whose technical signature
 is applied consistently across every cell of that instance and is reproducible from the
 seed. Two `Batch`es with identical hyper-parameters but different seeds = same biology,
@@ -66,7 +66,7 @@ def _emit_dm(rng, comp, lib, batch):
             p_c ~ Dirichlet(kappa_b * comp_c)              # proportions
             y_c ~ Multinomial(N_c, p_c)
 
-    `kappa` (= `BatchHyperParams.kappa` / `VisiumBatchHyperParams.kappa`) is the Dirichlet
+    `kappa` (= `RNABatchHyperParams.kappa` / `VisiumBatchHyperParams.kappa`) is the Dirichlet
     concentration: large kappa -> p≈comp (multinomial/Poisson-like); small kappa -> lumpy,
     over-dispersed proportions. NB stays the default for scRNA (what M2 fits); DM is the
     default-eligible model for the Visium assay (compositional per-spot capture).
@@ -89,7 +89,7 @@ COUNT_MODELS = {"nb": _emit_nb, "dm": _emit_dm}
 
 
 @dataclass
-class BatchHyperParams:
+class RNABatchHyperParams:
     """The scRNA assay's technical parameters — a defaults container.
 
     Holds the protocol-typical magnitudes of the scRNA count model: the batch and
@@ -159,7 +159,7 @@ class Batch:
     technical signature is reproducible from `seed` and differs between seeds.
     """
 
-    def __init__(self, hypers: BatchHyperParams, seed=0, label=None):
+    def __init__(self, hypers: RNABatchHyperParams, seed=0, label=None):
         self.h = hypers
         self.seed = int(seed)
         self.label = str(label) if label is not None else f"batch{self.seed}"

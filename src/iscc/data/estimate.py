@@ -1,8 +1,8 @@
 """Splatter-style `estimate_rna()` for the scRNA assay.
 
-Fits the hyper-parameters of the batch model (``BatchHyperParams`` in
+Fits the hyper-parameters of the batch model (``RNABatchHyperParams`` in
 ``batch.py``) from a real count matrix, so realistic technical magnitudes are *learned, not
-guessed*. The fitted ``BatchHyperParams`` (plus per-gene tables) drive ``scRNA`` /
+guessed*. The fitted ``RNABatchHyperParams`` (plus per-gene tables) drive ``scRNA`` /
 ``run_scrna_batches`` directly — same field names, no redefinition.
 
 What is fit (and from what):
@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .batch import BatchHyperParams
+from .batch import RNABatchHyperParams
 from .rna import PROTOCOL_PRESETS, resolve_protocol
 
 # Fields the batch model owns but a counts-only estimate cannot identify (need empty droplets /
@@ -52,11 +52,11 @@ _PRIOR_ONLY = ("ambient_frac", "doublet_rate", "kappa")
 class RNAEstimate:
     """Fitted scRNA technical parameters, ready to drive ``scRNA`` / ``run_scrna_batches``.
 
-    ``hypers`` is a ``BatchHyperParams`` with the fitted magnitudes; ``scrna_kwargs()`` returns
+    ``hypers`` is a ``RNABatchHyperParams`` with the fitted magnitudes; ``scrna_kwargs()`` returns
     the same as a kwargs dict. The per-gene tables (``gene_means`` + the gamma fit) are the
     Splatter mean-expression model, kept for reporting / a future expression generator.
     """
-    hypers: BatchHyperParams
+    hypers: RNABatchHyperParams
     protocol: str
     n_cells: int
     n_genes: int
@@ -265,7 +265,7 @@ def _fit_batch_params(counts, labels):
 # Public entry point
 # --------------------------------------------------------------------------------------
 def estimate_rna(adata, protocol="10x", batch_key=None, count_model="nb", fit_dropout=None):
-    """Fit ``BatchHyperParams`` from a real scRNA count matrix (Splatter-style).
+    """Fit ``RNABatchHyperParams`` from a real scRNA count matrix (Splatter-style).
 
     Parameters
     ----------
@@ -329,7 +329,7 @@ def estimate_rna(adata, protocol="10x", batch_key=None, count_model="nb", fit_dr
     # Smart-seq3 keeps its per-cell well term active (can't identify it from a single matrix).
     well_sigma = float(preset["well_sigma"])
 
-    hypers = BatchHyperParams(
+    hypers = RNABatchHyperParams(
         protocol=proto,
         sigma_batch=sigma_batch,
         mu_lib=mu_lib,

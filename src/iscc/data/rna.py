@@ -23,7 +23,7 @@ same biology, different technical signature (§B.3). `run_scrna_batches` builds 
 multi-batch benchmark (shared / balanced-split / confounded designs).
 """
 from .assay import Assay
-from .batch import Batch, BatchHyperParams, COUNT_MODELS
+from .batch import Batch, RNABatchHyperParams, COUNT_MODELS
 
 import os
 
@@ -84,7 +84,7 @@ class scRNA(Assay):
         ``cell_subset`` is passed to ``run``.
     count_model : str, default "nb"
         Final count-emission model: ``"nb"`` negative-binomial (independent per-gene
-        overdispersion, what ``estimate`` fits) or ``"dm"`` Dirichlet-multinomial (a fixed
+        overdispersion, what ``estimate_rna`` fits) or ``"dm"`` Dirichlet-multinomial (a fixed
         library total with gene-gene competition for reads).
     batch_label : str, optional
         Label recorded for this batch/realization; defaults to ``f"batch{seed}"``.
@@ -169,7 +169,7 @@ class scRNA(Assay):
             if val is not None:
                 params[name] = float(val)
 
-        self.hypers = BatchHyperParams(**params)
+        self.hypers = RNABatchHyperParams(**params)
         # convenience mirror for callers that still read `.n_reads`
         self.n_reads = self.hypers.mu_lib
 
