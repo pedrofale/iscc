@@ -445,21 +445,37 @@ def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap=
         if color_key == "cell_type":
             type_cmap = type_cmap if type_cmap is not None else cell_type_colors(traces, genotypes_parents)
             base = cell_data["cell_deme"].join(cell_data["cell_crd"])
-            base["val"] = cell_data["cell_type"]["cell_id"].values
-            deme_data = base.groupby(["deme_id"]).agg(lambda x: x.mode().iloc[0])
+            ids = cell_data["cell_type"]["cell_id"].values
+            base["gid"] = ids
+            # Colour each deme by its dominant cell TYPE (cancer vs the named normal types), not its
+            # dominant genotype: cancer splits across many clones, so a majority-cancer deme would
+            # otherwise lose the mode to a single unified normal type and read as stroma (while the
+            # cancer-fraction view shows it as cancer). A cancer-dominant deme is then coloured by its
+            # own dominant cancer clone.
+            base["coarse"] = np.where(np.isin(ids, list(normal_names)), ids, "cancer")
+
+            def _deme_label(sub):
+                dom = sub["coarse"].mode().iloc[0]
+                if dom != "cancer":
+                    return dom
+                return sub.loc[sub["coarse"].values == "cancer", "gid"].mode().iloc[0]
+
+            deme_label = base.groupby("deme_id")[["coarse", "gid"]].apply(_deme_label)
+            rc = base.groupby("deme_id")[["row", "col"]].first()
             grid = np.ones((grid_size, grid_size, 4))
             legend_patches = []
             cancer_colors = []  # per-clone cancer colours drawn, in colormap order
             for genotype, col in type_cmap.items():
-                mask = deme_data["val"] == genotype
-                rows = deme_data.loc[mask, "row"].astype(int).values
-                cols = deme_data.loc[mask, "col"].astype(int).values
-                if len(rows) > 0:
-                    grid[rows, cols] = col
-                    if genotype in normal_names:
-                        legend_patches.append(mpatches.Patch(color=col, label=genotype))
-                    else:
-                        cancer_colors.append(col)
+                demes = deme_label.index[deme_label.values == genotype]
+                if len(demes) == 0:
+                    continue
+                rows = rc.loc[demes, "row"].astype(int).values
+                cols = rc.loc[demes, "col"].astype(int).values
+                grid[rows, cols] = col
+                if genotype in normal_names:
+                    legend_patches.append(mpatches.Patch(color=col, label=genotype))
+                else:
+                    cancer_colors.append(col)
             ax.imshow(grid)
             if legend_patches:
                 ax.legend(handles=legend_patches, loc="upper right", fontsize=7, framealpha=0.8)
