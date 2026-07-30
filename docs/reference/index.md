@@ -55,7 +55,7 @@ call external read simulators, so the corresponding binaries must be installed.
 
 | | |
 |---|---|
-| [`iscc.data.reads.emit_reads`](emit_reads.md) | Bulk / single-cell DNA reads (→ FASTQ, optional BAM). |
+| [`iscc.data.reads.emit_dna_reads`](emit_dna_reads.md) | Bulk / single-cell DNA reads (→ FASTQ, optional BAM). |
 | [`iscc.data.reads.emit_scrna_reads`](emit_scrna_reads.md) | Mutation-aware single-cell RNA reads. |
 | [`iscc.data.reads.emit_visium_reads`](emit_visium_reads.md) | Spatial (Visium) reads. |
 
@@ -77,6 +77,6 @@ to a real reference dataset, so simulated data matches a target platform.
 
 | | |
 |---|---|
-| [`iscc.data.estimate`](estimate.md) | Calibrate the scRNA assay from a real count matrix. |
+| [`iscc.data.estimate_rna`](estimate_rna.md) | Calibrate the scRNA assay from a real count matrix. |
 | [`iscc.data.estimate_dna`](estimate_dna.md) | Calibrate the DNA assay from coverage / allele statistics. |
 | [`iscc.data.estimate_visium`](estimate_visium.md) | Calibrate the Visium assay from a real section. |

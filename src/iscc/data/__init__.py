@@ -9,7 +9,7 @@ from .batch import (
     DNABatch, DNABatchHyperParams, DNA_DEPTH_MODELS,
     VisiumBatch, VisiumBatchHyperParams,
 )
-from .estimate import estimate, RNAEstimate
+from .estimate import estimate_rna, RNAEstimate
 from .estimate_dna import estimate_dna, estimate_dna_from_assay, DNAEstimate
 from .estimate_visium import estimate_visium, estimate_visium_from_assay, VisiumEstimate
 

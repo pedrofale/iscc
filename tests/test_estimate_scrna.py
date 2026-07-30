@@ -1,16 +1,16 @@
-"""Tests for the scRNA `estimate()` (DESIGN_inference §B / milestone M2).
+"""Tests for the scRNA `estimate_rna()` (DESIGN_inference §B / milestone M2).
 
 Two pillars (cf. the PLOS Comp Bio bar, DESIGN_inference "Why this exists"):
-  * **Estimation recovery** — simulate with known ``BatchHyperParams`` -> estimate -> recover
+  * **Estimation recovery** — simulate with known ``BatchHyperParams`` -> estimate_rna -> recover
     them within tolerance (no external data; the key methods-paper validation).
-  * **Runs on realistic data** — estimate on a realistic single-batch AnnData returns valid,
+  * **Runs on realistic data** — estimate_rna on a realistic single-batch AnnData returns valid,
     plausible params.
 """
 import numpy as np
 import pandas as pd
 import pytest
 
-from iscc.data import run_scrna_batches, concat_batches, estimate, scRNA, BatchHyperParams
+from iscc.data import run_scrna_batches, concat_batches, estimate_rna, scRNA, BatchHyperParams
 
 
 # --------------------------------------------------------------------------------------
@@ -20,7 +20,7 @@ def _cell_data(n_cells, n_genes, seed=0):
     """cell_exp with a per-gene biological profile shared across cells.
 
     Cell-constant biology isolates the *technical* parameters, so the mean-variance trend
-    measures NB dispersion (+ library spread, which `estimate` de-biases) rather than biological
+    measures NB dispersion (+ library spread, which `estimate_rna` de-biases) rather than biological
     cell-cell variation. Real data has both; recovery needs the controlled case.
     """
     rng = np.random.default_rng(seed)
@@ -52,7 +52,7 @@ class TestRecovery:
     @pytest.fixture(scope="class")
     def fit(self):
         adata, realized_depth_sd = _multibatch_adata(self.TRUTH)
-        est = estimate(adata, protocol="10x", batch_key="batch")
+        est = estimate_rna(adata, protocol="10x", batch_key="batch")
         return est, realized_depth_sd
 
     def test_library_size_recovered(self, fit):
@@ -73,7 +73,7 @@ class TestRecovery:
         assert est.hypers.sigma_batch == pytest.approx(self.TRUTH["sigma_batch"], abs=0.06)
 
     def test_depth_batch_sigma_tracks_realized_spread(self, fit):
-        """`estimate` sees only the *realized* per-batch depths; it recovers their spread.
+        """`estimate_rna` sees only the *realized* per-batch depths; it recovers their spread.
 
         The gap from the realized spread to the 0.20 hyper-parameter is genuine finite-batch
         sampling (a LogNormal sd from ~16 draws), not estimator bias — so the honest target is
@@ -103,7 +103,7 @@ class TestRunsOnRealisticData:
 
     def test_estimate_returns_valid_params_10x(self):
         adata = self._realistic_adata("10x")
-        est = estimate(adata, protocol="10x")
+        est = estimate_rna(adata, protocol="10x")
         h = est.hypers
         assert h.mu_lib > 0 and h.sigma_lib > 0
         assert h.dispersion >= 0
@@ -115,7 +115,7 @@ class TestRunsOnRealisticData:
 
     def test_protocol_aware_smartseq3_disables_dropout(self):
         adata = self._realistic_adata("smartseq3")
-        est = estimate(adata, protocol="smartseq3")
+        est = estimate_rna(adata, protocol="smartseq3")
         assert est.protocol == "smartseq3"
         assert est.hypers.dropout_mid == 0.0          # dropout off for plate / 5'-UMI
         assert "dropout_mid" not in est.fitted
@@ -123,13 +123,13 @@ class TestRunsOnRealisticData:
 
     def test_dropout_fit_can_be_forced_off(self):
         adata = self._realistic_adata("10x")
-        est = estimate(adata, protocol="10x", fit_dropout=False)
+        est = estimate_rna(adata, protocol="10x", fit_dropout=False)
         assert est.hypers.dropout_mid == 0.0
 
     def test_scrna_kwargs_drive_the_assay(self):
         """Fitted params splat straight back into scRNA without redefinition."""
         adata = self._realistic_adata("10x")
-        est = estimate(adata, protocol="10x")
+        est = estimate_rna(adata, protocol="10x")
         kwargs = est.scrna_kwargs()
         assert "kappa" not in kwargs                  # set via count_model, not a constructor knob
         a = scRNA(n_cells=50, **kwargs).run(_cell_data(80, 400, seed=3))
@@ -139,10 +139,10 @@ class TestRunsOnRealisticData:
         cell_data = _cell_data(120, 200, seed=4)
         a = scRNA(protocol="10x", n_cells=120, seed=0).run(cell_data)
         df = a.observed_counts
-        est_df = estimate(df, protocol="10x")
-        est_np = estimate(df.values, protocol="10x")
+        est_df = estimate_rna(df, protocol="10x")
+        est_np = estimate_rna(df.values, protocol="10x")
         assert est_df.hypers.mu_lib == pytest.approx(est_np.hypers.mu_lib, rel=1e-9)
 
     def test_unknown_protocol_raises(self):
         with pytest.raises(ValueError):
-            estimate(np.ones((10, 5)), protocol="nanopore")
+            estimate_rna(np.ones((10, 5)), protocol="nanopore")

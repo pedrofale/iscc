@@ -37,7 +37,7 @@ code(r"""import numpy as np
 import pandas as pd
 
 from iscc.data.reads import (
-    SyntheticReference, build_cell_fasta, coverage_budget, emit_reads,
+    SyntheticReference, build_cell_fasta, coverage_budget, emit_dna_reads,
     inject, DwgsimAdapter, find_binary,
 )
 
@@ -95,12 +95,12 @@ print("deleted segment reads:", per_seg[3])""")
 
 md(r"""## 4. End-to-end emission (DWGSIM) — guarded
 
-`emit_reads` builds the per-cell FASTA(s), the coverage budget, the allele split and the exact
+`emit_dna_reads` builds the per-cell FASTA(s), the coverage budget, the allele split and the exact
 simulator command; if the binary is installed it shells out to FASTQ (and, with `emit_bam`,
 aligns to a sorted/indexed BAM). Without the binary it returns `status="skipped:..."` and the
 bespoke artefacts so the rest of the pipeline still runs.""")
 
-code(r"""res = emit_reads(cell_data, simulator="dwgsim", modality="bulk", breadth="wgs",
+code(r"""res = emit_dna_reads(cell_data, simulator="dwgsim", modality="bulk", breadth="wgs",
                  outdir="/tmp/reads_demo", seed=3, emit_bam=True)
 print("status            :", res["status"])
 print("dwgsim command    :", " ".join(res["command"]))

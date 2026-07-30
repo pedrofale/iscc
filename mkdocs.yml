@@ -119,7 +119,7 @@ nav:
           - scRNA: reference/scRNA.md
           - Visium: reference/Visium.md
       - Reads:
-          - emit_reads: reference/emit_reads.md
+          - emit_dna_reads: reference/emit_dna_reads.md
           - emit_scrna_reads: reference/emit_scrna_reads.md
           - emit_visium_reads: reference/emit_visium_reads.md
       - Inference:
@@ -127,6 +127,6 @@ nav:
           - Prior: reference/Prior.md
           - Posterior: reference/Posterior.md
       - Calibration:
-          - estimate: reference/estimate.md
+          - estimate_rna: reference/estimate_rna.md
           - estimate_dna: reference/estimate_dna.md
           - estimate_visium: reference/estimate_visium.md

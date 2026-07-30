@@ -1,4 +1,4 @@
-"""Splatter-style `estimate()` for the scRNA assay.
+"""Splatter-style `estimate_rna()` for the scRNA assay.
 
 Fits the hyper-parameters of the batch model (``BatchHyperParams`` in
 ``batch.py``) from a real count matrix, so realistic technical magnitudes are *learned, not
@@ -28,7 +28,7 @@ so the raw mean-variance slope ``S = (Var-mean)/mean^2`` measures ``phi*(1+c2)+c
 true ``phi``; on real data (which also has biological cell-cell variation) it is an effective
 dispersion, reported honestly.
 
-Protocol-aware: ``estimate(adata, protocol="10x")`` fits dropout and keeps droplet ambient/
+Protocol-aware: ``estimate_rna(adata, protocol="10x")`` fits dropout and keeps droplet ambient/
 doublet priors; ``protocol="smartseq3"`` disables dropout, enables the per-cell well term, and
 keeps the plate (low-ambient) priors. Counts-only data cannot identify the ambient soup fraction
 or doublet rate (those need empty droplets / genotype demultiplexing), so those two fields are
@@ -264,7 +264,7 @@ def _fit_batch_params(counts, labels):
 # --------------------------------------------------------------------------------------
 # Public entry point
 # --------------------------------------------------------------------------------------
-def estimate(adata, protocol="10x", batch_key=None, count_model="nb", fit_dropout=None):
+def estimate_rna(adata, protocol="10x", batch_key=None, count_model="nb", fit_dropout=None):
     """Fit ``BatchHyperParams`` from a real scRNA count matrix (Splatter-style).
 
     Parameters
