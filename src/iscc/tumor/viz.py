@@ -15,6 +15,44 @@ import pymuller
 from ..constants import normal_names, normal_cmap_rgba
 
 
+#: Copy-number colormap convention: blue (loss) — white (diploid, CN=2) — red (gain).
+CNV_CMAP = "bwr"
+
+
+def cnv_norm(values, center=2.0, floor=0.5):
+    """A symmetric ``Normalize`` for copy-number plots, so white sits at the diploid ``center``
+    (default 2) and an equal gain / loss get mirror-image reds / blues. The range is
+    ``center ± max(|values - center|, floor)``."""
+    v = np.asarray(values, dtype=float)
+    dev = np.nanmax(np.abs(v - center)) if np.isfinite(v).any() else floor
+    dev = max(float(dev), floor)
+    return matplotlib.colors.Normalize(vmin=center - dev, vmax=center + dev)
+
+
+# Per-quantity colormap convention, so different fields aren't confused when plotted:
+#   copy number -> diverging blue-white-red centred at 2 (CNV_CMAP / cnv_norm, handled separately)
+RATE_CMAP = "inferno"      # division / mutation / dispersal / death rates
+EXPRESSION_CMAP = "viridis"  # gene expression
+PROGRAM_CMAP = "cividis"   # gene-program activity (colourblind-safe, distinct from viridis)
+FRACTION_CMAP = "Purples"  # fractions in [0, 1], e.g. cancer fraction per deme
+
+
+def cmap_for(color_key, default="viridis"):
+    """Pick the colormap for a per-cell / per-deme quantity from its name, so rates, expression,
+    programs and fractions read as visually distinct. Copy number is handled separately with the
+    diverging blue-white-red map (see :data:`CNV_CMAP` / :func:`cnv_norm`)."""
+    k = str(color_key).lower()
+    if k.startswith("exp_"):
+        return EXPRESSION_CMAP
+    if k.startswith("prog") or "program" in k:
+        return PROGRAM_CMAP
+    if k.endswith("_rate") or k in ("division", "mutation", "dispersal", "death", "birth"):
+        return RATE_CMAP
+    if "frac" in k:
+        return FRACTION_CMAP
+    return default
+
+
 def _prepare(genotype_counts, genotype_parents):
     pop_df = genotype_counts
     pop_df["Generation"] = np.arange(pop_df.shape[0])
@@ -428,12 +466,13 @@ def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap=
             deme_data = base.groupby(["deme_id"]).mean(numeric_only=True)
             grid = np.zeros((grid_size, grid_size), dtype=float)
             grid[deme_data["row"].astype(int), deme_data["col"].astype(int)] = deme_data["val"]
-            im = ax.imshow(grid, cmap=cmap, vmin=0.0, vmax=1.0)
+            im = ax.imshow(grid, cmap=FRACTION_CMAP, vmin=0.0, vmax=1.0)
             plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
             ax.set_title(color_key)
         else:
             base = cell_data["cell_deme"].join(cell_data["cell_crd"])
             val = None
+            is_cnv = color_key.startswith("cnv_")
             for prefix, key in [("snv_", "cell_snv"), ("cnv_", "cell_cnv"), ("exp_", "cell_exp")]:
                 if color_key.startswith(prefix):
                     val = cell_data[key][color_key.split("_", 1)[1]]
@@ -449,9 +488,20 @@ def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap=
                 continue
             base["val"] = val
             deme_data = base.groupby(["deme_id"]).mean(numeric_only=True)
-            grid = np.zeros((grid_size, grid_size), dtype=float)
-            grid[deme_data["row"].astype(int), deme_data["col"].astype(int)] = deme_data["val"]
-            im = ax.imshow(grid, cmap=cmap)
+            rows = deme_data["row"].astype(int).values
+            cols = deme_data["col"].astype(int).values
+            if is_cnv:
+                # copy number: diverging blue-white-red centred on the diploid value (2). Empty
+                # demes are masked (white) so they don't read as a deletion.
+                grid = np.full((grid_size, grid_size), np.nan)
+                grid[rows, cols] = deme_data["val"].values
+                cnv_cmap = plt.get_cmap(CNV_CMAP).copy()
+                cnv_cmap.set_bad("white")
+                im = ax.imshow(grid, cmap=cnv_cmap, norm=cnv_norm(grid))
+            else:
+                grid = np.zeros((grid_size, grid_size), dtype=float)
+                grid[rows, cols] = deme_data["val"].values
+                im = ax.imshow(grid, cmap=cmap_for(color_key, default=cmap))
             plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
         ax.set_title(color_key)
     plt.axis("off")
