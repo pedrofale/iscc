@@ -31,7 +31,7 @@ ASSAY_CONFIGS = {
 }
 
 
-def simulate_tumor(steps=400, seed=2):
+def simulate_tumor(steps=40, seed=2):
     # genotype-level engine (config sets mode: genotype); seed 2 keeps the founder alive
     tumor = GenotypeTumor(config=CONFIG, seed=seed)
     tumor.grow(n_steps=steps, seed=seed)
@@ -79,7 +79,7 @@ def run_assays(sample_dir):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--force", action="store_true", help="Regenerate even if it exists.")
-    ap.add_argument("--steps", type=int, default=400)
+    ap.add_argument("--steps", type=int, default=40)
     ap.add_argument("--seed", type=int, default=2)
     args = ap.parse_args()
 

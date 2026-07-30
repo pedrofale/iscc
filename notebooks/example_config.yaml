@@ -1,60 +1,52 @@
-# Example tumor used by the iscc notebooks: a glandular duct that a cancer founds inside and
-# spreads across, capping near carrying_capacity per deme (real crowding — DESIGN_crowding.md).
-# Uses the genotype-level (count-based) engine by default. Grid x capacity is sized so the gland
-# holds a usable-size tumor (~10^4 cancer cells): the ~pi*20^2 ~= 1250 interior demes x K=10.
-# Grow with the exact engine for a few hundred steps for a quick small lesion, or update_mode="tau"
-# (~100 generations) to fill the gland to usable size for sampling/assays.
-mode: 'genotype'
-
-spatial_params:
-  grid_size: 50
-  n_structures: 1
-  structure_radius: 20   # epithelial duct; cancer founds inside and spreads across the gland interior
-
-deme_params:
-  carrying_capacity: 10       # cells per deme (gland sub-unit) — a real per-deme cap now
-  initial_cancer_cells: 5     # seed an established micro-lesion, not 1 cell (avoids ~7% founder extinction)
-  initial_death_rate: 0.1
-  maximum_death_rate: 1.0     # >= max_birth_rate (0.8) so evolved clones' crowding death can bind the cap
+# Example primary tumor for the iscc tutorials: a small cluster of epithelial glands (ducts) that a
+# cancer founds inside and grows across, under CINner-style selection. These are the same
+# reasonably-sized glands as the docs landing simulation (configs/landing.yaml), but WITHOUT its
+# metastasis + treatment arc — the tutorials grow this primary, sample it, and assay it. The
+# metastasis/clinical-arc version stays in configs/landing.yaml. Genotype (count) engine.
+mode: genotype
+update_mode: tau      # half-generation steps
+tau: 0.5
+snapshot_every: 1
 
 genome_params:
-  n_segments: 5
-  segment_size: 200   # 1000 genes total — large enough that mutations don't saturate the genome
+  n_segments: 12
+  segment_size: 50    # 600 genes total
 
 selection_params:
-  prop_driver: 0.1
-  prop_dispersal: 0.1
-  prop_immune_resistance: 0.1
-  prop_treatment_resistance: 0.1
-  driver_effects: 1.1
-  dispersal_effects: 1.1
-  immune_resistant_effects: 1.1
-  treatment_resistant_effects: 1.1
+  prop_driver: 0.04
+  prop_dispersal: 0.0
+  prop_immune_resistance: 0.02
+  # a rare, strong duct-escape (breach) subclone against a high epithelial barrier: the ducts pack
+  # full before a subclone breaks into the stroma.
+  prop_breach: 0.012
+  breach_effects: 2.2
+  prop_stromal_survival: 0.03
+  stromal_survival_effects: 2.2
 
 cell_params:
   cancer:
-    max_birth_rate: 0.8
-    division_rate: 0.3
-    death_rate: 0.02   # low turnover so the founder rarely dies out stochastically
-    mutation_rate: 0.2   # per-division P(genome change vs dispersal); tuned for realistic SNV load
-    dispersal_rate: 0.1
-    snv_prob: 0.5      # relative weight of an SNV event (vs a CNA event)
-    cnv_prob: 0.5      # relative weight of a CNA event
-    n_snvs_per_allele: 0.3   # Poisson mean new SNVs per allele copy; spread genome-wide, total scales with ploidy
-    amp_prob: 0.5      # P(amplification | CNA event); 1 - amp_prob = deletion
-  epithelial:
-    max_birth_rate: 0.8
-    death_rate: 0.0
-    division_rate: 0.0
-    dispersal_rate: 0.0
-  stromal:
-    max_birth_rate: 0.8
-    death_rate: 0.0
-    division_rate: 0.0
-    dispersal_rate: 0.0
-  immune:
-    max_birth_rate: 0.8
-    death_rate: 0.0
-    division_rate: 0.0
-    dispersal_rate: 0.0
-    prob_kill: 0.1
+    division_rate: 0.7
+    death_rate: 0.05
+    max_birth_rate: 0.95
+    mutation_rate: 0.6
+    dispersal_rate: 0.35
+    cnv_prob: 0.15
+    wgd_rate: 0.05
+
+deme_params:
+  carrying_capacity: 20
+  initial_cancer_cells: 8
+  resident_pressure_ref: 0.2
+
+spatial_params:
+  grid_size: 26
+  structure_radius: 3
+  n_glands: 4
+  gland_radius: 3
+  min_gland_sep: 8
+  K_duct: 40
+  K_stroma: 26
+  stroma_fill_frac: 0.3
+  cross_gland_kappa: 0.06
+  epithelial_barrier: 6.0
+  stromal_hazard: 0.7
