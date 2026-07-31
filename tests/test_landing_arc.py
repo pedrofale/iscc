@@ -215,14 +215,20 @@ def test_default_animate_still_requires_count_args(sim_out):
 
 
 def test_landing_config_is_valid_and_schedule_shaped():
-    """The committed configs/landing.yaml parses and encodes the full arc + the hero seed/params."""
+    """The committed configs/landing.yaml parses, encodes the full arc, and IS the tutorial's biology
+    (notebooks/example_config.yaml) + metastasis + treatment on the SAME grid and seed."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     cfg = yaml.safe_load(open(os.path.join(root, "configs", "landing.yaml")))
+    tut = yaml.safe_load(open(os.path.join(root, "notebooks", "example_config.yaml")))
     assert cfg["mode"] == "genotype" and cfg["update_mode"] == "tau" and cfg["tau"] == 0.5
     sch = cfg["schedule"]
-    assert sch["seed"] == 3 and sch["min_freq"] == 0.02
+    assert sch["seed"] == 2 and sch["min_freq"] == 0.02       # SAME seed as the tutorial
     ops = [p["op"] for p in sch["phases"]]
     assert ops == ["grow", "surgery", "chemotherapy", "grow"]
-    # the final splash params that make the CLI GIF equal the committed hero
-    assert cfg["selection_params"]["prop_breach"] == 0.012
-    assert cfg["spatial_params"]["met_hazard"] == 3.5
+    # the shared biology is IDENTICAL to the tutorial's (grid, invasion, per-cell rates)
+    assert cfg["spatial_params"]["grid_size"] == tut["spatial_params"]["grid_size"]
+    assert cfg["selection_params"]["prop_breach"] == tut["selection_params"]["prop_breach"] == 0.001
+    assert cfg["cell_params"]["cancer"] == tut["cell_params"]["cancer"]
+    # the landing-only ADDITIONS: metastasis + treatment (off in the tutorial) + the met compartment
+    assert cfg["selection_params"]["prop_met_survival"] > 0 > -cfg["selection_params"]["prop_treatment_resistance"]
+    assert cfg["spatial_params"]["met_hazard"] == 3.5 and cfg["spatial_params"]["met_grid_size"]

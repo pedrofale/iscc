@@ -1,101 +1,86 @@
-# The docs landing hero: one clonally-linked primary + metastasis carried through the full clinical
-# arc, rendered as the two-panel composite GIF (grids left, centered "fish" Mullers right, one shared
-# clone colormap). Reproduce the hero from the ordinary CLI:
-#
+# The docs landing hero: EXACTLY the tutorial (notebooks/example_config.yaml) — same biology, same
+# grid, same seed — plus the metastasis compartment + treatment that the tutorial leaves out, run
+# through the clinical-arc `schedule`. The primary is the tutorial's tumour; it then seeds a met and is
+# treated. Reproduce:
 #   isccsim --sim-config configs/landing.yaml -o out
-#   isccgif out --compartment --splash -o docs/assets/landing_hero.gif
-#
-# On-screen order: ducts fill (DCIS) -> a subclone breaches into the stroma (IDC) -> it seeds a
-# metastasis -> the primary is resected -> systemic chemotherapy regresses the sensitive met -> a
-# single resistant clone relapses. A clone is coloured by its dominant selective trait (grey=none,
-# blue=proliferation, orange=duct escape, green=stromal survival, purple=met establishment,
-# red=chemo resistance) — identical in the grids and the Mullers.
-#
-# Parameters mirror notebooks/landing_animation.py (the original bespoke renderer) so the CLI GIF
-# equals the committed docs/assets/landing_hero.gif.
+#   isccgif out --compartment --splash --scale 0.55 -o docs/assets/landing_hero.gif
+# (--scale lowers the render dpi so the grid-170 arc stays a ~2 MB web GIF.)
 mode: genotype
-update_mode: tau      # half-a-generation frames -> the growth reads as a smooth sweep
+update_mode: tau
 tau: 0.5
-snapshot_every: 1
+snapshot_every: 1          # per-generation traces for a smooth Muller (capture cadence, not biology)
+coarsen_passengers: true
+max_cells: 50000
 
 genome_params:
   n_segments: 12
   segment_size: 50
 
 selection_params:
+  # --- identical to example_config.yaml ---
   prop_driver: 0.04
   prop_dispersal: 0.0
   prop_immune_resistance: 0.02
-  # treatment_resistance is RARE + STRONG: at chemo time only a small met subclone is resistant, so
-  # strong chemo kills the sensitive bulk and the met regresses to essentially one relapsing red clone.
-  prop_treatment_resistance: 0.001
-  treatment_resistant_effects: 2.8
-  # breach is rare + the epithelial barrier is HIGH, so the ducts pack full (DCIS) before a breach
-  # subclone escapes into the stroma (IDC).
-  prop_breach: 0.012
-  breach_effects: 2.2
-  prop_stromal_survival: 0.03
+  prop_breach: 0.001
+  breach_effects: 2.8
+  prop_stromal_survival: 0.02
   stromal_survival_effects: 2.2
-  # met_survival is RARE + STRONG: kept rare so it does not drift to saturation across the primary
-  # (which would erase the met sweep); the strong met-host bottleneck lets a rare met_survival clone
-  # found and dominate the (purple) metastasis, distinct from the primary's green/orange invasion.
+  # --- the landing's ADDITIONS: metastasis + treatment (0 in the tutorial) ---
   prop_met_survival: 0.015
   met_survival_effects: 3.0
+  prop_treatment_resistance: 0.001
+  treatment_resistant_effects: 2.8
 
 cell_params:
-  cancer:
+  cancer:                  # identical to example_config.yaml
     division_rate: 0.7
     death_rate: 0.05
     max_birth_rate: 0.95
-    mutation_rate: 0.6
-    dispersal_rate: 0.35
-    cnv_prob: 0.15
-    wgd_rate: 0.05
+    mutation_rate: 0.3
+    n_snvs_per_allele: 0.02
+    dispersal_rate: 0.9
+    cnv_prob: 0.02
+    wgd_rate: 0.0005
 
-deme_params:
-  carrying_capacity: 20
-  initial_cancer_cells: 8
+deme_params:              # identical to example_config.yaml
+  carrying_capacity: 30
+  initial_cancer_cells: 20
   resident_pressure_ref: 0.2
 
 spatial_params:
-  grid_size: 26
-  structure_radius: 3
-  n_glands: 4
-  gland_radius: 3
-  min_gland_sep: 8
-  K_duct: 40
-  K_stroma: 26
+  # identical to example_config.yaml
+  grid_size: 170
+  structure_radius: 4
+  n_glands: 8
+  gland_radius: 4
+  min_gland_sep: 14
+  K_duct: 60
+  K_stroma: 30
   stroma_fill_frac: 0.3
   cross_gland_kappa: 0.06
-  epithelial_barrier: 6.0
-  stromal_hazard: 0.7
-  # met_grid_size == grid_size and K_met == K_duct so both grids have IDENTICAL cell granularity.
-  met_grid_size: 26
-  K_met: 40
+  cross_gland_lambda: 30
+  epithelial_barrier: 10.0
+  stromal_hazard: 0.6
+  # metastasis compartment (landing-only), same cell granularity as the primary
+  met_grid_size: 170
+  K_met: 60
   host_fill_frac: 0.5
-  # met establishment as a genuine selective bottleneck: a strong met-host hazard heavily kills
-  # invading cells that LACK met_survival, and a near-zero transit floor makes seeding essentially
-  # REQUIRE met_survival.
   met_seed_kappa: 0.03
   met_hazard: 3.5
   met_transit_floor: 0.001
 
-# The clinical arc (timed treatment schedule) + the compartment-trajectory capture cadence. Present ->
-# `isccsim` runs the multi-phase arc and writes compartment_trajectory.pkl for `isccgif --compartment`.
 schedule:
-  seed: 3               # the reproducible draw giving the clean arc (a purple met, a red relapse)
-  min_freq: 0.02        # clone size-merge threshold; keeps each resistant relapse clone its own band
+  seed: 2                 # SAME seed as the tutorial
+  min_freq: 0.02
   capture:
-    pre_seed_every: 2   # coarse cadence while the primary fills (near-empty met grid)
-    post_seed_every: 1  # every generation once the met exists, so establishment/growth stays smooth
+    pre_seed_every: 4
+    post_seed_every: 3
   phases:
-    # 1. grow DCIS -> breach -> seed a SUBSTANTIAL purple deposit before resection
-    - {op: grow, until: {met_cancer: 800, total_cancer: 11000},
+    # grow the primary to the tutorial's development (~250k) before resecting, so the hero shows the
+    # SAME dense DCIS->IDC field the tutorial does; the met grows alongside into a visible deposit.
+    - {op: grow, until: {met_cancer: 60000, total_cancer: 250000},
        phase: growth, seeded_phase: metastatic seeding}
-    # 2. resect the primary, then settle a few frames
     - {op: surgery, site: primary, settle: 3, phase: resection}
-    # 3. strong systemic chemotherapy on both sites: the sensitive met bulk regresses
     - {op: chemotherapy, steps: 16, duration: 16, kill_rate: 2.8, effectiveness: 0.98,
        toxicity: 0.12, sites: both, phase: chemotherapy}
-    # 4. relapse: the single resistant (red) clone re-expands, refilling the met grid
     - {op: grow, steps: 26, phase: relapse}

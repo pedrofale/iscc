@@ -62,7 +62,7 @@ def frame_cell_data(demes, deme_coords, n_primary_demes, gid_ord):
     }
 
 
-def build_figure(traj, splash=False):
+def build_figure(traj, splash=False, scale=1.0):
     """Persistent, LANDSCAPE figure: each cell-resolution grid on the LEFT, its own-compartment Muller
     on the RIGHT, in a 2x2 layout so the two Mullers stack in the right column and SHARE one tumour-time
     x-axis, each aligned with its grid's row. The Mullers are drawn ONCE (semantic clone colours,
@@ -76,7 +76,7 @@ def build_figure(traj, splash=False):
     # eased away by the cross-time Gaussian; hand plot_muller_compartments the generation so it hard-
     # cuts ONLY the primary panel (the met panel + its smoothed chemo bottleneck stay untouched).
     resection_gen = next((g for g, lbl in marks if lbl == "resection"), None)
-    fig = plt.figure(figsize=(12.6, 7.1), dpi=150 if splash else 170)
+    fig = plt.figure(figsize=(12.6, 7.1), dpi=int((150 if splash else 170) * scale))
     fig.patch.set_facecolor(BG)
     if splash:
         # Manual, SYMMETRIC placement: two EQUAL square grids in the left column, two wide Mullers in
@@ -189,12 +189,13 @@ def _save_gif_pillow(gif_path, imgs, per, budget_mb=5.95, candidates=(48, 32, 24
     return best[1]
 
 
-def render_animation(traj, out_path, splash=False, poster=True):
+def render_animation(traj, out_path, splash=False, poster=True, scale=1.0):
     """Render the compartment trajectory to an animated GIF at ``out_path``.
 
     ``splash=True`` -> the minimal HERO variant (label-light: no clone legend, no cell counts, no phase
     caption, no Muller y labels/ticks; keeps the event vlines + annotations), size-budgeted via a Pillow
-    global palette. ``splash=False`` -> the fully-labelled general animation. Returns the written MB."""
+    global palette. ``splash=False`` -> the fully-labelled general animation. ``scale`` (<1) lowers the
+    render dpi so each frame is lighter — a bigger tumour/grid stays a web-friendly GIF. Returns the MB."""
     frames = traj["frames"]
     colors = traj["colors"]
     deme_coords = traj["deme_coords"]
@@ -202,7 +203,7 @@ def render_animation(traj, out_path, splash=False, poster=True):
     gid_ord = traj["gid_ord"]
     grid_size, met_grid_size = traj["grid_size"], traj["met_grid_size"]
 
-    fig, axp, axm, ax_mp, ax_mm, xmax = build_figure(traj, splash=splash)
+    fig, axp, axm, ax_mp, ax_mm, xmax = build_figure(traj, splash=splash, scale=scale)
 
     caption = None
     if not splash:
