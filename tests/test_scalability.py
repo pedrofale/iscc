@@ -135,6 +135,33 @@ def test_plot_tissue_from_counts_is_complete():
         plt.close("all")
 
 
+def test_plot_tissue_stage_and_muller_by_stage_share_colouring():
+    """The stage views agree: plot_tissue(color="stage") and plot_muller(by_stage=True) both colour
+    clones by the same _stage_of rule (0..4), so grid / Muller / phylogeny read consistently."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    t = _grow(seed=1, coarsen=True, max_cells=200)
+    assert t.plot_tissue(color="stage") is not None
+    assert t.plot_muller(by_stage=True, by_drivers=True, min_freq=0.02) is not None
+    reps = [r for r in t.genotypes.values() if getattr(r, "type", None) == "cancer"]
+    assert reps and all(t._stage_of(r) in range(5) for r in reps)
+    plt.close("all")
+
+
+def test_plot_phylogeny_writes_png(tmp_path):
+    """plot_phylogeny renders a subsampled, stage-coloured lineage tree to a PNG (skipped when the
+    optional ete3 / PyQt5 stack is unavailable)."""
+    import os
+    pytest.importorskip("ete3")
+    t = _grow(seed=1, coarsen=True, max_cells=200)
+    try:
+        out = t.plot_phylogeny(str(tmp_path / "phylo.png"), sample_size=40, seed=0)
+    except ImportError as e:                    # PyQt5 backend missing on this host
+        pytest.skip(str(e))
+    assert os.path.exists(out) and os.path.getsize(out) > 0
+
+
 def test_he_image_from_counts_is_dense_and_structured():
     """he_image() renders an H&E from the per-deme COUNTS (complete, not the thin subsample), so it
     is dense and high-contrast, and cancer regions read differently from empty background."""

@@ -1903,14 +1903,20 @@ class GenotypeTumor:
         return self.cell_data
 
     # --- plotting (shared, engine-agnostic) ----------------------------------
-    def plot_muller(self, ax=None, by_drivers=False, **kwargs):
+    def plot_muller(self, ax=None, by_drivers=False, by_stage=False, **kwargs):
         """Render a Muller plot of the clonal dynamics (clone frequencies over steps, nested by ancestry).
 
         ``by_drivers=True`` colours by distinct DRIVER-mutation combinations (Noble's demon
-        convention) instead of by genotype, collapsing passenger-only diversity; combine with
-        ``min_freq`` for a size threshold. Additional keywords (``ax``, ``colormap``,
+        convention) instead of by genotype, collapsing passenger-only diversity; ``by_stage=True``
+        instead colours every band by its STAGE-dominant trait (none / proliferation / invasion / met /
+        chemo-resist), matching ``plot_tissue(color="stage")`` and ``plot_phylogeny``. Combine either
+        with ``min_freq`` for a size threshold. Additional keywords (``ax``, ``colormap``,
         ``normalize``) select the target axes and control the styling."""
         from .. import viz
+        if by_stage:
+            colors, present = self._stage_colors()
+            kwargs.setdefault("clone_colors", colors)
+            kwargs.setdefault("color_legend", viz.stage_legend(present))
         driver_map = self._driver_signatures() if by_drivers else None
         return viz.plot_muller(self.traces, self.genotypes_parents, ax=ax,
                                driver_map=driver_map, **kwargs)
@@ -1970,21 +1976,27 @@ class GenotypeTumor:
             if getattr(rep, "type", None) != "cancer":
                 out[str(gid)] = normal_cmap_rgba.get(rep.type, (0.8, 0.8, 0.8, 1.0))
                 continue
-            ep = rep.evolutionary_parameters
-            base_div = getattr(rep, "baseline_rates", {}).get("division_rate", ep["division_rate"])
-            if ep.get("treatment_resistance", 0) > 0:
-                s = 4
-            elif ep.get("met_survival", 0) > 0:
-                s = 3
-            elif ep.get("breach", 0) > 0 or ep.get("stromal_survival", 0) > 0:
-                s = 2
-            elif ep["division_rate"] > base_div + 1e-9:
-                s = 1
-            else:
-                s = 0
+            s = self._stage_of(rep)
             out[str(gid)] = viz.STAGE_PALETTE[s]
             present.add(s)
         return out, sorted(present)
+
+    def _stage_of(self, rep):
+        """Stage-dominant driver of one CANCER genotype: 0 none, 1 proliferation (division raised
+        above baseline), 2 invasion (breach/stromal_survival), 3 met survival, 4 chemo resistance —
+        the highest arc stage its heritable traits have activated. Robust to missing evo keys."""
+        ep = rep.evolutionary_parameters
+        div = ep.get("division_rate", 0.0)
+        base = getattr(rep, "baseline_rates", {}).get("division_rate", div)
+        if ep.get("treatment_resistance", 0) > 0:
+            return 4
+        if ep.get("met_survival", 0) > 0:
+            return 3
+        if ep.get("breach", 0) > 0 or ep.get("stromal_survival", 0) > 0:
+            return 2
+        if div > base + 1e-9:
+            return 1
+        return 0
 
     def plot_tissue(self, ax=None, color="state", cmap=None, figsize=(7, 7)):
         """Deme-resolution tissue map built directly from the per-deme genotype COUNTS.
@@ -1995,10 +2007,12 @@ class GenotypeTumor:
 
         Parameters
         ----------
-        color : {"state", "cancer_frac"}
+        color : {"state", "cancer_frac", "stage"}
             ``"state"`` (default): categorical — empty / stroma / duct(normal) / DCIS (cancer in a
             duct) / IDC (cancer in stroma). ``"cancer_frac"``: the per-deme cancer fraction as a
-            heatmap.
+            heatmap. ``"stage"``: colour each cancer deme by the STAGE-dominant trait of its dominant
+            clone (none / proliferation / invasion / met / chemo-resist), on a pale-stroma background —
+            matching ``plot_muller(by_stage=True)`` and ``plot_phylogeny``.
         """
         import matplotlib.pyplot as plt
         from matplotlib.colors import ListedColormap
@@ -2015,6 +2029,28 @@ class GenotypeTumor:
                     img[di] = sum(c for g, c in d.items() if gid_is_can[g]) / tot
             im = ax.imshow(img.reshape(G, G), cmap=cmap or "magma", vmin=0, vmax=1, interpolation="nearest")
             plt.colorbar(im, ax=ax, fraction=0.046, label="cancer fraction")
+        elif color == "stage":
+            from .. import viz
+            from matplotlib.colors import to_hex
+            from matplotlib.patches import Patch
+            img = np.full(G * G, -1, dtype=int)             # -1 = empty/stroma background
+            for di in range(min(len(self.demes), G * G)):
+                d = self.demes[di]
+                best_g, best_c = None, 0
+                for g, c in d.items():
+                    if gid_is_can[g] and c > best_c:
+                        best_g, best_c = g, c
+                if best_g is not None:
+                    img[di] = self._stage_of(self.genotypes[best_g])
+            img = img.reshape(G, G)
+            ax.imshow(np.zeros((G, G)), cmap=ListedColormap(["#f3e7e7"]))    # pale stroma
+            cm = ListedColormap([viz.STAGE_PALETTE[i] for i in range(5)])
+            ax.imshow(np.ma.masked_where(img < 0, img), cmap=cm, vmin=0, vmax=4, interpolation="nearest")
+            names = ["none", "proliferation", "invasion", "met survival", "chemo resist"]
+            present = sorted({int(v) for v in img.ravel() if v >= 0})
+            if present:
+                ax.legend(handles=[Patch(color=to_hex(viz.STAGE_PALETTE[i]), label=names[i]) for i in present],
+                          loc="upper right", fontsize=8, framealpha=0.9)
         else:
             # 0 empty, 1 stroma, 2 duct(normal), 3 DCIS (cancer in duct), 4 IDC (cancer in stroma)
             img = np.zeros(G * G, dtype=int)
@@ -2027,6 +2063,87 @@ class GenotypeTumor:
             ax.imshow(img.reshape(G, G), cmap=cm, vmin=0, vmax=4, interpolation="nearest")
         ax.set_xticks([]); ax.set_yticks([])
         return ax
+
+    def plot_phylogeny(self, outfile="phylogeny.png", sample_size=150, seed=0, mode="c", width=800):
+        """Render a subsampled CELL PHYLOGENY with ``ete3``, leaves coloured by the stage-dominant
+        trait so it reads against ``plot_muller(by_stage=True)`` and ``plot_tissue(color="stage")``.
+
+        Subsamples up to ``sample_size`` cancer clones (weighted by their cell count), builds the
+        induced lineage tree from ``genotypes_parents``, and colours every node by its stage — a
+        clone's own stage where known, otherwise the majority stage of its sampled descendants (so
+        interior/ancestral nodes pruned from the live registry still take a sensible colour). Written
+        as a PNG (ete3 renders headless under ``QT_QPA_PLATFORM=offscreen``); returns the path.
+
+        Needs ``ete3`` + a Qt backend (``pip install ete3 PyQt5``). Primary grid only.
+        """
+        import os
+        from collections import Counter
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        try:
+            from ete3 import Tree, TreeStyle, NodeStyle, CircleFace, TextFace
+        except ImportError as e:  # pragma: no cover - optional dep
+            raise ImportError("plot_phylogeny needs ete3 + PyQt5 (pip install ete3 PyQt5)") from e
+        from matplotlib.colors import to_hex
+        from .. import viz
+        # per-clone cancer cell counts across the primary grid
+        counts = {}
+        for d in self.demes:
+            for g, c in d.items():
+                if self._is_cancer(g):
+                    counts[g] = counts.get(g, 0) + c
+        if not counts:
+            raise ValueError("no cancer cells to build a phylogeny")
+        gids = np.array(list(counts))
+        w = np.array([counts[g] for g in gids], float); w /= w.sum()
+        rng = np.random.default_rng(seed)
+        k = min(int(sample_size), len(gids))
+        # sample WITH replacement then dedupe (size-weighted); guarantees the big clones appear
+        sample = list(dict.fromkeys(rng.choice(gids, size=max(k, 1), replace=True, p=w).tolist()))
+        parents = self.genotypes_parents
+        edges = {}                                     # child -> parent along each sampled lineage
+        for g in sample:
+            cur = g
+            while cur in parents and cur not in edges:
+                edges[cur] = parents[cur]; cur = parents[cur]
+        nodes = {}
+        def _nd(g):
+            if g not in nodes:
+                nodes[g] = Tree(name=str(g)); nodes[g].dist = 1.0
+            return nodes[g]
+        for c, p in edges.items():
+            _nd(p).add_child(_nd(c))
+        roots = [n for g, n in nodes.items() if g not in edges]
+        if len(roots) == 1:
+            root = roots[0]
+        else:
+            root = Tree(name="root")
+            for r in roots:
+                root.add_child(r)
+        node_stage = {}                                # own stage if known, else descendants' majority
+        for n in root.traverse("postorder"):
+            rep = self.genotypes.get(n.name)
+            s = self._stage_of(rep) if (rep is not None and getattr(rep, "type", None) == "cancer") else None
+            if s is None:
+                kids = [node_stage[c] for c in n.children if node_stage.get(c) is not None]
+                s = Counter(kids).most_common(1)[0][0] if kids else 0
+            node_stage[n] = s
+        for n in root.traverse():
+            ns = NodeStyle(); ns["vt_line_width"] = 1; ns["hz_line_width"] = 1
+            col = to_hex(viz.STAGE_PALETTE[node_stage[n]])
+            ns["hz_line_color"] = ns["vt_line_color"] = col
+            if n.is_leaf():
+                ns["size"] = 8; ns["fgcolor"] = col; ns["bgcolor"] = col
+            else:
+                ns["size"] = 0
+            n.set_style(ns)
+        ts = TreeStyle(); ts.mode = mode; ts.show_leaf_name = False; ts.show_scale = False
+        names = ["none", "proliferation", "invasion", "met survival", "chemo resist"]
+        for i in sorted({node_stage[l] for l in root.get_leaves()}):
+            ts.legend.add_face(CircleFace(6, to_hex(viz.STAGE_PALETTE[i])), column=0)
+            ts.legend.add_face(TextFace(" " + names[i], fsize=9), column=1)
+        ts.legend_position = 3
+        root.render(outfile, tree_style=ts, w=width)
+        return outfile
 
     def he_image(self, px=6, darkness=0.8, sigma_frac=0.5):
         """Dense H&E-like morphology image built from the per-deme cell COUNTS.

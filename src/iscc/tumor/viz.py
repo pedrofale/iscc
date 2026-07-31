@@ -270,7 +270,8 @@ def _muller_stackplot(ax, pop_df, anc_df, color_by, colormap, normalize, smoothi
 
 
 def plot_muller(traces, genotypes_parents, ax=None, colormap="gnuplot", normalize=True,
-                smoothing_std=0.1, show_axes=True, min_freq=None, driver_map=None, centered=False):
+                smoothing_std=0.1, show_axes=True, min_freq=None, driver_map=None, centered=False,
+                clone_colors=None, color_legend=None):
     """Muller plot of clonal dynamics.
 
     ``driver_map`` ({genotype_id -> hashable driver signature}, supplied by the engine) colours by
@@ -283,7 +284,32 @@ def plot_muller(traces, genotypes_parents, ax=None, colormap="gnuplot", normaliz
 
     ``centered`` (default False) stacks the clone bands SYMMETRICALLY around a central horizontal axis
     (the Noble "fish"/stream layout, ``baseline="sym"``) instead of upward from zero; the default is the
-    historical zero-based pymuller layout, byte-identical."""
+    historical zero-based pymuller layout, byte-identical.
+
+    ``clone_colors`` ({gid -> rgba}, e.g. the stage-dominant driver from ``_stage_colors``) draws each
+    band in an EXPLICIT categorical colour (bypassing the colormap), so this single panel matches
+    ``plot_muller_compartments``/``plot_grid_compartments``/``plot_tissue(color="stage")``; combine with
+    ``min_freq`` to thin the bands and ``color_legend`` ([(label, rgba), ...]) for the key."""
+    if clone_colors is not None:
+        basis_counts, basis_parents, _gmap, basis_cols = _display_basis(
+            traces, genotypes_parents, driver_map, min_freq)
+        if ax is None:
+            _, ax = plt.subplots()
+        if not basis_cols or basis_counts.values.sum() == 0:
+            ax.axis("off")
+            ax.text(0.5, 0.5, "no surviving clones", ha="center", va="center", transform=ax.transAxes)
+            return ax
+        pop_df, anc_df, _cb = _prepare(basis_counts.copy(), basis_parents)
+        band_colors = {str(b): clone_colors.get(str(b), (0.82, 0.82, 0.82, 1.0)) for b in basis_cols}
+        _draw_muller_panel(ax, pop_df, anc_df, band_colors, normalize, smoothing_std, centered=centered)
+        if show_axes:
+            ax.set_xlabel("Step"); ax.set_ylabel("Frequency" if normalize else "Cells")
+        else:
+            ax.axis("off")
+        if color_legend:
+            ax.legend(handles=[mpatches.Patch(color=c, label=l) for l, c in color_legend],
+                      fontsize=7, loc="upper left")
+        return ax
     genotype_counts, genotype_parents = _cancer_only(traces, genotypes_parents)
     # FULL parent map used to reconnect ancestry; replaced by the driver-tree edges after a collapse.
     merge_parents = genotypes_parents
