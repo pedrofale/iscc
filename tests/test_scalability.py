@@ -135,31 +135,19 @@ def test_plot_tissue_from_counts_is_complete():
         plt.close("all")
 
 
-def test_plot_tissue_stage_and_muller_by_stage_share_colouring():
-    """The stage views agree: plot_tissue(color="stage") and plot_muller(by_stage=True) both colour
-    clones by the same _stage_of rule (0..4), so grid / Muller / phylogeny read consistently."""
+def test_plot_tissue_clone_and_phylogeny_share_driver_colours():
+    """The driver-clone views agree: plot_tissue(color="clone") and plot_phylogeny() both colour by the
+    same functional_clone_colors map (matching plot_muller(by_drivers=True)), and the radial phylogeny
+    renders straight to an Axes (no image file)."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     t = _grow(seed=1, coarsen=True, max_cells=200)
-    assert t.plot_tissue(color="stage") is not None
-    assert t.plot_muller(by_stage=True, by_drivers=True, min_freq=0.02) is not None
-    reps = [r for r in t.genotypes.values() if getattr(r, "type", None) == "cancer"]
-    assert reps and all(t._stage_of(r) in range(5) for r in reps)
+    assert t.plot_tissue(color="clone") is not None
+    ax = t.plot_phylogeny(sample_size=40, seed=0)
+    # drew branches/leaves onto the axes rather than writing a file
+    assert ax is not None and (len(ax.lines) > 0 or len(ax.collections) > 0)
     plt.close("all")
-
-
-def test_plot_phylogeny_writes_png(tmp_path):
-    """plot_phylogeny renders a subsampled, stage-coloured lineage tree to a PNG (skipped when the
-    optional ete3 / PyQt5 stack is unavailable)."""
-    import os
-    pytest.importorskip("ete3")
-    t = _grow(seed=1, coarsen=True, max_cells=200)
-    try:
-        out = t.plot_phylogeny(str(tmp_path / "phylo.png"), sample_size=40, seed=0)
-    except ImportError as e:                    # PyQt5 backend missing on this host
-        pytest.skip(str(e))
-    assert os.path.exists(out) and os.path.getsize(out) > 0
 
 
 def test_he_image_from_counts_is_dense_and_structured():

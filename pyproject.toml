@@ -32,8 +32,6 @@ pytest = "^7.4"
 jupyterlab = "^4.3.4"
 squidpy = "^1.6.1"
 scanpy = "^1.10.4"
-ete3 = "^3.1.3"        # tutorial cell phylogenies (GenotypeTumor.plot_phylogeny)
-PyQt5 = "^5.15"        # ete3's headless render backend (QT_QPA_PLATFORM=offscreen)
 
 [tool.poetry.scripts]
 isccsim = "iscc.tumor.main:main"
