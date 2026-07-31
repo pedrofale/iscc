@@ -406,7 +406,7 @@ def _cancer_colorbar(ax, colors, label="cancer"):
 
 def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap="viridis",
               ax=None, figsize=(10, 10), dpi=100, expand_demes=False, section_frac=1.0, expand_seed=0,
-              cancer_color="#d62728", type_cmap=None, empty_color=None):
+              cancer_color="#d62728", type_cmap=None, empty_color=None, legend=True):
     if color is None:
         color = ["cell_type"]
     if ax is None:
@@ -426,14 +426,16 @@ def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap=
             legend_patches = [mpatches.Patch(color=type_cmap[n], label=n)
                               for n in normal_names if n in present and n in type_cmap]
             cancer_present = [g for g in type_cmap if g not in normal_names and g in present]
-            if cancer_color is not None:
+            if legend and cancer_color is not None:
                 # single-colour cancer view -> one legend entry
                 if cancer_present:
                     legend_patches.append(mpatches.Patch(color=cancer_color, label="cancer"))
                 if legend_patches:
                     ax.legend(handles=legend_patches, loc="upper right", fontsize=7, framealpha=0.8)
-            else:
-                # per-clone colours -> normals in the legend, cancer clones in a discrete colorbar
+            elif legend:
+                # per-clone colours -> normals in the legend, cancer clones in a discrete colorbar.
+                # (Skipped when legend=False — e.g. the compartment animation, whose colorbar would
+                # otherwise spawn a NEW axes every frame and accumulate into stray bars.)
                 if legend_patches:
                     ax.legend(handles=legend_patches, loc="upper right", fontsize=7, framealpha=0.8)
                 cancer_colors = [type_cmap[g] for g in cancer_present if g in type_cmap]

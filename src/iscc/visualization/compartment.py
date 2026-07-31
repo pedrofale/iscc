@@ -153,7 +153,7 @@ def draw_grid(ax, sub, gsz, colors, title, title_color=INK):
     a neutral grey (no blue cast). The empty background == the page colour so the grid has no card/seam:
     only the cells are non-page pixels and the tumour reads as growing directly on the splash."""
     viz.plot_grid(sub, gsz, None, None, color=["cell_type"], ax=ax, expand_demes=True,
-                  section_frac=0.85, cancer_color=None, type_cmap=colors, empty_color=BG)
+                  section_frac=0.85, cancer_color=None, type_cmap=colors, empty_color=BG, legend=False)
     if ax.legend_:
         ax.legend_.remove()
     ax.set_title(title, color=title_color, fontsize=12, pad=5)
