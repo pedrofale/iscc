@@ -214,6 +214,28 @@ def test_default_animate_still_requires_count_args(sim_out):
     assert "GENOTYPE_COUNTS" in r.output or "compartment" in r.output
 
 
+def test_breach_gated_invasion_requires_breach():
+    """breach_gated_invasion makes crossing the basement membrane (a duct->stroma dispersal hop) require
+    the `breach` trait. With the gate ON and NO breach genes (prop_breach 0), cancer cannot reach the
+    stroma at all; with it OFF, dispersal leaks cells across. Off by default => byte-identical otherwise."""
+    spatial = {"grid_size": 22, "structure_radius": 2, "n_glands": 3, "gland_radius": 3,
+               "min_gland_sep": 7, "K_duct": 24, "K_stroma": 16, "stroma_fill_frac": 0.3,
+               "stromal_hazard": 0.6}
+    sel = {**SELECTION_PARAMS, "prop_breach": 0.0}       # no breach genes -> breach trait always 0
+
+    def stroma_cancer(gate):
+        t = GenotypeTumor(seed=3, genome_params=GENOME_PARAMS, selection_params=sel,
+                          cancer_cell_params=CANCER_CELL_PARAMS, deme_params=DEME,
+                          spatial_params={**spatial, "breach_gated_invasion": gate},
+                          update_mode="tau", tau=1.0)
+        t.grow(n_steps=70, seed=3)
+        return sum(c for di, d in enumerate(t.demes) if t.gland_id[di] < 0
+                   for g, c in d.items() if t._is_cancer(g))
+
+    assert stroma_cancer(gate=True) == 0      # the gate blocks invasion when no cell can breach
+    assert stroma_cancer(gate=False) > 0      # without the gate, dispersal leaks cancer into the stroma
+
+
 def test_landing_config_is_valid_and_schedule_shaped():
     """The committed configs/landing.yaml parses, encodes the full arc, and IS the tutorial's biology
     (notebooks/example_config.yaml) + metastasis + treatment on the SAME grid and seed."""
@@ -227,7 +249,8 @@ def test_landing_config_is_valid_and_schedule_shaped():
     assert ops == ["grow", "surgery", "chemotherapy", "grow"]
     # the shared biology is IDENTICAL to the tutorial's (grid, invasion, per-cell rates)
     assert cfg["spatial_params"]["grid_size"] == tut["spatial_params"]["grid_size"]
-    assert cfg["selection_params"]["prop_breach"] == tut["selection_params"]["prop_breach"] == 0.001
+    assert cfg["selection_params"]["prop_breach"] == tut["selection_params"]["prop_breach"] == 0.02
+    assert cfg["spatial_params"]["breach_gated_invasion"] is tut["spatial_params"]["breach_gated_invasion"] is True
     assert cfg["cell_params"]["cancer"] == tut["cell_params"]["cancer"]
     # the landing-only ADDITIONS: metastasis + treatment (off in the tutorial) + the met compartment
     assert cfg["selection_params"]["prop_met_survival"] > 0 > -cfg["selection_params"]["prop_treatment_resistance"]

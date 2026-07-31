@@ -350,6 +350,13 @@ class GenotypeTumor:
         # terms vanish -> growth is byte-identical to before (the F8 off-by-default discipline).
         self._epithelial_barrier = (spatial_params or {}).get("epithelial_barrier", 0.0)
         self._stromal_hazard = (spatial_params or {}).get("stromal_hazard", 0.0)
+        # Breach-GATED invasion (DESIGN_ductal_field.md §3.2): with this on, crossing the basement
+        # membrane — a dispersal hop from a DUCT deme into a STROMA deme — succeeds only in proportion to
+        # the clone's heritable `breach` trait; a cell that fails stays confined in the duct (DCIS). This
+        # makes breach a true GATE (only breach clones enter the stroma) rather than the epithelial_barrier
+        # death-hazard, which merely disadvantages non-breach cells in the duct and so leaks. DEFAULT
+        # False -> the duct->stroma hop is an ordinary neighbour dispersal (byte-identical to before).
+        self._breach_gated_invasion = bool((spatial_params or {}).get("breach_gated_invasion", False))
 
         # founder cancer genotype
         founder = CancerCell(
@@ -1099,6 +1106,16 @@ class GenotypeTumor:
                     if tgt is None:
                         nbrs = self._neighbors(di)
                         tgt = nbrs[int(rng.choice(len(nbrs)))] if nbrs else di
+                    # Basement-membrane gate: a duct(gland)->stroma hop is an INVASION event and needs
+                    # `breach`. It succeeds with probability = the clone's breach trait; a cell that fails
+                    # stays confined in its duct (DCIS). Off unless breach_gated_invasion is set, and only
+                    # for the duct->stroma direction (intraductal/cross-gland and stroma->stroma hops are
+                    # untouched), so it is byte-identical when the flag is off.
+                    if (self._breach_gated_invasion and self.gland_id is not None
+                            and self.gland_id[di] >= 0 and self.gland_id[tgt] < 0):
+                        b = min(max(rep.evolutionary_parameters["breach"], 0.0), 1.0)
+                        if rng.random() >= b:
+                            tgt = di                      # crossing fails -> daughter stays in the duct
                     self._add(tgt, gid, 1)
                     affected.append(tgt)
 
@@ -1367,8 +1384,24 @@ class GenotypeTumor:
                 else:
                     idx = rng.integers(0, len(nbrs), size=n_local)
                     u, cnts = np.unique(idx, return_counts=True)
+                    gate = (self._breach_gated_invasion and self.gland_id is not None
+                            and self.gland_id[di] >= 0)
+                    b = None
                     for k, cnt in zip(u, cnts):
-                        self._add(nbrs[int(k)], gid, int(cnt))
+                        tgt = nbrs[int(k)]; cnt = int(cnt)
+                        # Basement-membrane gate: a duct->stroma hop is an INVASION event needing breach.
+                        # A Binomial(cnt, breach) fraction cross into the stroma; the rest stay confined
+                        # in the duct (DCIS). Off / non-duct->stroma hops -> add all cnt as before.
+                        if gate and self.gland_id[tgt] < 0:
+                            if b is None:
+                                b = min(max(self.genotypes[gid].evolutionary_parameters["breach"], 0.0), 1.0)
+                            n_ok = int(rng.binomial(cnt, b)) if b > 0 else 0
+                            if n_ok:
+                                self._add(tgt, gid, n_ok)
+                            if cnt - n_ok:
+                                self._add(di, gid, cnt - n_ok)  # crossing fails -> stays in the duct
+                        else:
+                            self._add(tgt, gid, cnt)
             for _ in range(n_cross):
                 tgt = self._cross_gland_target(src_g, rng)
                 if tgt is None:

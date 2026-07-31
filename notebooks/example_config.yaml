@@ -52,10 +52,12 @@ selection_params:
   # but would mislabel most clones as "metastatic" / "chemo-resistant" in the stage view.
   prop_met_survival: 0.0
   prop_treatment_resistance: 0.0
-  # BREACH-LIMITED invasion: crossing the duct wall (breach) is RARE and STRONG; once out, the stroma
-  # is permissive (low stromal_hazard below) so the escaped clone invades readily. stromal_survival is
-  # a minor add-on, not a second gate.
-  prop_breach: 0.001
+  # BREACH-GATED invasion (see spatial_params.breach_gated_invasion): crossing the basement membrane
+  # (duct -> stroma) REQUIRES the breach trait. prop_breach must be high enough that breach genes
+  # actually exist — 0.001 x 600 genes ~= 0.6, i.e. often ZERO breach genes and no invasion gate at
+  # all; 0.02 -> ~12 breach genes. Once a clone breaches, the permissive stroma (low stromal_hazard)
+  # lets it invade; stromal_survival is then selected in the stroma.
+  prop_breach: 0.02
   breach_effects: 2.8
   prop_stromal_survival: 0.02
   stromal_survival_effects: 2.2
@@ -92,5 +94,11 @@ spatial_params:
   stroma_fill_frac: 0.3
   cross_gland_kappa: 0.06    # intraductal (3-D-connected) spread along the tree
   cross_gland_lambda: 30
-  epithelial_barrier: 10.0   # ducts pack full (DCIS) before anything escapes
+  # BREACH GATE: a duct->stroma dispersal hop (crossing the basement membrane) succeeds only in
+  # proportion to the clone's `breach` trait; a cell that fails stays confined as DCIS. This makes
+  # breach a true GATE on invasion (only breach clones enter the stroma), so the IDC is invasion-stage
+  # rather than whatever dispersed across. It REPLACES the old epithelial_barrier death-hazard (which
+  # only disadvantaged non-breach cells in the duct and leaked), so that is set to 0.
+  breach_gated_invasion: true
+  epithelial_barrier: 0.0
   stromal_hazard: 0.6        # PERMISSIVE stroma: once a clone breaches, it invades/disperses readily

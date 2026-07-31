@@ -21,7 +21,7 @@ selection_params:
   prop_driver: 0.04
   prop_dispersal: 0.0
   prop_immune_resistance: 0.02
-  prop_breach: 0.001
+  prop_breach: 0.02
   breach_effects: 2.8
   prop_stromal_survival: 0.02
   stromal_survival_effects: 2.2
@@ -59,7 +59,8 @@ spatial_params:
   stroma_fill_frac: 0.3
   cross_gland_kappa: 0.06
   cross_gland_lambda: 30
-  epithelial_barrier: 10.0
+  breach_gated_invasion: true   # invasion requires breach (identical to example_config.yaml)
+  epithelial_barrier: 0.0
   stromal_hazard: 0.6
   # metastasis compartment (landing-only), same cell granularity as the primary
   met_grid_size: 170
@@ -81,6 +82,8 @@ schedule:
     - {op: grow, until: {met_cancer: 60000, total_cancer: 250000},
        phase: growth, seeded_phase: metastatic seeding}
     - {op: surgery, site: primary, settle: 3, phase: resection}
-    - {op: chemotherapy, steps: 16, duration: 16, kill_rate: 2.8, effectiveness: 0.98,
+    # STRONG, selective chemo: kill the sensitive bulk hard so the relapse is the resistant (red) clone,
+    # not a mix of chemo-survivors (kill_rate 2.8 left ~40% sensitive survivors).
+    - {op: chemotherapy, steps: 20, duration: 20, kill_rate: 10.0, effectiveness: 1.0,
        toxicity: 0.12, sites: both, phase: chemotherapy}
-    - {op: grow, steps: 26, phase: relapse}
+    - {op: grow, steps: 32, phase: relapse}
