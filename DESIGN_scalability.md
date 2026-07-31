@@ -304,3 +304,80 @@ not the HPC-only cost M3b reported.
 `GenotypeTumor(..., update_mode="tau", tau=1.0, snapshot_every=1)`; `grow(n_steps=G)` advances `G`
 generations. Default remains `update_mode="exact"` (unchanged reference engine). Reproducible
 (seeded `numpy.Generator`, creation-ordinal genotype ordering). No JAX.
+
+## 8. Spatial-assay scale — decoupling growth cost from the distinct-genotype count (2026-07-30)
+
+> **Motivation.** To grow a tumour **bigger than a Visium capture area** (>6.5 mm) so spatial and
+> molecular assays each sample a *subset* of one tissue, we profiled the shipped `example_config`
+> (ductal field, `mutation_rate 0.6`, tau-leaping) at grid 90. It took **~500 s** and throughput
+> *degraded* super-linearly (grid 45→90 was 1.5× the side but ~40× the time). Two costs dominated:
+> **(1)** genotype *creation* — a whole-genome `deepcopy` + summary recompute + CINner on nearly
+> every division, because at `mutation_rate 0.6` almost every division fixes a neutral passenger and
+> so spawns a brand-new genotype (making #genotypes ≈ #cells); and **(2)** a per-genotype
+> `_death_rate` that re-scanned the deme for its immune/epithelial/stromal composition, i.e.
+> O(#genotypes²) per deme. Neither is a tau-leaping cost — both are the §3 "#genotypes" concern,
+> which the high mutation rate turns from a tail risk into the main cost.
+
+### 8.1 Byte-identical wins (both engines, `coarsen_passengers` off)
+
+- **Structural-sharing copy-on-write** (`Cell.mutate`, phase-6 of §5). Replaced
+  `deepcopy(self.genome)` with a per-segment COW: a mutating division copies the top-level list + the
+  two mutable summary lists cheaply, then copies each *segment* dict / hap-list / allele bitset lazily
+  on first write (`_cow_privatize`). A division usually touches 1–2 of the N segments, so the copy
+  scales with segments-touched, not N. **Byte-identical** to the old deepcopy (same bits, same rng),
+  verified over the exact and tau engines.
+- **Per-deme composition cache** (`_deme_comp`). Compute a deme's
+  `(total, n_normal, n_immune, n_epithelial, n_stromal, n_host)` ONCE per deme and pass it into every
+  `_death_rate` call in that deme (its new `comp` argument), instead of each genotype re-scanning.
+  Turns the per-deme death-rate work from O(#genotypes²) to O(#genotypes). Identical values ⇒
+  byte-identical. Together these gave ~1.6× at grid 90 with no behaviour change.
+
+### 8.2 Passenger coarsening (`coarsen_passengers`, opt-in, the decoupling)
+
+**Insight (as in the handoff):** birth/death/dispersal rates depend on FITNESS — a pure function of
+`genome_summary` (drivers, copy number) — not on neutral passenger SNVs. So a mutating division that
+lands NO SNV on a fitness-relevant ("functional") position leaves `genome_summary` byte-identical to
+the parent: the daughter is dynamically indistinguishable from its parent. Under `coarsen_passengers`
+such a division is **folded into the parent clone** (a count increment) instead of registering a new
+genotype; only FITNESS/COPY-NUMBER-changing events (driver SNVs, CNVs, WGD) create genotypes. So
+#genotypes tracks the number of distinct **clones**, not cells, and the growth loop stops growing
+with the tumour. The dynamics are unchanged **in distribution** — a folded daughter has identical
+rates, so every future event rate is the same — i.e. **clonal selection is fully preserved** (verified:
+the cell-weighted division rate still evolves above baseline, driver sweeps and the DCIS→IDC breach
+remain visible). Implemented as a fast-path in `mutate` (a per-segment functional mask; a purely
+neutral SNV skips the summary update + CINner + genotype id and returns the sentinel `"passenger"`);
+**force-disabled under epistasis** (an SNV anywhere in an event module can fire an event, so
+"summary unchanged" no longer implies "neutral"). OFF by default → byte-identical to the exact
+per-genotype engine (all of test_count_engine / test_tau_leaping stay green).
+
+**Lazy passengers.** The folded neutral burden is tallied per clone (`_pass_load`) and **re-emitted
+per sampled cell at materialisation** (`_reconstruct_passengers`): each cancer cell draws
+`Poisson(load/clone-size)` neutral-site SNVs at VAF `1/cn`, restoring a realistic per-cell mutation
+burden and neutral VAF tail on top of the exact driver/CNV genome — without ever materialising a
+genotype per passenger during growth. Reproducible (dedicated seeded rng).
+
+Result: with a cm-scale-realistic per-division mutational input (few SNVs/division, rare CNA/WGD —
+neutral diversity comes from POPULATION SIZE at 10⁵–10⁶ cells, not per-cell hypermutation) the engine
+grows a **>6.5 mm tumour in a few minutes** with bounded #genotypes and memory, selection intact.
+
+## 9. Assay memory at cm-scale (`max_cells`, `make_cell_data(region=...)`)
+
+`make_cell_data` materialises one row per cell across ~a dozen dense `(n_cells × n_genes)` frames; at
+cm-scale (10⁵–10⁶ cells) that is many GB. Two bounded paths:
+
+- **`max_cells`** (config / constructor / `make_cell_data(max_cells=...)`): above the cap, materialise
+  a **representative subsample** — `Binomial(count, cap/total)` per (deme, genotype) bucket, so
+  spatial + clonal + cell-type proportions are preserved in expectation (a biopsy of the whole
+  tissue). The per-genotype caches are also restricted to the materialised genotypes, so even the
+  O(#genotypes × n_genes) cache build is bounded. `None` (default) materialises every cell
+  (byte-identical to before the cap existed).
+- **`make_cell_data(region=demes)`**: materialise only the given demes, at FULL local density. This is
+  what a SPATIAL assay needs — a Visium slide samples a small window of a cm-scale tumour and needs
+  that window at real cell density (~K cells/deme), which a uniform whole-tumour subsample would
+  thin to ~1 cell/spot. `tumor.primary_window(side, center)` returns a square window of deme indices
+  for it.
+
+The shipped `notebooks/example_config.yaml` sets `coarsen_passengers: true` and `max_cells: 50000`;
+Visium samples a windowed section over the fixed 10x **v1 slide** (4,992 spots) via
+`Visium(section_frac=..., spot_pitch=...).run(cell_data, grid_side=None)`. Validated in
+`tests/test_scalability.py`.

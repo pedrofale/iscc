@@ -1,12 +1,37 @@
-# Example primary tumor for the iscc tutorials: a small cluster of epithelial glands (ducts) that a
-# cancer founds inside and grows across, under CINner-style selection. These are the same
-# reasonably-sized glands as the docs landing simulation (configs/landing.yaml), but WITHOUT its
-# metastasis + treatment arc — the tutorials grow this primary, sample it, and assay it. The
-# metastasis/clinical-arc version stays in configs/landing.yaml. Genotype (count) engine.
+# Example primary tumour for the iscc tutorials, at SPATIAL-ASSAY SCALE — a realistic breast
+# DCIS -> IDC sample, grown BIGGER than a Visium capture so every assay samples a SUBSET of one tissue.
+#
+# PHYSICAL SCALE (the anchor for every size below).
+#   * cell        ~12 um.
+#   * DEME        ~50 um across = a PATCH of ~4 cells in-plane, standing for a small 3-D COLUMN of
+#                 tissue. It is NOT one cell. `carrying_capacity` (K) is that column's cell population
+#                 — that is what captures the tissue's 3-D depth (K_duct 60 in a dense duct, K_stroma
+#                 30 in looser stroma). A 2-D histology/Visium section samples a THIN slice of each
+#                 column (~section_frac of K).
+#   * DUCT        `gland_radius` 4 -> 9 demes across = ~450 um: a realistic DCIS-expanded duct that
+#                 spans MULTIPLE demes.
+#   * TISSUE      grid 170 -> 170 x 50 um = ~8.5 mm, i.e. LARGER than a 6.5 mm Visium capture, so the
+#                 slide samples a subset. Total tissue ~10^6 cells (grid^2 x K) — cm-scale, which is
+#                 exactly why the scalability engine below is needed.
+#   * VISIUM v1   100 um spot pitch = 2 demes, 55 um spot ~ 1 deme; a thin section -> ~10 cells/spot.
+#
+# BIOLOGY (single clonal founder; DCIS -> focal IDC). One cancer founds in ONE duct and grows confined
+# (DCIS); its descendants spread along the ductal tree (cross_gland dispersal — the ducts are connected
+# in 3-D), so the multiple filled ducts are all ONE clone. The stroma is HOSTILE (stromal_hazard high):
+# a cell that only breaks out of the duct (breach) dies there unless it ALSO acquires the rare
+# stromal_survival hit — a 2-hit gate that keeps invasion FOCAL (a few invasive foci that grow, not
+# every duct). See the Muller (single founder) and DESIGN_ductal_field.md.
+#
+# SCALE / COST. ~10^6 cells is affordable because (a) tau-leaping advances a whole clone (K cells) in
+# one Poisson draw, so cost scales with #clones x #demes, NOT #cells; (b) `coarsen_passengers` keeps
+# #genotypes tracking distinct CLONES not cells; (c) `max_cells` bounds the per-cell assay tables to a
+# representative subsample. See DESIGN_scalability.md §8-9.
 mode: genotype
-update_mode: tau      # half-generation steps
+update_mode: tau
 tau: 0.5
-snapshot_every: 1
+snapshot_every: 8
+coarsen_passengers: true
+max_cells: 50000
 
 genome_params:
   n_segments: 12
@@ -16,37 +41,44 @@ selection_params:
   prop_driver: 0.04
   prop_dispersal: 0.0
   prop_immune_resistance: 0.02
-  # a rare, strong duct-escape (breach) subclone against a high epithelial barrier: the ducts pack
-  # full before a subclone breaks into the stroma.
-  prop_breach: 0.012
+  # DCIS -> IDC as a TWO-HIT gate against a hostile stroma: breach breaks out of the duct, then
+  # stromal_survival is needed to grow in the high-hazard stroma. Both rare -> invasion is FOCAL.
+  prop_breach: 0.005
   breach_effects: 2.2
-  prop_stromal_survival: 0.03
-  stromal_survival_effects: 2.2
+  prop_stromal_survival: 0.004
+  stromal_survival_effects: 3.2
 
 cell_params:
   cancer:
     division_rate: 0.7
     death_rate: 0.05
     max_birth_rate: 0.95
-    mutation_rate: 0.6
-    dispersal_rate: 0.35
-    cnv_prob: 0.15
-    wgd_rate: 0.05
+    # cm-scale-realistic per-division mutational input: neutral diversity comes from POPULATION SIZE
+    # (~10^6 cells), not per-cell hypermutation, so few SNVs/division and rare CNA/WGD -> bounded
+    # #genotypes. Passenger burden is reconstructed per sampled cell at assay time (realistic TMB).
+    mutation_rate: 0.3
+    n_snvs_per_allele: 0.02
+    dispersal_rate: 0.6
+    cnv_prob: 0.02
+    wgd_rate: 0.0005
 
 deme_params:
-  carrying_capacity: 20
-  initial_cancer_cells: 8
+  # K = the deme column's 3-D cell population (see PHYSICAL SCALE). Duct patches are denser than stroma.
+  carrying_capacity: 30      # default (stroma); K_duct overrides duct demes below
+  initial_cancer_cells: 20   # an established micro-lesion in ONE duct (a fraction of K_duct)
   resident_pressure_ref: 0.2
 
 spatial_params:
-  grid_size: 26
-  structure_radius: 3
-  n_glands: 4
-  gland_radius: 3
-  min_gland_sep: 8
-  K_duct: 40
-  K_stroma: 26
+  grid_size: 170             # ~8.5 mm at ~50 um/deme — larger than a 6.5 mm Visium capture
+  # A field of a few realistic DCIS ducts (each ~450 um = 9 demes across) in moderate-density stroma.
+  n_glands: 2
+  structure_radius: 4
+  gland_radius: 4            # 9 demes = ~450 um duct
+  min_gland_sep: 14          # ~700 um between duct centres
+  K_duct: 60                 # dense duct column
+  K_stroma: 30               # looser stroma column
   stroma_fill_frac: 0.3
-  cross_gland_kappa: 0.06
-  epithelial_barrier: 6.0
-  stromal_hazard: 0.7
+  cross_gland_kappa: 0.06    # intraductal (3-D-connected) spread along the tree
+  cross_gland_lambda: 30
+  epithelial_barrier: 10.0   # ducts pack full (DCIS) before anything escapes
+  stromal_hazard: 4.0        # hostile stroma -> the 2-hit gate keeps invasion focal

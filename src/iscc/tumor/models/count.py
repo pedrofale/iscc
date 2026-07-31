@@ -119,7 +119,8 @@ class GenotypeTumor:
                  host_cell_params=None,
                  genome_mode="abstract", genome_spec=None,
                  update_mode="exact", tau=1.0, snapshot_every=1, microenv_params=None,
-                 layout_seed=None, expression_params=None):
+                 layout_seed=None, expression_params=None, coarsen_passengers=False,
+                 max_cells=None):
         self.seed = seed
         # EVOLUTION rng (per-run: spatial seeding; grow() draws its own fresh default_rng(seed+step)).
         self.rng = np.random.default_rng(seed)
@@ -145,6 +146,33 @@ class GenotypeTumor:
         self.snapshot_every = snapshot_every
         self.time = 0.0
         self.trace_times = []
+
+        # Passenger coarsening (DESIGN_scalability §8): the lever that DECOUPLES growth cost from the
+        # distinct-genotype count. Under a high mutation rate almost every division fixes a NEUTRAL
+        # (passenger) SNV and so, in the exact model, spawns a brand-new genotype whose fitness is
+        # identical to its parent's — making #genotypes track #cells and the whole growth loop
+        # super-linear (see the grid-90 profile in §7). With ``coarsen_passengers`` on, a mutating
+        # division whose daughter is genome_summary-identical to the parent (a pure passenger: no
+        # driver hit, no copy-number change, no WGD) is NOT registered as a new genotype; it grows the
+        # parent clone in place and its neutral burden is tallied in ``self._pass_load`` for lazy
+        # reconstruction at materialisation. Only FITNESS/COPY-NUMBER-CHANGING events (driver SNVs,
+        # CNVs, WGD) still create genotypes, so #genotypes tracks the number of distinct *clones*, not
+        # cells. The dynamics are unchanged in distribution — a passenger daughter has identical
+        # division/death/dispersal rates, so folding it into the parent leaves every future event rate
+        # the same (selection fully intact). Passengers are re-emitted per sampled cell in
+        # ``make_cell_data``. OFF by default -> byte-identical to the exact per-genotype engine.
+        # Force-off when epistasis is on (an SNV anywhere in an event module can fire an event, so
+        # "genome_summary unchanged" no longer implies "dynamically neutral").
+        self.coarsen_passengers = bool(coarsen_passengers)
+
+        # Assay-memory cap (DESIGN_scalability §9). ``make_cell_data`` materialises one row per cell
+        # across ~a dozen dense (n_cells × n_genes) frames; at cm-scale (millions of cells) that is
+        # tens of GB. ``max_cells`` bounds it: when the tumour exceeds the cap, a REPRESENTATIVE
+        # subsample (Binomial(count, cap/total) per (deme, genotype) bucket, so spatial + clonal +
+        # cell-type proportions are preserved) is materialised instead of every cell — a biopsy of one
+        # tissue, which is exactly what an assay samples. ``None`` (default) materialises all cells, so
+        # every existing small-tumour run/test is byte-identical. The re-scaled example_config sets it.
+        self.max_cells = max_cells
 
         # Real-genome mode (DESIGN_inference A.5): the genome is wired from a GenomeSpec built
         # from human chromosome-arm data (arm lengths -> segment_sizes, per-arm oncogene/TSG
@@ -175,6 +203,8 @@ class GenotypeTumor:
             self.update_mode = cfg.get("update_mode", update_mode)
             self.tau = cfg.get("tau", tau)
             self.snapshot_every = cfg.get("snapshot_every", snapshot_every)
+            self.coarsen_passengers = bool(cfg.get("coarsen_passengers", coarsen_passengers))
+            self.max_cells = cfg.get("max_cells", max_cells)
             microenv_params = cfg.get("microenv_params", microenv_params)
             expression_params = cfg.get("expression_params", expression_params)
             if cfg.get("layout_seed") is not None:
@@ -217,6 +247,38 @@ class GenotypeTumor:
                                    layout_seed=self.layout_seed, **selection_params)
         self.n_genes = self.selection.n_genes
         self._cancer_params = cancer_cell_params
+
+        # Passenger coarsening state (see the flag docstring above). Epistasis makes any SNV in an
+        # event module fitness-relevant, so coarsening is force-disabled there.
+        if self.coarsen_passengers and self.selection.epistasis is not None:
+            self.coarsen_passengers = False
+        # Per-segment mask of NEUTRAL (passenger) gene positions: everything NOT in any selection
+        # axis (drivers = onc∪tsg, dispersal, immune/treatment resistance, breach, stromal/met
+        # survival). A mutating division that touches only these leaves genome_summary untouched, so
+        # it is a pure passenger. Used to draw reconstructed passenger SNVs at materialisation.
+        sel = self.selection
+        self._neutral_pos = []
+        self._func_bits = []           # per-segment boolean mask of FITNESS-relevant gene positions
+        for seg in range(self.n_segments):
+            func = np.zeros(int(sel.segment_sizes[seg]), dtype=bool)
+            for idx in (sel.drivers[seg], sel.dispersal[seg], sel.immune_resistance[seg],
+                        sel.treatment_resistance[seg], sel.breach[seg], sel.stromal_survival[seg],
+                        sel.met_survival[seg]):
+                if len(idx):
+                    func[np.asarray(idx, dtype=int)] = True
+            self._func_bits.append(func)
+            self._neutral_pos.append(np.flatnonzero(~func))
+        # Global (genome-wide) neutral position ids and per-clone folded-passenger burden.
+        self._neutral_gene_ids = np.concatenate(
+            [self.selection._seg_offsets[s] + self._neutral_pos[s] for s in range(self.n_segments)]
+        ) if self.n_segments else np.array([], dtype=int)
+        # gene id -> segment index (for passenger reconstruction: a neutral site's VAF is 1/cn of the
+        # segment it sits in).
+        self._gene_segment = (np.concatenate(
+            [np.full(int(sel.segment_sizes[s]), s, dtype=int) for s in range(self.n_segments)])
+            if self.n_segments else np.array([], dtype=int))
+        self._pass_load = Counter()     # gid -> cumulative passenger SNVs folded into that clone
+        self._n_folded = 0              # diagnostics: passenger divisions folded this run
 
         # R13 program layer. The dictionary (gene->program map, `loading`, regulators, `s_g`) is part
         # of the SHARED landscape and so draws from `layout_seed`'s program sub-stream — two patients
@@ -266,6 +328,12 @@ class GenotypeTumor:
         self.genotypes_parents = {}
         self.genotypes_counts = Counter()
         self._next_ord = 0
+        # Running max of (division + dispersal) over cancer genotypes, maintained incrementally in
+        # _register so the tau-leap substep count doesn't need an O(#genotypes) scan every generation
+        # (only under coarsen_passengers, where #genotypes can still be large; the exact-engine path
+        # keeps its live-max scan so it stays byte-identical). Monotone upper bound -> conservative
+        # (never too-few substeps).
+        self._max_div_disp = 0.0
 
         # per-immune-cell contact kill hazard, and per-step treatment overrides
         # (gid -> extra death hazard / overridden immune resistance), refreshed each
@@ -480,6 +548,11 @@ class GenotypeTumor:
         rep.ord = self._next_ord
         self._next_ord += 1
         self.genotypes[rep.genotype_id] = rep
+        if self.coarsen_passengers and rep.type == "cancer":
+            ep = rep.evolutionary_parameters
+            dd = ep["division_rate"] + ep["dispersal_rate"]
+            if dd > self._max_div_disp:
+                self._max_div_disp = dd
         return rep.genotype_id
 
     def _normal_genotype(self, type_name):
@@ -725,6 +798,35 @@ class GenotypeTumor:
         host = sum(cnt for gid, cnt in deme.items() if self.genotypes[gid].type == "host")
         return host / total
 
+    def _deme_comp(self, deme):
+        """One O(#genotypes-in-deme) pass over a deme returning the per-compartment cell counts a
+        death-rate evaluation needs: ``(total, n_normal, n_immune, n_epithelial, n_stromal, n_host)``.
+
+        Passing the result into ``_death_rate`` (via its ``comp`` argument) lets every genotype in a
+        deme reuse ONE composition scan instead of each re-running the O(#genotypes) immune /
+        epithelial / stromal / host ``_*_fraction`` scans. That turns the per-deme death-rate work
+        from O(#genotypes²) to O(#genotypes) — the dominant per-substep cost once a high mutation
+        rate makes #genotypes track #cells (see the grid-90 profile in DESIGN_scalability.md §7).
+        ``n_normal`` matches ``sum(deme.get(nm, 0) for nm in normal_names)`` because a normal
+        genotype's id IS its type name."""
+        total = n_normal = n_immune = n_epi = n_stro = n_host = 0
+        G = self.genotypes
+        for gid, c in deme.items():
+            total += c
+            tp = G[gid].type
+            if tp == "cancer":
+                continue
+            n_normal += c
+            if tp == "immune":
+                n_immune += c
+            elif tp == "epithelial":
+                n_epi += c
+            elif tp == "stromal":
+                n_stro += c
+            elif tp == "host":
+                n_host += c
+        return (total, n_normal, n_immune, n_epi, n_stro, n_host)
+
     def _compartment_fields(self):
         """Per-deme epithelial / stromal LIVE fractions, as two (n_demes,) arrays — the compartment
         as a niche field for R13 route-3 (DESIGN_phenotype_plasticity.md §2, Part D). The SAME clone
@@ -751,7 +853,7 @@ class GenotypeTumor:
         is_met = deme_idx >= self.n_primary_demes
         return is_met if self._tx_sites == "met" else (not is_met)
 
-    def _death_rate(self, gid, deme_idx, total=None):
+    def _death_rate(self, gid, deme_idx, total=None, comp=None):
         """Cancer death rate = crowding-modulated baseline + local immune killing + treatment.
 
         Mirrors the corrected Deme.get_cancer_death_rate: immune killing is additive contact
@@ -760,10 +862,17 @@ class GenotypeTumor:
         (immunotherapy, via the per-step _tx_* overrides). ``total`` (the deme's cell count) may be
         passed in when the caller already computed it, so a per-deme loop doesn't recompute it once
         per genotype.
-        """
+
+        ``comp`` is the deme's precomputed composition tuple from ``_deme_comp``
+        ``(total, n_normal, n_immune, n_epithelial, n_stromal, n_host)``. When given, the immune /
+        compartment fractions and ``n_normal`` are read from it in O(1) instead of re-scanning the
+        deme per genotype; the numbers are identical, so this is byte-identical to ``comp=None`` (the
+        old per-call scans) but drops the per-deme cost from O(#genotypes²) to O(#genotypes)."""
         rep = self.genotypes[gid]
         deme = self.demes[deme_idx]
-        if total is None:
+        if comp is not None:
+            total, n_normal_c, n_immune_c, n_epi_c, n_stro_c, n_host_c = comp
+        elif total is None:
             total = sum(deme.values())
         base = rep.evolutionary_parameters["death_rate"]
         if self._crowding:
@@ -794,7 +903,8 @@ class GenotypeTumor:
                 # div near the reference persist. No overfill (nothing exceeds the reference).
                 death = base + max(0.0, self._crowding_ref - base) * steep * (total / K)
             else:
-                n_normal = sum(deme.get(nm, 0) for nm in normal_names)
+                n_normal = (n_normal_c if comp is not None
+                            else sum(deme.get(nm, 0) for nm in normal_names))
                 n_cancer = total - n_normal
                 death = base + max(0.0, div - base) * steep * (n_cancer / K)
                 if n_normal:
@@ -809,7 +919,9 @@ class GenotypeTumor:
         base_ir = rep.evolutionary_parameters["immune_resistance"]
         ir = self._tx_immune_resist.get(gid, base_ir) if self._tx_applies(deme_idx) else base_ir
         ir = min(max(ir, 0.0), 1.0)
-        death += self._immune_prob_kill * self._immune_fraction(deme, total) * (1.0 - ir)
+        imm_frac = ((n_immune_c / total if total else 0.0) if comp is not None
+                    else self._immune_fraction(deme, total))
+        death += self._immune_prob_kill * imm_frac * (1.0 - ir)
 
         # Compartment-dependent selection (v1): each resident compartment adds a local hazard,
         # attenuated by the clone's matching heritable trait — the exact shape of the immune term.
@@ -817,17 +929,23 @@ class GenotypeTumor:
         # additions are `+= 0.0` and the death rate is byte-identical to before.
         if self._epithelial_barrier:
             b = min(max(rep.evolutionary_parameters["breach"], 0.0), 1.0)
-            death += self._epithelial_barrier * self._epithelial_fraction(deme, total) * (1.0 - b)
+            epi_frac = ((n_epi_c / total if total else 0.0) if comp is not None
+                        else self._epithelial_fraction(deme, total))
+            death += self._epithelial_barrier * epi_frac * (1.0 - b)
         if self._stromal_hazard:
             ss = min(max(rep.evolutionary_parameters["stromal_survival"], 0.0), 1.0)
-            death += self._stromal_hazard * self._stromal_fraction(deme, total) * (1.0 - ss)
+            stro_frac = ((n_stro_c / total if total else 0.0) if comp is not None
+                         else self._stromal_fraction(deme, total))
+            death += self._stromal_hazard * stro_frac * (1.0 - ss)
         # Metastatic host-tissue hazard (R9): the met analogue of the stromal hazard — the deposit's
         # immortal host parenchyma adds a local death hazard to invading cancer, attenuated by the
         # clone's heritable met_survival trait (clamped [0,1] like the others). Default 0.0 -> += 0.0
         # -> byte-identical whether met is off or on-with-hazard-0.
         if self._met_hazard:
             ms = min(max(rep.evolutionary_parameters["met_survival"], 0.0), 1.0)
-            death += self._met_hazard * self._host_fraction(deme, total) * (1.0 - ms)
+            host_frac = ((n_host_c / total if total else 0.0) if comp is not None
+                         else self._host_fraction(deme, total))
+            death += self._met_hazard * host_frac * (1.0 - ms)
 
         # Chemo/targeted death hazard, gated to the treated compartment(s) (R9): systemic ('both')
         # hits everywhere, 'met'/'primary' only their site. 'both' is byte-identical to before.
@@ -843,11 +961,12 @@ class GenotypeTumor:
         (death-only) dynamic in a treated compartment under the off-target chemo toxicity hazard.
         Untreated (``_tx_death_add`` empty) -> the normal term vanishes -> byte-identical."""
         deme = self.demes[deme_idx]
-        total = sum(deme.values())
+        comp = self._deme_comp(deme)                # ONE composition scan reused by every genotype
+        total = comp[0]
         rate = 0.0
         for gid in self._cancer_gids(deme):
             div = self.genotypes[gid].evolutionary_parameters["division_rate"]
-            rate += deme[gid] * (div + self._death_rate(gid, deme_idx, total))
+            rate += deme[gid] * (div + self._death_rate(gid, deme_idx, total, comp=comp))
         if self._tx_death_add and self._tx_applies(deme_idx):
             for gid, cnt in deme.items():
                 if gid in self._tx_death_add and not self._is_cancer(gid):
@@ -897,10 +1016,11 @@ class GenotypeTumor:
         # pick a cancer genotype in the deme proportionally to count * (div + death),
         # ordered by creation ordinal (NOT the id()-based genotype_id) for reproducibility
         gids = sorted(self._cancer_gids(deme), key=lambda g: self.genotypes[g].ord)
-        total = sum(deme.values())
+        comp = self._deme_comp(deme)                # ONE composition scan reused by every genotype
+        total = comp[0]
         weights = [
             deme[gid] * (self.genotypes[gid].evolutionary_parameters["division_rate"]
-                         + self._death_rate(gid, di, total))
+                         + self._death_rate(gid, di, total, comp=comp))
             for gid in gids
         ]
         # NORMAL cells become death-only candidates under off-target chemo toxicity in a treated deme.
@@ -919,7 +1039,7 @@ class GenotypeTumor:
         gid = gids[pick]
         rep = self.genotypes[gid]
         div = rep.evolutionary_parameters["division_rate"]
-        death = self._death_rate(gid, di, total)
+        death = self._death_rate(gid, di, total, comp=comp)
 
         affected = [di]
         if rng.random() < death / (div + death):
@@ -929,9 +1049,18 @@ class GenotypeTumor:
             mut_prob = rep.mutation_rate / (rep.mutation_rate + disp)
             if rng.random() < mut_prob:
                 child = rep.divide()
-                if child.mutate(rng, self.selection):
-                    # A daughter breaching the viability limits is never born (see _is_viable):
-                    # the division is consumed but adds no cell.
+                res = child.mutate(rng, self.selection,
+                                   func_mask=self._func_bits if self.coarsen_passengers else None)
+                if res == "passenger":
+                    # pure neutral daughter: identical dynamics, fold into the parent clone and tally
+                    # its passenger burden for lazy reconstruction. No genotype registered.
+                    self._add(di, gid, 1)
+                    self._pass_load[gid] += child._n_new_snv
+                    self._n_folded += 1
+                elif res:
+                    # functional (driver / CNV / WGD) daughter -> a new genotype, unless it breaches
+                    # the viability limits, in which case it is never born (see _is_viable): the
+                    # division is consumed but adds no cell.
                     if self._is_viable(child):
                         self._register(child)
                         self.genotypes_parents[child.genotype_id] = rep.genotype_id
@@ -1145,12 +1274,13 @@ class GenotypeTumor:
             deme = self.demes[di]
             if not deme:
                 continue
-            total = sum(deme.values())
+            comp = self._deme_comp(deme)            # ONE composition scan reused by every genotype
+            total = comp[0]
             for gid in sorted(self._cancer_gids(deme), key=lambda g: self.genotypes[g].ord):
                 c = deme[gid]
                 rep = self.genotypes[gid]
                 div = rep.evolutionary_parameters["division_rate"]
-                death = self._death_rate(gid, di, total)
+                death = self._death_rate(gid, di, total, comp=comp)
                 disp = rep.evolutionary_parameters["dispersal_rate"]
                 n_div = int(rng.poisson(div * c * dt))
                 n_death = int(rng.poisson(death * c * dt))
@@ -1184,11 +1314,19 @@ class GenotypeTumor:
         # which case nothing is born; a saturated allele grows the parent in place.
         # This per-mutation genotype creation is intrinsic to the infinite-sites model and costs
         # exactly the same as in the exact engine (the separate #genotypes concern of §3).
+        fmask = self._func_bits if self.coarsen_passengers else None
         for di, gid, n in mutants:
             rep = self.genotypes[gid]
+            n_fold = 0
             for _ in range(n):
                 child = rep.divide()
-                if child.mutate(rng, self.selection):
+                res = child.mutate(rng, self.selection, func_mask=fmask)
+                if res == "passenger":
+                    # pure neutral daughter: fold into the parent clone (batched via n_fold),
+                    # tally its passenger burden. No genotype registered.
+                    n_fold += 1
+                    self._pass_load[gid] += child._n_new_snv
+                elif res:
                     # non-viable daughter: division consumed, no cell added (see _is_viable)
                     if self._is_viable(child):
                         self._register(child)
@@ -1196,6 +1334,9 @@ class GenotypeTumor:
                         self._add(di, child.genotype_id, 1)
                 else:
                     self._add(di, gid, 1)
+            if n_fold:
+                self._add(di, gid, n_fold)
+                self._n_folded += n_fold
         # dispersal-branch births: same genotype. A low fraction (~kappa) of gland-resident daughters
         # take an island hop to another gland's lumen; the rest go to a uniformly random neighbour.
         # kappa=0 draws no binomial and leaves the neighbour draw untouched -> byte-identical.
@@ -1241,13 +1382,17 @@ class GenotypeTumor:
         regime (this also prevents carrying-capacity overshoot, since death rates are re-read each
         substep). Records a full per-clone snapshot every `snapshot_every` generations."""
         ACCURACY = 0.34  # keep rate*dt <= this so Poisson tau-leaping stays accurate
-        max_cell_rate = 0.0
-        for gid in self.genotypes_counts:
-            if self._is_cancer(gid):
-                ep = self.genotypes[gid].evolutionary_parameters
-                max_cell_rate = max(max_cell_rate,
-                                    ep["division_rate"] + ep["dispersal_rate"])
-        max_cell_rate += self.maximum_death_rate
+        if self.coarsen_passengers:
+            # incremental monotone upper bound (see _max_div_disp) — avoids the O(#genotypes) scan
+            max_cell_rate = self._max_div_disp + self.maximum_death_rate
+        else:
+            max_cell_rate = 0.0
+            for gid in self.genotypes_counts:
+                if self._is_cancer(gid):
+                    ep = self.genotypes[gid].evolutionary_parameters
+                    max_cell_rate = max(max_cell_rate,
+                                        ep["division_rate"] + ep["dispersal_rate"])
+            max_cell_rate += self.maximum_death_rate
         n_sub = max(1, int(np.ceil(max_cell_rate * tau / ACCURACY)))
         dt = tau / n_sub
         for _ in range(n_sub):
@@ -1380,7 +1525,97 @@ class GenotypeTumor:
         return mod
 
     # --- materialisation: counts -> per-cell matrices ------------------------
-    def make_cell_data(self, cell_prefix="C", **kwargs):
+    def _reconstruct_passengers(self, snv_mat, types):
+        """Re-emit each materialised cancer cell's neutral (passenger) SNVs that coarsening folded
+        away during growth (see ``coarsen_passengers``). A clone's total folded burden
+        ``_pass_load[gid]`` is spread over its ``count`` cells, so each cell draws
+        ``Poisson(load/count)`` passenger sites from the genome's NEUTRAL positions and carries them
+        at VAF ``1/cn`` (a heterozygous SNV on one copy of that segment). This restores a realistic
+        per-cell mutation burden and a neutral VAF tail on top of the exact driver/CNV genome, WITHOUT
+        ever materialising a genotype per passenger during growth — the whole point of coarsening.
+        Modifies ``snv_mat`` in place; a no-op when nothing was folded. Uses a dedicated seeded rng so
+        the reconstruction is reproducible."""
+        if not self.coarsen_passengers or not self._pass_load or not len(self._neutral_gene_ids):
+            return
+        prng = np.random.default_rng(self.seed + 909090)
+        neutral = self._neutral_gene_ids
+        seg_of = self._gene_segment
+        mus = {}
+        for g in set(types):
+            if g in self._pass_load and self._is_cancer(g):
+                cnt = self.genotypes_counts.get(g, 0)
+                mus[g] = (self._pass_load[g] / cnt) if cnt else 0.0
+        n_neutral = len(neutral)
+        for i, g in enumerate(types):
+            mu = mus.get(g, 0.0)
+            if mu <= 0:
+                continue
+            k = int(prng.poisson(mu))
+            if k <= 0:
+                continue
+            pos = prng.choice(neutral, size=min(k, n_neutral), replace=False)
+            cns = self.genotypes[g].genome_summary["seg_cns"]
+            for p in pos:
+                cn = cns[seg_of[p]]
+                snv_mat[i, p] = (1.0 / cn) if cn > 0 else 0.0
+
+    def _materialize_plan(self, max_cells, region=None):
+        """Per-deme ``{gid: n_to_materialise}`` for ``make_cell_data``.
+
+        With no cap (or a tumour under it) every cell in scope is materialised (``n = count``), so
+        output is unchanged. Above the cap, each (deme, genotype) bucket keeps ``Binomial(count,
+        cap/total)`` cells — a representative subsample preserving spatial + clonal + cell-type
+        proportions in expectation, the biopsy an assay actually takes — so the dense per-cell frames
+        never exceed ~``max_cells`` rows regardless of tumour size. Deterministic (dedicated seeded
+        rng).
+
+        ``region`` (an iterable of deme indices) restricts materialisation to those demes, at FULL
+        local density unless the region itself exceeds the cap. This is what a SPATIAL assay needs: a
+        Visium slide samples a small window of a cm-scale tumour and needs that window at full cell
+        density (~K cells/deme), which a uniform whole-tumour subsample would dilute to ~1 cell/spot.
+        Non-region demes materialise nothing."""
+        reg = None if region is None else set(int(d) for d in region)
+        if reg is None:
+            total = self.get_tumor_size()
+        else:
+            total = sum(sum(self.demes[d].values()) for d in reg if 0 <= d < len(self.demes))
+        subsample = max_cells is not None and total > max_cells and total > 0
+        if not subsample and reg is None:
+            return [dict(d) for d in self.demes], False
+        frac = (max_cells / total) if subsample else 1.0
+        mrng = np.random.default_rng(self.seed + 20240730)
+        plan = []
+        for di, deme in enumerate(self.demes):
+            if reg is not None and di not in reg:
+                plan.append({})
+                continue
+            if not subsample:
+                plan.append(dict(deme))
+                continue
+            keep = {}
+            for gid, c in deme.items():
+                n = int(mrng.binomial(c, frac))
+                if n:
+                    keep[gid] = n
+            plan.append(keep)
+        return plan, subsample
+
+    def primary_window(self, side, center=None):
+        """Deme indices of a ``side``×``side`` square window of the PRIMARY grid, centred on
+        ``center`` ``(row, col)`` or the grid centre. Pass to ``make_cell_data(region=...)`` to
+        materialise a dense spatial patch (e.g. a Visium slide's footprint) of a cm-scale tumour at
+        real cell density, rather than thinning the whole tumour to a uniform subsample."""
+        G = self.grid_size
+        cr, cc = center if center is not None else (G // 2, G // 2)
+        half = side // 2
+        demes = []
+        for r in range(max(0, cr - half), min(G, cr - half + side)):
+            row = r * G
+            for c in range(max(0, cc - half), min(G, cc - half + side)):
+                demes.append(row + c)
+        return demes
+
+    def make_cell_data(self, cell_prefix="C", max_cells=None, region=None, **kwargs):
         """Expand the per-deme genotype counts into per-cell ground-truth tables.
 
         Materialises one row per cell (each genotype's count becomes that many identical
@@ -1394,12 +1629,26 @@ class GenotypeTumor:
         ----------
         cell_prefix : str, optional
             Prefix for the generated cell names (default ``"C"``).
+        max_cells : int, optional
+            Cap on the number of cells materialised (defaults to the tumour's ``self.max_cells``).
+            When the tumour is larger, a representative subsample is materialised instead of every
+            cell (see ``_materialize_plan``) so the dense frames stay memory-bounded at cm-scale.
+            ``None`` materialises every cell (byte-identical to before this cap existed).
+        region : iterable of int, optional
+            Deme indices to restrict materialisation to, at FULL local density (subject to
+            ``max_cells``). Use this for a SPATIAL assay (e.g. a Visium slide) that samples a small
+            window of a cm-scale tumour and needs that window at real cell density — a uniform
+            whole-tumour subsample would thin it to ~1 cell/spot. ``None`` materialises the whole
+            tumour.
 
         Returns
         -------
         dict
             ``self.cell_data`` — the per-cell dataframes.
         """
+        if max_cells is None:
+            max_cells = self.max_cells
+        mat_plan, _subsampled = self._materialize_plan(max_cells, region=region)
         gene_names = self.selection.get_gene_names()
         onc_idx, tsg_idx = self.selection.get_oncogenes(), self.selection.get_tsgs()
         disp_idx, ir_idx, tr_idx = (self.selection.get_dispersal_genes(),
@@ -1412,7 +1661,13 @@ class GenotypeTumor:
         # Both are per-CLONE, so they belong in this cache; the per-CELL `z` is drawn later.
         exp_p_cache, exp_m_cache, drive_cache = {}, {}, {}
         P = self.programs
-        for gid in self.genotypes_counts:
+        # Build per-genotype caches ONLY for genotypes that will be materialised — the whole plan
+        # without a cap, the subsample's genotypes under one. At cm-scale iterating every genotype
+        # here is itself an O(#genotypes × n_genes) memory/time wall, so the cap must bound it too.
+        mat_gids = set()
+        for keep in mat_plan:
+            mat_gids.update(keep)
+        for gid in mat_gids:
             rep = self.genotypes[gid]
             snv = rep.get_snvs()
             snv_cache[gid] = snv
@@ -1490,9 +1745,11 @@ class GenotypeTumor:
         rows_snv, rows_cnv, rows_exp, rows_evo, crd, types, demes_col, names = [], [], [], [], [], [], [], []
         rows_exp_p, rows_exp_m, rows_drive = [], [], []
         i = 0
-        for deme_idx, deme in enumerate(self.demes):
+        for deme_idx, keep in enumerate(mat_plan):
+            if not keep:
+                continue
             r, c = self.deme_coords[deme_idx]
-            for gid in sorted(deme.keys(), key=lambda g: self.genotypes[g].ord):
+            for gid in sorted(keep.keys(), key=lambda g: self.genotypes[g].ord):
                 if deme_mod is None:
                     exp_row = exp_cache[gid]
                 else:
@@ -1506,7 +1763,7 @@ class GenotypeTumor:
                     drive_row = drive_cache[gid]
                     if niche_drive is not None:
                         drive_row = drive_row + niche_drive[deme_idx]
-                for _ in range(deme[gid]):
+                for _ in range(keep[gid]):
                     rows_snv.append(snv_cache[gid]); rows_cnv.append(cnv_cache[gid])
                     rows_exp.append(exp_row); rows_evo.append(evo_cache[gid])
                     crd.append((r, c)); types.append(gid); demes_col.append(deme_idx)
@@ -1531,9 +1788,13 @@ class GenotypeTumor:
 
         idx = pd.Index(names)
         empty = np.empty((0, self.n_genes))
+        # SNV matrix, with coarsened-away passenger SNVs re-emitted per cell (no-op when coarsening is
+        # off or nothing was folded). Built once and reused for cell_rna_vaf below.
+        snv_mat = np.array(rows_snv) if rows_snv else empty
+        self._reconstruct_passengers(snv_mat, types)
         self.cell_data = dict(
             cell_evo=pd.DataFrame(rows_evo, index=idx),
-            cell_snv=pd.DataFrame(np.array(rows_snv) if rows_snv else empty, index=idx, columns=gene_names),
+            cell_snv=pd.DataFrame(snv_mat, index=idx, columns=gene_names),
             cell_cnv=pd.DataFrame(np.array(rows_cnv) if rows_cnv else empty, index=idx, columns=gene_names),
             # NB `len(...)`, not truthiness: with the program layer on, `rows_exp` is an ndarray.
             cell_exp=pd.DataFrame(np.array(rows_exp) if len(rows_exp) else empty, index=idx, columns=gene_names),

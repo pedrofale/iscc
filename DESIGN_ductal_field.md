@@ -72,6 +72,52 @@ the full 3D population per location; each assay takes the appropriate *view* (se
 population for dissociation). NOTE: iscc's current `Visium` pools *all* cells in a spot — the ST-generation
 work must switch it to this section-slice sampling so large K doesn't over-fill spots.
 
+### 3.2 Concrete physical scale + the shipped DCIS→IDC example (BUILT 2026-07-31)
+
+This pins §3/§3.1 to concrete numbers, decided with Pedro while building the spatial-assay-scale example
+(`notebooks/example_config.yaml`). **The anchor is that a deme is a PATCH of tissue, not a cell**, and its
+`carrying_capacity` K is the cell population of the 3-D column it stands for.
+
+| quantity | value | reasoning |
+|---|---|---|
+| cell | ~12 µm | breast epithelial cell |
+| **deme** | **~50 µm** in-plane | a PATCH of ~4 cells across — deliberately NOT ~1 cell wide; it stands for a 3-D column |
+| **K** (`carrying_capacity`) | **K_duct 60, K_stroma 30** | the column's 3-D cell population (a denser duct, looser stroma) — "captures the depth" (§3) |
+| **duct** | `gland_radius` 4 → **9 demes ≈ 450 µm** | a realistic DCIS-expanded duct spanning MANY demes (§3: a few demes × moderate K = a 3-D duct) |
+| **tissue** | grid 170 → **~8.5 mm** | LARGER than a 6.5 mm Visium capture, so the slide samples a subset; total ≈ **10⁶ cells** |
+| **Visium v1** | 100 µm pitch = **2 demes**, 55 µm spot ≈ **1 deme** | see the deconvolution note below |
+
+**2-D views are thin SECTIONS (§3.1), not the whole column.** A duct deme has K_duct = 60 cells in its
+3-D column, but a cell-level 2-D view — an H&E image, a Visium spot, an imaging assay — is ONE ~12 µm slice,
+so it shows only ~one layer: **~17 packed cells per duct deme** (a 50 µm patch of 12 µm cells), fewer in
+stroma. Materialising/plotting the WHOLE column into a 2-D pixel over-crowds it; the assay/plot must take a
+thin section (~`section_thickness/column_depth · K`). Dissociated assays (scRNA/scDNA) instead mix all
+depths and sample the whole per-location population.
+
+**Deconvolution tradeoff (refines §3's "spot covers several demes").** A Visium spot is 55 µm ≈ ONE deme at
+this scale, so the shipped example resolves ST at ~deme (50 µm) resolution and each spot's cells are a
+representative *within-deme* mixture. Sub-spot deconvolution across FINER structure would need a finer grid
+(deme < spot) — but a cell is ~12 µm and a spot only ~4–5 cells across, so "deme ≪ spot" forces ~cell-sized
+demes, which is the "1-cell-wide" deme we rejected. This is an inherent physical tension: pick deme ≈ spot
+(this example — cleaner biology, deme-resolution ST) OR deme ≈ ½–¼ spot (sub-spot deconvolution, ~cell-sized
+demes). K (depth) is orthogonal to both.
+
+**The key scalability consequence.** ~10⁶ cells falls straight out of the correct physics (grid² × K), NOT
+from an arbitrary "make it huge" — so the scalability engine (`DESIGN_scalability.md §8`) is *required*, not
+optional. And it is affordable: tau-leaping advances a whole clone (all K cells of a deme) in one Poisson
+draw, so growth cost scales with #clones × #demes, **not #cells** — a big K is nearly free at growth and
+only costs at `make_cell_data`/assay, where `max_cells` subsamples (§9).
+
+**Biology of the shipped example (single clonal founder; DCIS → focal IDC).** One founder in ONE duct grows
+confined (DCIS); its descendants spread along the ductal tree via `cross_gland` dispersal (the 3-D-connected
+ducts, §1/§4), so the filled ducts are ALL one clone (the Muller has a single founder). The stroma is
+HOSTILE (`stromal_hazard` high): a cell that only breaches the duct dies there unless it ALSO acquires the
+rare `stromal_survival` hit — a **2-hit gate** (breach → escape; stromal_survival → grow in stroma) that
+keeps invasion FOCAL, so a few ducts grow substantial invasive (IDC) masses rather than every duct invading.
+At high K the 2-hit gate has to be strict (a dense duct is many invasion trials), so invasion stays focal
+mainly with FEW ducts (the shipped config uses 2). Selection is intact under passenger coarsening (the
+cell-weighted division rate evolves above baseline; driver sweeps and the DCIS→IDC breach remain visible).
+
 ## 4. Dispersal (engine)
 One free dispersal event as today (a fraction of divisions send a daughter elsewhere; no capacity gate —
 crowding is via death). Split the dispersing daughters into two channels:
