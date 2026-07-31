@@ -35,6 +35,7 @@ Draw cells from the grown tumor before assaying.
 
 | | |
 |---|---|
+| [`iscc.sample.Resection`](Resection.md) | Cut a resected specimen into samples — bisect (in-plane cut) / dissociate / slice (depth cut). |
 | [`iscc.sample.Biopsy`](Biopsy.md) | Spatially-localized sample of cells. |
 | [`iscc.sample.Dissociation`](Dissociation.md) | Whole-tumor dissociation into a cell suspension. |
 

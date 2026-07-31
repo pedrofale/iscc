@@ -20,10 +20,12 @@ isccdata ──>  <data>/         (sequencing / spatial assay: observed data)
 isccsim --sim-config CONFIG.yaml -s STEPS -o <tumor>
 ```
 
-The sim-config selects a spatial `mode` (currently `glandular`; `mixed` is reserved) and
-carries `spatial_params`, `genome_params`, `selection_params`, `deme_params`, and
-per-type `cell_params` (cancer / epithelial / stromal / immune). See
-`src/iscc/tumor/tumorconfigs/glandular.yaml`.
+The sim-config selects a `mode` — one of `TUMOR_MODELS = {genotype, glandular, mixed}`. `genotype`
+(the **default**, used by `notebooks/example_config.yaml` and `configs/landing.yaml`) is the fast
+count-based engine; `glandular` is the exact cell-level engine; `mixed` is reserved and currently
+raises `NotImplementedError`. The config also carries `spatial_params`, `genome_params`,
+`selection_params`, `deme_params`, and per-type `cell_params` (cancer / epithelial / stromal /
+immune). See `src/iscc/tumor/tumorconfigs/glandular.yaml`.
 
 **Output `<tumor>/`:**
 
@@ -84,14 +86,18 @@ sample was taken. **Output `<sample>/`:** a `cell_data/` directory using the **s
 schema** as stage 1 (subset of rows), plus `sample_meta.yaml`
 (`method`, `fraction`, `n_input`, `n_sampled`, `seed`, `source`).
 
-> Current sampling is a random subset of the requested size for both methods; spatially
-> realistic biopsy, physical slicing, and dissociation dropout/doublets are the next
-> milestone. The on-disk contract above is stable.
+> Both methods are spatially realistic. `--method biopsy` selects a region over the `cell_crd` grid
+> via `--biopsy-type {needle,punch,multiregion,liquid}` (multi-region tags each disk with its own
+> `region` label; liquid draws circulating cells biased toward high-dispersal clones), and
+> `--method dissociation` applies cell-type-dependent recovery/composition bias
+> (`--dissociation-bias`, `--recovery`) plus an optional dissociation-stress expression signature
+> (`--stress-strength`). The `Resection` Python workflow adds physical cutting — `bisect` (in-plane
+> cut) / `dissociate` / `slice` (depth cut). The on-disk contract above is stable.
 
 ## Stage 3 — `isccdata` (assay)
 
 ```
-isccdata <sample> -a {scrna,bdna,scdna,visium} --assay-config CONFIG.yaml -o <data>
+isccdata <sample> -a {scrna,bdna,scdna,visium,scspatial} --assay-config CONFIG.yaml -o <data>
 ```
 
 Runs the chosen assay on `<sample>/cell_data/`. Assay configs live in
@@ -103,5 +109,6 @@ Runs the chosen assay on `<sample>/cell_data/`. Assay configs live in
 | `bdna` | `counts.csv` (per-gene coverage + alt counts) |
 | `scdna` | `coverage.csv`, `alt_counts.csv` (cells × genes), or `observed_snvs.csv` in binary mode |
 | `visium` | `spot_umi.csv`, `spot_crd.csv`, `spot_cell_counts.csv`, `spot_cell_ids.csv` |
+| `scspatial` | `counts.csv` (cells × genes, single-cell spatial), optional `<batch>.h5ad` |
 
 For `visium`, the grid side is inferred from `cell_crd` unless `--grid-side` is given.

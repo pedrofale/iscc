@@ -46,6 +46,12 @@ selection_params:
   prop_driver: 0.04
   prop_dispersal: 0.0
   prop_immune_resistance: 0.02
+  # This is a DCIS->IDC sample with NO metastasis and NO treatment, so the met + chemo-resistance
+  # traits are turned OFF (they belong to configs/landing.yaml). Otherwise the engine's default
+  # non-zero rates seed latent met_survival / treatment_resistance genes that never get selected here
+  # but would mislabel most clones as "metastatic" / "chemo-resistant" in the stage view.
+  prop_met_survival: 0.0
+  prop_treatment_resistance: 0.0
   # BREACH-LIMITED invasion: crossing the duct wall (breach) is RARE and STRONG; once out, the stroma
   # is permissive (low stromal_hazard below) so the escaped clone invades readily. stromal_survival is
   # a minor add-on, not a second gate.

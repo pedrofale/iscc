@@ -23,37 +23,49 @@ The ranges below come from the operating-envelope characterization: `analysis/ch
 Defaults are those in `notebooks/example_config.yaml`. Set them under the matching YAML block
 (`cell_params.cancer`, `deme_params`, `spatial_params`, `selection_params`, `genome_params`).
 
+!!! note "The defaults below are `example_config.yaml`'s DCIS→IDC tumour, at spatial-assay scale"
+    A **deme is a ~50 µm 3-D column** of tissue (~4 cells in-plane), **not one cell**; its
+    `carrying_capacity` is that column's whole cell population (`K_duct` 60 in a dense duct,
+    `K_stroma` 30 in looser stroma). A `grid_size` of 170 is therefore ~**8.5 mm** of tissue (~10⁶
+    cells) — larger than a Visium capture, so each assay samples a subset. The tumour is a **single
+    clonal founder** growing a **breach-limited DCIS→IDC**: confined behind a high `epithelial_barrier`
+    until a **rare, strong `breach`** mutation crosses the duct wall into a **permissive stroma** (low
+    `stromal_hazard`), then invades. So `example_config.yaml` deliberately **turns ON** the
+    compartment-selection axes (`epithelial_barrier` / `prop_breach`, `stromal_hazard` /
+    `prop_stromal_survival`, `cross_gland_*`, `wgd_rate`) that are **off in the bare engine** — the
+    tables below give `example_config`'s values, with the bare-engine off value noted where it differs.
+
 ### Mutations — `cell_params.cancer`
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|
-| `mutation_rate` | 0.2 | ~0.05–2 | **low** → monoclonal (no subclones); **high** → hypermutated mush (broken 1/f tail) |
-| `n_snvs_per_allele` | 0.3 | ~0.1–3 | **low** → no SNV diversity; **high** → hypermutated mush |
-| `snv_prob` / `cnv_prob` | 0.5 / 0.5 | relative weights (SNV vs CNA event) | all-SNV → no CNAs (inferCNV/clonealign demos degrade); all-CNA → no SNV phylogeny |
+| `mutation_rate` | 0.3 | ~0.05–2 | **low** → monoclonal (no subclones); **high** → hypermutated mush (broken 1/f tail) |
+| `n_snvs_per_allele` | 0.02 | ~0.1–3 | **low** → no SNV diversity; **high** → hypermutated mush |
+| `snv_prob` / `cnv_prob` | 0.5 / 0.02 | relative weights (SNV vs CNA event) | all-SNV → no CNAs (inferCNV/clonealign demos degrade); all-CNA → no SNV phylogeny |
 
 ### Growth & survival — `cell_params.cancer` + `deme_params`
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|
-| `division_rate` | 0.3 | **> `death_rate`** | ≤ death → extinction |
-| `death_rate` | 0.02 | **≪ `division_rate`** | ≥ division → extinction |
-| `initial_cancer_cells` | 5 | ≥ 5 | 1 → founder extinction (a lone founder is prone to stochastic loss, and density-dependent crowding death raises that risk at small `carrying_capacity`) |
-| `maximum_death_rate` | 1.0 | **≥ `max_birth_rate`** (0.8) | caps crowding death; **below `max_birth_rate` re-opens the over-fill bug** (evolved clones outrun the cap) |
+| `division_rate` | 0.7 | **> `death_rate`** | ≤ death → extinction |
+| `death_rate` | 0.05 | **≪ `division_rate`** | ≥ division → extinction |
+| `initial_cancer_cells` | 20 | ≥ 5 | 1 → founder extinction (a lone founder is prone to stochastic loss, and density-dependent crowding death raises that risk at small `carrying_capacity`) |
+| `maximum_death_rate` | 1.0 | **≥ `max_birth_rate`** (0.95) | caps crowding death; **below `max_birth_rate` re-opens the over-fill bug** (evolved clones outrun the cap) |
 
 ### Spatial structure — `spatial_params` + `deme_params` + `cell_params.cancer`
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|
-| `carrying_capacity` | 10 | a real **per-deme cap** (cells/deme); `None` or `0` → **well-mixed** (no ceiling, unbounded growth) | too small (1–3) → a lone founder is prone to extinction (crowding ramps from occupancy 0) |
-| `grid_size` × `carrying_capacity` | 50 × 10 | the tumour caps at ~`grid_size² × carrying_capacity`; size the grid **above** the target so it can spread (≳ 10⁴ demes for a 10⁵-cell tumour) | too small → no room to spread / no O₂ gradient / too few clones |
-| `dispersal_rate` | 0.1 | **≲ `division_rate`** | ≫ division → well-mixed, **no clonal territories** (silently breaks the PEtracer and multi-region benchmarks) |
-| `structure_radius` / `n_structures` | 20 / 1 | glandular geometry (duct size / count); the cancer founds inside and spreads across the gland | — |
-| `n_glands` | **1 (single ring)** | ductal-field substrate: number of small epithelial-ring glands scattered in stroma (DESIGN_ductal_field.md); `1` reproduces the single central ring | needs `structure_radius > 0`; too many for the grid → rejection sampling can't place them all |
-| `gland_radius` | = `structure_radius` | ring radius of each gland (small, ~2–3 demes: lumen + wall) | too large × many glands → they don't fit / overlap |
-| `min_gland_sep` | `2·gland_radius + 2` | minimum centre-to-centre spacing between glands | too small → glands touch (no stroma gap) |
-| `K_duct` / `K_stroma` | = `carrying_capacity` | per-compartment carrying capacity (a deme is a 3D column, so K is **moderate-to-large**, capturing depth — not a handful) | ST spot resolution is a **grid-spacing** constraint, not a K bound |
-| `stroma_fill_frac` | **1.0** | baseline stromal occupancy as a fraction of `K_stroma` (stroma is less dense than epithelium but **not empty** — real fibroblast/immune/endothelial cells that the assays capture and that carry the stromal hazard; seed at a **moderate** 0.3–0.5, leaving headroom for an invasive mass) | `1.0` = the old dense fill (byte-identical); too sparse → the live stromal fraction (and its hazard) is negligible |
-| `cross_gland_kappa` | **0.0 (off)** | island (intraductal) dispersal weight: a fraction ~`κ/(1+κ)` of a gland-resident clone's dispersing daughters seed **another gland's lumen** (bypassing the wall → confined DCIS, no breach), rate `κ·dispersal_rate` | stroma cells never hop; `0` → no cross-gland spread |
-| `cross_gland_lambda` | `None` (uniform) | distance kernel for cross-gland targeting (prob ∝ `exp(−d/λ)` over gland centres); `None` = uniform (zero extra parameter) | 2D-section distance is only a proxy for ductal-tree proximity |
-| `epithelial_barrier` | **0.0 (off)** | compartment-selection hazard: the epithelial ring adds `epithelial_barrier · epithelial_fraction(deme) · (1 − breach)` to a cancer cell's death (v1, DESIGN_phenotype_plasticity.md §2) | needs `structure_radius > 0`; too high → the ring is impassable and cancer stays in the lumen (raise `breach` fitness or lower the barrier) |
-| `stromal_hazard` | **0.0 (off)** | compartment-selection hazard: the stroma adds `stromal_hazard · stromal_fraction(deme) · (1 − stromal_survival)` to death | needs `structure_radius > 0`; the stromal analogue of `epithelial_barrier` |
+| `carrying_capacity` | 30 | a real **per-deme cap** (cells/deme); `None` or `0` → **well-mixed** (no ceiling, unbounded growth) | too small (1–3) → a lone founder is prone to extinction (crowding ramps from occupancy 0) |
+| `grid_size` × `carrying_capacity` | 170 × 30 | the tumour caps at ~`grid_size² × carrying_capacity`; size the grid **above** the target so it can spread (≳ 10⁴ demes for a 10⁵-cell tumour) | too small → no room to spread / no O₂ gradient / too few clones |
+| `dispersal_rate` | 0.9 | **≲ `division_rate`** | ≫ division → well-mixed, **no clonal territories** (silently breaks the PEtracer and multi-region benchmarks) |
+| `structure_radius` / `n_structures` | 4 / 1 | glandular geometry (duct size / count); the cancer founds inside and spreads across the gland | — |
+| `n_glands` | **8** | ductal-field substrate: number of small epithelial-ring glands scattered in stroma (DESIGN_ductal_field.md); `1` reproduces the single central ring | needs `structure_radius > 0`; too many for the grid → rejection sampling can't place them all |
+| `gland_radius` | = `structure_radius` | ring radius of each gland (`structure_radius` 4 → 9 demes across, ~450 µm: lumen + wall) | too large × many glands → they don't fit / overlap |
+| `min_gland_sep` | 14 (default `2·gland_radius + 2`) | minimum centre-to-centre spacing between glands | too small → glands touch (no stroma gap) |
+| `K_duct` / `K_stroma` | 60 / 30 | per-compartment carrying capacity (a deme is a 3D column, so K is **moderate-to-large**, capturing depth — not a handful) | ST spot resolution is a **grid-spacing** constraint, not a K bound |
+| `stroma_fill_frac` | 0.3 | baseline stromal occupancy as a fraction of `K_stroma` (stroma is less dense than epithelium but **not empty** — real fibroblast/immune/endothelial cells that the assays capture and that carry the stromal hazard; seed at a **moderate** 0.3–0.5, leaving headroom for an invasive mass) | `1.0` = the old dense fill (byte-identical); too sparse → the live stromal fraction (and its hazard) is negligible |
+| `cross_gland_kappa` | 0.06 (0.0 = off) | island (intraductal) dispersal weight: a fraction ~`κ/(1+κ)` of a gland-resident clone's dispersing daughters seed **another gland's lumen** (bypassing the wall → confined DCIS, no breach), rate `κ·dispersal_rate` | stroma cells never hop; `0` → no cross-gland spread |
+| `cross_gland_lambda` | 30 (`None` = uniform) | distance kernel for cross-gland targeting (prob ∝ `exp(−d/λ)` over gland centres); `None` = uniform (zero extra parameter) | 2D-section distance is only a proxy for ductal-tree proximity |
+| `epithelial_barrier` | 10.0 (0.0 = off in the bare engine) | compartment-selection hazard: the epithelial ring adds `epithelial_barrier · epithelial_fraction(deme) · (1 − breach)` to a cancer cell's death (v1, DESIGN_phenotype_plasticity.md §2) | needs `structure_radius > 0`; too high → the ring is impassable and cancer stays in the lumen (raise `breach` fitness or lower the barrier) |
+| `stromal_hazard` | 0.6 (0.0 = off in the bare engine) | compartment-selection hazard: the stroma adds `stromal_hazard · stromal_fraction(deme) · (1 − stromal_survival)` to death | needs `structure_radius > 0`; the stromal analogue of `epithelial_barrier` |
 
 !!! note "`carrying_capacity` is a real per-deme cap (density-dependent crowding, 2026-07-14)"
     Crowding death rises **relative to each clone's own (evolved) division rate**
@@ -67,12 +79,12 @@ Defaults are those in `notebooks/example_config.yaml`. Set them under the matchi
 ### Selection — `selection_params`
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|
-| `prop_driver` | 0.1 | 0.05–0.3 | high × strong effect → selective sweep (monoclonal) |
+| `prop_driver` | 0.04 | 0.05–0.3 | high × strong effect → selective sweep (monoclonal) |
 | `driver_effects` | 1.1 | 1.0–2 | ≫ 1 at low mutation rate → monoclonal sweep |
-| `prop_dispersal` / `dispersal_effects` | 0.1 / 1.1 | as above | strong → invasion dominates, structure washes out |
-| `prop_treatment_resistance` / `prop_immune_resistance` (+ effects) | 0.1 / 1.1 | as above | resistance is meant to **emerge**, not be pre-seeded |
-| `prop_breach` / `breach_effects` | **0.0 (off)** / 1.1 | compartment-selection axis: sites that if mutated let a clone cross the epithelial ring (attenuate `epithelial_barrier`); heritable, sequenceable | pairs with `spatial_params.epithelial_barrier`; both must be > 0 to have any effect |
-| `prop_stromal_survival` / `stromal_survival_effects` | **0.0 (off)** / 1.1 | compartment-selection axis: sites that if mutated let a clone survive the stroma (attenuate `stromal_hazard`) | pairs with `spatial_params.stromal_hazard` |
+| `prop_dispersal` / `dispersal_effects` | 0.0 / 1.1 | as above | strong → invasion dominates, structure washes out |
+| `prop_treatment_resistance` / `prop_immune_resistance` (+ effects) | 0.1 (treatment) / 0.02 (immune); effects 1.1 | as above | resistance is meant to **emerge**, not be pre-seeded |
+| `prop_breach` / `breach_effects` | 0.001 / 2.8 (prop 0.0 = off in the bare engine) | compartment-selection axis: sites that if mutated let a clone cross the epithelial ring (attenuate `epithelial_barrier`); heritable, sequenceable | pairs with `spatial_params.epithelial_barrier`; both must be > 0 to have any effect |
+| `prop_stromal_survival` / `stromal_survival_effects` | 0.02 / 2.2 (prop 0.0 = off in the bare engine) | compartment-selection axis: sites that if mutated let a clone survive the stroma (attenuate `stromal_hazard`) | pairs with `spatial_params.stromal_hazard` |
 
 #### Viability limits — `selection_params`
 
@@ -112,13 +124,13 @@ matter once you tighten them or push amplification/deletion hard.
 ### Genome — `genome_params`
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|
-| `n_segments` × `segment_size` | 5 × 200 (= 1000 genes) | ≳ 100 genes | too few → trivial genome; assays degenerate, too few drivers |
+| `n_segments` × `segment_size` | 12 × 50 (= 600 genes) | ≳ 100 genes | too few → trivial genome; assays degenerate, too few drivers |
 
 ### Copy-number — `cell_params.cancer`
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|
 | `amp_prob` | 0.5 | 0.2–0.8 | high → copy-number-heavy genome (viability-capped) |
-| `wgd_rate` | 0.0 (off) | 0.0–~0.05 | drives genome doubling; a separate per-division channel (leaves `snv_prob`/`cnv_prob` intact). Too high → most tumours WGD and pile against `max_ploidy` (doubled genomes are viability-capped); interacts directly with `max_ploidy`/`max_cn` |
+| `wgd_rate` | 0.0005 (0.0 = off in the bare engine) | 0.0–~0.05 | drives genome doubling; a separate per-division channel (leaves `snv_prob`/`cnv_prob` intact). Too high → most tumours WGD and pile against `max_ploidy` (doubled genomes are viability-capped); interacts directly with `max_ploidy`/`max_cn` |
 
 `wgd_rate` is the per-(mutating-)division probability of a **whole-genome duplication** (DESIGN_focal_cna.md v1):
 every copy on both homologs of every segment is doubled at once, so ploidy jumps 2→4 (then loss erodes it
