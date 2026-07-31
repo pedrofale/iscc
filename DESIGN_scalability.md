@@ -387,7 +387,15 @@ sampling-module home for the cutting procedure): **resect** the whole tumour (th
 **in-plane cut** (`Resection.bisect` → `dissociate`, `region=`) that the sequencing assays
 (bulk/scDNA/scRNA) dissociate, and a thin **depth slice** (`Resection.slice`, `region=remainder,
 depth_frac=0.5`) of the remainder that Visium sections — the two samples are disjoint pieces of the one
-specimen, and each materialises only its own cells (memory-safe at cm-scale). `notebooks/example_config.yaml` sets
+specimen, and each materialises only its own cells (memory-safe at cm-scale).
+
+The Visium assay places its **fixed** slide on that section explicitly: `Visium(placement=(row,col),
+rotation=deg)` chooses where and at what orientation the slide sits, and `vz.place_grid(section)` lays
+the grid down *without* assaying — `vz.to_anndata()` then returns a standard 10x AnnData of the spot
+grid on the full-section H&E (`in_tissue` flag, zero expression) that squidpy/scanpy plot directly, so
+the placement can be checked before committing. `vz.run()` reuses that placement (or does it itself).
+Because the v1 slide is wider than it is tall, a tall section (like the remainder) captures far more
+cells rotated 90° onto the slide's long axis. `notebooks/example_config.yaml` sets
 `coarsen_passengers: true` and `max_cells: 50000`; Visium lays the fixed 10x **v1 slide** (4,992 spots)
 over the section via `Visium(section_frac=..., spot_pitch=...).run(section, grid_side=None)`. Validated
 in `tests/test_scalability.py`.

@@ -186,6 +186,30 @@ def test_resection_cuts_partition_the_specimen():
     assert 0 < section["cell_snv"].shape[0] < full_rem["cell_snv"].shape[0]
 
 
+def test_visium_place_grid_then_run_and_rotation():
+    """place_grid() places the fixed grid so to_anndata() renders the spots on the full-section H&E
+    with NO expression (pure placement); run() then reuses that placement and fills in the counts;
+    `rotation` re-orients the section on the slide (a tall section captures a different set of cells)."""
+    from iscc.data import Visium
+    from iscc.sample import Resection
+    t = _grow(seed=1, coarsen=True)
+    section = Resection(t).slice(None, depth_frac=0.5)          # whole specimen, thin slice
+    vz = Visium(spot_pitch=2.0, spot_radius=0.55, section_frac=1.0, seed=0)
+    vz.place_grid(section)
+    pre = vz.to_anndata()                                       # placed but not assayed
+    lib = list(pre.uns["spatial"])[0]
+    assert pre.n_obs == vz._layout(None).shape[0]              # all v1 spots
+    assert float(pre.X.sum()) == 0.0                           # no expression yet — pure placement
+    assert 0 < int((pre.obs["in_tissue"] == 1).sum()) < pre.n_obs
+    assert pre.uns["spatial"][lib]["images"]["hires"].ndim == 3 and "spatial" in pre.obsm
+    vz.run()                                                    # reuse the placement, now assay it
+    post = vz.to_anndata()
+    assert post.X.sum() > 0 and post.n_obs == pre.n_obs        # same spots, now with counts
+    # rotation re-orients the section on the slide -> a different set of captured cells
+    rot = Visium(spot_pitch=2.0, spot_radius=0.55, section_frac=1.0, rotation=90, seed=0).place_grid(section)
+    assert not np.array_equal(vz._grid["n_cells"], rot._grid["n_cells"])
+
+
 def test_depth_cut_thins_occupancy_keeps_2d_structure():
     """make_cell_data(depth_frac=f) is a DEPTH cut: it keeps ~f of EACH deme's cells (thinning the
     3-D column) while leaving the 2-D field intact — the same demes are occupied, just less densely.
