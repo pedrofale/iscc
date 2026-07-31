@@ -371,16 +371,26 @@ cm-scale (10⁵–10⁶ cells) that is many GB. Two bounded paths:
   tissue). The per-genotype caches are also restricted to the materialised genotypes, so even the
   O(#genotypes × n_genes) cache build is bounded. `None` (default) materialises every cell
   (byte-identical to before the cap existed).
-- **`make_cell_data(region=demes)`**: materialise only the given demes, at FULL local density. This is
-  what a SPATIAL assay needs — a Visium slide samples a small window of a cm-scale tumour and needs
-  that window at real cell density (~K cells/deme), which a uniform whole-tumour subsample would
-  thin to ~1 cell/spot. `tumor.primary_window(side, center)` returns a square window of deme indices
-  for it.
+- **`make_cell_data(region=demes)`** — an **IN-PLANE cut**: materialise only the given demes, at FULL
+  local density. This selects a 2-D part of the tissue (e.g. one part of a resected specimen). A
+  SPATIAL assay needs this — a Visium slide samples a sub-region of a cm-scale tumour and needs it at
+  real cell density (~K cells/deme), which a uniform whole-tumour subsample would thin to ~1 cell/spot.
+  `tumor.primary_window(side, center)` returns a square window of deme indices for it.
+- **`make_cell_data(depth_frac=f)`** — the orthogonal **DEPTH cut** ("parallel-axis"): each deme keeps
+  only `Binomial(count, f)` of its cells, leaving the 2-D field intact but lowering every deme-column's
+  occupancy. Since a deme's `K` stands for its 3-D column, this is a thin histology/Visium **slice** of
+  a tissue block — the whole 2-D structure, ~one layer of cells. Composes with `region` (thin-slice a
+  sub-region) and `max_cells` (bound the slice). Deterministic (dedicated seeded rng).
 
-The shipped `notebooks/example_config.yaml` sets `coarsen_passengers: true` and `max_cells: 50000`;
-Visium samples a windowed section over the fixed 10x **v1 slide** (4,992 spots) via
-`Visium(section_frac=..., spot_pitch=...).run(cell_data, grid_side=None)`. Validated in
-`tests/test_scalability.py`.
+The tissue-sampling workflow the shipped tutorials use is packaged as **`iscc.sample.Resection`** (the
+sampling-module home for the cutting procedure): **resect** the whole tumour (the specimen), take an
+**in-plane cut** (`Resection.bisect` → `dissociate`, `region=`) that the sequencing assays
+(bulk/scDNA/scRNA) dissociate, and a thin **depth slice** (`Resection.slice`, `region=remainder,
+depth_frac=0.5`) of the remainder that Visium sections — the two samples are disjoint pieces of the one
+specimen, and each materialises only its own cells (memory-safe at cm-scale). `notebooks/example_config.yaml` sets
+`coarsen_passengers: true` and `max_cells: 50000`; Visium lays the fixed 10x **v1 slide** (4,992 spots)
+over the section via `Visium(section_frac=..., spot_pitch=...).run(section, grid_side=None)`. Validated
+in `tests/test_scalability.py`.
 
 ### 9.1 Dense H&E for the slide overlay (`GenotypeTumor.he_image`)
 

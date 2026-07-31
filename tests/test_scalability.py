@@ -165,3 +165,46 @@ def test_region_materialisation_is_dense_and_local():
     # full local density: the window's materialised cell count == the true count in those demes
     true_in_window = sum(sum(t.demes[d].values()) for d in window)
     assert cd["cell_snv"].shape[0] == true_in_window
+
+
+def test_resection_cuts_partition_the_specimen():
+    """Resection.bisect gives a disjoint in-plane partition; dissociate() materialises a full-depth
+    part for sequencing; slice() depth-cuts the remainder into a thin section — the two samples are
+    disjoint pieces of the one specimen (the sampling-module home for the cutting procedure)."""
+    from iscc.sample import Resection
+    t = _grow(seed=1, coarsen=True)
+    spec = Resection(t)
+    cut, rem = spec.bisect(frac=0.5, axis="x")
+    assert set(cut).isdisjoint(rem) and len(cut) + len(rem) == t.grid_size ** 2
+    cd = spec.dissociate(cut, max_cells=100000)
+    section = spec.slice(rem, depth_frac=0.5)
+    # dissociation cells live only in the cut demes; the section only in the remainder -> disjoint
+    assert set(cd["cell_deme"]["deme_id"]).issubset(set(cut))
+    assert set(section["cell_deme"]["deme_id"]).issubset(set(rem))
+    # slice() is a thin (depth) cut: fewer cells than a full-depth take of the same demes
+    full_rem = spec.dissociate(rem)
+    assert 0 < section["cell_snv"].shape[0] < full_rem["cell_snv"].shape[0]
+
+
+def test_depth_cut_thins_occupancy_keeps_2d_structure():
+    """make_cell_data(depth_frac=f) is a DEPTH cut: it keeps ~f of EACH deme's cells (thinning the
+    3-D column) while leaving the 2-D field intact — the same demes are occupied, just less densely.
+    This is the thin Visium/histology slice."""
+    t = _grow(seed=1, coarsen=True)
+    full = t.make_cell_data()
+    half = t.make_cell_data(depth_frac=0.5)
+    # ~half the cells overall (Binomial(N, 0.5)); generous band for the stochastic draw
+    assert 0.35 * full["cell_snv"].shape[0] < half["cell_snv"].shape[0] < 0.65 * full["cell_snv"].shape[0]
+    # 2-D structure intact: every occupied deme in the slice is an occupied deme in the full tissue,
+    # and the slice still covers most of them (a depth cut removes cells, not demes)
+    demes_full = set(full["cell_deme"]["deme_id"])
+    demes_half = set(half["cell_deme"]["deme_id"])
+    assert demes_half.issubset(demes_full)
+    assert len(demes_half) > 0.8 * len(demes_full)
+    # composes with an in-plane region cut
+    G = t.grid_size
+    window = t.primary_window(side=8, center=(G // 2, G // 2))
+    sl = t.make_cell_data(region=window, depth_frac=0.5)
+    assert set(sl["cell_deme"]["deme_id"]).issubset(set(window))
+    dense = t.make_cell_data(region=window)
+    assert sl["cell_snv"].shape[0] < dense["cell_snv"].shape[0]

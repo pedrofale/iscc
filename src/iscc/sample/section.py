@@ -63,7 +63,7 @@ def spatialize(cell_data, section_frac=1.0, jitter=0.5, seed=0):
     return out
 
 
-def tissue_image(coords, grid_side, px=14, darkness=0.72, sigma_frac=0.32, stain="he"):
+def tissue_image(coords, grid_side, px=14, darkness=0.85, sigma_frac=0.32, stain="he"):
     """Rasterize cell positions into an H&E-like **morphology** background image.
 
     Bins the ``(row, col)`` positions into a ``grid_side*px`` square raster, smooths the density,
@@ -111,7 +111,7 @@ def tissue_image(coords, grid_side, px=14, darkness=0.72, sigma_frac=0.32, stain
     ci = np.clip((coords[:, 1] * px).astype(int), 0, W - 1)
     np.add.at(dens, (ri, ci), 1.0)
     dens = gaussian_filter(dens, sigma=px * sigma_frac)
-    scale = np.percentile(dens, 99.5)          # robust contrast: don't let one dense patch wash it out
+    scale = np.percentile(dens[dens > 0], 90) if np.any(dens > 0) else 1.0  # typical tissue -> mid-tone, not washed out
     if scale > 0:
         dens = np.clip(dens / scale, 0.0, 1.0)
     d = darkness * dens

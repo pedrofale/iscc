@@ -1559,7 +1559,7 @@ class GenotypeTumor:
                 cn = cns[seg_of[p]]
                 snv_mat[i, p] = (1.0 / cn) if cn > 0 else 0.0
 
-    def _materialize_plan(self, max_cells, region=None):
+    def _materialize_plan(self, max_cells, region=None, depth_frac=None):
         """Per-deme ``{gid: n_to_materialise}`` for ``make_cell_data``.
 
         With no cap (or a tumour under it) every cell in scope is materialised (``n = count``), so
@@ -1570,22 +1570,44 @@ class GenotypeTumor:
         rng).
 
         ``region`` (an iterable of deme indices) restricts materialisation to those demes, at FULL
-        local density unless the region itself exceeds the cap. This is what a SPATIAL assay needs: a
-        Visium slide samples a small window of a cm-scale tumour and needs that window at full cell
-        density (~K cells/deme), which a uniform whole-tumour subsample would dilute to ~1 cell/spot.
-        Non-region demes materialise nothing."""
+        local density unless the region itself exceeds the cap. This is an IN-PLANE cut: it selects a
+        2-D patch of the tissue (e.g. one part of a resected specimen). Non-region demes materialise
+        nothing.
+
+        ``depth_frac`` is the orthogonal DEPTH cut (a "parallel-axis" cut): each deme keeps only
+        ``Binomial(count, depth_frac)`` of its cells, so the 2-D structure is left intact but every
+        deme-column's occupancy drops. Because a deme's ``K`` stands for the cells in its 3-D column,
+        this is exactly cutting through the depth — a thin histology/Visium SLICE of a tissue block
+        keeps the whole 2-D field but only ~one layer of cells. Applied once up-front (dedicated seeded
+        rng) so it composes deterministically with ``region`` and ``max_cells``."""
         reg = None if region is None else set(int(d) for d in region)
-        if reg is None:
+
+        # DEPTH cut: thin every deme's column to a fraction of its cells (a 2-D slice), up-front.
+        if depth_frac is not None:
+            drng = np.random.default_rng(self.seed + 20240731)
+            src = []
+            for deme in self.demes:
+                out = {}
+                for g, c in deme.items():
+                    n = int(drng.binomial(c, depth_frac))
+                    if n:
+                        out[g] = n
+                src.append(out)
+        else:
+            src = self.demes
+
+        if depth_frac is None and reg is None:
             total = self.get_tumor_size()
         else:
-            total = sum(sum(self.demes[d].values()) for d in reg if 0 <= d < len(self.demes))
+            scope = range(len(src)) if reg is None else [d for d in reg if 0 <= d < len(src)]
+            total = sum(sum(src[d].values()) for d in scope)
         subsample = max_cells is not None and total > max_cells and total > 0
-        if not subsample and reg is None:
+        if not subsample and reg is None and depth_frac is None:
             return [dict(d) for d in self.demes], False
         frac = (max_cells / total) if subsample else 1.0
         mrng = np.random.default_rng(self.seed + 20240730)
         plan = []
-        for di, deme in enumerate(self.demes):
+        for di, deme in enumerate(src):
             if reg is not None and di not in reg:
                 plan.append({})
                 continue
@@ -1615,7 +1637,7 @@ class GenotypeTumor:
                 demes.append(row + c)
         return demes
 
-    def make_cell_data(self, cell_prefix="C", max_cells=None, region=None, **kwargs):
+    def make_cell_data(self, cell_prefix="C", max_cells=None, region=None, depth_frac=None, **kwargs):
         """Expand the per-deme genotype counts into per-cell ground-truth tables.
 
         Materialises one row per cell (each genotype's count becomes that many identical
@@ -1640,6 +1662,12 @@ class GenotypeTumor:
             window of a cm-scale tumour and needs that window at real cell density — a uniform
             whole-tumour subsample would thin it to ~1 cell/spot. ``None`` materialises the whole
             tumour.
+        depth_frac : float, optional
+            DEPTH cut (a "parallel-axis" cut): keep only this fraction of EACH deme's cells, leaving
+            the 2-D structure intact but lowering every deme-column's occupancy. Because ``K`` stands
+            for the deme's 3-D column, this is a thin histology/Visium SLICE of a tissue block — the
+            whole 2-D field, one thin layer. ``None`` keeps the full column; ``0.5`` is a half-depth
+            slice. Composes with ``region`` (an in-plane cut) and ``max_cells``.
 
         Returns
         -------
@@ -1648,7 +1676,7 @@ class GenotypeTumor:
         """
         if max_cells is None:
             max_cells = self.max_cells
-        mat_plan, _subsampled = self._materialize_plan(max_cells, region=region)
+        mat_plan, _subsampled = self._materialize_plan(max_cells, region=region, depth_frac=depth_frac)
         gene_names = self.selection.get_gene_names()
         onc_idx, tsg_idx = self.selection.get_oncogenes(), self.selection.get_tsgs()
         disp_idx, ir_idx, tr_idx = (self.selection.get_dispersal_genes(),

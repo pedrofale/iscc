@@ -113,6 +113,7 @@ nav:
           - Surgery: reference/Surgery.md
           - Treatment (base): reference/Treatment.md
       - Sample:
+          - Resection: reference/Resection.md
           - Biopsy: reference/Biopsy.md
           - Dissociation: reference/Dissociation.md
       - Data:
