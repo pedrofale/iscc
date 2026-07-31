@@ -135,6 +135,23 @@ def test_plot_tissue_from_counts_is_complete():
         plt.close("all")
 
 
+def test_he_image_from_counts_is_dense_and_structured():
+    """he_image() renders an H&E from the per-deme COUNTS (complete, not the thin subsample), so it
+    is dense and high-contrast, and cancer regions read differently from empty background."""
+    t = _grow(seed=1, coarsen=True, max_cells=150)
+    px = 5
+    img, scale = t.he_image(px=px)
+    G = t.grid_size
+    assert img.shape == (G * px, G * px, 3) and scale == px
+    assert img.dtype == np.float32 and img.min() >= 0.0 and img.max() <= 1.0
+    # occupied tissue is stained darker than the (white) empty background -> real contrast, not blank
+    assert img.min() < 0.9 and (img.max() - img.min()) > 0.2
+    # the stain is H&E-tinted, not pure grey: at the darkest pixel the channels differ
+    darkest = np.unravel_index(img.sum(-1).argmin(), img.shape[:2])
+    r, g, b = img[darkest]
+    assert abs(float(g) - float(r)) > 0.02          # hematoxylin pulls green below red/blue
+
+
 def test_region_materialisation_is_dense_and_local():
     """make_cell_data(region=...) materialises ONLY the given demes, at FULL local density — what a
     spatial (Visium) assay needs to sample a dense window without a diluting whole-tumour subsample."""

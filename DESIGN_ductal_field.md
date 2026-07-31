@@ -108,15 +108,24 @@ optional. And it is affordable: tau-leaping advances a whole clone (all K cells 
 draw, so growth cost scales with #clones × #demes, **not #cells** — a big K is nearly free at growth and
 only costs at `make_cell_data`/assay, where `max_cells` subsamples (§9).
 
-**Biology of the shipped example (single clonal founder; DCIS → focal IDC).** One founder in ONE duct grows
-confined (DCIS); its descendants spread along the ductal tree via `cross_gland` dispersal (the 3-D-connected
-ducts, §1/§4), so the filled ducts are ALL one clone (the Muller has a single founder). The stroma is
-HOSTILE (`stromal_hazard` high): a cell that only breaches the duct dies there unless it ALSO acquires the
-rare `stromal_survival` hit — a **2-hit gate** (breach → escape; stromal_survival → grow in stroma) that
-keeps invasion FOCAL, so a few ducts grow substantial invasive (IDC) masses rather than every duct invading.
-At high K the 2-hit gate has to be strict (a dense duct is many invasion trials), so invasion stays focal
-mainly with FEW ducts (the shipped config uses 2). Selection is intact under passenger coarsening (the
-cell-weighted division rate evolves above baseline; driver sweeps and the DCIS→IDC breach remain visible).
+**Biology of the shipped example (single clonal founder; DCIS → IDC, BREACH-LIMITED).** One founder in ONE
+duct grows confined (DCIS, behind a high `epithelial_barrier`); its descendants spread along the ductal tree
+via `cross_gland` dispersal (the 3-D-connected ducts, §1/§4), filling ~8 duct cross-sections that are ALL one
+clone (the Muller has a single founder with derived subclones). Invasion is **breach-limited**, decided with
+Pedro: *"breaching is VERY unlikely but once it's breached, invasion and dispersal through the stroma should
+be easy."* So crossing the duct wall (`breach`) is RARE (`prop_breach` ~1e-3) and STRONG, but the stroma is
+**PERMISSIVE** (low `stromal_hazard` ~0.6) — once a clone is out it disperses and grows readily.
+`stromal_survival` is a minor add-on, NOT a required second gate (contrast the earlier 2-hit hostile-stroma
+design, which kept invasion focal by making the stroma lethal; that flip-flopped and was dropped because at
+8 ducts a strict-enough second gate meant *nothing* invaded while a looser one meant *all* ducts invaded in
+parallel — the breach-limited single-rare-event mechanism gives one clone escaping and then spreading,
+which is the correct DCIS→IDC picture). Because the breach clone also reaches connected ducts via
+`cross_gland`, invasion starts near several ducts and **coalesces** into a confluent invasive region with
+residual DCIS ducts embedded — matching the Janesick 10x Visium breast sample (several DCIS ducts + a
+dominant invasive region). `grow(n_steps=…)` sets how far the invasion has coalesced (the shipped tutorials
+grow to ~150: confluent invasive region(s) + DCIS ducts + residual stroma). Selection is intact under
+passenger coarsening (the cell-weighted division rate evolves above baseline; driver sweeps and the DCIS→IDC
+breach remain visible).
 
 ## 4. Dispersal (engine)
 One free dispersal event as today (a fraction of divisions send a daughter elsewhere; no capacity gate —

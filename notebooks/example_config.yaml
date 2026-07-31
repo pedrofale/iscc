@@ -15,12 +15,17 @@
 #                 exactly why the scalability engine below is needed.
 #   * VISIUM v1   100 um spot pitch = 2 demes, 55 um spot ~ 1 deme; a thin section -> ~10 cells/spot.
 #
-# BIOLOGY (single clonal founder; DCIS -> focal IDC). One cancer founds in ONE duct and grows confined
-# (DCIS); its descendants spread along the ductal tree (cross_gland dispersal — the ducts are connected
-# in 3-D), so the multiple filled ducts are all ONE clone. The stroma is HOSTILE (stromal_hazard high):
-# a cell that only breaks out of the duct (breach) dies there unless it ALSO acquires the rare
-# stromal_survival hit — a 2-hit gate that keeps invasion FOCAL (a few invasive foci that grow, not
-# every duct). See the Muller (single founder) and DESIGN_ductal_field.md.
+# BIOLOGY (single clonal founder; DCIS -> IDC). One cancer founds in ONE duct and grows confined
+# (DCIS, behind a high epithelial_barrier); its descendants spread along the ductal tree (cross_gland
+# dispersal — the ducts are connected in 3-D), filling ~8 duct cross-sections that are all ONE clone.
+# Invasion is BREACH-LIMITED: crossing the epithelial wall (`breach`) is RARE (low prop_breach), but
+# once a clone is out the stroma is PERMISSIVE (low stromal_hazard) and dispersal is fast, so the
+# escaped clone spreads readily into an INVASIVE (IDC) carcinoma. Because the breach clone also reaches
+# the connected ducts via cross_gland, invasion starts multifocally and COALESCES into a confluent
+# invasive region with residual DCIS ducts embedded — a realistic IDC-with-DCIS section (matches the
+# Janesick 10x Visium breast sample: several DCIS ducts + a dominant invasive region). All one clone
+# (see the by-driver Muller). `grow(n_steps=...)` sets how far the invasion has coalesced.
+# See DESIGN_ductal_field.md §3.2.
 #
 # SCALE / COST. ~10^6 cells is affordable because (a) tau-leaping advances a whole clone (K cells) in
 # one Poisson draw, so cost scales with #clones x #demes, NOT #cells; (b) `coarsen_passengers` keeps
@@ -41,12 +46,13 @@ selection_params:
   prop_driver: 0.04
   prop_dispersal: 0.0
   prop_immune_resistance: 0.02
-  # DCIS -> IDC as a TWO-HIT gate against a hostile stroma: breach breaks out of the duct, then
-  # stromal_survival is needed to grow in the high-hazard stroma. Both rare -> invasion is FOCAL.
-  prop_breach: 0.005
-  breach_effects: 2.2
-  prop_stromal_survival: 0.004
-  stromal_survival_effects: 3.2
+  # BREACH-LIMITED invasion: crossing the duct wall (breach) is RARE and STRONG; once out, the stroma
+  # is permissive (low stromal_hazard below) so the escaped clone invades readily. stromal_survival is
+  # a minor add-on, not a second gate.
+  prop_breach: 0.001
+  breach_effects: 2.8
+  prop_stromal_survival: 0.02
+  stromal_survival_effects: 2.2
 
 cell_params:
   cancer:
@@ -58,7 +64,7 @@ cell_params:
     # #genotypes. Passenger burden is reconstructed per sampled cell at assay time (realistic TMB).
     mutation_rate: 0.3
     n_snvs_per_allele: 0.02
-    dispersal_rate: 0.6
+    dispersal_rate: 0.9
     cnv_prob: 0.02
     wgd_rate: 0.0005
 
@@ -70,8 +76,8 @@ deme_params:
 
 spatial_params:
   grid_size: 170             # ~8.5 mm at ~50 um/deme — larger than a 6.5 mm Visium capture
-  # A field of a few realistic DCIS ducts (each ~450 um = 9 demes across) in moderate-density stroma.
-  n_glands: 2
+  # A field of ~8 DCIS ducts (~the Janesick section count), each ~450 um = 9 demes, in moderate stroma.
+  n_glands: 8
   structure_radius: 4
   gland_radius: 4            # 9 demes = ~450 um duct
   min_gland_sep: 14          # ~700 um between duct centres
@@ -81,4 +87,4 @@ spatial_params:
   cross_gland_kappa: 0.06    # intraductal (3-D-connected) spread along the tree
   cross_gland_lambda: 30
   epithelial_barrier: 10.0   # ducts pack full (DCIS) before anything escapes
-  stromal_hazard: 4.0        # hostile stroma -> the 2-hit gate keeps invasion focal
+  stromal_hazard: 0.6        # PERMISSIVE stroma: once a clone breaches, it invades/disperses readily

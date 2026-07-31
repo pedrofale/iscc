@@ -381,3 +381,18 @@ The shipped `notebooks/example_config.yaml` sets `coarsen_passengers: true` and 
 Visium samples a windowed section over the fixed 10x **v1 slide** (4,992 spots) via
 `Visium(section_frac=..., spot_pitch=...).run(cell_data, grid_side=None)`. Validated in
 `tests/test_scalability.py`.
+
+### 9.1 Dense H&E for the slide overlay (`GenotypeTumor.he_image`)
+
+The morphology image a histology/Visium slide sits on must be built from the **per-deme cell counts**,
+not from the (`max_cells`-thinned) `cell_data`: at cm-scale the subsample is a *thin section*, so
+rasterising its cells gives a faint, holey image where the tissue looks empty behind the spots — the
+symptom that made the earlier overlay read as "spots on white". `he_image(px)` paints every occupied
+deme from the full counts (denser DCIS ducts / invasive masses → darker; cancer nuclei tint toward
+hematoxylin purple, stroma stays eosin pink; density normalised by a high percentile, not the single
+peak, so one dense patch cannot wash out the contrast), giving a complete, high-contrast H&E in the
+deme-grid frame. Because `Visium._place_section` only **translates** the section onto the slide, the
+spot coordinates overlay on this image after subtracting that translation
+(`spot_coords.mean(0) − section_cell_crd.mean(0)`) — see notebook `03`. The lower-level
+`iscc.sample.tissue_image` (which rasterises arbitrary cell coords, e.g. `Visium.section_image`) was
+given the same percentile-normalisation and H&E tint. Validated in `tests/test_scalability.py`.

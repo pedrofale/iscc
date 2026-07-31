@@ -245,7 +245,7 @@ class Visium(Assay):
         Returns
         -------
         numpy.ndarray, shape (H, W, 3), float32
-            The greyscale tissue-morphology image (see :func:`iscc.sample.tissue_image`).
+            The H&E-like tissue-morphology image (see :func:`iscc.sample.tissue_image`).
         """
         from ..sample import tissue_image
         if self.section_frac is None:

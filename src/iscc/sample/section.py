@@ -63,13 +63,17 @@ def spatialize(cell_data, section_frac=1.0, jitter=0.5, seed=0):
     return out
 
 
-def tissue_image(coords, grid_side, px=14, darkness=0.72, sigma_frac=0.32):
-    """Rasterize cell positions into an H&E-like greyscale **morphology** background image.
+def tissue_image(coords, grid_side, px=14, darkness=0.72, sigma_frac=0.32, stain="he"):
+    """Rasterize cell positions into an H&E-like **morphology** background image.
 
     Bins the ``(row, col)`` positions into a ``grid_side*px`` square raster, smooths the density,
-    and maps it to greyscale (denser tissue → darker). This is the tissue *image* a spatial slide
-    sits on — morphology only, carrying no per-cell data — suitable for
+    and maps it to colour (denser tissue → darker/more nuclear). This is the tissue *image* a
+    spatial slide sits on — morphology only, carrying no per-cell data — suitable for
     ``adata.uns['spatial'][lib]['images']['hires']``.
+
+    The density is normalised by a **high percentile** (not the single peak) and clipped, so one
+    unusually dense patch does not wash out the contrast of the rest of the section — that
+    peak-normalisation is what made an earlier version read as structureless.
 
     Parameters
     ----------
@@ -82,9 +86,12 @@ def tissue_image(coords, grid_side, px=14, darkness=0.72, sigma_frac=0.32):
         Pixels per coordinate unit; also the ``tissue_hires_scalef`` to record so that
         ``obsm['spatial']`` maps onto the image.
     darkness : float, default 0.72
-        Maximum darkening of the densest tissue (0 = white everywhere, 1 = black at peak density).
+        Maximum darkening of the densest tissue (0 = pale everywhere, 1 = full stain at peak).
     sigma_frac : float, default 0.32
         Gaussian smoothing sigma as a fraction of ``px``.
+    stain : {"he", "grey"}, default "he"
+        ``"he"`` gives an eosin-pink stroma with hematoxylin-purple nuclei where dense (the
+        canonical H&E look); ``"grey"`` gives the legacy greyscale (denser → darker).
 
     Returns
     -------
@@ -104,8 +111,13 @@ def tissue_image(coords, grid_side, px=14, darkness=0.72, sigma_frac=0.32):
     ci = np.clip((coords[:, 1] * px).astype(int), 0, W - 1)
     np.add.at(dens, (ri, ci), 1.0)
     dens = gaussian_filter(dens, sigma=px * sigma_frac)
-    peak = dens.max()
-    if peak > 0:
-        dens /= peak
-    image = np.stack([1.0 - darkness * dens] * 3, axis=-1).astype(np.float32)
-    return image, float(px)
+    scale = np.percentile(dens, 99.5)          # robust contrast: don't let one dense patch wash it out
+    if scale > 0:
+        dens = np.clip(dens / scale, 0.0, 1.0)
+    d = darkness * dens
+    if stain == "grey":
+        image = np.stack([1.0 - d] * 3, axis=-1)
+    else:
+        # eosin-pink base (R>B>G) darkening toward hematoxylin purple where nuclei are dense
+        image = np.stack([1.0 - 0.45 * d, 1.0 - 1.05 * d, 1.0 - 0.60 * d], axis=-1)
+    return np.clip(image, 0.0, 1.0).astype(np.float32), float(px)

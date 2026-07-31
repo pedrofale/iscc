@@ -2000,6 +2000,58 @@ class GenotypeTumor:
         ax.set_xticks([]); ax.set_yticks([])
         return ax
 
+    def he_image(self, px=6, darkness=0.8, sigma_frac=0.5):
+        """Dense H&E-like morphology image built from the per-deme cell COUNTS.
+
+        The tissue *image* a histology/Visium slide sits on. Unlike rasterising the (possibly
+        subsampled) ``cell_data`` — which is a THIN section and so renders faint and holey at
+        cm-scale — this paints EVERY occupied deme from the full counts, so denser tissue (packed
+        DCIS ducts, invasive masses) reads dark and looser stroma reads pale, giving a complete,
+        high-contrast image. Cancer nuclei tint toward hematoxylin purple; stroma stays eosin pink.
+
+        The image is in the raw deme-grid frame (``px`` pixels per deme). To overlay a placed Visium
+        slide, shift the spot coordinates back into this frame by the placement translation
+        (``spot_coords.mean(0) - section_cell_crd.mean(0)``); see notebook ``03``.
+
+        Parameters
+        ----------
+        px : int, default 6
+            Pixels per deme.
+        darkness : float, default 0.8
+            Maximum staining of the densest tissue.
+        sigma_frac : float, default 0.5
+            Gaussian smoothing sigma as a fraction of ``px``.
+
+        Returns
+        -------
+        image : numpy.ndarray, shape (G*px, G*px, 3), float32
+            RGB H&E morphology image in ``[0, 1]``.
+        px : float
+            Pixels per deme (the scale factor mapping deme coords onto the image).
+        """
+        from scipy.ndimage import gaussian_filter
+        G = self.grid_size
+        gid_is_can = {g: self._is_cancer(g) for g in self.genotypes}
+        tot = np.zeros(G * G); can = np.zeros(G * G)
+        for di in range(min(len(self.demes), G * G)):
+            d = self.demes[di]
+            if not d:
+                continue
+            tot[di] = sum(d.values())
+            can[di] = sum(c for g, c in d.items() if gid_is_can[g])
+        tot = tot.reshape(G, G); can = can.reshape(G, G)
+        frac = np.divide(can, tot, out=np.zeros_like(can), where=tot > 0)
+        ref = np.percentile(tot[tot > 0], 98) if np.any(tot > 0) else 1.0
+        dens = np.clip(tot / (ref or 1.0), 0.0, 1.0)
+        dens = gaussian_filter(np.kron(dens, np.ones((px, px))), sigma=px * sigma_frac)
+        fr = gaussian_filter(np.kron(frac, np.ones((px, px))), sigma=px * sigma_frac)
+        d = darkness * dens
+        # eosin-pink stroma darkening toward hematoxylin purple where cancer nuclei are dense
+        image = np.stack([1 - d * (0.35 + 0.10 * fr),
+                          1 - d * (0.62 + 0.33 * fr),
+                          1 - d * (0.33 + 0.05 * fr)], axis=-1)
+        return np.clip(image, 0.0, 1.0).astype(np.float32), float(px)
+
     def plot_grid(self, color=None, ax=None, **kwargs):
         """Plot the spatial deme grid, colouring each deme by a per-cell attribute.
 
