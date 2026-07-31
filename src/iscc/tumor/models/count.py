@@ -2001,12 +2001,14 @@ class GenotypeTumor:
 
         Parameters
         ----------
-        color : {"state", "cancer_frac", "clone"}
+        color : {"state", "cancer_frac", "clone", "stage"}
             ``"state"`` (default): categorical — empty / stroma / duct(normal) / DCIS (cancer in a
             duct) / IDC (cancer in stroma). ``"cancer_frac"``: the per-deme cancer fraction as a
             heatmap. ``"clone"``: colour each cancer deme by its dominant clone's DRIVER-clone colour
             (the same driver-collapsed palette as ``plot_muller(by_drivers=True)`` and
-            ``plot_phylogeny``), on a pale-stroma background.
+            ``plot_phylogeny``), on a pale-stroma background. ``"stage"``: colour each cancer deme by
+            the STAGE-dominant trait of its dominant clone (none / proliferation / invasion / …) — the
+            same scheme (and palette) as the landing-animation hero — on a pale-stroma background.
         min_freq : float, optional
             For ``color="clone"``, the size threshold (fraction of the cancer population) below which
             driver clones are merged into their nearest surviving ancestor before colouring — matched
@@ -2042,6 +2044,28 @@ class GenotypeTumor:
                 if best_g is not None:
                     rgba[di] = clone_colors.get(str(best_g), default)
             ax.imshow(rgba.reshape(G, G, 4), interpolation="nearest")
+        elif color == "stage":
+            from .. import viz
+            from matplotlib.colors import to_hex
+            from matplotlib.patches import Patch
+            img = np.full(G * G, -1, dtype=int)             # -1 = empty/stroma background
+            for di in range(min(len(self.demes), G * G)):
+                d = self.demes[di]
+                best_g, best_c = None, 0
+                for g, c in d.items():
+                    if gid_is_can[g] and c > best_c:
+                        best_g, best_c = g, c
+                if best_g is not None:
+                    img[di] = self._stage_of(self.genotypes[best_g])
+            img = img.reshape(G, G)
+            ax.imshow(np.zeros((G, G)), cmap=ListedColormap(["#f3e7e7"]))    # pale stroma
+            cm = ListedColormap([viz.STAGE_PALETTE[i] for i in range(5)])
+            ax.imshow(np.ma.masked_where(img < 0, img), cmap=cm, vmin=0, vmax=4, interpolation="nearest")
+            names = ["none", "proliferation", "invasion", "met survival", "chemo resist"]
+            present = sorted({int(v) for v in img.ravel() if v >= 0})
+            if present:
+                ax.legend(handles=[Patch(color=to_hex(viz.STAGE_PALETTE[i]), label=names[i]) for i in present],
+                          loc="upper right", fontsize=8, framealpha=0.9)
         else:
             # 0 empty, 1 stroma, 2 duct(normal), 3 DCIS (cancer in duct), 4 IDC (cancer in stroma)
             img = np.zeros(G * G, dtype=int)

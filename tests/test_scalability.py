@@ -145,6 +145,7 @@ def test_plot_tissue_clone_and_phylogeny_share_driver_colours():
     from iscc.tumor import viz
     t = _grow(seed=1, coarsen=True, max_cells=200)
     assert t.plot_tissue(color="clone") is not None
+    assert t.plot_tissue(color="stage") is not None      # stage view (shared scheme with the landing hero)
     ax = t.plot_phylogeny()
     # one node per surviving driver clade (the same basis the by_drivers Muller draws on), no subsampling
     _, _, _, cols = viz._display_basis(t.traces, t.genotypes_parents,
