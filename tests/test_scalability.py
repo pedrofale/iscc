@@ -122,6 +122,19 @@ def test_subsample_preserves_celltype_proportions():
     assert abs(sub_frac - true_frac) < 0.15
 
 
+def test_plot_tissue_from_counts_is_complete():
+    """plot_tissue builds the deme map from the COUNTS, so every occupied deme is represented even
+    under a heavy max_cells subsample (where the cell_data-based plot_grid would go holey)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    t = _grow(seed=1, coarsen=True, max_cells=150)
+    for color in ("state", "cancer_frac"):
+        ax = t.plot_tissue(color=color)
+        assert ax is not None
+        import matplotlib.pyplot as plt
+        plt.close("all")
+
+
 def test_region_materialisation_is_dense_and_local():
     """make_cell_data(region=...) materialises ONLY the given demes, at FULL local density — what a
     spatial (Visium) assay needs to sample a dense window without a diluting whole-tumour subsample."""

@@ -1958,6 +1958,48 @@ class GenotypeTumor:
             present.add(s)
         return out, sorted(present)
 
+    def plot_tissue(self, ax=None, color="state", cmap=None, figsize=(7, 7)):
+        """Deme-resolution tissue map built directly from the per-deme genotype COUNTS.
+
+        Unlike ``plot_grid`` (which reads the possibly-subsampled ``cell_data`` and so goes holey at
+        cm-scale when ``max_cells`` thins the tissue), this colours EVERY occupied deme from the full
+        counts, so the spatial overview is always complete. Primary grid only.
+
+        Parameters
+        ----------
+        color : {"state", "cancer_frac"}
+            ``"state"`` (default): categorical — empty / stroma / duct(normal) / DCIS (cancer in a
+            duct) / IDC (cancer in stroma). ``"cancer_frac"``: the per-deme cancer fraction as a
+            heatmap.
+        """
+        import matplotlib.pyplot as plt
+        from matplotlib.colors import ListedColormap
+        if ax is None:
+            _, ax = plt.subplots(figsize=figsize)
+        G = self.grid_size
+        gid_is_can = {g: self._is_cancer(g) for g in self.genotypes}
+        if color == "cancer_frac":
+            img = np.full(G * G, np.nan)
+            for di in range(min(len(self.demes), G * G)):
+                d = self.demes[di]
+                tot = sum(d.values())
+                if tot:
+                    img[di] = sum(c for g, c in d.items() if gid_is_can[g]) / tot
+            im = ax.imshow(img.reshape(G, G), cmap=cmap or "magma", vmin=0, vmax=1, interpolation="nearest")
+            plt.colorbar(im, ax=ax, fraction=0.046, label="cancer fraction")
+        else:
+            # 0 empty, 1 stroma, 2 duct(normal), 3 DCIS (cancer in duct), 4 IDC (cancer in stroma)
+            img = np.zeros(G * G, dtype=int)
+            for di in range(min(len(self.demes), G * G)):
+                d = self.demes[di]
+                ncan = sum(c for g, c in d.items() if gid_is_can[g])
+                induct = self.gland_id is not None and self.gland_id[di] >= 0
+                img[di] = (3 if induct else 4) if ncan > 0 else (2 if (induct and d) else (1 if d else 0))
+            cm = cmap or ListedColormap(["white", "#f3d3d3", "#2e8b57", "#4b0082", "#d62728"])
+            ax.imshow(img.reshape(G, G), cmap=cm, vmin=0, vmax=4, interpolation="nearest")
+        ax.set_xticks([]); ax.set_yticks([])
+        return ax
+
     def plot_grid(self, color=None, ax=None, **kwargs):
         """Plot the spatial deme grid, colouring each deme by a per-cell attribute.
 
