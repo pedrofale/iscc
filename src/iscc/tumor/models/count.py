@@ -2055,117 +2055,93 @@ class GenotypeTumor:
         ax.set_xticks([]); ax.set_yticks([])
         return ax
 
-    def plot_phylogeny(self, ax=None, sample_size=150, seed=0, min_freq=0.02, figsize=(7, 7),
-                       linewidth=1.1, leaf_size=16):
-        """Radial CELL PHYLOGENY drawn inline with matplotlib (Cassiopeia-style), leaves coloured by
-        DRIVER clone so it reads against ``plot_muller(by_drivers=True)`` and ``plot_tissue("clone")``.
+    def plot_phylogeny(self, ax=None, min_freq=0.02, figsize=(7, 7), linewidth=1.4):
+        """Radial CLADE phylogeny drawn inline with matplotlib (Cassiopeia-style).
 
-        Subsamples up to ``sample_size`` cancer clones (weighted by their cell count), builds their
-        induced lineage tree from ``genotypes_parents``, lays it out radially (root at the centre,
-        leaves on the rim, depth = mutational distance), and colours every branch/leaf by its
-        driver-clone colour — a clone's own colour where known, else the majority colour of its sampled
-        descendants (so ancestral nodes pruned from the live registry still take a sensible colour).
+        Rather than subsampling cells, the whole cancer population is COLLAPSED to driver clones — the
+        same functional collapse the by_drivers Muller uses, size-merged at ``min_freq`` — and the tree
+        is the clade genealogy: each surviving clade is one node, placed radially (founder at the centre,
+        depth = clade ancestry), coloured by its driver-clone colour (matching ``plot_muller(by_drivers)``
+        and ``plot_tissue("clone")``) and sized by its cell count.
 
         Renders straight to ``ax`` (no image file); returns the matplotlib ``Axes``. Primary grid only.
         """
         import matplotlib.pyplot as plt
-        from collections import defaultdict, Counter
+        from collections import defaultdict
         from .. import viz
         if ax is None:
             _, ax = plt.subplots(figsize=figsize)
-        # driver-clone colours shared with the by_drivers Muller / plot_tissue("clone")
+        driver_map = self._driver_signatures()
+        # the SAME display basis the by_drivers Muller draws on: full population collapsed to driver
+        # clones and size-merged at min_freq (no cell subsampling).
+        basis_counts, basis_parents, _gmap, basis_cols = viz._display_basis(
+            self.traces, self.genotypes_parents, driver_map=driver_map, min_freq=min_freq)
+        present = [str(c) for c in basis_cols]
+        if not present:
+            raise ValueError("no cancer clones to build a phylogeny")
         clone_colors = viz.functional_clone_colors(
-            self.traces, self.genotypes_parents, driver_map=self._driver_signatures(), min_freq=min_freq)
+            self.traces, self.genotypes_parents, driver_map=driver_map, min_freq=min_freq)
         default = (0.6, 0.6, 0.6, 1.0)
-        # size-weighted subsample of cancer clones -> the tree's leaves
-        counts = {}
-        for d in self.demes:
-            for g, c in d.items():
-                if self._is_cancer(g):
-                    counts[g] = counts.get(g, 0) + c
-        if not counts:
-            raise ValueError("no cancer cells to build a phylogeny")
-        gids = np.array(list(counts))
-        w = np.array([counts[g] for g in gids], float); w /= w.sum()
-        rng = np.random.default_rng(seed)
-        k = min(int(sample_size), len(gids))
-        sampled = list(dict.fromkeys(rng.choice(gids, size=max(k, 1), replace=True, p=w).tolist()))
-        # induced lineage tree (child -> parent) traced back to the founder
-        parents = self.genotypes_parents
-        edge = {}
-        for g in sampled:
-            cur = g
-            while cur in parents and cur not in edge:
-                edge[str(cur)] = str(parents[cur]); cur = parents[cur]
-        children = defaultdict(list)
-        nodes = set()
-        for c, p in edge.items():
-            children[p].append(c); nodes.add(c); nodes.add(p)
-        roots = [n for n in nodes if n not in edge]
-        if len(roots) == 1:
-            root = roots[0]
-        else:                                       # fragmented forest -> tie under a synthetic root
-            root = "__root__"
+        # clade genealogy: each clade -> its parent clade (from the collapsed basis)
+        pmap = ({str(c): str(basis_parents.iloc[0][c]) for c in basis_parents.columns}
+                if basis_parents.shape[1] else {})
+        presset = set(present)
+        children, roots = defaultdict(list), []
+        for c in present:
+            p = pmap.get(c)
+            (children[p].append(c) if (p in presset and p != c) else roots.append(c))
+        root = roots[0] if len(roots) == 1 else "__root__"
+        if len(roots) != 1:
             for r in roots:
                 children[root].append(r)
-            nodes.add(root)
-
-        def is_leaf(n):
-            return len(children[n]) == 0
-        # leaf order (DFS) -> even angular spacing; internal angle = mean of children; radius = depth
-        post, stack = [], [(root, False)]
-        leaf_order = []
+        nodes = set(present) | {root}
+        peak = {c: float(basis_counts[c].max()) if c in basis_counts else 0.0 for c in present}
+        pmax = max(peak.values()) or 1.0
+        # radial layout: DFS leaf order -> even angles; internal angle = mean of children; radius = depth
+        depth = {root: 0}
+        order, post, stack = [], [], [(root, False)]
         while stack:
             n, done = stack.pop()
             if done:
                 post.append(n); continue
-            if is_leaf(n):
-                leaf_order.append(n); post.append(n); continue
+            ch = children.get(n, [])
+            if not ch:
+                order.append(n); post.append(n); continue
             stack.append((n, True))
-            for c in reversed(children[n]):
+            for c in reversed(ch):
+                depth[c] = depth[n] + 1
                 stack.append((c, False))
-        depth = {root: 0}
-        dq = [root]
-        while dq:
-            n = dq.pop()
-            for c in children[n]:
-                depth[c] = depth[n] + 1; dq.append(c)
-        maxd = max(depth.values()) or 1
-        nleaf = max(len(leaf_order), 1)
-        angle = {lf: 2 * np.pi * (i + 0.5) / nleaf for i, lf in enumerate(leaf_order)}
-        color = {}
-        for n in post:                              # post-order: children before parents
-            if n not in angle:                      # internal -> mean child angle
+        nleaf = max(len(order), 1)
+        angle = {lf: 2 * np.pi * (i + 0.5) / nleaf for i, lf in enumerate(order)}
+        for n in post:
+            if n not in angle:
                 angle[n] = float(np.mean([angle[c] for c in children[n]]))
-            c = clone_colors.get(n)
-            if c is None:                           # ancestor not in a surviving clone -> descendants' majority
-                kids = [color[ch] for ch in children[n] if ch in color]
-                c = Counter(kids).most_common(1)[0][0] if kids else default
-            color[n] = tuple(np.asarray(c, float).tolist())
+        maxd = max(depth.values()) or 1
+        col = {n: tuple(np.asarray(clone_colors.get(n, default), float).tolist()) for n in nodes}
 
-        def r_of(n):                                # inner pad so the centre isn't crowded
-            return 0.12 + 0.88 * depth[n] / maxd
-        # draw: an arc at each internal node's radius spanning its children, radial spokes out to each child
+        def r_of(n):                                # founder at the centre, clades on rings by depth
+            return depth[n] / maxd
+        # arc at each clade's radius spanning its children, radial spokes out to each child clade
         for n in nodes:
-            if is_leaf(n):
+            ch = children.get(n, [])
+            if not ch:
                 continue
             rn = r_of(n)
-            cangs = [angle[c] for c in children[n]]
+            cangs = [angle[c] for c in ch]
             a0, a1 = min(cangs), max(cangs)
             arc = np.linspace(a0, a1, max(2, int(np.ceil((a1 - a0) / 0.02)) + 1))
-            ax.plot(rn * np.cos(arc), rn * np.sin(arc), color=color[n], lw=linewidth, solid_capstyle="round")
-            for c in children[n]:
+            ax.plot(rn * np.cos(arc), rn * np.sin(arc), color=col[n], lw=linewidth, solid_capstyle="round")
+            for c in ch:
                 ac, rc = angle[c], r_of(c)
                 ax.plot([rn * np.cos(ac), rc * np.cos(ac)], [rn * np.sin(ac), rc * np.sin(ac)],
-                        color=color[c], lw=linewidth, solid_capstyle="round")
-        leaves = [n for n in nodes if is_leaf(n)]
-        if leaves:
-            lx = [r_of(n) * np.cos(angle[n]) for n in leaves]
-            ly = [r_of(n) * np.sin(angle[n]) for n in leaves]
-            ax.scatter(lx, ly, s=leaf_size, c=[color[n] for n in leaves], zorder=3, edgecolors="none")
+                        color=col[c], lw=linewidth, solid_capstyle="round")
+        # one marker per clade, sized by its cell count
+        for c in present:
+            s = 40 + 360 * np.sqrt(peak.get(c, 0) / pmax)
+            ax.scatter([r_of(c) * np.cos(angle[c])], [r_of(c) * np.sin(angle[c])], s=s,
+                       color=col[c], edgecolors="black", linewidth=0.4, zorder=3)
         ax.set_aspect("equal"); ax.axis("off")
-        lim = 1.08
-        ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim)
+        ax.set_xlim(-1.12, 1.12); ax.set_ylim(-1.12, 1.12)
         return ax
 
     def he_image(self, px=6, darkness=0.8, sigma_frac=0.5):

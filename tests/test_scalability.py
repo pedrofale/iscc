@@ -137,16 +137,19 @@ def test_plot_tissue_from_counts_is_complete():
 
 def test_plot_tissue_clone_and_phylogeny_share_driver_colours():
     """The driver-clone views agree: plot_tissue(color="clone") and plot_phylogeny() both colour by the
-    same functional_clone_colors map (matching plot_muller(by_drivers=True)), and the radial phylogeny
-    renders straight to an Axes (no image file)."""
+    same functional_clone_colors map (matching plot_muller(by_drivers=True)). The phylogeny collapses to
+    clades (no cell subsampling) and renders straight to an Axes (no image file)."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from iscc.tumor import viz
     t = _grow(seed=1, coarsen=True, max_cells=200)
     assert t.plot_tissue(color="clone") is not None
-    ax = t.plot_phylogeny(sample_size=40, seed=0)
-    # drew branches/leaves onto the axes rather than writing a file
-    assert ax is not None and (len(ax.lines) > 0 or len(ax.collections) > 0)
+    ax = t.plot_phylogeny()
+    # one node per surviving driver clade (the same basis the by_drivers Muller draws on), no subsampling
+    _, _, _, cols = viz._display_basis(t.traces, t.genotypes_parents,
+                                       driver_map=t._driver_signatures(), min_freq=0.02)
+    assert ax is not None and len(ax.collections) == len(cols) and len(ax.lines) > 0
     plt.close("all")
 
 
