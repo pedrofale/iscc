@@ -509,8 +509,12 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   fast, pymuller-free cell-resolution grid (the `plot_grid(expand_demes)` per-clone Muller colormap is
   O(#genotypes) and hangs at ~10^4 genotypes).
 - **DONE (2026-07-24) — docs landing-page growth ANIMATION** (`handoffs/landing_animation.md`).
-  `notebooks/landing_animation.py` renders the full metastatic arc (DCIS → breach → stromal → seeding →
-  resection → chemo → resistant relapse) as the docs Home hero. Layout = a 2×2 gridspec: cell-resolution
+  The landing hero renders the full metastatic arc (DCIS → breach → stromal → seeding →
+  resection → chemo → resistant relapse) as the docs Home hero. It is now reproducible from the ordinary
+  CLI — `isccsim --sim-config configs/landing.yaml` + `isccgif --compartment --splash` (seed 2, the
+  tutorial's tumour + met + treatment; render logic in `iscc.visualization.compartment` /
+  `iscc.tumor.arc`). The earlier bespoke `notebooks/landing_animation.py` generator was removed.
+  Layout = a 2×2 gridspec: cell-resolution
   deme-grids on the LEFT (primary top, metastasis bottom), each compartment's Muller on the RIGHT sharing
   one tumour-time axis. ALL panels share one clone colormap keyed by the stage-dominant selective trait
   (blue proliferation / orange duct-escape / green stromal / purple met / red chemo resistance); the four

@@ -2,9 +2,8 @@
 primary + metastasis through the full clinical story and captures a compartment TRAJECTORY that
 ``isccgif --compartment`` renders offline (grids + centered Mullers on one shared clone colormap).
 
-This promotes the arc + shared-clone-colouring logic that used to live only in the bespoke
-``notebooks/landing_animation.py`` into the package, so the landing hero is reproducible from the
-ordinary CLI:
+This promotes the arc + shared-clone-colouring logic that used to live only in a bespoke standalone
+script into the package, so the landing hero is reproducible from the ordinary CLI:
 
     isccsim --sim-config configs/landing.yaml -o out
     isccgif out --compartment --splash -o docs/assets/landing_hero.gif
@@ -12,7 +11,7 @@ ordinary CLI:
 The schedule (under the ``schedule:`` key of a sim-config) is a list of PHASES executed in order:
 
     schedule:
-      seed: 3                 # evolution seed for the whole arc (overrides --random-seed)
+      seed: 2                 # evolution seed for the whole arc (overrides --random-seed)
       min_freq: 0.02          # clone size-merge threshold (grids + Mullers must agree)
       capture: {pre_seed_every: 2, post_seed_every: 1}
       phases:

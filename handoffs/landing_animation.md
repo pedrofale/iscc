@@ -1,5 +1,11 @@
 # Handoff prompt — the docs landing-page growth animation (primary + metastasis grids + Muller)
 
+> SUPERSEDED (historical). The landing hero now renders from the ordinary CLI —
+> `isccsim --sim-config configs/landing.yaml` + `isccgif --compartment --splash` (seed 2; render logic
+> in `iscc.visualization.compartment` / `iscc.tumor.arc`). The standalone `notebooks/landing_animation.py`
+> described below was removed.
+
+
 Saved 2026-07-24. Copy the block below into a fresh session. **Docs/viz work.** Deliverable: the animation
 that replaces the placeholder hero on the docs landing page — the **primary tumour grid**, the
 **metastasis grid**, and the **Muller plot(s)** growing over time on one shared clone colormap, laid out as two

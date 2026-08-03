@@ -3,9 +3,9 @@ compartment trajectory: two cell-resolution deme-grids on the LEFT, their own-co
 ("fish"/symmetric) Mullers on the RIGHT, a shared tumour-time axis, and ONE shared clone colormap so a
 clone is the same colour in the grid and the Muller.
 
-This promotes ``notebooks/landing_animation.py``'s ``build_figure`` / centered-Muller / GIF logic into
-the CLI. It is ENGINE-FREE: everything is read from the trajectory pickle written by ``isccsim`` (see
-``iscc.tumor.arc``), so the GIF renders offline.
+This holds the ``build_figure`` / centered-Muller / GIF logic (promoted from an earlier bespoke
+standalone script). It is ENGINE-FREE: everything is read from the trajectory pickle written by
+``isccsim`` (see ``iscc.tumor.arc``), so the GIF renders offline.
 
 ``splash=True`` is the minimal HERO variant (no legend, "Primary"/"Metastasis" titles only, no axis
 numbers, per-panel event labels with a legible semi-opaque box); ``splash=False`` is the fully-labelled

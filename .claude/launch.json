@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "docs",
+      "runtimeExecutable": "/Users/pedroferreira/miniconda3/envs/iscc/bin/mkdocs",
+      "runtimeArgs": ["serve", "-a", "127.0.0.1:8011"],
+      "port": 8011
+    }
+  ]
+}
