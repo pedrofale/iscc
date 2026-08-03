@@ -13,7 +13,7 @@
 #   * TISSUE      grid 170 -> 170 x 50 um = ~8.5 mm, i.e. LARGER than a 6.5 mm Visium capture, so the
 #                 slide samples a subset. Total tissue ~10^6 cells (grid^2 x K) — cm-scale, which is
 #                 exactly why the scalability engine below is needed.
-#   * VISIUM v1   100 um spot pitch = 2 demes, 55 um spot ~ 1 deme; a thin section -> ~10 cells/spot.
+#   * VISIUM v1   100 um spot pitch = 2 demes, 55 um spot ~ 1 deme; a thin section -> ~5 cells/spot.
 #
 # BIOLOGY (single clonal founder; DCIS -> IDC). One cancer founds in ONE duct and grows confined
 # (DCIS, behind a high epithelial_barrier); its descendants spread along the ductal tree (cross_gland

@@ -100,8 +100,9 @@ schedule:
     pre_seed_every: 4
     post_seed_every: 3
   phases:
-    # grow the primary to the tutorial's development (~250k) before resecting, so the hero shows the
-    # SAME dense DCIS->IDC field the tutorial does; the met grows alongside into a visible deposit.
+    # grow to the tutorial's development before resecting, so the hero shows the SAME dense DCIS->IDC
+    # field the tutorial does (~190k primary cancer); the met grows alongside into a visible deposit.
+    # The stop below is on TOTAL cancer (primary + met) = 250k, i.e. ~190k primary + ~60k met.
     - {op: grow, until: {met_cancer: 60000, total_cancer: 250000},
        phase: growth, seeded_phase: metastatic seeding}
     - {op: surgery, site: primary, settle: 3, phase: resection}
