@@ -7,8 +7,7 @@ repo_name: pedrofale/iscc
 edit_uri: edit/dev/docs/
 docs_dir: docs
 
-# Not published yet (kept in docs/ to finish privately): the Guide pages (parameters/schema)
-# and the Tutorials notebooks.
+# Not published yet (kept in docs/ to finish privately): the Guide pages (parameters/schema).
 exclude_docs: |
   parameters.md
   schema.md
@@ -93,7 +92,7 @@ plugins:
             filters: ["!^_"]
             heading_level: 1
 
-# Tutorials stay in docs/ but are not published yet (excluded above). API Reference is
+# Tutorials render from the executed notebooks in docs/tutorials/ (symlinks to notebooks/). API Reference is
 # generated from src/ docstrings via mkdocstrings.
 nav:
   - Home: index.md
