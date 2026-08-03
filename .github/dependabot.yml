@@ -1,9 +1,13 @@
 # Keep dependencies patched automatically. Dependabot opens grouped PRs weekly (plus security
 # updates as advisories land), so the lockfile doesn't drift into a pile of alerts again.
+# PRs target `dev` (the source of truth), NOT the default branch `main` — `main` is a filtered
+# projection of `dev` via scripts/publish-main.sh, so a fix merged straight to `main` would be
+# reverted by the next publish. Config itself is read from the default branch (main).
 version: 2
 updates:
   - package-ecosystem: "pip"          # Poetry projects use the pip ecosystem (pyproject.toml + poetry.lock)
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
@@ -12,6 +16,7 @@ updates:
         patterns: ["*"]
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     groups:
