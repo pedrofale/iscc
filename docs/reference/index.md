@@ -38,6 +38,8 @@ Draw cells from the grown tumor before assaying.
 | [`iscc.sample.Resection`](Resection.md) | Cut a resected specimen into samples — bisect (in-plane cut) / dissociate / slice (depth cut). |
 | [`iscc.sample.Biopsy`](Biopsy.md) | Spatially-localized sample of cells. |
 | [`iscc.sample.Dissociation`](Dissociation.md) | Whole-tumor dissociation into a cell suspension. |
+| [`iscc.sample.spatialize`](spatialize.md) | Place a deme-based tumor's cells at sub-deme positions and thin to a section (for spatial assays). |
+| [`iscc.sample.tissue_image`](tissue_image.md) | Rasterize placed cell positions into an H&E-like morphology image (a spatial-slide background). |
 
 ## Data
 
