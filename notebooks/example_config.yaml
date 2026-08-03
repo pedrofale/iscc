@@ -61,6 +61,17 @@ selection_params:
   breach_effects: 2.8
   prop_stromal_survival: 0.02
   stromal_survival_effects: 2.2
+  # R15 GO-OR-GROW trade-off (compartment-context fitness): each dissemination/niche trait costs
+  # proliferation EVERYWHERE (a `*_cost` fraction of the division rate), while its BENEFIT is gated to
+  # its compartment. So a trait is net-favoured ONLY in its niche (breach at the wall, stromal in the
+  # stroma) and selected against elsewhere — the DCIS stays proliferative and the IDC turns stromal,
+  # instead of one super-clone that hitchhikes every trait into every compartment. Off by default.
+  breach_cost: 0.6
+  stromal_survival_cost: 0.6
+  # Driver-LOAD ceiling (CINner-style): distinct oncogene/TSG drivers PLUS each activated dissemination
+  # trait (breach/stromal/met/resistance) count toward it; a clone past the ceiling is non-viable. Caps
+  # biologically-absurd many-driver clones. Engine default is 1000 (off) to preserve e.g. hypermutation.
+  max_mut_drivers: 12
 
 cell_params:
   cancer:

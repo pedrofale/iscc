@@ -106,20 +106,21 @@ def test_unknown_schedule_op_raises():
 
 # --- shared clone colormap: grids and Mullers agree by construction ---------------------------
 def test_grid_and_muller_share_one_colormap(arc_run):
-    """A cancer clone takes the colour of its Muller DISPLAY BAND, so it is the same colour in the
-    grids (type_cmap) and in both Muller bands (clone_colors) — the whole point of the shared map."""
+    """Grids and Mullers share ONE per-cell (founder-clone) colormap: the SAME ``colors`` dict, keyed by
+    genotype, drives both, so a clone is the same colour everywhere. Each cancer clone takes the colour of
+    ITS OWN cascade stage (``stage_of``) — its trait mutations — NOT a band-dominant/founder-washed colour;
+    a low ``min_freq`` (schedule) then keeps the polyclonal invasion sweep's clones as their own coloured
+    Muller bands instead of folding them into their grey founder, so the Muller matches the grid."""
     t, frames, marks, traj = arc_run
     colors = traj["colors"]
-    _, _, gmap, basis_cols = viz._display_basis(
-        t.traces, t.genotypes_parents, driver_map=t._functional_signatures(), min_freq=traj["min_freq"])
     checked = 0
-    for gid, band in gmap.items():
-        if gid in colors and str(band) in colors:
-            assert tuple(colors[gid]) == tuple(colors[str(band)])
-            checked += 1
+    for gid, rep in t.genotypes.items():
+        if getattr(rep, "type", None) != "cancer":
+            continue
+        st = arc.stage_of(rep)
+        assert tuple(colors[str(gid)]) == tuple(arc.STAGE_COL["none" if st is None else st])
+        checked += 1
     assert checked > 0
-    # every Muller band founder has a colour (so no band renders as the grey fallback by accident)
-    assert all(str(b) in colors for b in basis_cols)
 
 
 def test_trajectory_is_engine_free_and_roundtrips(tmp_path, arc_run):
@@ -214,6 +215,24 @@ def test_default_animate_still_requires_count_args(sim_out):
     assert "GENOTYPE_COUNTS" in r.output or "compartment" in r.output
 
 
+def test_r15_proliferation_cost_and_driver_load():
+    """R15 compartment-context fitness. (a) proliferation_cost: each *_cost lowers a trait-carrying
+    clone's division as a multiplicative penalty, and is exactly 1.0 (byte-identical) when all costs are
+    0. (b) the driver LOAD counts the dissemination traits toward max_mut_drivers, so a clone that has
+    activated every trait is non-viable under a realistic ceiling."""
+    from iscc.tumor.components.selection import Selection
+    ep = {"breach": 0.6, "stromal_survival": 0.5, "met_survival": 0.9, "treatment_resistance": 0.6}
+    assert Selection().proliferation_cost(ep) == 1.0                       # off -> no-op
+    # breach_cost 0.5 on breach 0.6 -> factor 1 - 0.3 = 0.70; the others still 0
+    assert abs(Selection(breach_cost=0.5).proliferation_cost(ep) - 0.70) < 1e-9
+    # driver load = onc/TSG distinct drivers + one per activated dissemination trait
+    gs = {"ploidy": 2, "highest_cn": 2, "nullisomy_count": 0, "n_mutated_drivers": 2,
+          "n_mut_breach": 1, "n_mut_ss": 1, "n_mut_ms": 1, "n_mut_tr": 1}          # load = 2 + 4 = 6
+    assert Selection(max_mut_drivers=6).update_viability(gs) == 1
+    assert Selection(max_mut_drivers=5).update_viability(gs) == 0            # the super-clone dies
+    assert Selection(max_mut_drivers=1000).update_viability(gs) == 1         # default ceiling: viable
+
+
 def test_breach_gated_invasion_requires_breach():
     """breach_gated_invasion makes crossing the basement membrane (a duct->stroma dispersal hop) require
     the `breach` trait. With the gate ON and NO breach genes (prop_breach 0), cancer cannot reach the
@@ -244,7 +263,8 @@ def test_landing_config_is_valid_and_schedule_shaped():
     tut = yaml.safe_load(open(os.path.join(root, "notebooks", "example_config.yaml")))
     assert cfg["mode"] == "genotype" and cfg["update_mode"] == "tau" and cfg["tau"] == 0.5
     sch = cfg["schedule"]
-    assert sch["seed"] == 2 and sch["min_freq"] == 0.02       # SAME seed as the tutorial
+    # min_freq is LOW (0.002) so the polyclonal invasion sweep keeps its own green Muller bands
+    assert sch["seed"] == 2 and sch["min_freq"] == 0.002      # SAME seed as the tutorial
     ops = [p["op"] for p in sch["phases"]]
     assert ops == ["grow", "surgery", "chemotherapy", "grow"]
     # the shared biology is IDENTICAL to the tutorial's (grid, invasion, per-cell rates)
@@ -252,6 +272,11 @@ def test_landing_config_is_valid_and_schedule_shaped():
     assert cfg["selection_params"]["prop_breach"] == tut["selection_params"]["prop_breach"] == 0.02
     assert cfg["spatial_params"]["breach_gated_invasion"] is tut["spatial_params"]["breach_gated_invasion"] is True
     assert cfg["cell_params"]["cancer"] == tut["cell_params"]["cancer"]
-    # the landing-only ADDITIONS: metastasis + treatment (off in the tutorial) + the met compartment
+    # R15 go-or-grow: the invasion costs + the driver-load ceiling are shared with the tutorial
+    for k in ("breach_cost", "stromal_survival_cost", "max_mut_drivers"):
+        assert cfg["selection_params"][k] == tut["selection_params"][k]
+    # the landing-only ADDITIONS: metastasis + treatment (off in the tutorial) + the met compartment,
+    # with a LOW met-survival cost (so the met establishes) and a HIGH resistance cost (rare pre-chemo)
     assert cfg["selection_params"]["prop_met_survival"] > 0 > -cfg["selection_params"]["prop_treatment_resistance"]
+    assert 0 < cfg["selection_params"]["met_survival_cost"] < cfg["selection_params"]["treatment_resistance_cost"]
     assert cfg["spatial_params"]["met_hazard"] == 3.5 and cfg["spatial_params"]["met_grid_size"]

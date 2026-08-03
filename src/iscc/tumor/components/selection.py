@@ -10,6 +10,8 @@ class Selection(object):
                  prop_breach=0.0, prop_stromal_survival=0.0, prop_met_survival=0.0,
                  driver_effects=1.1, dispersal_effects=1.1, treatment_resistant_effects=1.1, immune_resistant_effects=1.1,
                  breach_effects=1.1, stromal_survival_effects=1.1, met_survival_effects=1.1,
+                 breach_cost=0.0, stromal_survival_cost=0.0, met_survival_cost=0.0,
+                 treatment_resistance_cost=0.0,
                  selection_mode="gene", s_arm=None, arm_baseline=2.0,
                  max_ploidy=6, max_cn=12, max_nullisomy=2, max_mut_drivers=1000, rng=None,
                  epistasis_params=None, dependency_params=None, layout_seed=None, ):
@@ -52,6 +54,17 @@ class Selection(object):
         self.breach_effects = breach_effects
         self.stromal_survival_effects = stromal_survival_effects
         self.met_survival_effects = met_survival_effects
+        # Compartment-context fitness TRADE-OFFS (R15, go-or-grow): each niche/dissemination trait
+        # carries a PROLIFERATION cost that applies EVERYWHERE, while its BENEFIT (attenuating a hazard)
+        # is gated to its compartment in _death_rate. So a trait is net-favoured only where its niche
+        # benefit outweighs the cost (breach at the wall, stromal in the stroma, met in the deposit,
+        # resistance under chemo) and is selected AGAINST elsewhere — instead of being a free neutral
+        # passenger that hitchhikes into every compartment. `cost` fraction of division lost per unit
+        # trait. ALL DEFAULT 0.0 -> proliferation_cost() returns 1.0 -> division byte-identical to before.
+        self.breach_cost = breach_cost
+        self.stromal_survival_cost = stromal_survival_cost
+        self.met_survival_cost = met_survival_cost
+        self.treatment_resistance_cost = treatment_resistance_cost
 
         # Selection model. "gene" (default) = the abstract CINner gene-driver model
         # (oncogene/TSG mutation + copy-number fitness via n_wt/n_mut counts). "arm" = the
@@ -278,12 +291,24 @@ class Selection(object):
         if genome_summary['ploidy'] > self.max_ploidy:
             return 0
         if genome_summary['highest_cn'] > self.max_cn:
-            return 0 
+            return 0
         if genome_summary['nullisomy_count'] > self.max_nullisomy:
             return 0
-        if genome_summary['n_mutated_drivers'] > self.max_mut_drivers:
+        # Driver LOAD: distinct oncogene/TSG drivers PLUS each dissemination/niche PROGRAM the clone has
+        # activated (breach / stromal_survival / met_survival / treatment_resistance, counted by
+        # presence). A clone that stacks every program — the "super-clone" — thus exceeds a realistic
+        # mutational-load ceiling and is non-viable, the CINner way. Counting the compartment traits is
+        # what stops one lineage from being optimal in every compartment at once. NOTE off-by-default:
+        # ``max_mut_drivers`` defaults to 1000, so this is a no-op (load << 1000) unless a config sets a
+        # realistic limit; and with prop_*=0 the compartment terms are 0 -> byte-identical either way.
+        load = (genome_summary['n_mutated_drivers']
+                + int(genome_summary.get('n_mut_breach', 0) > 0)
+                + int(genome_summary.get('n_mut_ss', 0) > 0)
+                + int(genome_summary.get('n_mut_ms', 0) > 0)
+                + int(genome_summary.get('n_mut_tr', 0) > 0))
+        if load > self.max_mut_drivers:
             return 0
-        return 1        
+        return 1
 
     def update_death_rate(self, genome_summary, param, event_bits=0, **kwargs):
         # Synthetic lethality (R14): a genotype carrying both events of a planted mutually-exclusive
@@ -373,6 +398,17 @@ class Selection(object):
         e = self.met_survival_effects
         return self._rel_fitness(genome_summary['n_wt_ms'], genome_summary['n_mut_ms'],
                                  genome_summary['ploidy'], self.N_ms, e, e**2)
+
+    def proliferation_cost(self, ep):
+        """Go-or-grow trade-off multiplier on ``division_rate`` (R15): each dissemination/niche trait
+        costs a fraction ``*_cost`` of division PER UNIT of the trait, applied EVERYWHERE, while the
+        trait's BENEFIT is gated to its compartment in ``_death_rate``. So a trait is net-favoured only
+        where the niche benefit outweighs the cost, and selected against elsewhere. Returns 1.0 when
+        every cost is 0 (default) -> division byte-identical to the additive model."""
+        return (max(0.0, 1.0 - self.breach_cost * ep.get("breach", 0.0))
+                * max(0.0, 1.0 - self.stromal_survival_cost * ep.get("stromal_survival", 0.0))
+                * max(0.0, 1.0 - self.met_survival_cost * ep.get("met_survival", 0.0))
+                * max(0.0, 1.0 - self.treatment_resistance_cost * ep.get("treatment_resistance", 0.0)))
 
     def get_gene_names(self, gene_prefix='G'):
         gene_names = []

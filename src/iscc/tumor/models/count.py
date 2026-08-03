@@ -1990,10 +1990,10 @@ class GenotypeTumor:
 
     def _stage_colors(self):
         """{gid -> rgba} colouring each CANCER genotype by its STAGE-DOMINANT driver — the highest arc
-        stage it has activated (from its heritable traits): 1 proliferation (division rate raised by an
-        onc/TSG mutation), 2 invasion (breach or stromal_survival), 3 met survival, 4 chemo resistance;
-        0 = no driver. Normal cells keep their type colours. This is the todo #14 categorical view: a
-        few colours tracking the selection cascade instead of a per-clone functional rainbow.
+        stage it has activated (from its heritable traits), on the SAME 6-stage scheme + colours as the
+        landing hero: 1 proliferation (division rate raised by an onc/TSG mutation), 2 breach (duct escape),
+        3 stromal survival, 4 met survival, 5 chemo resistance; 0 = no driver. Normal cells keep their type
+        colours. This is the todo #14 categorical view: a few colours tracking the selection cascade.
 
         Returns the map plus the sorted set of stages actually present, for the legend."""
         from .. import viz
@@ -2009,17 +2009,20 @@ class GenotypeTumor:
         return out, sorted(present)
 
     def _stage_of(self, rep):
-        """Stage-dominant driver of one CANCER genotype: 0 none, 1 proliferation (division raised
-        above baseline), 2 invasion (breach/stromal_survival), 3 met survival, 4 chemo resistance —
-        the highest arc stage its heritable traits have activated. Robust to missing evo keys."""
+        """Stage-dominant driver of one CANCER genotype, on the SAME 6-stage scheme as the landing hero
+        (``iscc.tumor.arc.stage_of``): 0 none, 1 proliferation (division raised above baseline), 2 breach
+        (duct escape), 3 stromal survival, 4 met survival, 5 chemo resistance — the highest arc stage its
+        heritable traits have activated. Robust to missing evo keys."""
         ep = rep.evolutionary_parameters
         div = ep.get("division_rate", 0.0)
         base = getattr(rep, "baseline_rates", {}).get("division_rate", div)
         if ep.get("treatment_resistance", 0) > 0:
-            return 4
+            return 5
         if ep.get("met_survival", 0) > 0:
+            return 4
+        if ep.get("stromal_survival", 0) > 0:
             return 3
-        if ep.get("breach", 0) > 0 or ep.get("stromal_survival", 0) > 0:
+        if ep.get("breach", 0) > 0:
             return 2
         if div > base + 1e-9:
             return 1
@@ -2092,9 +2095,9 @@ class GenotypeTumor:
                     img[di] = self._stage_of(self.genotypes[best_g])
             img = img.reshape(G, G)
             ax.imshow(np.zeros((G, G)), cmap=ListedColormap(["#f3e7e7"]))    # pale stroma
-            cm = ListedColormap([viz.STAGE_PALETTE[i] for i in range(5)])
-            ax.imshow(np.ma.masked_where(img < 0, img), cmap=cm, vmin=0, vmax=4, interpolation="nearest")
-            names = ["none", "proliferation", "invasion", "met survival", "chemo resist"]
+            cm = ListedColormap([viz.STAGE_PALETTE[i] for i in range(6)])
+            ax.imshow(np.ma.masked_where(img < 0, img), cmap=cm, vmin=0, vmax=5, interpolation="nearest")
+            names = ["none", "proliferation", "breach", "stromal", "met survival", "chemo resist"]
             present = sorted({int(v) for v in img.ravel() if v >= 0})
             if present:
                 ax.legend(handles=[Patch(color=to_hex(viz.STAGE_PALETTE[i]), label=names[i]) for i in present],

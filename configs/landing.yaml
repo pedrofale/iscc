@@ -25,9 +25,24 @@ selection_params:
   breach_effects: 2.8
   prop_stromal_survival: 0.02
   stromal_survival_effects: 2.2
+  # R15 GO-OR-GROW trade-off (see example_config.yaml): invasion costs are the same as the tutorial;
+  # met-survival gets a LOW cost so the deposit can still establish. Resistance gets only a SMALL cost:
+  # it is near-neutral off-drug so (a) it does not hitchhike the pre-chemo met (kept rare instead by a
+  # low prop_treatment_resistance) yet (b) after chemo clears the sensitive bulk the resistant subset
+  # tolerates the drug AND regrows, giving a RED relapse. A HIGH resistance cost instead crippled the
+  # relapse: cost-bearing resistant cells lost the off-drug regrowth race to any surviving sensitive cell.
+  breach_cost: 0.6
+  stromal_survival_cost: 0.6
+  met_survival_cost: 0.15
+  treatment_resistance_cost: 0.3
+  max_mut_drivers: 12
   # --- the landing's ADDITIONS: metastasis + treatment (0 in the tutorial) ---
   prop_met_survival: 0.015
   met_survival_effects: 3.0
+  # Resistance is kept rare PRE-chemo by RARITY (0.001 x 600 ~= <1 resistance gene), NOT by a punishing
+  # cost -- so it neither hitchhikes the pre-chemo met nor is crippled in the post-chemo relapse. The
+  # moderate cost 0.3 above just trims residual pre-chemo standing resistance; the chemo window stays
+  # wide enough (resistant net-positive under drug) that the rare standing subclone survives and regrows.
   prop_treatment_resistance: 0.001
   treatment_resistant_effects: 2.8
 
@@ -72,7 +87,15 @@ spatial_params:
 
 schedule:
   seed: 2                 # SAME seed as the tutorial
-  min_freq: 0.02
+  # Muller clone-merge threshold. LOW (0.002, not the usual 0.02) on purpose: the DCIS->IDC invasion is a
+  # POLYCLONAL sweep (dozens of independent stromal_survival clones, each <2%), so at 0.02 they all fold
+  # into their grey stage-'none' founder and the Muller reads grey while the per-cell grid reads green.
+  # 0.002 keeps those clones as their own green bands, so the founder-clone Muller matches the grid.
+  min_freq: 0.002
+  # place the "seeding" mark where the met ESTABLISHES (reaches 50 cells), not at the first cell to
+  # arrive -- early seeds land and die under the met-host hazard; the indicator should point at the seed
+  # that actually sticks and grows the deposit.
+  seeding_establishes_at: 50
   capture:
     pre_seed_every: 4
     post_seed_every: 3
@@ -82,8 +105,16 @@ schedule:
     - {op: grow, until: {met_cancer: 60000, total_cancer: 250000},
        phase: growth, seeded_phase: metastatic seeding}
     - {op: surgery, site: primary, settle: 3, phase: resection}
-    # STRONG, selective chemo: kill the sensitive bulk hard so the relapse is the resistant (red) clone,
-    # not a mix of chemo-survivors (kill_rate 2.8 left ~40% sensitive survivors).
-    - {op: chemotherapy, steps: 20, duration: 20, kill_rate: 10.0, effectiveness: 1.0,
+    # SELECTIVE chemo: clear the sensitive bulk so the relapse is the resistant (red) clone. The genotype
+    # engine's kill is ADDITIVE (count.py): added_death = dosage * effectiveness * (1 - tr) * kill_rate,
+    # i.e. kill_rate is an absolute death-rate/step, NOT a multiplier. A sensitive cell (tr 0) takes the
+    # full +kill_rate/step; a resistant cell (tr~0.64) only +0.36*kill_rate. The relapse is red ONLY if the
+    # sensitive bulk is cleared to ~0 -- any survivor out-relapses the cost-bearing resistant clone off-drug
+    # and comes back purple. So the course is LONG (36 steps): the sensitive bulk clears in ~20 steps, then
+    # the extra steps eradicate the last sensitive cells while the now-uncrowded resistant subclone RE-GROWS
+    # under the drug (it is only lightly hit), so chemo ends on an essentially pure-resistant met -> red relapse.
+    - {op: chemotherapy, steps: 36, duration: 36, kill_rate: 1.5, effectiveness: 1.0,
        toxicity: 0.12, sites: both, phase: chemotherapy}
-    - {op: grow, steps: 32, phase: relapse}
+    # long relapse: the resistant subclone (~tens of cells post-chemo) re-expands to REFILL and grow the
+    # met deposit past its pre-chemo size, so the hero ends on a large, still-expanding RED relapse.
+    - {op: grow, steps: 90, phase: relapse}

@@ -70,6 +70,9 @@ def build_figure(traj, splash=False, scale=1.0):
     reveal cursor over them. Returns ``(fig, axp, axm, ax_mp, ax_mm, xmax)``."""
     traces = traj["traces"]
     parents = traj["genotypes_parents"]
+    # grids AND Mullers share ONE per-cell (founder-clone) colormap; a low ``min_freq`` (set in the
+    # schedule) keeps the polyclonal invasion sweep's clones as their own stage-coloured bands rather than
+    # folding them into their grey 'none' founder, so the Muller greens up to match the grid.
     colors = traj["colors"]
     marks = traj["marks"]
     # resection is a DISCRETE removal of the primary -> its Muller must drop to 0 in one step, not be

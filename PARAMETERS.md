@@ -85,6 +85,7 @@ Defaults are those in `notebooks/example_config.yaml`. Set them under the matchi
 | `prop_treatment_resistance` / `prop_immune_resistance` (+ effects) | 0.1 (treatment) / 0.02 (immune); effects 1.1 | as above | resistance is meant to **emerge**, not be pre-seeded |
 | `prop_breach` / `breach_effects` | 0.001 / 2.8 (prop 0.0 = off in the bare engine) | compartment-selection axis: sites that if mutated let a clone cross the epithelial ring (attenuate `epithelial_barrier`); heritable, sequenceable | pairs with `spatial_params.epithelial_barrier`; both must be > 0 to have any effect |
 | `prop_stromal_survival` / `stromal_survival_effects` | 0.02 / 2.2 (prop 0.0 = off in the bare engine) | compartment-selection axis: sites that if mutated let a clone survive the stroma (attenuate `stromal_hazard`) | pairs with `spatial_params.stromal_hazard` |
+| `breach_cost` / `stromal_survival_cost` / `met_survival_cost` / `treatment_resistance_cost` | 0.0 (off) | 0.0–1.0 | **R15 go-or-grow trade-off** (compartment-context fitness): each dissemination/niche trait costs this fraction of `division_rate` per unit of the trait, applied **everywhere**, while its benefit (attenuating its compartment hazard) is compartment-gated. So a trait is net-favoured **only in its niche** and selected against elsewhere — this is what stops one super-clone from hitchhiking every trait into every compartment (proliferation stays in the DCIS, stromal in the IDC, met-survival in the deposit, resistance under chemo). | too high suppresses the trait even in its niche (e.g. a high `met_survival_cost` starves the metastasis; a high `treatment_resistance_cost` keeps resistance a rare pre-chemo subclone, which is usually what you want) |
 
 #### Viability limits — `selection_params`
 
@@ -99,14 +100,18 @@ matter once you tighten them or push amplification/deletion hard.
 | `max_ploidy` | 6 | 3–8 | tight (≲ 3) → caps CIN; near-diploid tumour, WGD impossible |
 | `max_cn` | 12 | 6–20 | tight → caps focal amplification; interacts with `amp_prob` |
 | `max_nullisomy` | 2 | 0–`n_segments` | `0` → **any** fully deleted segment is fatal; loose → whole-genome loss survives |
-| `max_mut_drivers` | 1000 | 1–(`prop_driver` × `n_genes`) | tight → caps driver accumulation; `0` → any driver SNV is fatal |
+| `max_mut_drivers` | 1000 | 1–(`prop_driver` × `n_genes`) + 4 | tight → caps the driver LOAD; `0` → any driver is fatal. **Config-set** (default 1000 = off) so it does not disturb e.g. hypermutation studies or the R14 MHN benchmarks; the cascade configs set it ~12 |
 
-!!! note "`max_mut_drivers` counts distinct driver *genes*, not mutated copies"
-    Its input, `genome_summary['n_mutated_drivers']`, is the number of distinct driver genes
-    (oncogene ∪ TSG) carrying an SNV on **at least one copy**. A mutated oncogene amplified to
-    copy number 4 counts **once**; a deletion that removes a gene's last mutated copy lowers the
-    count again. Do not reach for `n_mut_onc` / `n_mut_tsg` as a substitute — those are
-    copy-weighted (CNVs scale them by copy number) and so are *not* a count of mutated drivers.
+!!! note "`max_mut_drivers` = distinct driver *genes* PLUS activated dissemination programs (R15)"
+    The load is `n_mutated_drivers` (distinct oncogene ∪ TSG genes carrying an SNV on **at least one
+    copy** — a gene amplified to CN 4 counts once) **plus one per activated dissemination trait**
+    (`breach` / `stromal_survival` / `met_survival` / `treatment_resistance`, counted by presence). So a
+    "super-clone" that stacks every program pushes the load up and is culled under a realistic ceiling —
+    the CINner mutational-load idea, extended to the compartment axes. Note this cannot *localize* traits
+    (a metastatic-resistant cell legitimately carries ~8 drivers, so any ceiling that admits it also
+    admits the super-clone) — that is the go-or-grow **cost**'s job; the ceiling only removes the
+    biologically-absurd tail. Do not reach for `n_mut_onc` / `n_mut_tsg` as a substitute for the
+    onc/TSG part — those are copy-weighted (CNVs scale them) and so are *not* a count of mutated drivers.
 
     The default of 1000 is far out of reach at the shipped defaults, so this limit moves no
     existing trajectory (`test_default_limits_are_a_noop_for_the_exact_engine`). It was inert in

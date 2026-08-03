@@ -170,6 +170,11 @@ class Cell(object):
             0.0, 1.0 - 1.0 / selection.update_stromal_survival(gs))
         self.evolutionary_parameters['met_survival'] = max(
             0.0, 1.0 - 1.0 / selection.update_met_survival(gs))
+        # Go-or-grow trade-off (R15): the dissemination/niche traits cost proliferation everywhere,
+        # while their benefits are compartment-gated in _death_rate, so each is net-favoured only in its
+        # niche. Applied AFTER the traits are known; a no-op (x1.0) unless a *_cost is configured.
+        self.evolutionary_parameters['division_rate'] *= selection.proliferation_cost(
+            self.evolutionary_parameters)
 
     def _recount_seg_drivers(self, selection, seg):
         """Refresh this segment's contribution to ``n_mutated_drivers``: the number of DISTINCT
