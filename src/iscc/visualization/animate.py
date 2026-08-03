@@ -44,6 +44,9 @@ from pymuller import muller
                    "'Primary'/'Metastasis' titles, per-panel event labels). Default: fully labelled.")
 @click.option("--poster", is_flag=True,
               help="With --compartment: also write a poster PNG (final frame) next to the GIF.")
+@click.option("--scale", default=1.0, type=float,
+              help="With --compartment: render-dpi multiplier (<1 lightens each frame, so a large "
+                   "grid still yields a web-friendly GIF).")
 @click.option("--colormap", default="gnuplot", help="Colormap for genotypes.")
 @click.option("--figw", default=8, help="Figure width.")
 @click.option("--figh", default=8, help="Figure height.")
@@ -65,6 +68,7 @@ def main(
     compartment,
     splash,
     poster,
+    scale,
     colormap,
     figw,
     figh,
@@ -77,7 +81,7 @@ def main(
     output_path,
 ):
     if compartment:
-        return _render_compartment(grids_dir, splash, output_path, poster)
+        return _render_compartment(grids_dir, splash, output_path, poster, scale=scale)
 
     if genotype_counts is None or genotype_parents is None:
         raise click.UsageError(
@@ -112,7 +116,7 @@ def main(
     animation.save(os.path.join(output_path, f'slice{suffix}.gif'))
 
 
-def _render_compartment(grids_dir, splash, output_path, poster=False):
+def _render_compartment(grids_dir, splash, output_path, poster=False, scale=1.0):
     """Render the primary+metastasis composite GIF from the isccsim compartment trajectory in
     GRIDS-DIR (the isccsim output directory). Promotes the landing-animation build_figure/centered-
     Muller/GIF logic into the CLI (see iscc.visualization.compartment)."""
@@ -129,7 +133,7 @@ def _render_compartment(grids_dir, splash, output_path, poster=False):
     else:
         gif_path = os.path.join(output_path, f"{stem}.gif")
 
-    size_mb = comp.render_animation(traj, gif_path, splash=splash, poster=poster)
+    size_mb = comp.render_animation(traj, gif_path, splash=splash, poster=poster, scale=scale)
     click.echo(f"wrote {gif_path}  ({size_mb:.2f} MB, {len(traj['frames'])} frames, "
                f"{'splash/minimal' if splash else 'full-labelled'})")
 

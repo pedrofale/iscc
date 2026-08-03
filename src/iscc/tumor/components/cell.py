@@ -170,6 +170,11 @@ class Cell(object):
             0.0, 1.0 - 1.0 / selection.update_stromal_survival(gs))
         self.evolutionary_parameters['met_survival'] = max(
             0.0, 1.0 - 1.0 / selection.update_met_survival(gs))
+        # Go-or-grow trade-off (R15): the dissemination/niche traits cost proliferation everywhere,
+        # while their benefits are compartment-gated in _death_rate, so each is net-favoured only in its
+        # niche. Applied AFTER the traits are known; a no-op (x1.0) unless a *_cost is configured.
+        self.evolutionary_parameters['division_rate'] *= selection.proliferation_cost(
+            self.evolutionary_parameters)
 
     def _recount_seg_drivers(self, selection, seg):
         """Refresh this segment's contribution to ``n_mutated_drivers``: the number of DISTINCT
@@ -542,8 +547,28 @@ class CancerCell(Cell):
         if self.parent is not None:
             self.genotype_id = self.parent.genotype_id
 
+    def _cow_privatize(self, seg):
+        """Give this cell a private copy of segment ``seg``'s dict and its two hap lists before the
+        segment is mutated (the individual allele bitsets stay shared until each is itself copied on
+        write, in the mutate branches). Idempotent within one division via ``self._cow_segs``. This
+        is the per-segment half of the structural-sharing copy-on-write that replaces mutate()'s old
+        whole-genome deepcopy; only segments a division actually writes to are copied."""
+        if seg in self._cow_segs:
+            return
+        old = self.genome[seg]
+        self.genome[seg] = {'p': list(old['p']), 'm': list(old['m'])}
+        self._cow_segs.add(seg)
+
     def mutate(self, rng, selection, n_snvs_per_allele=None, snv_prob=None, cnv_prob=None,
-               amp_prob=None, wgd_rate=None):
+               amp_prob=None, wgd_rate=None, func_mask=None):
+        # ``func_mask`` (per-segment boolean array of FITNESS-relevant gene positions) turns on the
+        # count engine's passenger fast-path: an SNV division that lands NO mutation on a functional
+        # position leaves genome_summary unchanged (a pure passenger), so it returns the sentinel
+        # ``"passenger"`` and skips the summary update + CINner recompute + genotype id — the caller
+        # folds it into the parent clone. ``None`` (the default, and every non-coarsening caller such
+        # as the cell engine) preserves the original behaviour byte-for-byte. Only ever set when the
+        # engine's ``coarsen_passengers`` is on, which is force-disabled under epistasis (so skipping
+        # the summary update can never miss an event firing from a neutral-looking SNV).
         # SNV/CNA split, per-allele SNV rate and amp/del split default to this genotype's
         # configured rates (set in __init__, inherited through divide()), but stay overridable per call.
         n_snvs_per_allele = self.n_snvs_per_allele if n_snvs_per_allele is None else n_snvs_per_allele
@@ -554,13 +579,30 @@ class CancerCell(Cell):
         # Copy-on-write: this cell is diverging into a new genotype, so take a private
         # copy of the (until now possibly shared) genome/summary before modifying them.
         # This is the only place the genome is mutated, so sharing elsewhere is safe.
-        self.genome = deepcopy(self.genome)
-        self.genome_summary = deepcopy(self.genome_summary)
+        #
+        # STRUCTURAL SHARING (not a whole-genome deepcopy): a mutating division usually touches
+        # only a handful of the n_segments segments, so we copy the top-level list and the two
+        # mutable summary lists cheaply here and copy each SEGMENT's dict / hap-list / allele bitset
+        # lazily, on first write, via _cow_privatize. Untouched segments stay shared with the parent
+        # (their bitsets are never mutated in place — see the per-allele .copy() below). This is
+        # byte-identical to the old ``deepcopy(self.genome)`` (same bits, same rng draws) but its
+        # cost scales with segments-touched, not n_segments — the dominant growth cost when almost
+        # every division mutates (high mutation_rate). See DESIGN_scalability.md §5 phase 6.
+        self.genome = list(self.genome)                     # private top list; seg dicts shared for now
+        gs = dict(self.genome_summary)                      # private summary; two lists still shared
+        gs['seg_cns'] = list(gs['seg_cns'])
+        gs['seg_mut_drivers'] = list(gs['seg_mut_drivers'])
+        self.genome_summary = gs
+        self._cow_segs = set()                              # segments already privatised this division
+        # Number of NEW SNVs this division fixes (read by the count engine's passenger-coarsening
+        # path to tally a folded neutral daughter's burden; 0 for CNV/WGD, which are never folded).
+        self._n_new_snv = 0
         events_before = self.event_bits   # everything acquired below is ONE tied group (see _close_event_group)
         # A fully deleted genome (every segment at nullisomy) has no allele to act on; the
         # per-segment selection weights would be all-zero (0/0 -> NaN). Nothing to mutate.
         if not any(self.genome[s]['p'] or self.genome[s]['m'] for s in range(self.n_segments)):
             return False
+        hit_functional = False   # coarsening: did any SNV land on a fitness-relevant position?
         # WGD is its own event channel (DESIGN_focal_cna.md v1), fired with probability wgd_rate per
         # mutating division INSTEAD of the SNV/CNA split. The `wgd_rate > 0` guard is what keeps the
         # off-by-default path byte-identical: at the default 0.0 no random variable is drawn here, so
@@ -580,12 +622,14 @@ class CancerCell(Cell):
             # update_genome_summary_cnv seam, and the viability gate (update_evolutionary_parameters
             # below + the engine's reject-at-birth check) drops any daughter that busts max_ploidy/max_cn.
             for seg in range(self.n_segments):
+                self._cow_privatize(seg)                     # WGD writes to every segment
                 for hap in ('p', 'm'):
                     existing = list(self.genome[seg][hap])   # snapshot: don't double the new copies
                     for allele_bits in existing:
                         self.genome[seg][hap].append(allele_bits.copy())  # independent copy (no aliasing)
                         self.update_genome_summary_cnv(selection, allele_bits, seg, 1)
             self.is_wgd = True
+            hit_functional = True                            # WGD changes copy number -> never folded
         elif event == 'mut':
             # A dividing cell can fix several SNVs at once, scattered across the whole genome
             # rather than clustered in one segment. Each allele (physical copy) independently
@@ -597,7 +641,9 @@ class CancerCell(Cell):
             placed = 0
             for seg in range(self.n_segments):
                 for hap in ('p', 'm'):
-                    for allele in self.genome[seg][hap]:
+                    hap_list = self.genome[seg][hap]  # parent's list; the private copy is made on write
+                    for ai in range(len(hap_list)):
+                        allele = hap_list[ai]         # pristine parent bitset (only ever read here)
                         k = rng.poisson(n_snvs_per_allele)
                         if k == 0:
                             continue
@@ -606,10 +652,21 @@ class CancerCell(Cell):
                             continue
                         n_mutations = min(k, len(available))
                         muts = rng.choice(available, size=n_mutations, replace=False)
-                        allele[muts] = True  # set mutated bits on this copy
+                        # copy-on-write: privatise the segment, then write to a copy of THIS allele so
+                        # the parent's shared bitset is never mutated in place.
+                        self._cow_privatize(seg)
+                        new_allele = self.genome[seg][hap][ai].copy()
+                        new_allele[muts] = True  # set mutated bits on this copy
+                        self.genome[seg][hap][ai] = new_allele
                         mut_bits = np.zeros(self.segment_sizes[seg], dtype=bool)
                         mut_bits[muts] = True
-                        self.update_genome_summary_mutation(selection, mut_bits, seg)
+                        # Coarsening fast-path: a purely NEUTRAL mut_bits leaves genome_summary
+                        # unchanged (all category counts += 0, driver recount += 0), so skipping the
+                        # update is EXACT (epistasis, the one exception, is off whenever func_mask is
+                        # set). Only a functional hit updates the summary and marks a new genotype.
+                        if func_mask is None or func_mask[seg][muts].any():
+                            self.update_genome_summary_mutation(selection, mut_bits, seg)
+                            hit_functional = True
                         placed += n_mutations
             if placed == 0:
                 # The engine already decided this division mutates, so an SNV event must change
@@ -627,10 +684,16 @@ class CancerCell(Cell):
                 seg, hap, ai = candidates[rng.choice(len(candidates))]
                 allele = self.genome[seg][hap][ai]
                 pos = int(rng.choice(self._available_sites(selection, seg, allele, gate_bits)))
-                allele[pos] = True
+                self._cow_privatize(seg)                     # copy-on-write before the in-place set
+                new_allele = self.genome[seg][hap][ai].copy()
+                new_allele[pos] = True
+                self.genome[seg][hap][ai] = new_allele
                 mut_bits = np.zeros(self.segment_sizes[seg], dtype=bool)
                 mut_bits[pos] = True
-                self.update_genome_summary_mutation(selection, mut_bits, seg)
+                if func_mask is None or func_mask[seg][pos]:
+                    self.update_genome_summary_mutation(selection, mut_bits, seg)
+                    hit_functional = True
+            self._n_new_snv = placed if placed else 1     # fallback above forces exactly one SNV
         elif event == 'cnv':
             # Sample segment
             segment_probs = np.array([len(self.genome[seg]['p'] + self.genome[seg]['m']) for seg in range(self.n_segments)]) # can't select empty segment
@@ -643,6 +706,7 @@ class CancerCell(Cell):
             all = rng.choice(range(len(self.genome[seg][hap])))
             # Decide wether to delete or copy
             evt = rng.choice(['del', 'amp'], p=[1.0 - amp_prob, amp_prob])
+            self._cow_privatize(seg)                         # copy-on-write before the list append/del
             if evt == 'amp':
                 sign = 1
                 self.genome[seg][hap].append(self.genome[seg][hap][all].copy()) # independent copy (no aliasing)
@@ -657,8 +721,15 @@ class CancerCell(Cell):
                 # weight, so they are never picked for further deletion.
                 del self.genome[seg][hap][all]
             self.update_genome_summary_cnv(selection, allele_bits, seg, sign) # for evolutionary parameters
+            hit_functional = True                            # CNV changes copy number -> never folded
 
         self._close_event_group(selection, events_before)
+        # Coarsening: a pure-passenger SNV division (no functional hit) yields a daughter whose
+        # genome_summary — hence fitness — is identical to the parent's. Signal it so the engine folds
+        # it into the parent clone, skipping the CINner recompute and the new genotype id. func_mask
+        # is None for every non-coarsening caller, so this branch is never taken there.
+        if func_mask is not None and not hit_functional:
+            return "passenger"
         self.update_evolutionary_parameters(selection)
         self.set_genotype_id()
         return True  # a new genotype was created

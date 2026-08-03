@@ -2,9 +2,8 @@
 primary + metastasis through the full clinical story and captures a compartment TRAJECTORY that
 ``isccgif --compartment`` renders offline (grids + centered Mullers on one shared clone colormap).
 
-This promotes the arc + shared-clone-colouring logic that used to live only in the bespoke
-``notebooks/landing_animation.py`` into the package, so the landing hero is reproducible from the
-ordinary CLI:
+This promotes the arc + shared-clone-colouring logic that used to live only in a bespoke standalone
+script into the package, so the landing hero is reproducible from the ordinary CLI:
 
     isccsim --sim-config configs/landing.yaml -o out
     isccgif out --compartment --splash -o docs/assets/landing_hero.gif
@@ -12,7 +11,7 @@ ordinary CLI:
 The schedule (under the ``schedule:`` key of a sim-config) is a list of PHASES executed in order:
 
     schedule:
-      seed: 3                 # evolution seed for the whole arc (overrides --random-seed)
+      seed: 2                 # evolution seed for the whole arc (overrides --random-seed)
       min_freq: 0.02          # clone size-merge threshold (grids + Mullers must agree)
       capture: {pre_seed_every: 2, post_seed_every: 1}
       phases:
@@ -67,58 +66,51 @@ PHASE_CAPTION = {
 TRAJECTORY_FILE = "compartment_trajectory.pkl"
 
 
-def stage_of(rep, B=0.70, S=0.80, M=0.92, R=0.55):
-    """The stage-dominant selective trait of a cancer clone: the LAST sweep in the metastatic arc it
-    has activated (saturated). ``None`` for normal cells.
+def stage_of(rep):
+    """The cascade stage of a cancer clone: which trait MUTATIONS it carries, taken as the furthest
+    along the metastatic arc — resistance > met > stromal > breach > proliferation > none. ``None`` for
+    normal cells.
 
-    The fitness effects are spatially gated: ``breach`` only lifts the epithelial-barrier hazard at
-    the duct wall, ``stromal_survival`` only the stromal hazard, and ``met_survival`` only the met host
-    hazard. ``met_survival`` therefore drifts up neutrally in the primary, so it needs a high threshold
-    (near-saturation) to count as the met stage; the invasion axes are selected earlier and get lower
-    thresholds, so the duct-escape (orange) and stromal (green) fronts surface before the primary turns
-    met-capable (purple)."""
+    No value thresholds: a clone is at a stage iff it carries ≥1 mutation giving that trait (the trait
+    value is >0 iff a gene for it is mutated). A cell that carries several trait mutations is coloured by
+    the last one in the arc. (Because a clone can carry multiple traits at once — asexual linked
+    selection means a sweeping clone hitchhikes them together — the same clone can be, e.g., both
+    met-survival and resistance; it then reads as the later stage, resistance.)"""
     if getattr(rep, "type", None) != "cancer":
         return None
     ep = rep.evolutionary_parameters
     base_div = getattr(rep, "baseline_rates", {}).get("division_rate", ep["division_rate"])
-    if ep.get("treatment_resistance", 0) > R:
+    if ep.get("treatment_resistance", 0) > 0:
         return "resistance"
-    if ep.get("met_survival", 0) > M:
+    if ep.get("met_survival", 0) > 0:
         return "met"
-    if ep.get("stromal_survival", 0) > S:
+    if ep.get("stromal_survival", 0) > 0:
         return "stromal"
-    if ep.get("breach", 0) > B:
+    if ep.get("breach", 0) > 0:
         return "breach"
     if ep["division_rate"] > base_div + 1e-9:
         return "prolif"
     return "none"
 
 
-def story_colors(t, min_freq):
+def story_colors(t, min_freq=None):
     """{str(gid) -> rgba}: ONE shared clone colormap for the grids AND the Mullers.
 
-    Every cancer genotype is routed through the SAME display basis the Muller draws on (functional
-    clone via ``_functional_signatures``, size-merged at ``min_freq``) and takes ITS BAND's colour. A
-    band's colour is the stage-dominant sweep of the band's founder — exactly what the Muller keys on —
-    so a clone is literally the same colour in the primary grid, the met grid, and both Muller bands.
-    Normals keep their muted type colour."""
-    from . import viz
-    by_str = {str(gid): rep for gid, rep in t.genotypes.items()}
-    driver_map = t._functional_signatures()
-    _, _, gmap, basis_cols = viz._display_basis(t.traces, t.genotypes_parents,
-                                                driver_map=driver_map, min_freq=min_freq)
-    band_col = {}
-    for b in basis_cols:
-        st = stage_of(by_str.get(str(b)))
-        band_col[str(b)] = STAGE_COL["none" if st is None else st]
+    PER-CELL colouring: every cancer genotype takes the colour of ITS OWN cascade stage (``stage_of`` —
+    the trait MUTATIONS it carries: green=stromal, purple=met, red=resistance, blue=proliferation,
+    grey=no trait), so a clone shows the trait it ACTUALLY HAS in the primary grid, the met grid, and the
+    Muller alike. This is the "colour cells/clones by whether they carry each trait's mutations" view: a
+    small breach/stromal/… sub-clone keeps its own trait colour instead of being folded (band-dominant or
+    by founder) into a bulk that is mostly stage 'none' and washed grey. ``min_freq`` is accepted for
+    call-site compatibility but unused (no band merging happens in the colour map). Normals stay muted."""
     out = {}
-    for sgid, rep in by_str.items():
+    for gid, rep in t.genotypes.items():
+        sgid = str(gid)
         if getattr(rep, "type", None) != "cancer":
             out[sgid] = NORMAL_MUTED.get(getattr(rep, "type", None), (0.7, 0.7, 0.7, 1.0))
             continue
-        b = str(gmap.get(sgid, sgid))
         st = stage_of(rep)
-        out[sgid] = band_col.get(b, STAGE_COL["none" if st is None else st])
+        out[sgid] = STAGE_COL["none" if st is None else st]
     for n in normal_names:
         out[n] = NORMAL_MUTED[n]
     return out
@@ -149,13 +141,17 @@ def execute_schedule(t, schedule):
 
     frames, marks = [], []
     seeding_snap = None
+    # mark "seeding" when the met is ESTABLISHED (has reached this many cancer cells), not when the FIRST
+    # cell arrives -- early seeds often land and die under the met-host hazard; the indicator should point
+    # at the seed that actually sticks and grows the deposit. Default 1 = the first cell (old behaviour).
+    established_at = int(schedule.get("seeding_establishes_at", 1))
 
     def capture(phase):
         frames.append(dict(demes=[dict(d) for d in t.demes], cursor=len(t.traces), phase=phase))
 
     def note_seeding():
         nonlocal seeding_snap
-        if seeding_snap is None and _compartment_cancer(t)[1] > 0:
+        if seeding_snap is None and _compartment_cancer(t)[1] >= established_at:
             seeding_snap = len(t.traces)
             marks.append((seeding_snap, "seeding"))
 

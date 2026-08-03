@@ -406,7 +406,7 @@ def _cancer_colorbar(ax, colors, label="cancer"):
 
 def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap="viridis",
               ax=None, figsize=(10, 10), dpi=100, expand_demes=False, section_frac=1.0, expand_seed=0,
-              cancer_color="#d62728", type_cmap=None, empty_color=None):
+              cancer_color="#d62728", type_cmap=None, empty_color=None, legend=True):
     if color is None:
         color = ["cell_type"]
     if ax is None:
@@ -426,14 +426,16 @@ def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap=
             legend_patches = [mpatches.Patch(color=type_cmap[n], label=n)
                               for n in normal_names if n in present and n in type_cmap]
             cancer_present = [g for g in type_cmap if g not in normal_names and g in present]
-            if cancer_color is not None:
+            if legend and cancer_color is not None:
                 # single-colour cancer view -> one legend entry
                 if cancer_present:
                     legend_patches.append(mpatches.Patch(color=cancer_color, label="cancer"))
                 if legend_patches:
                     ax.legend(handles=legend_patches, loc="upper right", fontsize=7, framealpha=0.8)
-            else:
-                # per-clone colours -> normals in the legend, cancer clones in a discrete colorbar
+            elif legend:
+                # per-clone colours -> normals in the legend, cancer clones in a discrete colorbar.
+                # (Skipped when legend=False — e.g. the compartment animation, whose colorbar would
+                # otherwise spawn a NEW axes every frame and accumulate into stray bars.)
                 if legend_patches:
                     ax.legend(handles=legend_patches, loc="upper right", fontsize=7, framealpha=0.8)
                 cancer_colors = [type_cmap[g] for g in cancer_present if g in type_cmap]
@@ -445,21 +447,37 @@ def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap=
         if color_key == "cell_type":
             type_cmap = type_cmap if type_cmap is not None else cell_type_colors(traces, genotypes_parents)
             base = cell_data["cell_deme"].join(cell_data["cell_crd"])
-            base["val"] = cell_data["cell_type"]["cell_id"].values
-            deme_data = base.groupby(["deme_id"]).agg(lambda x: x.mode().iloc[0])
+            ids = cell_data["cell_type"]["cell_id"].values
+            base["gid"] = ids
+            # Colour each deme by its dominant cell TYPE (cancer vs the named normal types), not its
+            # dominant genotype: cancer splits across many clones, so a majority-cancer deme would
+            # otherwise lose the mode to a single unified normal type and read as stroma (while the
+            # cancer-fraction view shows it as cancer). A cancer-dominant deme is then coloured by its
+            # own dominant cancer clone.
+            base["coarse"] = np.where(np.isin(ids, list(normal_names)), ids, "cancer")
+
+            def _deme_label(sub):
+                dom = sub["coarse"].mode().iloc[0]
+                if dom != "cancer":
+                    return dom
+                return sub.loc[sub["coarse"].values == "cancer", "gid"].mode().iloc[0]
+
+            deme_label = base.groupby("deme_id")[["coarse", "gid"]].apply(_deme_label)
+            rc = base.groupby("deme_id")[["row", "col"]].first()
             grid = np.ones((grid_size, grid_size, 4))
             legend_patches = []
             cancer_colors = []  # per-clone cancer colours drawn, in colormap order
             for genotype, col in type_cmap.items():
-                mask = deme_data["val"] == genotype
-                rows = deme_data.loc[mask, "row"].astype(int).values
-                cols = deme_data.loc[mask, "col"].astype(int).values
-                if len(rows) > 0:
-                    grid[rows, cols] = col
-                    if genotype in normal_names:
-                        legend_patches.append(mpatches.Patch(color=col, label=genotype))
-                    else:
-                        cancer_colors.append(col)
+                demes = deme_label.index[deme_label.values == genotype]
+                if len(demes) == 0:
+                    continue
+                rows = rc.loc[demes, "row"].astype(int).values
+                cols = rc.loc[demes, "col"].astype(int).values
+                grid[rows, cols] = col
+                if genotype in normal_names:
+                    legend_patches.append(mpatches.Patch(color=col, label=genotype))
+                else:
+                    cancer_colors.append(col)
             ax.imshow(grid)
             if legend_patches:
                 ax.legend(handles=legend_patches, loc="upper right", fontsize=7, framealpha=0.8)
@@ -678,13 +696,17 @@ def _band_y_at(pop_df, anc, band_id, gen, smoothing_std):
 # proliferation (onc/TSG, in the ducts) -> invasion (breach/stromal_survival, in the stroma) ->
 # met survival (in the deposit) -> chemo resistance (under treatment). GenotypeTumor._stage_colors maps
 # each genotype to STAGE_PALETTE[stage]; here we only own the palette + drawing.
-STAGE_NAMES = ["no driver", "proliferation (onc/TSG)", "invasion (breach/stromal)",
-               "met survival", "chemo resistance"]
-STAGE_PALETTE = [(0.80, 0.80, 0.80, 1.0),   # none — grey
-                 (0.27, 0.45, 0.71, 1.0),   # proliferation — blue
-                 (0.33, 0.66, 0.41, 1.0),   # invasion — green
-                 (0.55, 0.42, 0.72, 1.0),   # met survival — purple
-                 (0.79, 0.28, 0.28, 1.0)]   # chemo resistance — red
+# 6 stages, SAME colours as the landing hero (iscc.tumor.arc.STAGE_COL) so plot_tissue(color="stage")
+# and the by_stage Muller read identically to the animation: breach (duct escape) is its OWN orange
+# stage, distinct from green stromal_survival, rather than folded into a combined "invasion".
+STAGE_NAMES = ["no driver", "proliferation", "duct escape (breach)",
+               "stromal survival", "met survival", "chemo resistance"]
+STAGE_PALETTE = [(0.50, 0.53, 0.60, 1.0),   # none — grey
+                 (0.23, 0.51, 0.84, 1.0),   # proliferation — blue
+                 (0.98, 0.62, 0.09, 1.0),   # duct escape (breach) — orange
+                 (0.18, 0.75, 0.44, 1.0),   # stromal survival — green
+                 (0.68, 0.40, 0.86, 1.0),   # met survival — purple
+                 (0.94, 0.24, 0.28, 1.0)]   # chemo resistance — red
 
 
 def stage_legend(present=None):

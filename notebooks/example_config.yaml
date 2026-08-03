@@ -1,12 +1,42 @@
-# Example primary tumor for the iscc tutorials: a small cluster of epithelial glands (ducts) that a
-# cancer founds inside and grows across, under CINner-style selection. These are the same
-# reasonably-sized glands as the docs landing simulation (configs/landing.yaml), but WITHOUT its
-# metastasis + treatment arc — the tutorials grow this primary, sample it, and assay it. The
-# metastasis/clinical-arc version stays in configs/landing.yaml. Genotype (count) engine.
+# Example primary tumour for the iscc tutorials, at SPATIAL-ASSAY SCALE — a realistic breast
+# DCIS -> IDC sample, grown BIGGER than a Visium capture so every assay samples a SUBSET of one tissue.
+#
+# PHYSICAL SCALE (the anchor for every size below).
+#   * cell        ~12 um.
+#   * DEME        ~50 um across = a PATCH of ~4 cells in-plane, standing for a small 3-D COLUMN of
+#                 tissue. It is NOT one cell. `carrying_capacity` (K) is that column's cell population
+#                 — that is what captures the tissue's 3-D depth (K_duct 60 in a dense duct, K_stroma
+#                 30 in looser stroma). A 2-D histology/Visium section samples a THIN slice of each
+#                 column (~section_frac of K).
+#   * DUCT        `gland_radius` 4 -> 9 demes across = ~450 um: a realistic DCIS-expanded duct that
+#                 spans MULTIPLE demes.
+#   * TISSUE      grid 170 -> 170 x 50 um = ~8.5 mm, i.e. LARGER than a 6.5 mm Visium capture, so the
+#                 slide samples a subset. Total tissue ~10^6 cells (grid^2 x K) — cm-scale, which is
+#                 exactly why the scalability engine below is needed.
+#   * VISIUM v1   100 um spot pitch = 2 demes, 55 um spot ~ 1 deme; a thin section -> ~5 cells/spot.
+#
+# BIOLOGY (single clonal founder; DCIS -> IDC). One cancer founds in ONE duct and grows confined
+# (DCIS, behind a high epithelial_barrier); its descendants spread along the ductal tree (cross_gland
+# dispersal — the ducts are connected in 3-D), filling ~8 duct cross-sections that are all ONE clone.
+# Invasion is BREACH-LIMITED: crossing the epithelial wall (`breach`) is RARE (low prop_breach), but
+# once a clone is out the stroma is PERMISSIVE (low stromal_hazard) and dispersal is fast, so the
+# escaped clone spreads readily into an INVASIVE (IDC) carcinoma. Because the breach clone also reaches
+# the connected ducts via cross_gland, invasion starts multifocally and COALESCES into a confluent
+# invasive region with residual DCIS ducts embedded — a realistic IDC-with-DCIS section (matches the
+# Janesick 10x Visium breast sample: several DCIS ducts + a dominant invasive region). All one clone
+# (see the by-driver Muller). `grow(n_steps=...)` sets how far the invasion has coalesced.
+# See DESIGN_ductal_field.md §3.2.
+#
+# SCALE / COST. ~10^6 cells is affordable because (a) tau-leaping advances a whole clone (K cells) in
+# one Poisson draw, so cost scales with #clones x #demes, NOT #cells; (b) `coarsen_passengers` keeps
+# #genotypes tracking distinct CLONES not cells; (c) `max_cells` bounds the per-cell assay tables to a
+# representative subsample. See DESIGN_scalability.md §8-9.
 mode: genotype
-update_mode: tau      # half-generation steps
+update_mode: tau
 tau: 0.5
-snapshot_every: 1
+snapshot_every: 8
+coarsen_passengers: true
+max_cells: 50000
 
 genome_params:
   n_segments: 12
@@ -16,37 +46,70 @@ selection_params:
   prop_driver: 0.04
   prop_dispersal: 0.0
   prop_immune_resistance: 0.02
-  # a rare, strong duct-escape (breach) subclone against a high epithelial barrier: the ducts pack
-  # full before a subclone breaks into the stroma.
-  prop_breach: 0.012
-  breach_effects: 2.2
-  prop_stromal_survival: 0.03
+  # This is a DCIS->IDC sample with NO metastasis and NO treatment, so the met + chemo-resistance
+  # traits are turned OFF (they belong to configs/landing.yaml). Otherwise the engine's default
+  # non-zero rates seed latent met_survival / treatment_resistance genes that never get selected here
+  # but would mislabel most clones as "metastatic" / "chemo-resistant" in the stage view.
+  prop_met_survival: 0.0
+  prop_treatment_resistance: 0.0
+  # BREACH-GATED invasion (see spatial_params.breach_gated_invasion): crossing the basement membrane
+  # (duct -> stroma) REQUIRES the breach trait. prop_breach must be high enough that breach genes
+  # actually exist — 0.001 x 600 genes ~= 0.6, i.e. often ZERO breach genes and no invasion gate at
+  # all; 0.02 -> ~12 breach genes. Once a clone breaches, the permissive stroma (low stromal_hazard)
+  # lets it invade; stromal_survival is then selected in the stroma.
+  prop_breach: 0.02
+  breach_effects: 2.8
+  prop_stromal_survival: 0.02
   stromal_survival_effects: 2.2
+  # R15 GO-OR-GROW trade-off (compartment-context fitness): each dissemination/niche trait costs
+  # proliferation EVERYWHERE (a `*_cost` fraction of the division rate), while its BENEFIT is gated to
+  # its compartment. So a trait is net-favoured ONLY in its niche (breach at the wall, stromal in the
+  # stroma) and selected against elsewhere — the DCIS stays proliferative and the IDC turns stromal,
+  # instead of one super-clone that hitchhikes every trait into every compartment. Off by default.
+  breach_cost: 0.6
+  stromal_survival_cost: 0.6
+  # Driver-LOAD ceiling (CINner-style): distinct oncogene/TSG drivers PLUS each activated dissemination
+  # trait (breach/stromal/met/resistance) count toward it; a clone past the ceiling is non-viable. Caps
+  # biologically-absurd many-driver clones. Engine default is 1000 (off) to preserve e.g. hypermutation.
+  max_mut_drivers: 12
 
 cell_params:
   cancer:
     division_rate: 0.7
     death_rate: 0.05
     max_birth_rate: 0.95
-    mutation_rate: 0.6
-    dispersal_rate: 0.35
-    cnv_prob: 0.15
-    wgd_rate: 0.05
+    # cm-scale-realistic per-division mutational input: neutral diversity comes from POPULATION SIZE
+    # (~10^6 cells), not per-cell hypermutation, so few SNVs/division and rare CNA/WGD -> bounded
+    # #genotypes. Passenger burden is reconstructed per sampled cell at assay time (realistic TMB).
+    mutation_rate: 0.3
+    n_snvs_per_allele: 0.02
+    dispersal_rate: 0.9
+    cnv_prob: 0.02
+    wgd_rate: 0.0005
 
 deme_params:
-  carrying_capacity: 20
-  initial_cancer_cells: 8
+  # K = the deme column's 3-D cell population (see PHYSICAL SCALE). Duct patches are denser than stroma.
+  carrying_capacity: 30      # default (stroma); K_duct overrides duct demes below
+  initial_cancer_cells: 20   # an established micro-lesion in ONE duct (a fraction of K_duct)
   resident_pressure_ref: 0.2
 
 spatial_params:
-  grid_size: 26
-  structure_radius: 3
-  n_glands: 4
-  gland_radius: 3
-  min_gland_sep: 8
-  K_duct: 40
-  K_stroma: 26
+  grid_size: 170             # ~8.5 mm at ~50 um/deme — larger than a 6.5 mm Visium capture
+  # A field of ~8 DCIS ducts (~the Janesick section count), each ~450 um = 9 demes, in moderate stroma.
+  n_glands: 8
+  structure_radius: 4
+  gland_radius: 4            # 9 demes = ~450 um duct
+  min_gland_sep: 14          # ~700 um between duct centres
+  K_duct: 60                 # dense duct column
+  K_stroma: 30               # looser stroma column
   stroma_fill_frac: 0.3
-  cross_gland_kappa: 0.06
-  epithelial_barrier: 6.0
-  stromal_hazard: 0.7
+  cross_gland_kappa: 0.06    # intraductal (3-D-connected) spread along the tree
+  cross_gland_lambda: 30
+  # BREACH GATE: a duct->stroma dispersal hop (crossing the basement membrane) succeeds only in
+  # proportion to the clone's `breach` trait; a cell that fails stays confined as DCIS. This makes
+  # breach a true GATE on invasion (only breach clones enter the stroma), so the IDC is invasion-stage
+  # rather than whatever dispersed across. It REPLACES the old epithelial_barrier death-hazard (which
+  # only disadvantaged non-breach cells in the duct and leaked), so that is set to 0.
+  breach_gated_invasion: true
+  epithelial_barrier: 0.0
+  stromal_hazard: 0.6        # PERMISSIVE stroma: once a clone breaches, it invades/disperses readily

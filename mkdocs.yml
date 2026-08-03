@@ -7,12 +7,10 @@ repo_name: pedrofale/iscc
 edit_uri: edit/dev/docs/
 docs_dir: docs
 
-# Not published yet (kept in docs/ to finish privately): the Guide pages (parameters/schema)
-# and the Tutorials notebooks.
+# Not published yet (kept in docs/ to finish privately): the Guide pages (parameters/schema).
 exclude_docs: |
   parameters.md
   schema.md
-  tutorials/
 
 theme:
   name: material
@@ -94,12 +92,16 @@ plugins:
             filters: ["!^_"]
             heading_level: 1
 
-# Tutorials stay in docs/ but are not published yet (excluded above). API Reference is
+# Tutorials render from the executed notebooks in docs/tutorials/ (symlinks to notebooks/). API Reference is
 # generated from src/ docstrings via mkdocstrings.
 nav:
   - Home: index.md
   - Overview: overview.md
   - Installation: installation.md
+  - Tutorials:
+      - Pipeline walkthrough: tutorials/01_pipeline_walkthrough.ipynb
+      - Tumor growth: tutorials/02_tumor_growth.ipynb
+      - Data overview: tutorials/03_data_overview.ipynb
   - API Reference:
       - reference/index.md
       - Tumor:
@@ -113,6 +115,7 @@ nav:
           - Surgery: reference/Surgery.md
           - Treatment (base): reference/Treatment.md
       - Sample:
+          - Resection: reference/Resection.md
           - Biopsy: reference/Biopsy.md
           - Dissociation: reference/Dissociation.md
       - Data:
