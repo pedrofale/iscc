@@ -44,6 +44,8 @@ def spatialize(cell_data, section_frac=1.0, jitter=0.5, seed=0):
     """
     rng = np.random.default_rng(seed)
     crd = cell_data["cell_crd"]
+    if crd.shape[0] == 0:                       # empty part -> nothing to place (avoid concatenate([]))
+        return {k: (v.copy() if hasattr(v, "copy") else v) for k, v in cell_data.items()}
     labels = np.asarray(crd.index)
     deme = cell_data["cell_deme"]["deme_id"].reindex(crd.index).to_numpy()
     rc = crd[["row", "col"]].to_numpy(float)
@@ -85,7 +87,7 @@ def tissue_image(coords, grid_side, px=14, darkness=0.85, sigma_frac=0.32, stain
     px : int, default 14
         Pixels per coordinate unit; also the ``tissue_hires_scalef`` to record so that
         ``obsm['spatial']`` maps onto the image.
-    darkness : float, default 0.72
+    darkness : float, default 0.85
         Maximum darkening of the densest tissue (0 = pale everywhere, 1 = full stain at peak).
     sigma_frac : float, default 0.32
         Gaussian smoothing sigma as a fraction of ``px``.

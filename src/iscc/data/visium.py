@@ -125,6 +125,9 @@ class Visium(Assay):
         (see :func:`iscc.sample.spatialize`). The tissue is then centred on the fixed slide and a
         morphology *image* is attached to the output. ``None`` (default) uses ``cell_crd`` as
         given (no placement) — appropriate when the coordinates are already at cell resolution.
+        This thins the same 3-D column as :meth:`iscc.sample.Resection.slice`'s ``depth_frac``, so
+        the two **compose multiplicatively** — keep one at ``1.0`` (the tutorials slice via
+        ``Resection`` and pass ``section_frac=1.0`` here).
     placement : tuple of float, optional
         Where the fixed slide sits on the section, as a ``(row, col)`` in the section's coordinate
         frame that the slide's capture area is centred on. ``None`` (default) centres the section's
@@ -241,6 +244,8 @@ class Visium(Assay):
         from ..sample import spatialize
         placed = spatialize(cell_data, section_frac=self.section_frac, seed=self.seed)
         crd = placed["cell_crd"][["row", "col"]].to_numpy(float)
+        if crd.shape[0] == 0:                                    # empty section -> nothing to place
+            return placed
         target = crd.mean(axis=0) if self.placement is None else np.asarray(self.placement, dtype=float)
         if self.rotation:
             th = np.deg2rad(self.rotation)
@@ -280,12 +285,14 @@ class Visium(Assay):
             placed = self._place_section(cell_data, spot_coords)
             crd = placed["cell_crd"][["row", "col"]].to_numpy(float)
             # a frame covering BOTH tissue and spot grid, shifted non-negative, for a full-section H&E
+            # (np.vstack tolerates an empty section, so an empty part renders a blank slide rather
+            # than crashing on an empty-array reduction)
             off = np.vstack([crd, spot_coords]).min(axis=0)
             crd, spot_coords = crd - off, spot_coords - off
             placed["cell_crd"] = placed["cell_crd"].assign(row=crd[:, 0], col=crd[:, 1])
             from ..sample import tissue_image
-            H = int(np.ceil(max(crd[:, 0].max(), spot_coords[:, 0].max()))) + 1
-            W = int(np.ceil(max(crd[:, 1].max(), spot_coords[:, 1].max()))) + 1
+            hi = np.vstack([crd, spot_coords]).max(axis=0)
+            H, W = int(np.ceil(hi[0])) + 1, int(np.ceil(hi[1])) + 1
             he, scalef = tissue_image(crd, (H, W), px=px)
         else:
             placed = cell_data
@@ -300,35 +307,34 @@ class Visium(Assay):
         }
         return self
 
-    def section_image(self, cell_data, grid_side=None, px=14):
+    def section_image(self, cell_data, grid_side=None, px=6):
         """Render the placed tissue section as an H&E-like image, **without** running the assay.
 
-        Preview the slide's tissue morphology before assaying it. Requires ``section_frac`` to be
-        set (otherwise there is no placement to render). The same placement (seed) is used by
-        :meth:`run`, so this preview matches the ``img=True`` background of the assayed AnnData.
+        Preview the slide's tissue morphology before assaying it. This runs the *same*
+        :meth:`place_grid` step the assay uses (frame, placement, rotation and ``px`` all match), so
+        the returned image is byte-identical to the ``img=True`` background of the AnnData that
+        :meth:`to_anndata` / :meth:`run` produce. It also leaves the grid placed, so a following
+        :meth:`run` (with no argument) reuses this exact placement. Requires ``section_frac`` to be
+        set (otherwise there is no placement to render).
 
         Parameters
         ----------
         cell_data : dict
-            Per-cell tables (uses ``cell_deme`` + ``cell_crd``).
+            The section to image (uses ``cell_deme`` + ``cell_crd``).
         grid_side : int, optional
             Capture-area side; ``None`` (default) uses the fixed v1 slide (4,992 spots).
-        px : int, default 14
-            Pixels per coordinate unit.
+        px : int, default 6
+            Pixels per coordinate unit (must match :meth:`place_grid` to align with the assay).
 
         Returns
         -------
         numpy.ndarray, shape (H, W, 3), float32
             The H&E-like tissue-morphology image (see :func:`iscc.sample.tissue_image`).
         """
-        from ..sample import tissue_image
         if self.section_frac is None:
             raise ValueError("section_image requires section_frac to be set on the Visium assay")
-        spot_coords = self._layout(grid_side)
-        extent = (int(np.ceil(spot_coords[:, 0].max())), int(np.ceil(spot_coords[:, 1].max())))
-        placed = self._place_section(cell_data, spot_coords)
-        img, _ = tissue_image(placed["cell_crd"][["row", "col"]].to_numpy(float), extent, px=px)
-        return img
+        self.place_grid(cell_data, grid_side=grid_side, px=px)
+        return self._grid["he"]
 
     # -- diffusion ---------------------------------------------------------------------
     def _diffuse(self, raw, coords):
