@@ -1,9 +1,11 @@
 """Shared spatial substrate for the iscc *science* showcase notebooks — the **ductal field**.
 
 Every science notebook in ``notebooks/`` imports this helper so they all analyse the **same**
-deterministic, spatially-structured tumour (and the same 5-tumour cohort). Nothing is cached to disk
-— the tumour re-grows in ~15-30 s, which keeps the notebooks self-contained and the ground truth
-exactly reproducible.
+deterministic, spatially-structured tumour (and the same 5-tumour cohort) — now the SAME realistic,
+cm-scale, breach-gated ductal field the tutorials ship (``notebooks/example_config.yaml`` via
+``validation/realistic_regime.py``), not a smaller stand-in. Nothing is cached to disk; the tumour
+re-grows from counts in a couple of minutes at cm-scale and only a ``max_cells`` subsample is ever
+materialised, which keeps the notebooks self-contained and the ground truth exactly reproducible.
 
 The substrate is a **multi-focal DCIS→IDC lesion on a ductal field** (``DESIGN_ductal_field.md`` +
 ``DESIGN_phenotype_plasticity.md`` §2): a FIELD of many small epithelial-ring glands scattered in
@@ -15,10 +17,11 @@ design choices baked in here (see the per-notebook narratives for why they matte
   epithelial + stromal), never a pre-filtered cancer-only matrix. A single founder colonises the
   other glands via low-rate **cross-gland (island) dispersal** (``cross_gland_kappa``), so a section
   shows several *clonally related* foci.
-* **Compartment-dependent selection (DCIS→IDC).** Two sequenceable heritable traits, ``breach`` and
-  ``stromal_survival``, attenuate two live-cell-fraction death hazards (``epithelial_barrier`` at the
-  gland wall, ``stromal_hazard`` in the stroma). A lumen founder is confined (DCIS) until a subclone
-  evolves the escape traits and invades the stroma (IDC).
+* **Compartment-dependent selection (DCIS→IDC), breach-GATED.** Crossing the basement membrane
+  (duct→stroma) REQUIRES the ``breach`` trait (``breach_gated_invasion``): a lumen founder is confined
+  (DCIS) until a subclone evolves ``breach`` and invades the permissive stroma (IDC), where
+  ``stromal_survival`` is then selected. This gate replaces the older leaky ``epithelial_barrier``
+  death-hazard; a go-or-grow cost keeps each trait net-favoured only in its own compartment.
 * **CINner-style selection** (``prop_driver``) drives clonal evolution; **WGD on** (``wgd_rate=0.05``,
   PCAWG-like); **allele-specific expression on** and the **gene-program layer on** (via the vetted
   ``validation/programs_common.expression_params``).
@@ -30,9 +33,10 @@ design choices baked in here (see the per-notebook narratives for why they matte
   seed falls back to ``DEFAULT_LAYOUT_SEED`` and shares the SAME gene roles, program dictionary,
   gland-field layout and epistasis landscape — the comparability guarantee the cohort notebooks recover.
 
-Parameters are scaled up from ``validation/validate_compartment_selection.py`` /
-``validate_ductal_field.py`` so the confined lesion still reaches **≥10 000 cancer cells** with the
-compartment barriers ON (a bigger field + more glands, not weaker barriers).
+The config blocks are the realistic regime (``realistic_regime.py``) with a few science-notebook
+overrides (WGD/CNV bumped for the copy-number demos; the ``EXPR()`` program layer on). The lesion
+grows to a confluent cm-scale IDC-with-DCIS (tens of thousands of cancer cells) with the breach gate
+ON — realistic scale AND structure, matching the shipped tutorials.
 """
 import os
 import sys
@@ -95,10 +99,11 @@ def _n_cancer(t):
     return int(sum(c for g, c in t.genotypes_counts.items() if c > 0 and t._is_cancer(g)))
 
 
-def grow_base_tumor(seed=BASE_SEED, target_cancer=120000, cancer_params=None, expression=None,
-                    selection_params=None, spatial_params=None, max_cells=RR.MAX_CELLS, verbose=False):
-    """Grow one realistic cm-scale ductal-field tumour to >= ``target_cancer`` cancer cells, then
-    materialise a ``max_cells`` representative subsample (a biopsy of the one tissue).
+def grow_base_tumor(seed=BASE_SEED, target_cancer=80000, cancer_params=None, expression=None,
+                    selection_params=None, spatial_params=None, max_cells=RR.MAX_CELLS,
+                    scale="cm", coarsen=RR.COARSEN, verbose=False):
+    """Grow one realistic ductal-field tumour to >= ``target_cancer`` cancer cells, then materialise a
+    ``max_cells`` representative subsample (a biopsy of the one tissue).
 
     Delegates to :func:`realistic_regime.grow_realistic` (the shared, materialisation-efficient grower)
     with the science-notebook overrides layered on: WGD/CNV bumped (``CANCER``) and the default
@@ -122,9 +127,16 @@ def grow_base_tumor(seed=BASE_SEED, target_cancer=120000, cancer_params=None, ex
         Overrides the default ``EXPR()`` expression params.
     max_cells : int, optional
         Cap on the materialised per-cell tables (the cm-scale tumour is far larger — sample it).
+    scale : {"cm", "mid", "small"}, optional
+        Field-size preset (:data:`realistic_regime.SCALES`). ``cm`` (default) is the full grid-170
+        regime the tutorials ship.
+    coarsen : bool, optional
+        Passenger coarsening (default on — required at cm-scale). Turn OFF for lineage-resolved SNVs
+        (``tree_inference_dna`` phylogenetics), which forces a smaller ``scale``/``target_cancer`` since
+        every SNV then spawns a genotype. See :func:`realistic_regime.grow_realistic`.
     """
     return RR.grow_realistic(
-        seed=seed, target_cancer=target_cancer, scale="cm",
+        seed=seed, target_cancer=target_cancer, scale=scale, coarsen=coarsen,
         selection=selection_params,
         cancer={"wgd_rate": 0.05, "cnv_prob": 0.15, **(cancer_params or {})},
         spatial=spatial_params,
@@ -132,7 +144,24 @@ def grow_base_tumor(seed=BASE_SEED, target_cancer=120000, cancer_params=None, ex
         max_cells=max_cells, materialise=True, verbose=verbose)
 
 
-def grow_cohort(seeds=COHORT_SEEDS, target_cancer=120000, **kwargs):
+def new_tumor(seed=BASE_SEED, cancer_params=None, selection_params=None, spatial_params=None,
+              expression=None, max_cells=RR.MAX_CELLS):
+    """An UNGROWN, cm-safe realistic ductal-field tumour — same config as :func:`grow_base_tumor` but
+    NOT grown, for the notebooks that step it themselves to build a DCIS→IDC growth movie.
+
+    Carries ``coarsen_passengers`` + ``max_cells`` so it stays tractable at grid 170 (without them a
+    cm-scale tumour explodes the genotype count and materialises millions of cells). Call ``.grow(...)``
+    yourself; each ``grow`` materialises a ``max_cells`` subsample. ``spatial_params={"breach_gated_
+    invasion": False}`` gives the no-gate DCIS→IDC control (``compartment_selection_confound``)."""
+    cfg = RR.config_for("cm", selection=selection_params,
+                        cancer={"wgd_rate": 0.05, "cnv_prob": 0.15, **(cancer_params or {})},
+                        spatial=spatial_params)
+    return GenotypeTumor(seed=seed, update_mode="tau", tau=RR.TAU, coarsen_passengers=RR.COARSEN,
+                         max_cells=max_cells,
+                         expression_params=(expression if expression is not None else EXPR()), **cfg)
+
+
+def grow_cohort(seeds=COHORT_SEEDS, target_cancer=80000, **kwargs):
     """Generator over ``(seed, tumour)`` — grow one at a time so RAM never holds 5 full tumours.
 
     Each cm-scale tumour is materialised only to a ``max_cells`` subsample, but the cohort notebooks
