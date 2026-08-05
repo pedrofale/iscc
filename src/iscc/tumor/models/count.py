@@ -35,6 +35,25 @@ from ...constants import normal_names, DEFAULT_LAYOUT_SEED, LAYOUT_OFFSET_F8_PRO
 
 CELLTYPES = ["cancer", "epithelial", "stromal", "immune"]
 
+# --- Coalescent passenger overlay (v1, DESIGN_snv_coalescent.md §9 step 1) --------------------------
+# Fraction of a clone's realized folded passenger burden (``_pass_load``) that is treated as
+# CLADE-CLONAL (a "stem" born on the clone's founding edge, inherited by the whole subtree) vs.
+# PRIVATE (per-cell singletons). 0.35 was chosen empirically: high enough that the shared clade
+# signal dominates the per-cell noise (so a passenger-only tree recovers the clone-tree clades),
+# low enough to keep a realistic per-cell singleton tail (the SFS is not collapsed to pure clonal
+# markers). The stem layer is what the old per-cell-independent reconstruction entirely lacked.
+F_STEM_DEFAULT = 0.35
+# Every clone-split that separates sampled cells should be MARKABLE, so each clone on a sampled
+# lineage gets at least this many stem markers even when its folded burden rounds to zero.
+STEM_FLOOR = 2
+# Per-clone cap on stem markers, so the finite neutral-site budget spreads across many splits
+# instead of saturating on one early high-burden clone (the genome-saturation headroom lever of
+# DESIGN_snv_coalescent.md §4.4 / §7.3; raise the genome for deeper trees).
+STEM_CAP = 6
+# Dedicated RNG offset for the passenger reconstruction (added to ``self.seed``) — a fixed constant
+# so the overlay is reproducible and independent of the growth stream.
+PASSENGER_RNG_OFFSET = 909090
+
 
 class GenotypeTumor:
     """Genotype-level (count-based) tumour engine — the default, scalable iscc growth model.
@@ -1558,39 +1577,279 @@ class GenotypeTumor:
         return mod
 
     # --- materialisation: counts -> per-cell matrices ------------------------
+    def _hap_cns(self, gid):
+        """Per-segment ``(cn_p, cn_m)`` allele-specific copy numbers of clone ``gid`` — the number of
+        physical copies on each homolog, read straight off the genome copy lists (their lengths)."""
+        g = self.genotypes[gid]
+        return [(len(g.genome[s]['p']), len(g.genome[s]['m'])) for s in range(self.n_segments)]
+
     def _reconstruct_passengers(self, snv_mat, types):
-        """Re-emit each materialised cancer cell's neutral (passenger) SNVs that coarsening folded
-        away during growth (see ``coarsen_passengers``). A clone's total folded burden
-        ``_pass_load[gid]`` is spread over its ``count`` cells, so each cell draws
-        ``Poisson(load/count)`` passenger sites from the genome's NEUTRAL positions and carries them
-        at VAF ``1/cn`` (a heterozygous SNV on one copy of that segment). This restores a realistic
-        per-cell mutation burden and a neutral VAF tail on top of the exact driver/CNV genome, WITHOUT
-        ever materialising a genotype per passenger during growth — the whole point of coarsening.
-        Modifies ``snv_mat`` in place; a no-op when nothing was folded. Uses a dedicated seeded rng so
-        the reconstruction is reproducible."""
-        if not self.coarsen_passengers or not self._pass_load or not len(self._neutral_gene_ids):
-            return
-        prng = np.random.default_rng(self.seed + 909090)
+        """Overlay a LINEAGE-CONSISTENT, allele-resolved neutral (passenger) SNV layer on the sampled
+        cells, replacing the old per-cell-independent reconstruction (DESIGN_snv_coalescent.md v1,
+        "star-at-founding").
+
+        For each cancer clone ``Y`` on a sampled lineage we place a set of STEM passengers "born on
+        ``Y``'s founding edge" (count ≈ ``F_STEM``·``_pass_load[Y]``, floored so every split is
+        markable, capped so the finite neutral-site budget spreads across splits). A stem SNV picks a
+        neutral position (globally unique so clades stay homoplasy-free in the collapsed view), a
+        homolog ∝ its copy number, and starts at multiplicity 1. Its multiplicity is then propagated
+        down every descendant clone through the exact per-clone allele-specific CN events (WGD ×2;
+        amplification +1 w.p. mult/cn; deletion −1 w.p. mult/cn, lost at 0 — the §4.3 marginal of the
+        engine's per-copy process). A materialised cell of clone ``Z`` therefore carries the stem
+        passengers of ``Z`` AND all its ancestors (each at its propagated multiplicity) plus a private
+        per-cell tail (``Poisson((1−F_STEM)·load/count)`` singletons). Cells in the same clade now
+        SHARE passenger SNVs, so a passenger-only tree recovers the clone-tree clades — which the old
+        independent draw (≈ noise) could not.
+
+        Modifies ``snv_mat`` in place (the collapsed VAF = total variant copies / seg_cn, so existing
+        readers are unchanged in shape/semantics) and RETURNS the allele-resolved ``(snv_p, snv_m)``
+        homolog-VAF frames (the primary truth; ``snv_p + snv_m == snv_mat``), or ``None`` for the
+        byte-identical no-op fallback (coarsening off / nothing folded / no neutral sites / no sampled
+        cancer). Dedicated seeded rng -> reproducible."""
+        if (not self.coarsen_passengers or not self._pass_load or not len(self._neutral_gene_ids)
+                or snv_mat.shape[0] == 0):
+            return None
         neutral = self._neutral_gene_ids
         seg_of = self._gene_segment
-        mus = {}
-        for g in set(types):
-            if g in self._pass_load and self._is_cancer(g):
-                cnt = self.genotypes_counts.get(g, 0)
-                mus[g] = (self._pass_load[g] / cnt) if cnt else 0.0
         n_neutral = len(neutral)
+
+        # ---- materialised cancer clones + their ancestor closure (the sampled clone sub-tree) ------
+        per_clone_cells = Counter(types)
+        mat_cancer = [g for g in per_clone_cells if self._is_cancer(g)]
+        if not mat_cancer:
+            return None
+        parents = self.genotypes_parents
+        closure = set()
+        for g in mat_cancer:
+            cur = g
+            while cur is not None and cur not in closure:
+                closure.add(cur)
+                cur = parents.get(cur)
+        # children within the closure + roots (founder, or any closure node whose parent is outside)
+        children = {g: [] for g in closure}
+        roots = []
+        for g in closure:
+            p = parents.get(g)
+            if p in closure:
+                children[p].append(g)
+            else:
+                roots.append(g)
+        for g in closure:                       # deterministic child order (by birth ordinal)
+            children[g].sort(key=lambda c: self.genotypes[c].ord)
+        roots.sort(key=lambda c: self.genotypes[c].ord)
+
+        hap_cn = {g: self._hap_cns(g) for g in closure}   # gid -> [(cn_p, cn_m), ...] per segment
+        seg_cn = {g: [cp + cm for (cp, cm) in hap_cn[g]] for g in closure}
+
+        # Pre-order (root-first) traversal of the closure, built iteratively so tree DEPTH never hits
+        # the recursion limit (a long linear driver chain can be deep). Reused for subtree sums and
+        # multiplicity descent below.
+        order = []
+        stack = list(reversed(roots))
+        while stack:
+            g = stack.pop()
+            order.append(g)
+            stack.extend(reversed(children[g]))
+
+        # subtree sampled-cell counts (a clone whose subtree is ALL sampled cancer cells marks no
+        # observable split, so it is skipped to save the site budget for informative splits).
+        total_cancer = sum(per_clone_cells[g] for g in mat_cancer)
+        subtree = {g: per_clone_cells.get(g, 0) for g in closure}
+        for g in reversed(order):                 # children precede parents in reverse pre-order
+            p = parents.get(g)
+            if p in subtree:
+                subtree[p] += subtree[g]
+
+        prng = np.random.default_rng(self.seed + PASSENGER_RNG_OFFSET)
+
+        # ---- allocate stem markers to clones, drawing globally-unique neutral positions -----------
+        # Position-level global uniqueness (one stem SNV per neutral position across the whole tree)
+        # keeps the collapsed clades homoplasy-free; homolog is still resolved per SNV. A shuffled
+        # position order + pointer makes the draw O(1) and deterministic. Informative splits are
+        # marked first (by how balanced the split is) so a tight budget covers the big clades.
+        pos_order = prng.permutation(neutral)
+        pos_ptr = 0
+        f_stem = F_STEM_DEFAULT
+        # Total order (final `ord` tiebreaker) so allocation is independent of set-iteration order
+        # (string hashing is per-process randomised) -> reproducible.
+        informative = [g for g in closure if 0 < subtree[g] < total_cancer]
+        informative.sort(key=lambda g: (min(subtree[g], total_cancer - subtree[g]),
+                                        self._pass_load.get(g, 0), self.genotypes[g].ord),
+                         reverse=True)
+        born = {g: [] for g in closure}          # gid -> list of (pos, hom, seg)
+        for g in informative:
+            if pos_ptr >= n_neutral:
+                break
+            load = self._pass_load.get(g, 0)
+            n_stem = min(max(int(round(f_stem * load)), STEM_FLOOR), STEM_CAP)
+            cn_g = hap_cn[g]
+            for _ in range(n_stem):
+                if pos_ptr >= n_neutral:
+                    break
+                pos = int(pos_order[pos_ptr]); pos_ptr += 1
+                s = int(seg_of[pos])
+                cp, cm = cn_g[s]
+                if cp + cm == 0:
+                    continue                     # nullisomic segment: no copy to sit on, skip
+                if cp == 0:
+                    hom = 'm'
+                elif cm == 0:
+                    hom = 'p'
+                else:
+                    hom = 'p' if prng.random() < cp / (cp + cm) else 'm'
+                born[g].append((pos, hom, s))
+
+        # ---- propagate stem multiplicity down the closure (§4.3), record per-clone stem genome ----
+        # A stem SNV is (pos, hom, seg, mult). At each clone we hold the surviving inherited SNVs +
+        # those born there (mult 1); each child edge applies that edge's exact CN event to every
+        # active SNV on the affected (seg, hom). clone_stem[Z] is the shared stem layer of clone Z.
+        clone_stem = {}
+
+        def _edge_event(parent_g, child_g):
+            """The CN event on edge parent->child as ``('wgd',)`` or ``('cn', changes)`` where changes
+            is a list of ``(seg, hom, delta, cn_before)``. Each registered child is ONE mutate() = one
+            event: a CNV changes exactly one (seg, hom) by ±1, a WGD doubles EVERY homolog (so it
+            changes many), an SNV changes none. Reading it off the exact per-homolog copy numbers, more
+            than one changed (seg, hom) therefore uniquely identifies a WGD — no reliance on the
+            monotone ``is_wgd`` flag (which cannot flag a repeat WGD)."""
+            cp, cc = hap_cn[parent_g], hap_cn[child_g]
+            changes = []
+            for s in range(self.n_segments):
+                dp = cc[s][0] - cp[s][0]
+                dm = cc[s][1] - cp[s][1]
+                if dp:
+                    changes.append((s, 'p', dp, cp[s][0]))
+                if dm:
+                    changes.append((s, 'm', dm, cp[s][1]))
+            if len(changes) > 1:
+                return ('wgd',)
+            return ('cn', changes)
+
+        def _apply(active, event):
+            """Return the child's active stem SNVs after applying `event` (mult propagation)."""
+            ev = event[0]
+            out = []
+            if ev == 'wgd':
+                for (pos, hom, s, mult) in active:
+                    out.append((pos, hom, s, mult * 2))
+                return out
+            changes = event[1]
+            for (pos, hom, s, mult) in active:
+                m = mult
+                for (cs, chom, delta, cn_before) in changes:
+                    if cs != s or chom != hom:
+                        continue
+                    step = 1 if delta > 0 else -1
+                    cn = cn_before
+                    for _ in range(abs(delta)):
+                        if cn <= 0:
+                            break
+                        if step > 0:             # amplification: duplicated copy is a mutant w.p. m/cn
+                            if prng.random() < m / cn:
+                                m += 1
+                            cn += 1
+                        else:                    # deletion: removed copy is a mutant w.p. m/cn
+                            if prng.random() < m / cn:
+                                m -= 1
+                            cn -= 1
+                if m > 0:
+                    out.append((pos, hom, s, m))
+            return out
+
+        active_in = {g: [] for g in roots}        # stem SNVs entering each clone from its parent
+        for g in order:                           # pre-order: a parent is processed before its children
+            active = active_in.pop(g, [])
+            for (pos, hom, s) in born[g]:
+                active.append((pos, hom, s, 1))
+            if g in per_clone_cells:
+                clone_stem[g] = active
+            for c in children[g]:
+                active_in[c] = _apply(active, _edge_event(g, c))
+
+        # ---- assemble per-clone overlay vectors, then per-cell rows (base alleles + stem + private) -
+        snv_p = np.zeros_like(snv_mat)
+        snv_m = np.zeros_like(snv_mat)
+        base_p, base_m = {}, {}          # per-clone allele-resolved base (drivers + genome passengers)
+        stem_p, stem_m = {}, {}          # per-clone stem overlay (homolog VAF added on top of base)
+        # per-clone allele fraction CAPS: the most a homolog can contribute at a locus is cn_h/seg_cn
+        # (all its copies mutated). Enforced at the end so a collision (an overlay SNV landing where the
+        # base genome already mutated the same homolog+position) merges to "all copies mutated" instead
+        # of over-counting past the physical copy number -> guarantees snv_p+snv_m == snv_mat and VAF<=1.
+        seg_of_arr = np.asarray(seg_of)
+        capfrac_p, capfrac_m = {}, {}
+        for g in per_clone_cells:
+            rep = self.genotypes[g]
+            vp, vm = rep.get_snvs_alleles()
+            base_p[g], base_m[g] = vp, vm
+            sp = np.zeros_like(vp); sm = np.zeros_like(vm)
+            if g in clone_stem:
+                scn = seg_cn[g]
+                for (pos, hom, s, mult) in clone_stem[g]:
+                    cn = scn[s]
+                    if cn > 0:
+                        (sp if hom == 'p' else sm)[pos] += mult / cn
+            stem_p[g], stem_m[g] = sp, sm
+            hp = hap_cn.get(g) or self._hap_cns(g)   # cancer closure cached; normals computed here
+            cp_seg = np.asarray([cp for (cp, cm) in hp], dtype=float)
+            cm_seg = np.asarray([cm for (cp, cm) in hp], dtype=float)
+            cn_seg = cp_seg + cm_seg
+            denom = np.maximum(cn_seg[seg_of_arr], 1e-9)
+            nz = cn_seg[seg_of_arr] > 0
+            capfrac_p[g] = np.where(nz, cp_seg[seg_of_arr] / denom, 0.0)
+            capfrac_m[g] = np.where(nz, cm_seg[seg_of_arr] / denom, 0.0)
+
         for i, g in enumerate(types):
-            mu = mus.get(g, 0.0)
+            snv_p[i] = base_p[g] + stem_p[g]
+            snv_m[i] = base_m[g] + stem_m[g]
+
+        # private per-cell singletons (Poisson((1-f_stem)*load/count)); NOT inherited, so drawn fresh
+        # per cell on sites unused by that cell (per-cell infinite sites).
+        for i, g in enumerate(types):
+            if g not in per_clone_cells or g not in self._pass_load or not self._is_cancer(g):
+                continue
+            cnt = self.genotypes_counts.get(g, 0)
+            if not cnt:
+                continue
+            mu = (1.0 - f_stem) * self._pass_load[g] / cnt
             if mu <= 0:
                 continue
             k = int(prng.poisson(mu))
             if k <= 0:
                 continue
-            pos = prng.choice(neutral, size=min(k, n_neutral), replace=False)
-            cns = self.genotypes[g].genome_summary["seg_cns"]
-            for p in pos:
-                cn = cns[seg_of[p]]
-                snv_mat[i, p] = (1.0 / cn) if cn > 0 else 0.0
+            used = set(np.flatnonzero(snv_p[i] + snv_m[i]).tolist())
+            pool = neutral if not used else neutral[~np.isin(neutral, list(used))]
+            if not len(pool):
+                continue
+            picks = prng.choice(pool, size=min(k, len(pool)), replace=False)
+            scn = seg_cn.get(g)
+            cn_g = hap_cn.get(g)
+            for pos in picks:
+                pos = int(pos); s = int(seg_of[pos])
+                cn = scn[s]
+                if cn <= 0:
+                    continue
+                cp, cm = cn_g[s]
+                if cp + cm == 0:
+                    continue
+                if cp == 0:
+                    hom_p = False
+                elif cm == 0:
+                    hom_p = True
+                else:
+                    hom_p = prng.random() < cp / (cp + cm)
+                inc = 1.0 / cn
+                if hom_p:
+                    snv_p[i, pos] += inc
+                else:
+                    snv_m[i, pos] += inc
+
+        # Clip each homolog to its physical fraction, then DERIVE the collapsed frame from the alleles
+        # (single source of truth) so snv_p + snv_m == snv_mat exactly and every VAF is in [0, 1].
+        for i, g in enumerate(types):
+            np.minimum(snv_p[i], capfrac_p[g], out=snv_p[i])
+            np.minimum(snv_m[i], capfrac_m[g], out=snv_m[i])
+            snv_mat[i] = snv_p[i] + snv_m[i]
+        return snv_p, snv_m
 
     def _materialize_plan(self, max_cells, region=None, depth_frac=None):
         """Per-deme ``{gid: n_to_materialise}`` for ``make_cell_data``.
@@ -1852,7 +2111,7 @@ class GenotypeTumor:
         # SNV matrix, with coarsened-away passenger SNVs re-emitted per cell (no-op when coarsening is
         # off or nothing was folded). Built once and reused for cell_rna_vaf below.
         snv_mat = np.array(rows_snv) if rows_snv else empty
-        self._reconstruct_passengers(snv_mat, types)
+        snv_alleles = self._reconstruct_passengers(snv_mat, types)
         self.cell_data = dict(
             cell_evo=pd.DataFrame(rows_evo, index=idx),
             cell_snv=pd.DataFrame(snv_mat, index=idx, columns=gene_names),
@@ -1863,6 +2122,14 @@ class GenotypeTumor:
             cell_type=pd.DataFrame(types, index=idx, columns=["cell_id"]),
             cell_deme=pd.DataFrame(demes_col, index=idx, columns=["deme_id"]),
         )
+        # Allele-resolved neutral SNV layer (the PRIMARY truth of the coalescent passenger overlay,
+        # DESIGN_snv_coalescent.md §4.5): per-homolog VAF frames whose sum is exactly `cell_snv`.
+        # Only present when the overlay actually ran (coarsening on + folded burden + neutral sites),
+        # so the base schema is unchanged otherwise — the F8 off-by-default discipline.
+        if snv_alleles is not None:
+            snv_p, snv_m = snv_alleles
+            self.cell_data["cell_snv_p"] = pd.DataFrame(snv_p, index=idx, columns=gene_names)
+            self.cell_data["cell_snv_m"] = pd.DataFrame(snv_m, index=idx, columns=gene_names)
         # cell_rna_vaf (F7b): the EXPECTED allele FRACTION in RNA (not an observed VAF). With m
         # mutant + w wt copies at a locus and per-locus expression effect e (selection.mut_effects:
         # oncogene=2, TSG=0.5, else 1), the fraction of expression from mutant alleles is

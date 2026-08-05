@@ -378,6 +378,28 @@ class Cell(object):
                 vafs[self._seg_offsets[seg]:self._seg_offsets[seg + 1]] = counts / cn
         return vafs
 
+    def get_snvs_alleles(self):
+        """Allele-resolved SNV VAFs: ``(vaf_p, vaf_m)`` whose sum is exactly :meth:`get_snvs`.
+
+        ``vaf_h[gene] = (mutated copies on homolog h) / seg_cn`` — the same VAF definition as
+        :meth:`get_snvs` but split by homolog, so a caller can see WHICH parental allele carries a
+        variant (the B-allele signal). This is the SNV analogue of :meth:`get_exp_alleles` and the
+        base layer the coalescent passenger overlay (``_reconstruct_passengers``) adds to.
+        """
+        vaf_p = np.zeros((self.n_genes,))
+        vaf_m = np.zeros((self.n_genes,))
+        for seg in range(self.n_segments):
+            cn = self.genome_summary['seg_cns'][seg]
+            if cn <= 0:
+                continue
+            lo, hi = self._seg_offsets[seg], self._seg_offsets[seg + 1]
+            cp, cm = self.genome[seg]['p'], self.genome[seg]['m']
+            if cp:
+                vaf_p[lo:hi] = np.sum(cp, axis=0) / cn
+            if cm:
+                vaf_m[lo:hi] = np.sum(cm, axis=0) / cn
+        return vaf_p, vaf_m
+
     def get_cnvs(self):
         cnvs = []
         for seg, seg_cn in enumerate(self.genome_summary['seg_cns']):

@@ -10,11 +10,11 @@ update_mode: tau
 tau: 0.5
 snapshot_every: 1          # per-generation traces for a smooth Muller (capture cadence, not biology)
 coarsen_passengers: true
-max_cells: 50000
+max_cells: 8000
 
 genome_params:
   n_segments: 12
-  segment_size: 50
+  segment_size: 500
 
 selection_params:
   # --- identical to example_config.yaml ---
@@ -52,7 +52,7 @@ cell_params:
     death_rate: 0.05
     max_birth_rate: 0.95
     mutation_rate: 0.3
-    n_snvs_per_allele: 0.02
+    n_snvs_per_allele: 0.1
     dispersal_rate: 0.9
     cnv_prob: 0.02
     wgd_rate: 0.0005

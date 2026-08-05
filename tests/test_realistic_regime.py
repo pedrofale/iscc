@@ -15,10 +15,11 @@ import realistic_regime as R  # noqa: E402
 
 
 def test_canonical_blocks_trace_to_example_config():
-    # The regime IS the tutorial config — grid-170 breach-gated ductal field, 600-gene genome.
+    # The regime IS the tutorial config — grid-170 breach-gated ductal field, 6000-gene genome (enough
+    # neutral sites to resolve a sampled cell's lineage from its passengers; DESIGN_snv_coalescent.md).
     assert R.SPATIAL["grid_size"] == 170
     assert R.SPATIAL["breach_gated_invasion"] is True
-    assert R.GENOME["n_segments"] * R.GENOME["segment_size"] == 600
+    assert R.GENOME["n_segments"] * R.GENOME["segment_size"] == 6000
     assert R.MAX_CELLS and R.COARSEN is True
 
 

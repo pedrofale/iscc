@@ -1,8 +1,18 @@
 # DESIGN — Coalescent SNV overlay: full, lineage-faithful per-cell genomes at cm-scale
 
-Status: proposed (2026-08-05). Supersedes the per-cell-independent passenger reconstruction in
+Status: **v1 LANDED** (2026-08-05). Supersedes the per-cell-independent passenger reconstruction in
 `GenotypeTumor._reconstruct_passengers`. Owner decision: **route 2** — one cm-scale ground truth, full
 genomes for every sampled cell.
+
+**v1 shipped (star-at-founding + allele-resolved + multiplicity through CNAs/WGD):** lineage-consistent
+overlay in `_reconstruct_passengers`, allele frames `cell_snv_p`/`cell_snv_m` (sum ≡ `cell_snv`),
+`Cell.get_snvs_alleles`. Collision bug fixed by clipping each homolog to `cn_h/cn` and DERIVING the
+collapsed frame (invariant exact). **Genome enlarged to the realistic default 6000 sites** (`segment_size`
+50→500; `max_cells` 50000→8000 to hold ~3 GB; `n_snvs_per_allele` 0.02→0.1 for realistic TMB) — this was
+the decisive lever (§4.4). Measured: passenger-only cophenetic **0.905** (vs 0.125 at 600 sites, ~0 for
+the old independent draw), invariant 0.000, per-cell TMB ~40/6000, cm grow to 61k in 93 s / 2.8 GB, full
+suite green. Remaining: **v2** the full within-clone coalescent (§4.1) for a correct SFS; and the
+STEM_FLOOR marker-invention is a v1 completeness shortcut to revisit (§7 note).
 
 ## 1. Why
 

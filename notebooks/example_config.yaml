@@ -36,11 +36,20 @@ update_mode: tau
 tau: 0.5
 snapshot_every: 8
 coarsen_passengers: true
-max_cells: 50000
+# max_cells bounds the materialised biopsy. Lowered to 8000 to hold the per-cell tables at ~3 GB now
+# that the genome is 10x larger (6000 vs 600 genes): memory ~ max_cells x n_genes, so 8000 x 6000 is
+# the same footprint 50000 x 600 was. scDNA/scRNA are small-sample assays anyway; a spatial assay that
+# needs a bigger section overrides max_cells (or samples a region via Resection).
+max_cells: 8000
 
 genome_params:
   n_segments: 12
-  segment_size: 50    # 600 genes total
+  # 6000 genes. The abstract genome must carry enough NEUTRAL sites that a sampled cell's lineage is
+  # resolvable from its passengers (the coalescent SNV overlay, DESIGN_snv_coalescent.md): at 600 sites
+  # the tree saturates (cophenetic ~0.1); at 6000 the passenger layer alone recovers the true lineage
+  # (cophenetic ~0.9) and a cell's full genome is well-resolved. Infinite-sites is PER COPY, so alleles
+  # (p/m) + copies extend this budget further (§4.4). This is the resolution/memory lever (§7.3).
+  segment_size: 500
 
 selection_params:
   prop_driver: 0.04
@@ -79,10 +88,14 @@ cell_params:
     death_rate: 0.05
     max_birth_rate: 0.95
     # cm-scale-realistic per-division mutational input: neutral diversity comes from POPULATION SIZE
-    # (~10^6 cells), not per-cell hypermutation, so few SNVs/division and rare CNA/WGD -> bounded
-    # #genotypes. Passenger burden is reconstructed per sampled cell at assay time (realistic TMB).
+    # (~10^6 cells), not per-cell hypermutation, so few driver-defining events/division and rare
+    # CNA/WGD -> bounded #genotypes. The neutral passenger burden is reconstructed per sampled cell,
+    # lineage-consistently, at assay time (coalescent SNV overlay). `n_snvs_per_allele` sets that
+    # burden; 0.1 gives a realistic per-cell TMB (~40 mutated sites / 6000 genes) and enough shared
+    # passenger sites to resolve the lineage — at the tuned 6000-gene genome this keeps `mutation_rate`
+    # (the driver/clone-defining rate) at 0.3 so the clone count stays bounded.
     mutation_rate: 0.3
-    n_snvs_per_allele: 0.02
+    n_snvs_per_allele: 0.1
     dispersal_rate: 0.9
     cnv_prob: 0.02
     wgd_rate: 0.0005
