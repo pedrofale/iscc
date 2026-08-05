@@ -614,8 +614,6 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   `DESIGN_crowding.md`. (user 2026-07-17)
 - **LATER — `estimate_visium` kappa-on-sparse-data refinement** — fit on expressed genes; minor
   estimator robustness, doesn't affect defaults.
-- **LATER — fill the 5 analysis-stub notebooks** — `dna_mhn`, `visium_niches`, `scrna_batch_effects`,
-  `combining_scdna_scrna`, `real_data_comparison` (currently title-only roadmap stubs).
 - **LATER — RESEARCH_QUESTIONS R1–R11** — 3D (R1), AI histology (R2), metastasis/multi-site (R9),
   focal CNAs/WGD (R10), recommender (R11), etc. Each a substantial new track; promote when committed.
 
