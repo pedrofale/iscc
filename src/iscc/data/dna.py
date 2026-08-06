@@ -24,6 +24,7 @@ are produced separately by ``iscc.data.reads``.
 """
 from .assay import Assay
 from .batch import DNABatch, DNABatchHyperParams, DNA_DEPTH_MODELS
+from ..sample.dissociation.dissociation import biological_type
 
 import os
 import zlib
@@ -132,6 +133,46 @@ def _segment_of(gene):
         except ValueError:
             return -1
     return -1
+
+
+def _germline_mask(germline_sites, genes, genes_all, obs):
+    """Per-observed-locus "this variant is inherited, not somatic" flag.
+
+    Accepts whichever form the caller happens to hold, since the germline ground truth is
+    produced upstream and is not always available at all:
+
+    * ``None`` -> ``None`` (no germline truth; the caller then omits the flag entirely);
+    * a boolean ``pandas.Series`` indexed by locus name (missing loci count as not germline);
+    * a boolean array over every genome locus, or over the observed loci only;
+    * a collection of locus NAMES;
+    * a collection of INTEGER positions into the genome-wide locus list.
+
+    Returns a boolean array aligned to `genes`, where `genes` is `genes_all` taken at
+    positions `obs`.
+    """
+    if germline_sites is None:
+        return None
+    if isinstance(germline_sites, pd.Series):
+        vals = germline_sites.reindex(genes).to_numpy()   # loci absent from the Series -> NaN
+        return np.where(pd.isna(vals), False, vals).astype(bool)
+
+    arr = np.asarray(list(germline_sites))
+    if arr.size == 0:
+        return np.zeros(len(genes), dtype=bool)
+    if arr.dtype == bool:
+        if arr.size == len(genes):
+            return arr.copy()
+        if arr.size == len(genes_all):
+            return arr[np.asarray(obs, dtype=int)]
+        raise ValueError(
+            f"boolean germline_sites has length {arr.size}; expected {len(genes)} "
+            f"(observed loci) or {len(genes_all)} (all loci)"
+        )
+    if np.issubdtype(arr.dtype, np.integer):
+        names = {genes_all[int(i)] for i in arr if 0 <= int(i) < len(genes_all)}
+    else:
+        names = {str(x) for x in arr}
+    return np.array([str(g) in names for g in genes], dtype=bool)
 
 
 class DNA(Assay):
@@ -302,6 +343,12 @@ class bulkDNA(DNA):
     (``kappa=2000`` ≈ un-amplified multinomial/Poisson) and leave the single-cell allele
     knobs inert (``ado_rate=0``, ``doublet_rate=0``).
 
+    After ``run``, ``purity`` holds the pool's TRUE tumour purity (the fraction of pooled
+    cells that are cancer cells, ``None`` when the sample carries no cell types) and
+    ``n_cells_pooled`` its size. Purity is what turns an observed VAF into a cancer-cell
+    fraction, so it is both an input to that calculation and the answer key for any method
+    that estimates purity from the data.
+
     See [`DNA`][iscc.data.DNA] for the constructor parameters.
     """
 
@@ -313,7 +360,23 @@ class bulkDNA(DNA):
         return dict(kappa=2000.0, nb_dispersion=0.1, ado_rate=0.0,
                     beta_binom_conc=200.0, doublet_rate=0.0)
 
-    def run(self, cell_data, cell_subset=None, **kwargs):
+    @staticmethod
+    def _pool_purity(cell_data, cells):
+        """Tumour purity of the pool: the fraction of pooled cells that are cancer cells.
+
+        Returns ``None`` when the sample carries no cell-type table, because purity is then
+        genuinely unknown — reporting 1.0 instead would silently corrupt every cancer-cell
+        fraction computed from it.
+        """
+        ctype = cell_data.get("cell_type")
+        if ctype is None or len(cells) == 0:
+            return None
+        ids = ctype.reindex(cells).iloc[:, 0].dropna()
+        if len(ids) == 0:
+            return None
+        return float((ids.astype(str).map(biological_type) == "cancer").mean())
+
+    def run(self, cell_data, cell_subset=None, germline_sites=None, **kwargs):
         """Assay a pooled bulk-DNA sample from the sampled cells.
 
         Pools the selected cells into a single bulk library and emits, per locus, the
@@ -324,14 +387,23 @@ class bulkDNA(DNA):
         ----------
         cell_data : dict
             Per-cell ground-truth tables from the sampling stage; uses the SNV table
-            ``cell_snv`` and the copy-number ground truth.
+            ``cell_snv`` and the copy-number ground truth. The cell-type table, when
+            present, gives the true tumour purity of the pool.
         cell_subset : array-like of cell IDs, optional
             Restrict the pool to these cells. By default every sampled cell is pooled.
+        germline_sites : optional
+            Which loci carry an INHERITED (germline) variant rather than a somatic one.
+            A boolean mask over all loci or over the assayed loci, a boolean
+            ``pandas.Series`` indexed by locus name, a collection of locus names, or a
+            collection of integer locus positions. Supplied, it adds an ``is_germline``
+            column to ``observed_data``; omitted, no such column is produced. Falls back
+            to ``cell_data["germline_sites"]`` when the sample carries that ground truth.
 
         Returns
         -------
         bulkDNA
-            ``self``, with the per-locus results in ``observed_data``. Call
+            ``self``, with the per-locus results in ``observed_data``, the pool's true
+            tumour purity in ``purity`` and its size in ``n_cells_pooled``. Call
             ``to_anndata`` or ``write`` to export.
         """
         snv = cell_data["cell_snv"]
@@ -362,6 +434,16 @@ class bulkDNA(DNA):
 
         self.batch = batch
         self.n_cells_pooled = len(cells)
+        # The pool's TRUE purity: needed to turn an observed VAF into a cancer-cell fraction
+        # (VAF x copy number / purity), and to grade an estimate of it against the truth.
+        self.purity = self._pool_purity(cell_data, cells)
+        if germline_sites is None:
+            # Fall back to the sample's own germline truth if it carries any, but only in a
+            # shape we can read — never guess at an unrecognised object.
+            fallback = cell_data.get("germline_sites")
+            if isinstance(fallback, (list, tuple, set, frozenset, np.ndarray, pd.Series, pd.Index)):
+                germline_sites = fallback
+        self.germline_mask = _germline_mask(germline_sites, genes, genes_all, obs)
         self.observed_data = pd.DataFrame(
             {
                 "coverage": coverage,
@@ -376,6 +458,8 @@ class bulkDNA(DNA):
             },
             index=pd.Index(genes, name="locus"),
         )
+        if self.germline_mask is not None:
+            self.observed_data["is_germline"] = self.germline_mask
         return self
 
     def to_anndata(self):
@@ -383,10 +467,13 @@ class bulkDNA(DNA):
         import anndata as ad
 
         df = self.observed_data
+        # NaN, not 1.0, when the purity is unknown — a wrong number is worse than a missing one.
+        purity = float("nan") if self.purity is None else float(self.purity)
         adata = ad.AnnData(
             X=df["coverage"].values.astype(np.float32)[None, :],
             obs=pd.DataFrame({"batch": [self.batch.label], "breadth": [self.breadth],
-                              "n_cells_pooled": [self.n_cells_pooled]},
+                              "n_cells_pooled": [self.n_cells_pooled],
+                              "purity": [purity]},
                              index=pd.Index([self.batch.label], name="sample")),
             var=df.drop(columns=["coverage"]).copy(),
         )
@@ -394,6 +481,8 @@ class bulkDNA(DNA):
         adata.layers["vaf"] = df["vaf"].values.astype(np.float32)[None, :]
         adata.uns["assay"] = "bulkDNA"
         adata.uns["breadth"] = self.breadth
+        adata.uns["purity"] = purity
+        adata.uns["n_cells_pooled"] = int(self.n_cells_pooled)
         adata.uns["hyperparams"] = self.hypers.to_dict()
         return adata
 
@@ -583,7 +672,11 @@ class scDNA(DNA):
         adata.layers["true_alt_fraction"] = self.true_alt_fraction.values.astype(np.float32)
         adata.layers["ado"] = self.ado_mask.values.astype(np.float32)
         if {"row", "col"} <= set(self.obs.columns):
-            adata.obsm["spatial"] = self.obs[["row", "col"]].values.astype(float)
+            # 10x/squidpy convention: obsm['spatial'] is (x, y) = (col, row), the same order the
+            # Visium export uses, so a cell-level plot and a spot-level plot of the same tissue come
+            # out the same way up. The raw grid indices stay in obs['row'] / obs['col'].
+            adata.obsm["spatial"] = self.obs[["col", "row"]].values.astype(float)
+            adata.uns["spatial_axes"] = "xy"
         adata.uns["assay"] = "scDNA"
         adata.uns["breadth"] = self.breadth
         adata.uns["hyperparams"] = self.hypers.to_dict()

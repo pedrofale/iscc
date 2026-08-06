@@ -47,7 +47,8 @@ class Subgroup:
     subtype (which is eradicated). See :func:`iscc.cohort.cohort` / the personalized-medicine benchmark.
 
     ``germline_mutations`` (flat gene indices) seed an INHERITED germline variant into EVERY cell of the
-    patient — the founder cancer cell AND the normal (epithelial/stromal/immune) cells — since germline
+    patient — the founder cancer cell AND every normal cell type present (epithelial, stromal, immune,
+    and a metastatic deposit's host parenchyma) — since germline
     variants are present in every cell of an individual, not only the tumour. Appropriate for a
     hereditary subtype-defining background (e.g. a germline predisposition variant), NOT for modelling
     acquired resistance (which must emerge). ``therapy_response`` is a free-form ground-truth label
@@ -274,7 +275,8 @@ class Cohort:
 
 def _apply_germline_mutations(tumor, gene_indices):
     """Seed inherited GERMLINE variants into EVERY cell of the patient BEFORE growth — the founder
-    cancer genotype AND every normal (epithelial/stromal/immune) genotype present — since a germline
+    cancer genotype AND every non-cancer genotype present (epithelial, stromal, immune, and a
+    metastatic deposit's host parenchyma) — since a germline
     variant is carried by every cell of an individual, not just the tumour. This makes ALL of a
     patient's cells (tumour and normal) share the same private germline background, which is exactly
     what genetic demultiplexing (souporcell/vireo) uses to assign cells to individuals.
@@ -303,8 +305,12 @@ def _apply_germline_mutations(tumor, gene_indices):
     founder = tumor.genotypes[tumor.founder_id]
     set_bits(founder, update_summary=True)
     founder.update_evolutionary_parameters(sel)
+    # Every non-cancer representative, tested by exclusion rather than by listing the normal
+    # types — a list silently misses any type added later (it already missed the metastatic
+    # deposit's host parenchyma, leaving those cells without the patient's germline background).
     for gid, rep in tumor.genotypes.items():
-        if gid != tumor.founder_id and getattr(rep, "type", None) in ("epithelial", "stromal", "immune"):
+        cell_type = getattr(rep, "type", None)
+        if gid != tumor.founder_id and cell_type is not None and cell_type != "cancer":
             set_bits(rep, update_summary=False)
     # the founder's rates may have changed -> refresh every deme rate so event sampling stays correct
     tumor.deme_rates = np.array([tumor._deme_rate(i) for i in range(len(tumor.demes))], dtype=float)

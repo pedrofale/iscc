@@ -6,13 +6,15 @@ Internal-validation targets from DESIGN_features §C C1 / §G:
   * VAF recovers the true alt fraction at high depth (bulk);
   * ADO shows as allele loss at heterozygous loci (single-cell);
   * breadth behaves (panel = deep / few loci, WGS = shallow / many);
-  * the NB depth alternative and multi-batch (same biology, different technical) work.
+  * the NB depth alternative and multi-batch (same biology, different technical) work;
+  * the bulk pool reports its true tumour purity, and germline sites are flagged.
 """
 import numpy as np
 import pandas as pd
 import pytest
 
 from iscc.data.dna import bulkDNA, scDNA, run_dna_batches
+from iscc.sample.dissociation.dissociation import biological_type
 
 
 N_SEG, SZ = 4, 25
@@ -37,6 +39,37 @@ def make_cnv_cell_data(n_cells=40, amp_seg=1, amp_cn=8.0, het_loci=(5, 30), seed
         "cell_cnv": pd.DataFrame(cnv, index=cells, columns=GENES),
         "cell_snv": pd.DataFrame(af, index=cells, columns=GENES),
         "cell_type": pd.DataFrame(["cloneA"] * n_cells, index=cells, columns=["cell_id"]),
+    }
+
+
+# Loci used by the purity / germline tests: germline hets sit at VAF 0.5 in EVERY cell
+# (tumour and normal alike), somatic clonal hets at VAF 0.5 in the cancer cells only.
+GERMLINE_LOCI = (2, 40, 60)
+SOMATIC_LOCI = (7, 55)
+
+
+def make_mixed_pool(n_cancer=400, n_normal=600,
+                    normal_types=("immune", "stromal", "epithelial", "host"),
+                    germline_loci=GERMLINE_LOCI, somatic_loci=SOMATIC_LOCI):
+    """A pool of known composition: `n_cancer` cancer cells + `n_normal` normal cells.
+
+    Everything is diploid, so the arithmetic is exact: purity = n_cancer / (n_cancer +
+    n_normal); a germline het reads VAF 0.5 whatever the purity; a clonal somatic het reads
+    VAF 0.5 x purity.
+    """
+    cells = ([f"T{i}" for i in range(n_cancer)] + [f"N{i}" for i in range(n_normal)])
+    types = (["1"] * n_cancer
+             + [normal_types[i % len(normal_types)] for i in range(n_normal)])
+    n = len(cells)
+    af = np.zeros((n, N_GENES))
+    for l in germline_loci:
+        af[:, l] = 0.5
+    for l in somatic_loci:
+        af[:n_cancer, l] = 0.5
+    return {
+        "cell_cnv": pd.DataFrame(np.full((n, N_GENES), 2.0), index=cells, columns=GENES),
+        "cell_snv": pd.DataFrame(af, index=cells, columns=GENES),
+        "cell_type": pd.DataFrame(types, index=cells, columns=["cell_id"]),
     }
 
 
@@ -91,6 +124,146 @@ class TestBulkCoverage:
         od = bulkDNA(breadth="wgs", seed=11, depth_model="nb").run(cd).observed_data
         assert od[od.segment == 1].coverage.mean() > od[od.segment == 0].coverage.mean()
         assert (od.alt_counts <= od.coverage).all()
+
+
+# -------------------------------------------------------- BULK PURITY + GERMLINE ------
+class TestBulkPurity:
+    def test_host_is_not_cancer(self):
+        """Regression: the resident parenchyma of a metastatic deposit is NORMAL tissue.
+
+        It was previously missing from the non-cancer type list, so every host cell was
+        counted as a tumour cell and the purity of any met-bearing sample came out too high.
+        """
+        assert biological_type("host") == "host"
+        for t in ("immune", "stromal", "epithelial"):
+            assert biological_type(t) == t
+        assert biological_type("7") == "cancer"
+
+    def test_purity_of_known_mixture(self):
+        cd = make_mixed_pool(n_cancer=400, n_normal=600)
+        assay = bulkDNA(breadth="wgs", seed=1).run(cd)
+        assert assay.n_cells_pooled == 1000
+        assert assay.purity == pytest.approx(0.4)
+
+    def test_purity_correct_for_a_met_bearing_sample(self):
+        """A pool whose whole normal compartment is host parenchyma (a metastatic deposit).
+
+        Before the fix this reported purity 1.0 — the exact silent failure the flag guards.
+        """
+        cd = make_mixed_pool(n_cancer=400, n_normal=600, normal_types=("host",))
+        assay = bulkDNA(breadth="wgs", seed=1).run(cd)
+        assert assay.purity == pytest.approx(0.4)
+
+    def test_purity_follows_cell_subset(self):
+        cd = make_mixed_pool(n_cancer=400, n_normal=600)
+        subset = [f"T{i}" for i in range(100)] + [f"N{i}" for i in range(300)]
+        assay = bulkDNA(breadth="wgs", seed=1).run(cd, cell_subset=subset)
+        assert assay.n_cells_pooled == 400
+        assert assay.purity == pytest.approx(0.25)
+
+    def test_purity_is_none_when_cell_types_absent(self):
+        """No cell-type table -> purity is unknowable; report nothing rather than 1.0."""
+        cd = make_cnv_cell_data(n_cells=10)
+        cd.pop("cell_type")
+        assay = bulkDNA(breadth="wgs", seed=1).run(cd)
+        assert assay.purity is None
+        assert "is_germline" not in assay.observed_data.columns
+
+    def test_purity_surfaced_in_anndata(self):
+        cd = make_mixed_pool(n_cancer=400, n_normal=600)
+        adata = bulkDNA(breadth="wgs", seed=1).run(cd).to_anndata()
+        assert adata.obs["purity"].iloc[0] == pytest.approx(0.4)
+        assert adata.uns["purity"] == pytest.approx(0.4)
+        assert adata.uns["n_cells_pooled"] == 1000
+
+    def test_anndata_purity_is_nan_when_unknown(self):
+        cd = make_cnv_cell_data(n_cells=10)
+        cd.pop("cell_type")
+        adata = bulkDNA(breadth="wgs", seed=1).run(cd).to_anndata()
+        assert np.isnan(adata.obs["purity"].iloc[0])
+
+
+class TestBulkGermline:
+    LOCI = [GENES[l] for l in GERMLINE_LOCI + SOMATIC_LOCI]
+
+    def _deep_assay(self, cd, germline_sites):
+        return bulkDNA(breadth="panel", seed=13, target_genes=self.LOCI,
+                       mu_depth=4000.0, error_rate=0.0).run(cd, germline_sites=germline_sites)
+
+    def test_germline_het_vaf_anchors_at_half_regardless_of_purity(self):
+        """A germline het is in EVERY cell, so its VAF is 0.5 whatever the purity — the
+        anchor a caller uses to read purity off the data. A clonal somatic het instead
+        reads 0.5 x purity, so it moves with the mixture."""
+        cd = make_mixed_pool(n_cancer=400, n_normal=600)   # purity 0.4
+        assay = self._deep_assay(cd, germline_sites=[GENES[l] for l in GERMLINE_LOCI])
+        od = assay.observed_data
+        assert assay.purity == pytest.approx(0.4)
+
+        germ = od[od.is_germline]
+        som = od[~od.is_germline]
+        assert len(germ) == len(GERMLINE_LOCI) and len(som) == len(SOMATIC_LOCI)
+        # germline hets: truth exactly 0.5, observed tight around it at this depth.
+        assert germ.true_alt_fraction.values == pytest.approx(0.5)
+        assert germ.vaf.mean() == pytest.approx(0.5, abs=0.03)
+        # clonal somatic hets: 0.5 x purity = 0.2, clearly separated from the anchor.
+        assert som.true_alt_fraction.values == pytest.approx(0.2)
+        assert som.vaf.mean() == pytest.approx(0.2, abs=0.03)
+
+    def test_ccf_from_vaf_cn_and_purity_recovers_clonality(self):
+        """CCF = VAF x CN / purity must return ~1 for a clonal somatic mutation — and only
+        the somatic ones, which is why the germline flag has to be there to drop them."""
+        cd = make_mixed_pool(n_cancer=400, n_normal=600)
+        assay = self._deep_assay(cd, germline_sites=[GENES[l] for l in GERMLINE_LOCI])
+        od = assay.observed_data
+        ccf = od.vaf * od.true_cn / assay.purity
+        assert ccf[~od.is_germline].mean() == pytest.approx(1.0, abs=0.1)
+        # germline sites put through the same formula give an impossible CCF > 1.
+        assert (ccf[od.is_germline] > 1.5).all()
+
+    def test_germline_anchor_tracks_a_different_purity(self):
+        cd = make_mixed_pool(n_cancer=750, n_normal=250)   # purity 0.75
+        assay = self._deep_assay(cd, germline_sites=[GENES[l] for l in GERMLINE_LOCI])
+        od = assay.observed_data
+        assert assay.purity == pytest.approx(0.75)
+        assert od[od.is_germline].vaf.mean() == pytest.approx(0.5, abs=0.03)
+        assert od[~od.is_germline].vaf.mean() == pytest.approx(0.375, abs=0.03)
+
+    def test_germline_sites_accepts_every_supported_form(self):
+        cd = make_mixed_pool(n_cancer=400, n_normal=600)
+        names = [GENES[l] for l in GERMLINE_LOCI]
+        by_name = self._deep_assay(cd, names).observed_data.is_germline
+        forms = {
+            "positions": list(GERMLINE_LOCI),
+            "mask_all_loci": np.isin(np.arange(N_GENES), GERMLINE_LOCI),
+            "mask_observed": np.array([g in set(names) for g in self.LOCI]),
+            "series": pd.Series(True, index=names),
+        }
+        for label, sites in forms.items():
+            got = self._deep_assay(cd, sites).observed_data.is_germline
+            assert got.equals(by_name), label
+
+    def test_no_germline_sites_means_no_column(self):
+        cd = make_mixed_pool(n_cancer=400, n_normal=600)
+        od = self._deep_assay(cd, germline_sites=None).observed_data
+        assert "is_germline" not in od.columns
+
+    def test_germline_sites_read_from_cell_data_when_present(self):
+        """Falls back to the sample's own germline ground truth when the caller passes none."""
+        cd = make_mixed_pool(n_cancer=400, n_normal=600)
+        cd["germline_sites"] = list(GERMLINE_LOCI)
+        od = self._deep_assay(cd, germline_sites=None).observed_data
+        assert od.is_germline.tolist() == [True] * len(GERMLINE_LOCI) + [False] * len(SOMATIC_LOCI)
+
+    def test_germline_flag_reaches_anndata_var(self):
+        cd = make_mixed_pool(n_cancer=400, n_normal=600)
+        adata = self._deep_assay(cd, [GENES[l] for l in GERMLINE_LOCI]).to_anndata()
+        assert "is_germline" in adata.var.columns
+        assert adata.var["is_germline"].sum() == len(GERMLINE_LOCI)
+
+    def test_bad_boolean_mask_length_is_rejected(self):
+        cd = make_mixed_pool(n_cancer=10, n_normal=10)
+        with pytest.raises(ValueError):
+            self._deep_assay(cd, np.zeros(3, dtype=bool))
 
 
 # ------------------------------------------------------------------ SINGLE-CELL (F5) --

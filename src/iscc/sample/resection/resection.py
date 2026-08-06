@@ -11,7 +11,44 @@ A specimen is physically divided by two orthogonal cuts before any assay runs:
 The cuts operate on the tumour's per-deme genotype counts and materialise only what each sample needs
 (via :meth:`GenotypeTumor.make_cell_data`), so ``Resection`` stays memory-safe at cm-scale — you never
 materialise the whole tumour just to sample a piece of it.
+
+Taking a sample does not change the tumour: :meth:`dissociate` and :meth:`slice` RETURN their
+per-cell tables and leave ``tumor.cell_data`` exactly as they found it, so cutting a section never
+silently redefines what ``to_anndata(tumor)`` / ``tumor.write_h5ad(...)`` export. Pass
+``install=True`` when you *want* the sample to become the tumour's own table — that is what the
+tumour-level helpers that read ``tumor.cell_data`` (``clones_from_clades``, ``to_anndata(tumor)``)
+then see.
 """
+
+
+class _CellDataGuard:
+    """Context manager that leaves ``tumor.cell_data`` as it found it.
+
+    ``make_cell_data`` both returns the sample AND installs it on the tumour. A sample is not the
+    tumour, so :class:`Resection` runs it inside this guard: the returned tables are unaffected
+    (``make_cell_data`` rebinds ``cell_data`` to a fresh dict rather than mutating the old one), and
+    the tumour keeps whatever it had before the cut.
+    """
+
+    __slots__ = ("tumor", "_had", "_saved")
+
+    def __init__(self, tumor):
+        self.tumor = tumor
+
+    def __enter__(self):
+        self._had = hasattr(self.tumor, "cell_data")
+        self._saved = getattr(self.tumor, "cell_data", None)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._had:
+            self.tumor.cell_data = self._saved
+        else:                                    # nothing was installed before: leave it that way
+            try:
+                del self.tumor.cell_data
+            except AttributeError:
+                pass
+        return False
 
 
 class Resection:
@@ -35,6 +72,11 @@ class Resection:
     >>> cd = spec.dissociate(cut, max_cells=50000)       # sequencing sample (full depth)
     >>> section = spec.slice(remainder, depth_frac=0.5)  # imaging section (thin slice)
     >>> met = Resection(tumor, compartment="met").dissociate()   # the metastasis instead
+
+    Notes
+    -----
+    Both samplers leave ``tumor.cell_data`` untouched — take as many cuts as you like without
+    redefining what the tumour itself exports.
     """
 
     def __init__(self, tumor, compartment="primary"):
@@ -103,7 +145,14 @@ class Resection:
                     (part if key < s else remainder).append(base + r * G + c)
         return part, remainder
 
-    def dissociate(self, region=None, max_cells=None):
+    def _materialise(self, install, **kwargs):
+        """``make_cell_data`` for a sample: return its tables, leave the tumour's own alone."""
+        if install:
+            return self.tumor.make_cell_data(**kwargs)
+        with _CellDataGuard(self.tumor):
+            return self.tumor.make_cell_data(**kwargs)
+
+    def dissociate(self, region=None, max_cells=None, install=False):
         """Dissociate a 2-D part into a per-cell table for the sequencing assays.
 
         Materialises the part at FULL column depth (all ~K cells/deme, subsampled to ``max_cells``);
@@ -116,6 +165,12 @@ class Resection:
             dissociates the whole resected :attr:`compartment` (the primary by default).
         max_cells : int, optional
             Cap on materialised cells (a representative subsample above it).
+        install : bool, default False
+            Also make this sample the tumour's own ``cell_data``. Off by default: a sample is not
+            the tumour, and installing it would silently redefine what ``to_anndata(tumor)`` and
+            ``tumor.write_h5ad(...)`` export. Turn it on when you want the tumour-level helpers
+            that read ``tumor.cell_data`` (``clones_from_clades``, ``to_anndata(tumor)``) to work
+            on exactly these cells.
 
         Returns
         -------
@@ -124,9 +179,9 @@ class Resection:
         """
         if region is None:
             region = self._all_demes()
-        return self.tumor.make_cell_data(region=region, max_cells=max_cells)
+        return self._materialise(install, region=region, max_cells=max_cells)
 
-    def slice(self, region=None, depth_frac=0.5, max_cells=None):
+    def slice(self, region=None, depth_frac=0.5, max_cells=None, install=False):
         """Cut a thin histology / Visium **section**: a depth cut of a 2-D part.
 
         Keeps ``depth_frac`` of each deme's 3-D column (default half — "take away half"), leaving the
@@ -143,6 +198,9 @@ class Resection:
             one of them at ``1.0`` (the tutorials slice here and leave ``section_frac=1.0``).
         max_cells : int, optional
             Cap on materialised cells (bounds the section at cm-scale).
+        install : bool, default False
+            Also make this section the tumour's own ``cell_data`` — see :meth:`dissociate`. Off by
+            default, so taking a section never changes what the tumour itself exports.
 
         Returns
         -------
@@ -151,4 +209,5 @@ class Resection:
         """
         if region is None:
             region = self._all_demes()
-        return self.tumor.make_cell_data(region=region, depth_frac=depth_frac, max_cells=max_cells)
+        return self._materialise(install, region=region, depth_frac=depth_frac,
+                                 max_cells=max_cells)

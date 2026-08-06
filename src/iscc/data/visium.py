@@ -491,6 +491,9 @@ class Visium(Assay):
                 "fiducial_diameter_fullres": diam,
             },
         }}
+        # Same marker every other export writes, so a reader can tell the axis order of
+        # obsm["spatial"] without knowing which assay produced the object.
+        adata.uns["spatial_axes"] = "xy"
         adata.uns["assay"] = "visium"
         adata.uns["protocol"] = self.protocol
         adata.uns["count_model"] = self.count_model

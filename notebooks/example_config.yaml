@@ -97,8 +97,48 @@ cell_params:
     mutation_rate: 0.3
     n_snvs_per_allele: 0.1
     dispersal_rate: 0.9
-    cnv_prob: 0.02
-    wgd_rate: 0.0005
+    # CHROMOSOMAL INSTABILITY. Breast carcinomas are copy-number-driven: a typical tumour has a large
+    # part of its genome at a non-diploid copy number and a sizeable minority of tumours have been
+    # through a whole-genome doubling. `cnv_prob` is the share of mutating divisions that produce a
+    # copy-number change rather than a point mutation, and it is the dial that sets how altered the
+    # genome ends up. Measured on this config at a reduced grid: 0.02 leaves the tumour essentially
+    # flat and diploid (0.5% of the genome altered), 0.15 gives 20%, and 0.35 gives 31% of the genome
+    # altered, an average ploidy of 2.6, a quarter of cells past a whole-genome doubling, and
+    # essentially every cell carrying at least one copy-number change. That last set of numbers is
+    # what a real breast tumour looks like, so 0.35 is the default.
+    cnv_prob: 0.35
+    # Whole-genome doubling rate per mutating division. Small, because a doubling is a rare one-off
+    # event, but not vanishing: at 0.02 roughly a quarter of the cells in the final tumour descend
+    # from a doubled ancestor, which is the proportion seen in real breast tumours. It is also what
+    # puts truncal variants on more than one copy, so a caller that assumes one copy per variant
+    # reports the clonal peak above 1 — exactly as it does on real part-doubled tumours.
+    wgd_rate: 0.02
+
+# The mutations the founder cell already carried the moment it became cancer: the clock-like burden
+# its normal lineage had been accumulating for years, plus the driver hits that transformed it. These
+# are what a tumour's CLONAL peak is made of — they sit in the most recent common ancestor of every
+# tumour cell, so every cell inherits them. Without this block the founder genome is blank, and then
+# nothing can ever be clonal: a growing, spatially structured tumour does not sweep later mutations to
+# fixation, so the site-frequency spectrum comes out with no clonal peak at all. 40 neutral sites puts
+# about half of a sampled cell's mutated sites in the clonal peak at this tumour's size — the realistic
+# share — and a larger share in a small, barely-diversified lesion, which is what such a lesion really
+# looks like. 2 driver hits is the usual count for a transformed breast epithelial cell; they are the
+# only part of this block that changes the founder's fitness, and only oncogenes and tumour
+# suppressors are eligible, so the tumour does not start out already invasive or drug-resistant.
+founder_mutations:
+  n_passenger: 40
+  n_driver: 2
+
+# The patient's own inherited variants — present in EVERY cell, tumour and normal alike, because the
+# patient was born with them. Two analyses need them. A bulk sample is a mixture of tumour and normal
+# cells, and a heterozygous germline site sits at half the reads whatever that mixture is, so it is the
+# anchor a purity estimate leans on; without purity you cannot turn a somatic variant's read fraction
+# into the fraction of cancer cells that carry it. And when several patients are sequenced in one pooled
+# run, their differing germline genotypes are what lets a demultiplexer sort the cells back to donors.
+# Germline sites are drawn from the neutral part of the genome, so they never change how a cell behaves.
+germline_params:
+  het_frac: 0.005
+  hom_frac: 0.33
 
 deme_params:
   # K = the deme column's 3-D cell population (see PHYSICAL SCALE). Duct patches are denser than stroma.

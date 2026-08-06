@@ -30,9 +30,12 @@ dispersion, reported honestly.
 
 Protocol-aware: ``estimate_rna(adata, protocol="10x")`` fits dropout and keeps droplet ambient/
 doublet priors; ``protocol="smartseq3"`` disables dropout, enables the per-cell well term, and
-keeps the plate (low-ambient) priors. Counts-only data cannot identify the ambient soup fraction
-or doublet rate (those need empty droplets / genotype demultiplexing), so those two fields are
-carried from the protocol preset and flagged as *not fit* in ``RNAEstimate.fitted``.
+keeps the plate layout (wells per plate, plates, the shared per-plate depth offset) and the
+low-ambient priors. Counts-only data cannot identify the ambient soup fraction, the doublet rate or
+the plate layout (those need empty droplets / genotype demultiplexing / the wet-lab plate map), so
+those fields are carried from the protocol preset. ``RNAEstimate.fitted`` lists what the data
+actually determined and ``RNAEstimate.carried`` lists what came from the preset, so a report can
+say which is which instead of implying the whole parameter set was measured.
 
 numpy / scipy / sklearn only (no JAX); stateless and config-driven.
 """
@@ -44,8 +47,12 @@ from .batch import RNABatchHyperParams
 from .rna import PROTOCOL_PRESETS, resolve_protocol
 
 # Fields the batch model owns but a counts-only estimate cannot identify (need empty droplets /
-# demultiplexing); carried from the protocol preset, never claimed as "fit".
-_PRIOR_ONLY = ("ambient_frac", "doublet_rate", "kappa")
+# demultiplexing / the wet-lab plate map); carried from the protocol preset, never claimed as
+# "fit". The plate layout belongs here too: a count matrix does not say how many wells a plate had,
+# how many plates the cells were spread over, or how much depth the cells on one plate shared —
+# dropping them silently turned a fitted Smart-seq3 estimate into a plate-less one.
+_PRIOR_ONLY = ("ambient_frac", "doublet_rate", "kappa",
+               "well_sigma", "n_wells", "n_plates", "plate_sigma")
 
 
 @dataclass
@@ -55,6 +62,11 @@ class RNAEstimate:
     ``hypers`` is a ``RNABatchHyperParams`` with the fitted magnitudes; ``scrna_kwargs()`` returns
     the same as a kwargs dict. The per-gene tables (``gene_means`` + the gamma fit) are the
     Splatter mean-expression model, kept for reporting / a future expression generator.
+
+    ``fitted`` and ``carried`` split the hyper-parameters into the ones this count matrix actually
+    determined and the ones taken from the protocol preset because counts alone cannot identify
+    them (ambient soup, doublets, the plate layout, and the cross-batch terms when there is only
+    one batch), so a report can be explicit about which is which.
     """
     hypers: RNABatchHyperParams
     protocol: str
@@ -67,6 +79,7 @@ class RNAEstimate:
     gamma_scale: float
     fitted: list                           # hyper-param names actually fit from this data
     per_batch: dict = field(default_factory=dict)   # label -> {mu_lib, dispersion, n_cells}
+    carried: list = field(default_factory=list)     # names taken from the protocol preset
 
     def scrna_kwargs(self):
         """Kwargs to splat into ``scRNA(...)`` or ``run_scrna_batches(...)``."""
@@ -81,7 +94,8 @@ class RNAEstimate:
                 f"mu_lib={h.mu_lib:.0f}, sigma_lib={h.sigma_lib:.3f}, "
                 f"dispersion={h.dispersion:.3f}, sigma_batch={h.sigma_batch:.3f}, "
                 f"depth_batch_sigma={h.depth_batch_sigma:.3f}, "
-                f"dropout_mid={h.dropout_mid:.2f}, fitted={self.fitted})")
+                f"dropout_mid={h.dropout_mid:.2f}, n_wells={h.n_wells}, "
+                f"fitted={self.fitted}, carried={self.carried})")
 
 
 # --------------------------------------------------------------------------------------
@@ -326,9 +340,9 @@ def estimate_rna(adata, protocol="10x", batch_key=None, count_model="nb", fit_dr
         if phis:
             dispersion = float(np.mean(phis))
 
-    # Smart-seq3 keeps its per-cell well term active (can't identify it from a single matrix).
-    well_sigma = float(preset["well_sigma"])
-
+    # The whole plate layer (well spread, wells per plate, plates, shared per-plate depth) comes
+    # from the protocol preset: a bare count matrix carries no plate map. Smart-seq3 therefore keeps
+    # its 384-well layout instead of silently degrading to a plate-less protocol.
     hypers = RNABatchHyperParams(
         protocol=proto,
         sigma_batch=sigma_batch,
@@ -339,12 +353,21 @@ def estimate_rna(adata, protocol="10x", batch_key=None, count_model="nb", fit_dr
         doublet_rate=float(preset["doublet_rate"]),     # prior
         dropout_mid=dropout_mid,
         dropout_shape=dropout_shape,
-        well_sigma=well_sigma,
+        well_sigma=float(preset["well_sigma"]),         # prior
+        n_wells=int(preset["n_wells"]),                 # prior
+        n_plates=int(preset["n_plates"]),               # prior
+        plate_sigma=float(preset["plate_sigma"]),       # prior
         depth_batch_sigma=depth_batch_sigma,
         kappa=float(preset["kappa"]),
     )
+    # Honest bookkeeping: everything the preset supplied, plus dropout when it was not fitted.
+    carried = list(_PRIOR_ONLY)
+    if "dropout_mid" not in fitted:
+        carried.append("dropout_shape")
+    if "sigma_batch" not in fitted:
+        carried += ["sigma_batch", "depth_batch_sigma"]
     return RNAEstimate(
         hypers=hypers, protocol=proto, n_cells=n_cells, n_genes=n_genes, n_batches=n_batches,
         cv_lib=cv_lib, gene_means=gene_means, gamma_shape=gshape, gamma_scale=gscale,
-        fitted=fitted, per_batch=per_batch,
+        fitted=fitted, per_batch=per_batch, carried=carried,
     )

@@ -54,8 +54,25 @@ cell_params:
     mutation_rate: 0.3
     n_snvs_per_allele: 0.1
     dispersal_rate: 0.9
-    cnv_prob: 0.02
-    wgd_rate: 0.0005
+    # Chromosomal instability, identical to example_config.yaml: 0.35 of mutating divisions produce a
+    # copy-number change rather than a point mutation, which lands the tumour at ~31% of the genome
+    # altered and an average ploidy of 2.6 — the range a real breast carcinoma sits in. A doubling
+    # rate of 0.02 leaves about a quarter of the final cells descended from a doubled ancestor.
+    cnv_prob: 0.35
+    wgd_rate: 0.02
+
+# The mutations the founder already carried when it transformed — identical to example_config.yaml.
+# They are the tumour's clonal layer: present in the common ancestor of every tumour cell, so every
+# cell inherits them, and without them nothing in the tumour can ever be clonal.
+founder_mutations:
+  n_passenger: 40
+  n_driver: 2
+
+# The patient's inherited variants — identical to example_config.yaml. Present in every cell, tumour and
+# normal, and drawn from the neutral genome so they never change how a cell behaves.
+germline_params:
+  het_frac: 0.005
+  hom_frac: 0.33
 
 deme_params:              # identical to example_config.yaml
   carrying_capacity: 30

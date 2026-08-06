@@ -49,7 +49,7 @@ def load_config(path=CONFIG_PATH):
 _CFG = load_config()
 # The canonical parameter blocks — exposed so a benchmark can override JUST what its effect needs
 # (e.g. ``cancer={"wgd_rate": 0.05}`` to turn WGD on) while inheriting the realistic structure/scale.
-GENOME = dict(_CFG["genome_params"])              # 12 × 50 = 600 genes
+GENOME = dict(_CFG["genome_params"])              # 12 × 500 = 6000 genes
 SELECTION = dict(_CFG["selection_params"])         # breach-gated DCIS→IDC, go-or-grow costs
 CANCER = dict(_CFG["cell_params"]["cancer"])
 DEME = dict(_CFG["deme_params"])
@@ -57,6 +57,13 @@ SPATIAL = dict(_CFG["spatial_params"])             # grid 170, 8 ducts, K_duct 6
 TAU = _CFG.get("tau", 0.5)
 MAX_CELLS = _CFG.get("max_cells", 50000)
 COARSEN = bool(_CFG.get("coarsen_passengers", True))
+# The founder's inherited mutation burden (the tumour's clonal/truncal layer) and the patient's germline
+# variants. Both are drawn once, before growth, and are what make a bulk VAF spectrum look real: the
+# truncal layer is the clonal peak, the germline hets are the purity anchor. Carried here so every
+# benchmark and notebook that grows through this module gets them — without forwarding these the tumour
+# has no clonal mutations at all.
+FOUNDER_MUTATIONS = _CFG.get("founder_mutations")
+GERMLINE = _CFG.get("germline_params")
 
 # Scale presets. ``cm`` is the full grid-170 paper/tutorial regime. ``mid`` / ``small`` shrink the
 # FIELD (fewer, closer ducts on a smaller grid) for cheap CI / interactive runs while keeping the
@@ -86,7 +93,8 @@ def config_for(scale="cm", genome=None, selection=None, cancer=None, deme=None, 
 
 def grow_realistic(seed=2, target_cancer=150_000, scale="cm", genome=None, selection=None,
                    cancer=None, deme=None, spatial=None, expression=None, max_cells=MAX_CELLS,
-                   materialise=False, tau=TAU, coarsen=COARSEN, verbose=False):
+                   materialise=False, tau=TAU, coarsen=COARSEN,
+                   founder_mutations=FOUNDER_MUTATIONS, germline=GERMLINE, verbose=False):
     """Grow one realistic breach-gated ductal-field tumour to ``target_cancer`` cancer cells.
 
     Memory-safe by default: ``materialise=False`` leaves ``cell_data`` empty (the tumour is per-clone
@@ -115,13 +123,23 @@ def grow_realistic(seed=2, target_cancer=150_000, scale="cm", genome=None, selec
         program notebooks pass one).
     max_cells : int or None
         Assay-memory cap used when ``materialise=True`` (defaults to the config's 50k).
+    founder_mutations : dict or None
+        The mutations the founder already carried when it transformed — the tumour's clonal (truncal)
+        layer. Defaults to the shipped config's setting; pass ``None`` for a founder with an empty
+        genome, in which case the tumour has NO clonal mutations at all (nothing can be clonal unless
+        it is present in the common ancestor of every cancer cell).
+    germline : dict or None
+        The patient's inherited variants, present in every cell including the normal ones. Defaults to
+        the shipped config's setting. Heterozygous germline sites are the anchor a purity estimate
+        leans on, so a bulk-DNA analysis needs them.
     """
     cfg = config_for(scale, genome, selection, cancer, deme, spatial)
     from iscc.tumor.models import GenotypeTumor
     # Cap at 1 during the growth loop so grow()'s forced make_cell_data stays ~free; the real cap is
     # restored for the single materialisation at the end.
     t = GenotypeTumor(seed=seed, expression_params=expression, update_mode="tau", tau=tau,
-                      coarsen_passengers=coarsen, max_cells=1, **cfg)
+                      coarsen_passengers=coarsen, max_cells=1,
+                      founder_mutations=founder_mutations, germline_params=germline, **cfg)
     # Adaptive stepping: coarse leaps while far from the target, finer near it, so an invasive mass
     # (which grows fast once it breaches) lands close to `target_cancer` without a huge overshoot. Only
     # the last ~10% single-steps — at cm-scale a single grid-170 step over thousands of clones is the

@@ -16,14 +16,16 @@ compositional alternative, the Visium assay's default — see `batch.COUNT_MODEL
 Protocol presets set which technical components dominate:
   * 10x        — droplet / UMI / 3': prominent ambient RNA + doublets, moderate depth.
   * Smart-seq3 — plate / 5' UMI + full-length: higher sensitivity / lower dropout than 10x,
-                 low amplification noise (low dispersion), extra well-in-plate nesting.
+                 low amplification noise (low dispersion), and real plate structure — cells
+                 are index-sorted one per well onto `n_wells`-well plates, and depth is
+                 plate-nested (a per-plate offset x a per-well term).
 
 Two `scRNA` instances with the same hyper-parameters and different seeds are two batches:
 same biology, different technical signature (§B.3). `run_scrna_batches` builds a labelled
 multi-batch benchmark (shared / balanced-split / confounded designs).
 """
 from .assay import Assay
-from .batch import Batch, RNABatchHyperParams, COUNT_MODELS
+from .batch import Batch, RNABatchHyperParams, COUNT_MODELS, assign_plates
 
 import os
 
@@ -33,19 +35,28 @@ import pandas as pd
 
 # Protocol-typical hyper-parameter presets (DESIGN_features §B.2, §D).
 PROTOCOL_PRESETS = {
+    # Droplet protocol: no plates, so n_wells = 0 switches the whole plate layer off.
     "10x": dict(
         sigma_batch=0.10, mu_lib=4000.0, sigma_lib=0.35, dispersion=0.30,
         ambient_frac=0.05, doublet_rate=0.05, dropout_mid=1.5, dropout_shape=1.0,
-        well_sigma=0.0, depth_batch_sigma=0.05, kappa=50.0,
+        well_sigma=0.0, n_wells=0, n_plates=0, plate_sigma=0.0,
+        depth_batch_sigma=0.05, kappa=50.0,
     ),
     # 5' UMIs suppress amplification noise (low dispersion); plate prep -> low ambient /
-    # few doublets, higher sensitivity (deeper) / lower dropout; well-in-plate nesting.
+    # few doublets, higher sensitivity (deeper) / lower dropout. Cells are index-sorted one
+    # per well onto 384-well plates (n_plates=0 -> as many plates as the cells need).
+    # plate_sigma defaults to 0 (plates are bookkeeping only) so the preset reproduces the
+    # depths this protocol produced before plates existed; set it to ~0.1-0.2 to switch on
+    # the shared per-plate depth offset.
     "smartseq3": dict(
         sigma_batch=0.10, mu_lib=8000.0, sigma_lib=0.45, dispersion=0.15,
         ambient_frac=0.005, doublet_rate=0.01, dropout_mid=0.0, dropout_shape=1.0,
-        well_sigma=0.15, depth_batch_sigma=0.05, kappa=50.0,
+        well_sigma=0.15, n_wells=384, n_plates=0, plate_sigma=0.0,
+        depth_batch_sigma=0.05, kappa=50.0,
     ),
 }
+# Hyper-parameters that count things (plates / wells) rather than measuring a magnitude.
+_INT_PARAMS = ("n_wells", "n_plates")
 # Accept common spellings.
 _PROTOCOL_ALIASES = {
     "10x": "10x", "10X": "10x", "tenx": "10x", "droplet": "10x",
@@ -76,7 +87,7 @@ class scRNA(Assay):
         Hyper-parameter preset selecting which technical components dominate: ``"10x"``
         (droplet / UMI / 3': prominent ambient RNA + doublets, moderate depth) or
         ``"smartseq3"`` (plate / 5' UMI + full-length: higher sensitivity, lower dropout and
-        amplification noise, extra well-in-plate nesting). Common spellings are accepted
+        amplification noise, and real plate/well structure). Common spellings are accepted
         (``"10X"``, ``"tenx"``, ``"droplet"``; ``"smart-seq3"``, ``"ss3"``, ``"plate"``).
         Sets the defaults of every hyper-parameter below.
     n_cells : int, default 100
@@ -122,9 +133,25 @@ class scRNA(Assay):
         Logistic dropout steepness (active only when ``dropout_mid > 0``). Default None ->
         preset (1.0).
     well_sigma : float, optional
-        Per-cell "well" / plate-position LogNormal sd — an extra per-cell multiplier nesting a
-        plate-position effect inside the batch (Smart-seq3); 0 disables. Default None ->
+        Per-well library-size LogNormal sd. A plate protocol sorts one cell per well, so this
+        is both the per-well and the per-cell depth term; 0 disables it. Default None ->
         preset (10x: 0.0, smartseq3: 0.15).
+    n_wells : int, optional
+        Wells per plate — 384 for a standard Smart-seq3 plate (96 / 1536 also work; the
+        row-by-column grid follows the standard 2:3 plate shape). 0 means the protocol has no
+        plates, which switches the plate layer off entirely. Default None -> preset
+        (10x: 0, smartseq3: 384).
+    n_plates : int, optional
+        How many plates the assayed cells are spread over; the cells are split as evenly as
+        possible across them. 0 (the preset) means "as many plates as the cells need". Since
+        one cell occupies one well, at most ``n_plates * n_wells`` cells fit: asking for more
+        GROWS the plate count to what is needed and warns. Default None -> preset (0).
+    plate_sigma : float, optional
+        Per-plate library-size LogNormal sd: one offset drawn per plate and shared by every
+        cell on it, so cells prepared on the same plate have correlated depth (plate-nested
+        depth = plate effect x well effect x per-cell library). 0 (the preset) leaves plates
+        as pure bookkeeping — ids in ``obs``, no effect on the counts; ~0.1-0.2 is a
+        realistic plate-to-plate spread. Default None -> preset (0.0).
     depth_batch_sigma : float, optional
         Per-batch depth-shift LogNormal sd, so different seeds (batches) differ in realized
         depth. Default None -> preset (0.05).
@@ -143,7 +170,8 @@ class scRNA(Assay):
                  n_reads=None, lib_size_sigma=None, dispersion=None,
                  sigma_batch=None, mu_lib=None, sigma_lib=None,
                  ambient_frac=None, doublet_rate=None, dropout_mid=None, dropout_shape=None,
-                 well_sigma=None, depth_batch_sigma=None, kappa=None,
+                 well_sigma=None, n_wells=None, n_plates=None, plate_sigma=None,
+                 depth_batch_sigma=None, kappa=None,
                  seed=42):
         super(scRNA, self).__init__(seed=seed, protocol=resolve_protocol(protocol))
         self.n_cells = int(n_cells)
@@ -163,15 +191,23 @@ class scRNA(Assay):
         for name, val in dict(
             sigma_batch=sigma_batch, mu_lib=mu_lib, sigma_lib=sigma_lib, dispersion=dispersion,
             ambient_frac=ambient_frac, doublet_rate=doublet_rate, dropout_mid=dropout_mid,
-            dropout_shape=dropout_shape, well_sigma=well_sigma, depth_batch_sigma=depth_batch_sigma,
+            dropout_shape=dropout_shape, well_sigma=well_sigma, n_wells=n_wells,
+            n_plates=n_plates, plate_sigma=plate_sigma, depth_batch_sigma=depth_batch_sigma,
             kappa=kappa,
         ).items():
             if val is not None:
-                params[name] = float(val)
+                params[name] = int(val) if name in _INT_PARAMS else float(val)
+        for name in _INT_PARAMS:            # presets / estimates may arrive as floats
+            params[name] = int(params.get(name, 0))
+        if params["n_wells"] < 0 or params["n_plates"] < 0:
+            raise ValueError("n_wells and n_plates must be non-negative "
+                             f"(got n_wells={params['n_wells']}, n_plates={params['n_plates']})")
 
         self.hypers = RNABatchHyperParams(**params)
         # convenience mirror for callers that still read `.n_reads`
         self.n_reads = self.hypers.mu_lib
+        # plate/well placement of the assayed cells; set by `run` (None without plates)
+        self.plates = None
 
     # -- selection ---------------------------------------------------------------------
     def _select_cells(self, cell_states, cell_subset):
@@ -187,7 +223,9 @@ class scRNA(Assay):
 
         Draws per-cell UMI counts from each cell's expression state through one
         sequencing batch: per-gene capture factor, library size, negative-binomial
-        overdispersion, ambient soup, dropout, and doublets.
+        overdispersion, ambient soup, dropout, and doublets. On a plate protocol the cells
+        are first placed one per well on the plates, and their depth picks up the offset
+        shared by everything on the same plate.
 
         Parameters
         ----------
@@ -219,8 +257,13 @@ class scRNA(Assay):
         base_profile = activities.sum(axis=0)  # pooled expression -> ambient soup
         self.batch = Batch(self.hypers, seed=self.seed, label=label).realize(genes, base_profile)
 
+        # plate protocols: place the cells one per well before drawing depth, so cells that
+        # share a plate share its depth offset (droplet protocols have n_wells = 0 -> None)
+        self.plates = (assign_plates(self.n_cells, self.hypers.n_wells, self.hypers.n_plates)
+                       if self.hypers.n_wells > 0 else None)
+
         # biology -> library -> batch (shared), then the pluggable count draw
-        lib = self.batch.library_factors(self.n_cells)
+        lib = self.batch.library_factors(self.n_cells, plates=self.plates)
         comp = self.batch.composition(probs)
         counts = self.batch.emit(comp, lib, count_model=self.count_model)
         counts = self.batch.add_ambient(counts, lib)
@@ -237,6 +280,14 @@ class scRNA(Assay):
         obs = pd.DataFrame(index=pd.Index(target_cells, name="cell"))
         obs["batch"] = label
         obs["protocol"] = self.protocol
+        # where the cell physically sat (plate protocols only); plate ids carry the batch
+        # label, so concatenated batches stay distinct physical plates
+        if self.plates is not None:
+            obs["plate"] = self.plates.plate_ids(label)
+            obs["plate_index"] = self.plates.plate
+            obs["well"] = self.plates.well_ids()
+            obs["well_row"] = self.plates.row
+            obs["well_col"] = self.plates.col
         obs["n_counts"] = counts.sum(axis=1)
         obs["n_genes"] = (counts > 0).sum(axis=1)
         obs["is_doublet"] = is_doublet
@@ -261,12 +312,19 @@ class scRNA(Assay):
             var=pd.DataFrame(index=self.observed_counts.columns),
         )
         if {"row", "col"} <= set(self.obs.columns):
-            adata.obsm["spatial"] = self.obs[["row", "col"]].values.astype(float)
+            # 10x/squidpy convention: obsm['spatial'] is (x, y) = (col, row), the same order the
+            # Visium export uses, so a cell-level plot and a spot-level plot of the same tissue come
+            # out the same way up. The raw grid indices stay in obs['row'] / obs['col'].
+            adata.obsm["spatial"] = self.obs[["col", "row"]].values.astype(float)
+            adata.uns["spatial_axes"] = "xy"
         adata.uns["assay"] = "scRNA"
         adata.uns["protocol"] = self.protocol
         adata.uns["count_model"] = self.count_model
         adata.uns["batch_seed"] = self.seed
         adata.uns["hyperparams"] = self.hypers.to_dict()
+        if self.plates is not None:
+            # realized layout (the plate count may have grown to fit the cells)
+            adata.uns["plate_layout"] = self.plates.to_dict()
         return adata
 
     def write(self, out_path, write_h5ad=True):
@@ -291,7 +349,8 @@ def run_scrna_batches(cell_data, n_batches=2, base_seed=42, design="shared",
     calling this once per tumour with a distinct `cell_data` and concatenating the results.)
 
     Returns a list of run `scRNA` instances (one per batch), each with `.observed_counts`,
-    `.obs`, `.batch`, and `.to_anndata()`.
+    `.obs`, `.batch`, and `.to_anndata()`. On a plate protocol each batch is its own plate
+    run: its plate ids carry the batch label, so they stay distinct after `concat_batches`.
     """
     cell_states = cell_data["cell_exp"]
     n_avail = len(cell_states.index)

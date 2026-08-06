@@ -7,9 +7,9 @@ here; those belong to the F3 assay. F2 stays the sample-prep biology:
 
 * **cell-type-dependent dissociation efficiency -> composition bias** (the
   headline piece): each biological type (cancer / immune / stromal /
-  epithelial) has a recovery probability, so the sampled type fractions differ
-  from the true tissue fractions (e.g. immune is typically under-recovered by
-  enzymatic dissociation).
+  epithelial / host parenchyma) has a recovery probability, so the sampled type
+  fractions differ from the true tissue fractions (e.g. immune is typically
+  under-recovered by enzymatic dissociation).
 * **dissociation-stress expression signature** (optional knob): a multiplicative
   shift on a small stress-gene set in ``cell_exp`` for dissociated cells.
 
@@ -19,14 +19,23 @@ stress signature, if enabled, returns a modified copy of ``cell_exp``).
 """
 import numpy as np
 
-NORMAL_TYPES = ("immune", "stromal", "epithelial")
+from ...constants import normal_names
+
+# Every NON-cancer cell type the engine can seed, taken from the engine's own list rather
+# than repeated here — a hand-written copy goes stale the moment a type is added, which is
+# exactly what happened to ``host`` (the resident parenchyma of a metastatic deposit, i.e.
+# normal tissue of the colonised organ). While it was missing, every host cell was counted
+# as a tumour cell, overstating the purity of any sample containing a metastasis.
+NORMAL_TYPES = tuple(normal_names)
 
 # Default per-type recovery probabilities. Immune cells are the hardest to
 # recover from enzymatic tumour dissociation, epithelial the easiest — so the
 # default biases composition AGAINST immune and toward epithelial/cancer.
+# Host parenchyma dissociates like the other resident epithelium.
 DEFAULT_RECOVERY = {
     "cancer": 0.9,
     "epithelial": 0.8,
+    "host": 0.8,
     "stromal": 0.6,
     "immune": 0.4,
 }
@@ -35,8 +44,8 @@ DEFAULT_RECOVERY = {
 def biological_type(genotype_id):
     """Map a genotype id to its biological type.
 
-    Non-cancer ids are the literal types ``immune``/``stromal``/``epithelial``;
-    any other id (a numeric clone id) is ``cancer``.
+    Non-cancer ids are the literal types ``immune``/``stromal``/``epithelial``/
+    ``host``; any other id (a numeric clone id) is ``cancer``.
     """
     s = str(genotype_id)
     return s if s in NORMAL_TYPES else "cancer"

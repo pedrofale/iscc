@@ -18,8 +18,9 @@ Two knobs the caller sets (per the design):
   * **data distribution** — `mu_counts` (per-cell total molecules over the panel), `dispersion`,
     `dropout_mid`, `ambient_frac`, ... (imaging presets: low depth, near-zero dropout, no droplets).
 
-Output is AnnData: `X` = cells x panel-genes counts, `obsm["spatial"]` = per-cell (row, col),
-`.obs` = per-cell ground truth (clone / type / coords) + QC, `.uns` = hyperparams.
+Output is AnnData: `X` = cells x panel-genes counts, `obsm["spatial"]` = per-cell (x, y) in the
+10x/squidpy order, `.obs` = per-cell ground truth (clone / type / raw row+col) + QC, `.uns` =
+hyperparams.
 """
 from .assay import Assay
 from .batch import Batch, RNABatchHyperParams, COUNT_MODELS
@@ -170,7 +171,11 @@ class scSpatial(Assay):
             var=pd.DataFrame(index=self.observed_counts.columns),
         )
         if {"row", "col"} <= set(self.obs.columns):
-            adata.obsm["spatial"] = self.obs[["row", "col"]].values.astype(float)
+            # 10x/squidpy convention: obsm['spatial'] is (x, y) = (col, row), the same order the
+            # Visium export uses, so an imaging section and a Visium slide cut from the same tissue
+            # plot in the same orientation. The raw grid indices stay in obs['row'] / obs['col'].
+            adata.obsm["spatial"] = self.obs[["col", "row"]].values.astype(float)
+            adata.uns["spatial_axes"] = "xy"
         adata.uns["assay"] = "scspatial"
         adata.uns["platform"] = self.protocol
         adata.uns["count_model"] = self.count_model

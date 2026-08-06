@@ -30,6 +30,12 @@ class Selection(object):
         self.segment_sizes = [int(s) for s in segment_sizes]
         self._seg_offsets = np.concatenate([[0], np.cumsum(self.segment_sizes)]).astype(int)
         self.n_genes = int(self._seg_offsets[-1])
+        # Per-gene germline (inherited) variant mask: 0 = none, 1 = heterozygous, 2 = homozygous.
+        # All zeros unless a patient's germline is seeded (iscc.tumor.germline.apply_germline writes
+        # it), and surfaced by get_gene_data only when non-empty, so the default annotation is
+        # unchanged. It lives here because the germline is a property of the GENOME, alongside which
+        # genes are drivers.
+        self.germline_types = np.zeros(self.n_genes, dtype=int)
         self.prop_driver = prop_driver
         self.prop_dispersal = prop_dispersal
         self.prop_treatment_resistance = prop_treatment_resistance
@@ -431,10 +437,17 @@ class Selection(object):
         breach_types = np.concatenate(self.breach_types)
         stromal_survival_types = np.concatenate(self.stromal_survival_types)
         met_survival_types = np.concatenate(self.met_survival_types)
-        return dict(driver_types=pd.DataFrame(driver_types, index=gene_names),
-                    dispersal_types=pd.DataFrame(dispersal_types, index=gene_names),
-                    treatment_resistance_types=pd.DataFrame(treatment_resistance_types, index=gene_names),
-                    immune_resistance_types=pd.DataFrame(immune_resistance_types, index=gene_names),
-                    breach_types=pd.DataFrame(breach_types, index=gene_names),
-                    stromal_survival_types=pd.DataFrame(stromal_survival_types, index=gene_names),
-                    met_survival_types=pd.DataFrame(met_survival_types, index=gene_names))
+        gene_data = dict(driver_types=pd.DataFrame(driver_types, index=gene_names),
+                         dispersal_types=pd.DataFrame(dispersal_types, index=gene_names),
+                         treatment_resistance_types=pd.DataFrame(treatment_resistance_types, index=gene_names),
+                         immune_resistance_types=pd.DataFrame(immune_resistance_types, index=gene_names),
+                         breach_types=pd.DataFrame(breach_types, index=gene_names),
+                         stromal_survival_types=pd.DataFrame(stromal_survival_types, index=gene_names),
+                         met_survival_types=pd.DataFrame(met_survival_types, index=gene_names))
+        # Germline mask (0 none / 1 heterozygous / 2 homozygous), added ONLY when this patient
+        # actually carries germline variants — so the annotation a plain tumour writes out, and the
+        # keys a reader gets back, are exactly what they were before germline existed.
+        germline_types = getattr(self, "germline_types", None)
+        if germline_types is not None and np.any(germline_types):
+            gene_data["germline_types"] = pd.DataFrame(np.asarray(germline_types), index=gene_names)
+        return gene_data

@@ -29,6 +29,7 @@ import yaml
 from ..components.selection import Selection
 from ..components.epistasis import bits_to_events
 from ..components.cell import CancerCell, EpithelialCell, StromalCell, ImmuneCell, HostCell
+from ..germline import draw_germline_sites, apply_germline, seed_founder_mutations
 from .glandular import bresenham_circumference, get_inside
 from ..programs import ProgramModel
 from ...constants import normal_names, DEFAULT_LAYOUT_SEED, LAYOUT_OFFSET_F8_PROGRAMS, LAYOUT_OFFSET_MET
@@ -130,6 +131,17 @@ class GenotypeTumor:
         GENOME-LAYOUT seed (config-determined, shared across runs of the same config):
         fixes driver identities and baseline expression so a cohort is comparable by
         construction. Defaults to the fixed ``DEFAULT_LAYOUT_SEED``.
+    germline_params : dict, optional
+        Inherited (germline) variants — ``het_frac``, ``hom_frac`` and an optional ``seed``.
+        Off by default; when given, neutral loci are seeded into every cell of the patient
+        (tumour and normal alike) before growth, giving a DNA assay the constant background
+        it reads purity and allelic imbalance against.
+    founder_mutations : dict, optional
+        The mutations the founder cell already carried when it transformed — ``n_passenger``
+        (the clock-like burden the normal lineage accumulated first), ``n_driver`` (the
+        transforming hits) and an optional ``seed``. Off by default; when given, they are
+        written into the founder genome before growth, so every cancer cell inherits them and
+        the tumour has the clonal peak real sequencing shows.
     """
 
     def __init__(self, config=None, seed=42, genome_params=None, selection_params=None,
@@ -139,7 +151,7 @@ class GenotypeTumor:
                  genome_mode="abstract", genome_spec=None,
                  update_mode="exact", tau=1.0, snapshot_every=1, microenv_params=None,
                  layout_seed=None, expression_params=None, coarsen_passengers=False,
-                 max_cells=None):
+                 max_cells=None, germline_params=None, founder_mutations=None):
         self.seed = seed
         # EVOLUTION rng (per-run: spatial seeding; grow() draws its own fresh default_rng(seed+step)).
         self.rng = np.random.default_rng(seed)
@@ -193,6 +205,24 @@ class GenotypeTumor:
         # every existing small-tumour run/test is byte-identical. The re-scaled example_config sets it.
         self.max_cells = max_cells
 
+        # Germline (inherited) variants: the patient's constant genetic background, carried by every
+        # cell — tumour and normal alike — and so the purity / cancer-cell-fraction anchor a DNA
+        # analysis calibrates against. A dict of the ``draw_germline_sites`` knobs, e.g.
+        # ``{"het_frac": 5e-3, "hom_frac": 0.33, "seed": 7}``; ``seed`` defaults to this run's seed,
+        # since a germline background is private to one individual. ``None`` (the default) means no
+        # germline layer at all. The variants are drawn from a dedicated rng and written into the
+        # founder genomes before any growth rng is touched, so a tumour is byte-identical with the
+        # layer on or off at a given seed.
+        self.germline_params = germline_params
+
+        # Founder (truncal) mutations: what the transformed cell already carried at t=0 — the
+        # clock-like burden of its normal lineage plus the driver hits that transformed it. A dict of
+        # the ``seed_founder_mutations`` knobs, e.g. ``{"n_passenger": 60, "n_driver": 2, "seed": 7}``;
+        # ``seed`` defaults to this run's seed. ``None`` (the default) leaves the founder genome blank,
+        # which means NOTHING in the tumour can ever be clonal — the most recent common ancestor of
+        # every cancer cell is the founder, so an empty founder genome is an empty clonal layer.
+        self.founder_mutations = founder_mutations
+
         # Real-genome mode (DESIGN_inference A.5): the genome is wired from a GenomeSpec built
         # from human chromosome-arm data (arm lengths -> segment_sizes, per-arm oncogene/TSG
         # content) and selection uses the per-arm copy-number model (selection_mode="arm",
@@ -224,6 +254,8 @@ class GenotypeTumor:
             self.snapshot_every = cfg.get("snapshot_every", snapshot_every)
             self.coarsen_passengers = bool(cfg.get("coarsen_passengers", coarsen_passengers))
             self.max_cells = cfg.get("max_cells", max_cells)
+            self.germline_params = cfg.get("germline_params", germline_params)
+            self.founder_mutations = cfg.get("founder_mutations", founder_mutations)
             microenv_params = cfg.get("microenv_params", microenv_params)
             expression_params = cfg.get("expression_params", expression_params)
             if cfg.get("layout_seed") is not None:
@@ -534,6 +566,32 @@ class GenotypeTumor:
         # the O(#genotypes-in-deme) composition scan — the same optimisation as _has_immune.
         self._has_epithelial = "epithelial" in self.genotypes
         self._has_stromal = "stromal" in self.genotypes
+
+        # Germline layer. Applied HERE — after every normal genotype has been registered, so the
+        # inherited variants reach the whole tissue and not just the tumour, and before the per-deme
+        # event rates below, so nothing has to be recomputed. It draws from its own seeded rng and
+        # never touches the growth stream, so `germline_params=None` leaves this an early return and
+        # the run byte-identical to one built before the layer existed.
+        self.germline_sites = np.array([], dtype=int)
+        self.germline_zygosity = np.array([], dtype="<U4")
+        self.germline_homolog = np.array([], dtype="<U4")
+        if self.germline_params:
+            gp = dict(self.germline_params)
+            gp.setdefault("seed", self.seed)
+            apply_germline(self, *draw_germline_sites(self.selection, **gp))
+
+        # Founder (truncal) mutations. Applied to the founder genotype AFTER it is registered and the
+        # germline is in place (so the two layers can be kept off each other's positions) and BEFORE
+        # any growth, which is what makes them clonal by descent rather than by reconstruction. Like
+        # the germline it uses its own seeded rng, so `founder_mutations=None` is an early return and
+        # the run is byte-identical to one built before the layer existed.
+        self.truncal_sites = np.array([], dtype=int)
+        self.truncal_homolog = np.array([], dtype="<U4")
+        self.truncal_is_driver = np.array([], dtype=bool)
+        if self.founder_mutations:
+            fm = dict(self.founder_mutations)
+            fm.setdefault("seed", self.seed)
+            seed_founder_mutations(self, **fm)
 
         self.deme_rates = np.array([self._deme_rate(i) for i in range(len(self.demes))], dtype=float)
         self.traces = []
@@ -1588,9 +1646,13 @@ class GenotypeTumor:
         cells, replacing the old per-cell-independent reconstruction (DESIGN_snv_coalescent.md v1,
         "star-at-founding").
 
-        For each cancer clone ``Y`` on a sampled lineage we place a set of STEM passengers "born on
-        ``Y``'s founding edge" (count ≈ ``F_STEM``·``_pass_load[Y]``, floored so every split is
-        markable, capped so the finite neutral-site budget spreads across splits). A stem SNV picks a
+        For each cancer clone ``Y`` whose subtree is a PROPER subset of the sample (a split between
+        sampled cells) we place a set of STEM passengers "born on ``Y``'s founding edge"
+        (count ≈ ``F_STEM``·``_pass_load[Y]``, floored so every split is markable, capped so the
+        finite neutral-site budget spreads across splits). This layer is deliberately SUBCLONAL only:
+        the clonal (truncal) burden of a tumour is carried by the founder genome itself (see
+        ``founder_mutations``), so that it is present whether or not passengers are coarsened. A
+        marker picks a
         neutral position (globally unique so clades stay homoplasy-free in the collapsed view), a
         homolog ∝ its copy number, and starts at multiplicity 1. Its multiplicity is then propagated
         down every descendant clone through the exact per-clone allele-specific CN events (WGD ×2;
@@ -1610,8 +1672,18 @@ class GenotypeTumor:
                 or snv_mat.shape[0] == 0):
             return None
         neutral = self._neutral_gene_ids
+        # Keep the somatic overlay off the loci that are already spoken for: the patient's inherited
+        # (germline) variants, and the mutations the founder cell carried when it transformed (which
+        # are in every cancer cell and form the clonal peak). A reconstructed passenger never shares a
+        # position with either, so a caller can tell the layers apart. Neither present -> the pool is
+        # untouched -> byte-identical to a run without them.
+        for taken in (getattr(self, "germline_sites", None), getattr(self, "truncal_sites", None)):
+            if taken is not None and len(taken):
+                neutral = neutral[~np.isin(neutral, taken)]
         seg_of = self._gene_segment
         n_neutral = len(neutral)
+        if not n_neutral:
+            return None
 
         # ---- materialised cancer clones + their ancestor closure (the sampled clone sub-tree) ------
         per_clone_cells = Counter(types)
@@ -1670,22 +1742,16 @@ class GenotypeTumor:
         pos_order = prng.permutation(neutral)
         pos_ptr = 0
         f_stem = F_STEM_DEFAULT
-        # Total order (final `ord` tiebreaker) so allocation is independent of set-iteration order
-        # (string hashing is per-process randomised) -> reproducible.
-        informative = [g for g in closure if 0 < subtree[g] < total_cancer]
-        informative.sort(key=lambda g: (min(subtree[g], total_cancer - subtree[g]),
-                                        self._pass_load.get(g, 0), self.genotypes[g].ord),
-                         reverse=True)
         born = {g: [] for g in closure}          # gid -> list of (pos, hom, seg)
-        for g in informative:
-            if pos_ptr >= n_neutral:
-                break
-            load = self._pass_load.get(g, 0)
-            n_stem = min(max(int(round(f_stem * load)), STEM_FLOOR), STEM_CAP)
+
+        def _mark(g, n_markers, limit):
+            """Place ``n_markers`` markers born on clone ``g``: an unused neutral position each (taken
+            from the shuffled order, stopping at ``limit``), on a homolog drawn ∝ its copy number."""
+            nonlocal pos_ptr
             cn_g = hap_cn[g]
-            for _ in range(n_stem):
-                if pos_ptr >= n_neutral:
-                    break
+            for _ in range(int(n_markers)):
+                if pos_ptr >= limit:
+                    return
                 pos = int(pos_order[pos_ptr]); pos_ptr += 1
                 s = int(seg_of[pos])
                 cp, cm = cn_g[s]
@@ -1698,6 +1764,23 @@ class GenotypeTumor:
                 else:
                     hom = 'p' if prng.random() < cp / (cp + cm) else 'm'
                 born[g].append((pos, hom, s))
+
+        # ---- stems: one budget per clone-split that separates sampled cells ------------------------
+        # A clone whose subtree is EVERY sampled cancer cell marks no observable split, so it is
+        # skipped and its sites stay available for the splits that do carry information. The clonal
+        # layer of a real tumour is not built here at all — it is inherited from the founder genome
+        # (``founder_mutations``), which is why it survives with coarsening switched off.
+        # Total order (final `ord` tiebreaker) so allocation is independent of set-iteration order
+        # (string hashing is per-process randomised) -> reproducible.
+        informative = [g for g in closure if 0 < subtree[g] < total_cancer]
+        informative.sort(key=lambda g: (min(subtree[g], total_cancer - subtree[g]),
+                                        self._pass_load.get(g, 0), self.genotypes[g].ord),
+                         reverse=True)
+        for g in informative:
+            if pos_ptr >= n_neutral:
+                break
+            load = self._pass_load.get(g, 0)
+            _mark(g, min(max(int(round(f_stem * load)), STEM_FLOOR), STEM_CAP), n_neutral)
 
         # ---- propagate stem multiplicity down the closure (§4.3), record per-clone stem genome ----
         # A stem SNV is (pos, hom, seg, mult). At each clone we hold the surviving inherited SNVs +
@@ -2725,3 +2808,17 @@ class GenotypeTumor:
         Path(os.path.join(output_path, "cell_data")).mkdir(parents=True, exist_ok=True)
         for mat in self.cell_data:
             self.cell_data[mat].to_csv(os.path.join(output_path, "cell_data", f"{mat}.csv"))
+
+    def write_h5ad(self, path, compression="gzip", **kwargs):
+        """Write the whole tumour — cells, genes, clones and parameters — to one ``.h5ad`` file.
+
+        The standard single-cell container instead of a directory of CSVs: expression in ``X``, the
+        other per-cell matrices in layers, per-cell annotation in ``obs``, tissue coordinates in
+        ``obsm``, gene roles in ``var``, and the clone tree / programs / run parameters in ``uns``.
+        Reads back anywhere ``anndata`` is installed (``anndata.read_h5ad``). Extra keywords go to
+        :func:`iscc.integrations.to_anndata` (e.g. ``spatial="rowcol"``).
+        """
+        from ...integrations.anndata import to_anndata
+        adata = to_anndata(self, **kwargs)
+        adata.write_h5ad(str(path), compression=compression)
+        return path
