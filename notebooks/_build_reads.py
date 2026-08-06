@@ -1,4 +1,4 @@
-"""Builder for notebooks/reads.ipynb (F7 read-emission demo, DESIGN_features §C C2/C3).
+"""Builder for notebooks/reads.ipynb — the read-emission demo.
 
 Run with the iscc env to (re)generate the notebook, then execute it with nbconvert. Shows the
 synthetic-reference -> per-cell FASTA -> DWGSIM path end-to-end, guarded so it no-ops without
@@ -13,10 +13,10 @@ md = lambda s: cells.append(nbf.v4.new_markdown_cell(s))
 code = lambda s: cells.append(nbf.v4.new_code_cell(s))
 
 
-md(r"""# DNA read emission: count/coverage matrix -> FASTQ / BAM (F7 demo)
+md(r"""# DNA read emission: count/coverage matrix -> FASTQ / BAM
 
 Read-level realism for DNA (`src/iscc/data/reads/`, DESIGN_features **§C C2/C3**, milestone
-**F7**), **SISTEM-faithful** (Weiner & Bansal 2025): per-cell full reference -> copy-number
+**SISTEM-faithful** (Weiner & Bansal 2025): per-cell full reference -> copy-number
 coverage distribution -> third-party short-read simulator -> BAM.
 
 ```
@@ -117,7 +117,7 @@ for the BAM. The `variants.inject` seam is modality-generic and reused unchanged
 
 md(r"""## 5. Mutation-aware scRNA reads — and why variant calling from scRNA is hard (F7b)
 
-The **same** variant seam drives scRNA: `emit_scrna_reads` conserves the F3 UMI totals and, at a
+The **same** variant seam drives scRNA: `emit_scrna_reads` conserves the assay's UMI totals and, at a
 mutated locus, splits UMIs into alt/ref at the observed RNA-VAF (`cell_rna_vaf × obs_fidelity`).
 Because a variant is only seen where its gene is **expressed** and captured, and is further
 under-detected by the single `obs_fidelity` knob (monoallelic expression / bursting / RT error),

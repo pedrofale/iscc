@@ -44,7 +44,7 @@ def sample_cells(tumor_dir, sample_dir, biopsy_type="punch", seed=0):
     keys = ["cell_evo", "cell_exp", "cell_snv", "cell_cnv", "cell_crd", "cell_type", "cell_deme"]
     src = os.path.join(tumor_dir, "cell_data")
     data = {k: pd.read_csv(os.path.join(src, f"{k}.csv"), index_col=0) for k in keys}
-    # F1 spatial biopsy over the cell_crd grid (a punch = disk), not a random subset.
+    # spatial biopsy over the cell_crd grid (a punch = disk), not a random subset.
     bx = Biopsy(data, rng=np.random.default_rng(seed))
     chosen, region, geom = bx.sample(biopsy_type=biopsy_type)
     out = os.path.join(sample_dir, "cell_data")

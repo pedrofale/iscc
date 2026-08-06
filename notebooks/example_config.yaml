@@ -25,12 +25,11 @@
 # invasive region with residual DCIS ducts embedded — a realistic IDC-with-DCIS section (matches the
 # Janesick 10x Visium breast sample: several DCIS ducts + a dominant invasive region). All one clone
 # (see the by-driver Muller). `grow(n_steps=...)` sets how far the invasion has coalesced.
-# See DESIGN_ductal_field.md §3.2.
 #
 # SCALE / COST. ~10^6 cells is affordable because (a) tau-leaping advances a whole clone (K cells) in
 # one Poisson draw, so cost scales with #clones x #demes, NOT #cells; (b) `coarsen_passengers` keeps
 # #genotypes tracking distinct CLONES not cells; (c) `max_cells` bounds the per-cell assay tables to a
-# representative subsample. See DESIGN_scalability.md §8-9.
+# representative subsample.
 mode: genotype
 update_mode: tau
 tau: 0.5
@@ -45,10 +44,10 @@ max_cells: 8000
 genome_params:
   n_segments: 12
   # 6000 genes. The abstract genome must carry enough NEUTRAL sites that a sampled cell's lineage is
-  # resolvable from its passengers (the coalescent SNV overlay, DESIGN_snv_coalescent.md): at 600 sites
+  # resolvable from its passengers: at 600 sites
   # the tree saturates (cophenetic ~0.1); at 6000 the passenger layer alone recovers the true lineage
   # (cophenetic ~0.9) and a cell's full genome is well-resolved. Infinite-sites is PER COPY, so alleles
-  # (p/m) + copies extend this budget further (§4.4). This is the resolution/memory lever (§7.3).
+  # (p/m) + copies extend this budget further. This is the resolution/memory lever.
   segment_size: 500
 
 selection_params:
@@ -70,7 +69,7 @@ selection_params:
   breach_effects: 2.8
   prop_stromal_survival: 0.02
   stromal_survival_effects: 2.2
-  # R15 GO-OR-GROW trade-off (compartment-context fitness): each dissemination/niche trait costs
+  # GO-OR-GROW trade-off (compartment-context fitness): each dissemination/niche trait costs
   # proliferation EVERYWHERE (a `*_cost` fraction of the division rate), while its BENEFIT is gated to
   # its compartment. So a trait is net-favoured ONLY in its niche (breach at the wall, stromal in the
   # stroma) and selected against elsewhere — the DCIS stays proliferative and the IDC turns stromal,

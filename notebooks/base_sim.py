@@ -7,8 +7,8 @@ cm-scale, breach-gated ductal field the tutorials ship (``notebooks/example_conf
 re-grows from counts in a couple of minutes at cm-scale and only a ``max_cells`` subsample is ever
 materialised, which keeps the notebooks self-contained and the ground truth exactly reproducible.
 
-The substrate is a **multi-focal DCIS→IDC lesion on a ductal field** (``DESIGN_ductal_field.md`` +
-``DESIGN_phenotype_plasticity.md`` §2): a FIELD of many small epithelial-ring glands scattered in
+The substrate is a **multi-focal DCIS→IDC lesion on a ductal field**: a FIELD of many small
+epithelial-ring glands scattered in
 moderate-density stroma (a population-genetics *island model*), grown from ONE cancer founder. The
 design choices baked in here (see the per-notebook narratives for why they matter):
 
@@ -58,7 +58,7 @@ NORMALS = ("epithelial", "stromal", "immune")
 # tutorials ship (``notebooks/example_config.yaml`` via ``validation/realistic_regime.py``) — grid 170,
 # 8 ducts, K_duct 60 / K_stroma 30, breach-gated invasion — instead of the old grid-40 mini-field. The
 # blocks below are that regime, with the few SCIENCE-notebook overrides these demos specifically need.
-GENOME = dict(RR.GENOME)                       # 12 × 50 = 600 genes (same as the tutorials)
+GENOME = dict(RR.GENOME)                       # 12 × 500 = 6000 genes (same as the tutorials)
 # Realistic breach-gated selection (met/treatment axes OFF; MET_SELECTION turns them on for the arc).
 SELECTION = dict(RR.SELECTION)
 # WGD turned UP to PCAWG-like: the tutorial config keeps WGD rare for a clean single-clone story, but
@@ -69,7 +69,7 @@ DEME = dict(RR.DEME)
 # The realistic cm-scale ductal field (grid 170, 8 breach-gated ducts, K_duct 60 / K_stroma 30). Same
 # structure and scale as the tutorials, so every science notebook analyses a cm-scale IDC-with-DCIS
 # section. ``cross_gland`` (intraductal spread) + the breach gate give the multi-focal → confluent
-# invasion; a deme's ``K`` stands for its 3-D column (DESIGN_ductal_field.md §3).
+# invasion; a deme's ``K`` stands for its 3-D column.
 SPATIAL = {**RR.SPATIAL, **RR.SCALES["cm"]}
 
 
@@ -343,7 +343,7 @@ def thin_section(t, per_deme_cap=8, seed=0):
     """A depth-subsampled ``cell_data`` view for the 2D-section spatial assay (Visium).
 
     iscc's ``Visium`` currently pools ALL cells within a spot's radius (the section-slice sampling of
-    ``DESIGN_ductal_field.md`` §3.1 is a pending ENGINE TODO, NOT built here), so with the moderate K a
+    is taken upstream with ``Resection.slice``), so with the moderate K a
     single spot over the duct over-fills far past a realistic per-spot count. As a stand-in we sample at
     most ``per_deme_cap`` cells per deme UNIFORMLY at random (uniform keeps the composition
     representative) and hand Visium that thinned section. This is a NOTEBOOK-side workaround, not an
@@ -368,7 +368,7 @@ def thin_section(t, per_deme_cap=8, seed=0):
 
 
 # ==================================================================================================
-# Metastasis module (R9) — OPT-IN. The 8 DCIS->IDC science notebooks use grow_base_tumor (no met) and
+# Metastasis module — OPT-IN. The 8 DCIS->IDC science notebooks use grow_base_tumor (no met) and
 # are unchanged; grow_metastasis_tumor() adds a second (met) grid, the heritable met-establishment
 # axis, and runs the full clinical arc:  grow -> seed -> resect -> chemo -> relapse.
 # ==================================================================================================

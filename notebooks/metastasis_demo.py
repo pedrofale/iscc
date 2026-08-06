@@ -1,4 +1,4 @@
-"""Metastasis module (R9) — end-to-end demo of the full clinical arc on the ductal field:
+"""Metastasis — end-to-end demo of the full clinical arc on the ductal field:
 
     grow (DCIS -> IDC)  ->  seed the metastasis  ->  resect the primary  ->  systemic chemo on the met  ->  relapse
 
