@@ -60,8 +60,16 @@ markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.superfences
+  - pymdownx.arithmatex:
+      generic: true
   - toc:
       permalink: true
+
+# The DNA tutorial writes real equations (the relation between a read count, purity, copy number and
+# multiplicity). Without these the page shows raw LaTeX source.
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
 
 plugins:
   - search
