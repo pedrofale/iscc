@@ -39,7 +39,9 @@ theme:
     - navigation.indexes
     - navigation.footer
     - navigation.tracking
-    - navigation.sections
+    # NOT navigation.sections: that renders every group as a flat always-open header. Without it the
+    # tutorial groups (Getting started / Assays / Examples) are COLLAPSIBLE and only the group holding
+    # the current page is expanded.
     - navigation.top
     - toc.follow
     - toc.integrate      # fold the page TOC into the left sidebar → a single left nav (dynestyx-style)
@@ -99,9 +101,26 @@ nav:
   - Overview: overview.md
   - Installation: installation.md
   - Tutorials:
-      - Pipeline walkthrough: tutorials/01_pipeline_walkthrough.ipynb
-      - Tumor growth: tutorials/02_tumor_growth.ipynb
-      - Data overview: tutorials/03_data_overview.ipynb
+      - Getting started:
+          - Pipeline walkthrough: tutorials/01_pipeline_walkthrough.ipynb
+          - Tumor growth: tutorials/02_tumor_growth.ipynb
+          - Data overview: tutorials/03_data_overview.ipynb
+      - Assays:
+          - Bulk & single-cell DNA: tutorials/assay_dna.ipynb
+          - Single-cell RNA: tutorials/assay_scrna.ipynb
+          - Spatial (Visium): tutorials/assay_spatial.ipynb
+          - Sequencing reads: tutorials/reads.ipynb
+      - Examples:
+          - The shared tumour: tutorials/base_simulation.ipynb
+          - scDNA + scRNA integration: tutorials/combining_scdna_scrna.ipynb
+          - Gene programs: tutorials/gene_programs.ipynb
+          - WGD & allele-specific CNA: tutorials/wgd_allele_cna.ipynb
+          - Phylogeny from DNA: tutorials/tree_inference_dna.ipynb
+          - scRNA + Visium integration: tutorials/scrna_visium_integration.ipynb
+          - Compartment selection: tutorials/compartment_selection_confound.ipynb
+          - Cohort — recurrent drivers: tutorials/cohort_mhn_recurrence.ipynb
+          - Cohort — shared programs: tutorials/cohort_shared_programs.ipynb
+          - Metastasis: tutorials/metastasis.ipynb
   - API Reference:
       - reference/index.md
       - Tumor:
