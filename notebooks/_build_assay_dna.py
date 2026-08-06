@@ -18,12 +18,7 @@ code = lambda s: cells.append(nbf.v4.new_code_cell(s))
 md(r"""# DNA sequencing: bulk and single cell
 
 We grow one tumour, look at exactly what is in it, then sequence it the way a lab would — bulk
-whole-genome, a targeted panel, and single-cell DNA — and check every readout against the truth.
-
-The through-line: **a bulk sample is a mixture, and a DNA read count is three things multiplied
-together** — how many cells carry the variant, how many copies of the locus they carry it on, and
-how much normal tissue is diluting them. Pull those apart and the numbers make sense. Leave them
-mixed and the clonal peak lands in the wrong place.""")
+whole-genome, a targeted panel, and single-cell DNA — and check every readout against the truth.""")
 
 
 # ======================================================================================
@@ -378,6 +373,166 @@ improves from 10x to 100x, because its scatter comes from how *unevenly* reads s
 genome, not from how many there are. Aggregate all the way to whole chromosome segments and the
 measurement scatter is still larger than the real signal. Section 5 recovers these CNAs one cell at
 a time.""")
+
+
+md(r"""### Correcting the log2 ratio for normal contamination
+
+So should the log2 ratio account for the normal DNA? Yes — and the correction is the first thing any
+copy-number caller does.
+
+What the sequencer measures at a locus is the **mixture**, not the tumour:
+
+$$CN_{\text{obs}} \;=\; \rho\,CN_{\text{tumour}} \;+\; 2\,(1-\rho)
+\qquad\Longrightarrow\qquad
+\log_2\text{ratio} \;=\; \log_2\!\frac{\rho\,CN_{\text{tumour}} + 2(1-\rho)}{2}$$
+
+with $\rho$ the purity. The normal half of the tube is diploid at every locus, so it drags every
+segment back towards 2 copies. At this sample's purity that is brutal: a clean doubling to 4 copies
+reads as ~2.5, a hemizygous loss to 1 copy reads as ~1.8. The plot below shows the whole curve.
+
+**But nobody rescales the log2 ratio on its own**, because $\rho$ is not known and is not identifiable
+from coverage alone. A segment that is 15% brighter than baseline could be a big gain in a few cells,
+a small gain in most cells, or a modest gain in a genome that is already more than diploid — purity
+and ploidy trade off against each other and depth cannot tell them apart.
+
+ASCAT, Battenberg, Sequenza, FACETS, PureCN and ABSOLUTE all break that tie the same way: fit **two**
+signals jointly, one from coverage and one from allele balance.
+
+$$\text{LogR}\;\propto\;\rho\,(n_{\text{major}}+n_{\text{minor}}) + 2(1-\rho)
+\qquad
+\text{BAF} \;=\; \frac{\rho\,n_{\text{minor}} + (1-\rho)}{\rho\,(n_{\text{major}}+n_{\text{minor}}) + 2(1-\rho)}$$
+
+BAF is read at **germline heterozygous sites**, and that is exactly why it works. A germline het sits
+on one copy of two in every normal cell, so it reads 0.5 no matter what the mixture is. Any departure
+from 0.5 is purity times allelic imbalance — and unlike LogR it does not move with ploidy. The caller
+then searches over $(\rho, \text{ploidy})$ for the pair that puts every segment closest to **integer**
+allele-specific copy number.
+
+We have both ingredients: `tumor.germline_sites` and `tumor.germline_zygosity` mark the het sites,
+and the assay reports their observed VAF, which *is* the BAF.""")
+
+code(r"""rho = wgs.purity
+od = runs[100].observed_data; v = V.loc[od.index]
+mix   = lambda cn, r: r * cn + 2.0 * (1.0 - r)
+l2mix = lambda cn, r: np.log2(mix(cn, r) / 2.0)
+
+print(f"purity {rho:.3f} — {1 - rho:.0%} of the DNA in the tube is diploid normal")
+for cn_t in (4, 1):
+    print(f"  true CN {cn_t} in every cancer cell -> pooled {mix(cn_t, rho):.2f} copies, "
+          f"log2 {l2mix(cn_t, rho):+.2f}  (undiluted {np.log2(cn_t / 2):+.2f}; "
+          f"{abs(l2mix(cn_t, rho) / np.log2(cn_t / 2)):.0%} of the amplitude survives)")
+
+# --- BAF: alt copies and total copies per CANCER cell at each germline het site
+het  = np.flatnonzero(V.germline_het.values)
+hloc = V.index[het]
+altc = (snv[is_cancer][:, het] * cnv[is_cancer][:, het]).mean(0)   # mean alt copies per cancer cell
+cnt  = cnv[is_cancer][:, het].mean(0)                              # mean total copies per cancer cell
+baf_mix   = lambda r: (r * altc + (1 - r)) / (r * cnt + 2 * (1 - r))
+baf_state = lambda M, m, r: (r * m + (1 - r)) / (r * (M + m) + 2 * (1 - r))
+hd = od.loc[hloc]; ok = hd.coverage.values >= 20
+se = np.sqrt(0.25 / np.maximum(hd.coverage.values, 1))
+
+# --- invert the mixture per segment, from the noiseless pooled CN and from the measured coverage
+cn_cancer = pd.Series(cnv[is_cancer].mean(0)).groupby(V.segment.values).mean()
+cn_pool   = od.groupby("segment").true_cn.mean()
+cov_corr  = od.coverage.values / runs[100].batch.efficiency
+cn_meas   = pd.Series(cov_corr / cov_corr.mean() * od.true_cn.mean(),
+                      index=od.index).groupby(od.segment).mean()
+invert = lambda cn_o: (cn_o - 2.0 * (1.0 - rho)) / rho
+
+fig, axes = plt.subplots(1, 3, figsize=(15, 3.9))
+
+ax = axes[0]
+x = np.linspace(0.5, 6, 200)
+for r, c in zip([rho, 0.4, 0.7, 1.0], ["C3", "C1", "C0", "k"]):
+    lab = f"purity {r:.2f}" + (" (this sample)" if r == rho else "")
+    ax.plot(x, l2mix(x, r), color=c, lw=1.8 if r == rho else 1.0, label=lab)
+ax.axhline(0, color="0.85", lw=0.8)
+for cn_t, dx, dy in [(1, -4, -16), (4, 6, 8)]:
+    ax.plot([cn_t], [l2mix(cn_t, rho)], "o", color="C3", ms=6, zorder=4)
+    ax.annotate(f"CN {cn_t} reads {l2mix(cn_t, rho):+.2f}", (cn_t, l2mix(cn_t, rho)), color="C3",
+                fontsize=8, textcoords="offset points", xytext=(dx, dy))
+ax.set_ylim(-2.2, 1.9)
+ax.set_xlabel("true copy number in the cancer cells"); ax.set_ylabel("observed log2 ratio")
+ax.set_title("normal DNA compresses the log2 ratio")
+ax.legend(fontsize=7, frameon=False, loc="upper left")
+
+ax = axes[1]
+pos = od.index.get_indexer(hloc)
+ax.axhline(0.5, color="0.7", lw=1)
+for M, m, c in [(2, 1, "C0"), (2, 0, "C4")]:
+    s = baf_state(M, m, rho)
+    ax.axhline(s, color=c, ls="--", lw=0.9); ax.axhline(1 - s, color=c, ls="--", lw=0.9)
+    ax.text(len(od) * 0.99, s - 0.01, f"a CLONAL {M}+{m} would sit here", color=c, fontsize=7,
+            ha="right", va="top")
+ax.errorbar(pos[ok], hd.vaf.values[ok], yerr=se[ok], fmt="o", ms=3.5, color="0.35", lw=0.8,
+            label="observed (>=20x)")
+ax.plot(pos, hd.true_alt_fraction.values, "x", color="C3", ms=6, label="true pooled BAF")
+ax.set_ylim(0.2, 0.8); ax.set_xticks([]); ax.set_xlabel("germline het sites along the genome")
+ax.set_ylabel("B-allele frequency"); ax.set_title(f"BAF at {len(hloc)} germline het sites")
+ax.legend(fontsize=7, frameon=False, loc="upper left")
+
+ax = axes[2]
+lim = (1.5, 5.4)
+ax.plot(lim, lim, "k--", lw=0.9, label="perfect recovery")
+ax.scatter(cn_cancer, invert(cn_pool), s=38, color="C2", zorder=3, label="inverted from pooled CN")
+ax.scatter(cn_cancer, invert(cn_meas), s=38, color="C1", label="inverted from measured coverage")
+ax.set_xlim(*lim); ax.set_ylim(*lim)
+ax.set_xlabel("true cancer-cell copy number"); ax.set_ylabel("purity-corrected estimate")
+ax.set_title("undoing the mixture, per segment")
+ax.legend(fontsize=7, frameon=False, loc="upper left")
+plt.tight_layout(); plt.show()
+
+dev_obs, dev_true = np.abs(hd.vaf.values[ok] - 0.5), np.abs(hd.true_alt_fraction.values - 0.5)
+print(f"\nBAF: observed mean |BAF-0.5| = {dev_obs.mean():.3f}, and the binomial noise alone is "
+      f"{np.sqrt(0.25 / hd.coverage.values[ok]).mean():.3f} — the scatter IS the noise")
+print(f"     true pooled |BAF-0.5|: mean {dev_true.mean():.3f}, max {dev_true.max():.3f}")
+print(f"     if the sample were pure (rho=1): mean {np.abs(baf_mix(1.0) - 0.5).mean():.3f}, "
+      f"max {np.abs(baf_mix(1.0) - 0.5).max():.3f} — still under the noise")
+print(f"     a CLONAL 2+1 segment would read BAF {baf_state(2, 1, rho):.3f} at this purity "
+      f"({baf_state(2, 1, 1.0):.3f} if pure)")
+
+print(f"\ninversion, from the noiseless pooled CN: max error vs truth "
+      f"{np.abs(invert(cn_pool) - cn_cancer).max():.2e} copies — the relation is exact")
+print(f"inversion, from the measured coverage: pooled measurement scatter "
+      f"{(cn_meas - cn_pool).std():.2f} copies -> {(invert(cn_meas) - cn_cancer).std():.2f} after "
+      f"dividing by rho (x{1 / rho:.1f}), against a true spread of only "
+      f"{cn_cancer.max() - cn_cancer.min():.2f} copies")
+print(f"                                       correlation with truth: "
+      f"{np.corrcoef(invert(cn_meas), cn_cancer)[0, 1]:.2f}")""")
+
+md(r"""**The compression is severe.** At 23% purity a doubling to 4 copies reads as +0.30 in log2
+instead of +1.0 — under a third of the amplitude — and a hemizygous loss reads as −0.18 instead of
+−1.0. That is before a single read of noise. Raise the purity and the curve straightens out; the
+black line at purity 1.0 is the undiluted truth.
+
+**This tumour has no BAF signal to read, and purity is not why.** The het sites sit on 0.5, and their
+scatter is exactly the binomial noise of their depth. The *true* pooled BAF barely moves either —
+mean departure 0.005, max 0.014. Set purity to 1.0 and it only reaches 0.016. The reason is the same
+one that flattened the log2 ratio: the copy-number changes are subclonal and point in different
+directions, so averaging over cancer cells rebalances the two homologs before the normal DNA ever
+gets involved. Within segment 7, one het site leans to 0.543 and another to 0.457 — they cancel.
+
+Contrast that with a genuinely clonal event: a 2+1 segment carried by every cancer cell would read
+BAF 0.448 at this purity, a 0.05 departure — small per site, but a real genome offers on the order of
+a million germline hets to average over. This simulation has 27, so even that would not clear the
+noise. If you want a readable BAF track here, you need clonal imbalance and many more het sites, not
+a higher purity.
+
+**The inversion works, and it also amplifies the noise.** Rearranged,
+
+$$CN_{\text{tumour}} \;=\; \frac{CN_{\text{obs}} - 2(1-\rho)}{\rho}$$
+
+Feed it the noiseless pooled copy number and it returns the cancer-cell profile to machine precision
+(green points, dead on the diagonal) — the relation is exactly what the mixture did, run backwards.
+Feed it the *measured* coverage and the same $1/\rho$ that restores the signal multiplies the
+measurement error by 4.3: a per-segment scatter of 0.21 copies becomes 0.89, against a true spread of
+0.63 copies. The orange points scatter off the diagonal, correlation 0.09. Correcting for purity is
+necessary; at 23% purity it is not sufficient.
+
+And note what we just did: we used the *known* $\rho$. In a real study $\rho$ is the unknown, and
+recovering it from LogR and BAF together is precisely what ASCAT and Battenberg are for. Here the
+truth is on hand, so the correction can be checked rather than trusted.""")
 
 
 md(r"""### Normal contamination and cancer-cell fraction
