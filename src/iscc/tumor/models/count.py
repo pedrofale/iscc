@@ -55,6 +55,34 @@ STEM_CAP = 6
 # so the overlay is reproducible and independent of the growth stream.
 PASSENGER_RNG_OFFSET = 909090
 
+# --- Breast-cancer subtype presets ------------------------------------------------------------
+# Selected with ``cell_params.cancer.subtype`` (absent -> no preset -> nothing changes). A preset
+# only supplies DEFAULTS: any of the three knobs written explicitly in the config still wins, so a
+# config can pick a subtype and then override one number.
+#
+# The receptor subtypes of breast cancer differ in how chromosomally unstable they are, and that
+# difference shows up in exactly three measurable quantities, which are the three knobs here:
+#
+#   * ``cnv_prob``     — how much of the genome ends up at a non-diploid copy number. Oestrogen-
+#                        receptor-positive (luminal) tumours are the quieter end of the spectrum
+#                        (roughly a fifth of the genome altered); triple-negative (basal-like)
+#                        tumours are the loud end (roughly twice that).
+#   * ``wgd_rate``     — how often a whole-genome doubling happens. Doublings are common in breast
+#                        cancer and markedly commoner in triple-negative disease than in luminal.
+#   * ``mutation_rate`` — ongoing instability: the rate at which new clone-defining events arise at
+#                        all, so how much subclonal structure the tumour keeps generating.
+#
+# Nothing else about the subtypes is modelled here — no receptor signalling, no subtype-specific
+# driver genes, no treatment response. These are three instability dials and that is all.
+BREAST_SUBTYPES = {
+    # cnv_prob is the share of mutating divisions that change copy number. These values were briefly
+    # tuned down while a defect quadrupled the mutation rate inside the confined founding patch; with
+    # that removed they are back where they belong, and give the aneuploidy burden a real breast tumour
+    # carries (about a third of the genome altered for the luminal subtype).
+    "ER+": dict(cnv_prob=0.045, wgd_rate=0.001, mutation_rate=0.30),
+    "TNBC": dict(cnv_prob=0.100, wgd_rate=0.006, mutation_rate=0.45),
+}
+
 
 class GenotypeTumor:
     """Genotype-level (count-based) tumour engine — the default, scalable iscc growth model.
@@ -277,6 +305,21 @@ class GenotypeTumor:
         self.expression_params = expression_params
         self.programs = None
 
+        # Subtype preset (see BREAST_SUBTYPES). ``subtype`` is a cancer-cell config key that stands in
+        # for three instability numbers; it is popped here so the cell class never sees it. Absent ->
+        # the params dict is copied unchanged -> byte-identical.
+        cancer_cell_params = dict(cancer_cell_params or {})
+        subtype = cancer_cell_params.pop("subtype", None)
+        if subtype is not None:
+            if subtype not in BREAST_SUBTYPES:
+                raise ValueError(
+                    f"unknown cancer subtype {subtype!r}; choose one of "
+                    f"{sorted(BREAST_SUBTYPES)} (or drop the key and set cnv_prob / wgd_rate / "
+                    f"mutation_rate directly)")
+            for k, v in BREAST_SUBTYPES[subtype].items():
+                cancer_cell_params.setdefault(k, v)   # an explicit config value still wins
+        self.subtype = subtype
+
         self.genome_params = genome_params
         self.n_segments = genome_params["n_segments"]
         self.segment_size = genome_params.get("segment_size", 1000)
@@ -463,9 +506,37 @@ class GenotypeTumor:
         # division. => near-neutral where there is space (low density) and fitness-selective where
         # crowded (the invasion border), from one context-free rule; nothing exceeds the reference so
         # demes still cannot overfill. Subsumes the resident-pressure gate (normals count in `total`).
+        # "lottery" = the structural-cap law (DESIGN_crowding_v2.md), PROTOTYPE, off by default:
+        # the crowding death is UNIFORM across the clones of a deme (so the fitness term cannot
+        # cancel) and sits BELOW the deme's mean net growth, while the density cap is enforced
+        # STRUCTURALLY -- a deme has floor(K) slots, a birth that cannot get one simply fails, and
+        # when more births are drawn than there are slots the slots go to clones in proportion to the
+        # births they drew. Rate law sets TURNOVER, the cap sets DENSITY, and neither has to
+        # compromise for the other, so demes sit at K *and* clones compete inside them.
         self._crowding_mode = deme_params.get("crowding_mode", "own")
         self._crowding_ref = deme_params.get(
             "crowding_ref", getattr(self.genotypes[self.founder_id], "max_birth_rate", 0.98))
+        # rho: the uniform crowding pressure as a FRACTION of the deme's mean net growth. Must be < 1
+        # -- the rate law alone has to want to overfill, otherwise the structural cap never binds and
+        # the whole law is inert (DESIGN_crowding_v2.md §8, amendment 1).
+        self._crowding_turnover = float(deme_params.get("crowding_turnover", 0.6))
+        # Which rate the uniform pressure references: the deme's own cell-weighted mean cancer
+        # division rate ("deme_mean", RELATIVE purifying selection -- a costly clone is disadvantaged,
+        # not lethal) or a fixed config scalar ("fixed" = `crowding_ref`, ABSOLUTE purifying selection).
+        self._crowding_reference = deme_params.get("crowding_reference", "deme_mean")
+        # Cancer replaces normal tissue: a birth with no free slot evicts one resident. Without this a
+        # duct WALL deme (seeded full of immortal epithelium at K_duct) has zero slots forever and the
+        # DCIS->IDC arc is structurally impossible. Immune cells hold slots but are NOT evictable by
+        # default (that would make immune escape structurally free).
+        self._evict_residents = bool(deme_params.get("evict_residents", True))
+        self._evict_immune = bool(deme_params.get("evict_immune", False))
+        # The well-mixed regime (carrying_capacity None/0) has no capacity, hence no slots: it stays
+        # unbounded whatever crowding_mode says.
+        self._lottery = bool(self._crowding and self._crowding_mode == "lottery")
+        if self._lottery and not 0.0 < self._crowding_turnover < 1.0:
+            raise ValueError("crowding_turnover must be in (0, 1) — at rho >= 1 the uniform crowding "
+                             "pressure exceeds the deme's mean net growth and demes UNDER-fill; at "
+                             "rho <= 0 there is no turnover and nothing ever competes.")
         self.structure_radius = spatial_params.get("structure_radius", 0)
         # Ductal-field substrate (DESIGN_ductal_field.md): the structured case is a FIELD of many small
         # epithelial-ring glands at 2D positions in moderate-density stroma (an island model), not one
@@ -489,6 +560,56 @@ class GenotypeTumor:
         self.gland_id = None
         self.gland_centers = None
         self.gland_lumen_demes = None
+
+        # --- Origin confinement (OFF by default) ------------------------------------------------
+        # A breast lesion starts inside ONE intact acinus: the myoepithelial layer is continuous and
+        # the basement membrane is unbroken, so a daughter cell has essentially nowhere to go and the
+        # founding patch recycles its cells in place. That containment is a property of EARLY,
+        # architecturally intact tissue: as the lesion grows it distends the duct and the myoepithelial
+        # layer is progressively lost (Risom et al., Cell 2022, measured that disruption across 79
+        # resections), after which cells leave the patch as freely as anywhere else.
+        #
+        # Modelling it matters because it is what lets an early alteration become TRUNCAL. A
+        # copy-number change that fixes in the founding patch before any cell has left is carried by
+        # every cell that ever exists, because every later cell descends from that patch. At the
+        # ordinary dispersal rate cells leave within a couple of generations, long before anything can
+        # fix, and the tumour ends up with no clonal copy-number layer at all.
+        #
+        # The containment is deliberately ORIGIN-SPECIFIC and TRANSIENT. Applying it to every duct
+        # would be wrong biology and wrong data: in-situ breast lesions are commonly POLYCLONAL (in
+        # Casasent et al., Cell 2018, 6 of 10 lesions profiled at single-cell resolution), so a duct
+        # must stay free to be colonised by several clones.
+        #
+        # Config (``spatial_params.origin_confinement``), a dict; absent -> None -> nothing at all
+        # happens and growth is byte-identical:
+        #   dispersal_factor : dispersal rate inside the founding patch, as a MULTIPLE of the
+        #                      configured ``dispersal_rate`` (0 => a closed acinus, nothing gets out).
+        #                      A multiplier, not an absolute rate, so an evolved dispersal trait still
+        #                      shows through. It acts on the DAUGHTER'S DESTINATION, not on the cell's
+        #                      rates: a would-be disperser that cannot leave competes for a slot where
+        #                      it is (``_escape_factor``). Deliberately so — confinement must not
+        #                      change how often a division mutates. Scaling the dispersal rate inside
+        #                      the mutate-or-disperse denominator instead would send the mutation
+        #                      probability to 1.0 in a closed acinus (a silent 4x at the shipped
+        #                      rates), which is an artefact of how the fate is drawn, not biology.
+        #   established_at   : the countdown does not start until the founding patch is at least this
+        #                      fraction of its carrying capacity — an acinus with a handful of cells in
+        #                      it is not distending anything yet. Fractions of K, so it means the same
+        #                      thing at every grid size.
+        #   generations      : generations of distension after that before the architecture gives way
+        #                      and the patch reverts to the ordinary dispersal rate. One-way: once
+        #                      released, never re-confined.
+        _oc = spatial_params.get("origin_confinement", None)
+        self._origin_confinement = _oc
+        self._origin_demes = ()          # deme(s) holding the founder at t=0; set by the seeding below
+        self._origin_confined = _oc is not None
+        self._origin_age = None          # generations since the patch filled; None = not filled yet
+        if _oc is not None:
+            self._origin_disp_factor = float(_oc.get("dispersal_factor", 1e-4))
+            self._origin_established_at = float(_oc.get("established_at", 0.5))
+            self._origin_generations = float(_oc.get("generations", 200))
+            if self._origin_disp_factor < 0:
+                raise ValueError("origin_confinement.dispersal_factor must be >= 0")
         # Number of founder cancer cells to seed (an established micro-lesion). A single founder
         # has P(extinction) ≈ death/division (~7% for the defaults) regardless of carrying
         # capacity, so a one-cell start makes runs/demos randomly cancer-free; seeding a small
@@ -526,6 +647,10 @@ class GenotypeTumor:
         n_demes = self.grid_size * self.grid_size
         self.n_primary_demes = n_demes
         self.demes = [dict() for _ in range(n_demes)]
+        # deme index -> its live CANCER cell count, present only while positive. Maintained by
+        # _add/_remove (the only two routes cells take in or out of a deme) so a tau substep can
+        # iterate the cancer-occupied demes instead of all grid_size**2 of them (_active_demes).
+        self._deme_cancer_n = {}
         self.deme_coords = [(i // self.grid_size, i % self.grid_size) for i in range(n_demes)]
         # Per-deme carrying capacity (DESIGN_ductal_field.md §3): uniform = carrying_capacity by
         # default (byte-identical to the scalar law); _seed_structure overwrites duct demes with
@@ -538,6 +663,7 @@ class GenotypeTumor:
         else:
             center = (self.grid_size // 2) * self.grid_size + (self.grid_size // 2)
             self._add(center, self.founder_id, self._n_founder)
+            self._origin_demes = (center,)
 
         # Optional immune microenvironment: seed immune cells in every deme so that
         # cancer growing into them experiences local immune pressure (and so that
@@ -714,7 +840,10 @@ class GenotypeTumor:
         in_border = [(r, c) for (r, c) in in_border if 0 <= r < self.grid_size and 0 <= c < self.grid_size]
         if in_border:
             pos = in_border[int(self.rng.choice(len(in_border)))]
-            self._add(pos[0] * self.grid_size + pos[1], self.founder_id, self._n_founder)
+            origin = pos[0] * self.grid_size + pos[1]
+            self._add(origin, self.founder_id, self._n_founder)
+            # The founding acinus — the only deme origin confinement ever applies to.
+            self._origin_demes = (origin,)
 
         # stroma fills the rest, seeded at MODERATE density (stroma_fill_frac≈0.3-0.5: real stromal
         # cells that carry the stromal hazard as a LIVE fraction, DESIGN_ductal_field.md §5, with
@@ -775,6 +904,8 @@ class GenotypeTumor:
         deme = self.demes[deme_idx]
         deme[gid] = deme.get(gid, 0) + n
         self.genotypes_counts[gid] += n
+        if self.genotypes[gid].type == "cancer":
+            self._deme_cancer_n[deme_idx] = self._deme_cancer_n.get(deme_idx, 0) + n
 
     def _remove(self, deme_idx, gid, n):
         deme = self.demes[deme_idx]
@@ -784,6 +915,90 @@ class GenotypeTumor:
         self.genotypes_counts[gid] -= n
         if self.genotypes_counts[gid] <= 0:
             del self.genotypes_counts[gid]
+        if self.genotypes[gid].type == "cancer":
+            left = self._deme_cancer_n.get(deme_idx, 0) - n
+            if left > 0:
+                self._deme_cancer_n[deme_idx] = left
+            else:
+                self._deme_cancer_n.pop(deme_idx, None)
+
+    # --- structural density cap: slots + eviction (DESIGN_crowding_v2.md §3.2/§3.4) -----------
+    #: Resident cell types a cancer birth may DISPLACE to take a slot. Invasive carcinoma replaces
+    #: normal tissue — a duct effaced by DCIS is the canonical picture — so epithelium, stroma and
+    #: metastatic host parenchyma are evictable. Immune cells are not (see `evict_immune`): letting a
+    #: tumour structurally clear its own immune pressure would trivialise immune escape.
+    _EVICTABLE = ("epithelial", "stromal", "host")
+
+    def _cap_of(self, deme_idx):
+        """This deme's integer slot count — its carrying capacity (per-deme K where the ductal field
+        set one, the scalar ``carrying_capacity`` otherwise)."""
+        K = (self.carrying_capacity if self._deme_capacity is None
+             else self._deme_capacity[deme_idx])
+        return int(K)
+
+    def _evictable_gids(self, deme_idx):
+        """The deme's displaceable resident genotypes, in creation-ordinal order (deterministic)."""
+        if not self._evict_residents:
+            return []
+        deme = self.demes[deme_idx]
+        types = self._EVICTABLE + (("immune",) if self._evict_immune else ())
+        return sorted((g for g in deme if self.genotypes[g].type in types),
+                      key=lambda g: self.genotypes[g].ord)
+
+    def _n_evictable(self, deme_idx):
+        """How many cells in this deme a birth could displace. Zero when eviction is off — the slot
+        allocator sizes its second (eviction) draw from this, so it MUST agree with ``_evict``."""
+        if not self._evict_residents:
+            return 0
+        deme = self.demes[deme_idx]
+        types = self._EVICTABLE + (("immune",) if self._evict_immune else ())
+        return sum(c for g, c in deme.items() if self.genotypes[g].type in types)
+
+    def _evict(self, deme_idx, n, rng):
+        """Displace ``n`` resident cells from ``deme_idx``, drawn across the resident genotypes in
+        proportion to their counts. Returns the number actually removed (< n only if the deme runs
+        out of residents). One resident genotype — the overwhelmingly common case — costs no rng
+        draw."""
+        if n <= 0 or not self._evict_residents:
+            return 0
+        gids = self._evictable_gids(deme_idx)
+        if not gids:
+            return 0
+        deme = self.demes[deme_idx]
+        if len(gids) == 1:
+            k = min(n, deme[gids[0]])
+            self._remove(deme_idx, gids[0], k)
+            return k
+        counts = np.array([deme[g] for g in gids], dtype=np.int64)
+        take = min(n, int(counts.sum()))
+        drawn = rng.multivariate_hypergeometric(counts, take)
+        for g, k in zip(gids, drawn):
+            if k:
+                self._remove(deme_idx, g, int(k))
+        return take
+
+    def _can_place(self, deme_idx, total=None):
+        """Whether a newborn cell can acquire a slot in this deme — either a free one or one taken
+        from a displaceable resident."""
+        if total is None:
+            total = sum(self.demes[deme_idx].values())
+        if total < self._cap_of(deme_idx):
+            return True
+        return self._evict_residents and self._n_evictable(deme_idx) > 0
+
+    def _place_one(self, deme_idx, gid, rng):
+        """Place ONE newborn cell, taking a free slot or displacing one resident. Returns whether it
+        was placed; a birth into a full deme with no displaceable resident simply FAILS (the division
+        is consumed, no cell is added), exactly like a daughter that breaches the viability limits.
+        There is deliberately NO redraw of a rejected dispersal target — that would be free-space-
+        biased directional dispersal, a different model."""
+        if not self._lottery:
+            self._add(deme_idx, gid, 1)
+            return True
+        if sum(self.demes[deme_idx].values()) >= self._cap_of(deme_idx) and not self._evict(deme_idx, 1, rng):
+            return False
+        self._add(deme_idx, gid, 1)
+        return True
 
     def _cross_gland_target(self, src_gland, rng):
         """A lumen deme of ANOTHER gland, for an island (cross-gland) dispersal hop
@@ -884,7 +1099,13 @@ class GenotypeTumor:
 
     def _deme_comp(self, deme):
         """One O(#genotypes-in-deme) pass over a deme returning the per-compartment cell counts a
-        death-rate evaluation needs: ``(total, n_normal, n_immune, n_epithelial, n_stromal, n_host)``.
+        death-rate evaluation needs:
+        ``(total, n_normal, n_immune, n_epithelial, n_stromal, n_host, b_bar, d_bar)``.
+
+        ``b_bar`` / ``d_bar`` are the deme's cell-weighted mean CANCER division and baseline death
+        rates — the reference the ``"lottery"`` crowding law's uniform pressure is scaled by
+        (DESIGN_crowding_v2.md §3.1). They are accumulated in this same pass (two extra floats, no
+        extra scan) and left at 0.0 under every other crowding mode, which never reads them.
 
         Passing the result into ``_death_rate`` (via its ``comp`` argument) lets every genotype in a
         deme reuse ONE composition scan instead of each re-running the O(#genotypes) immune /
@@ -894,11 +1115,18 @@ class GenotypeTumor:
         ``n_normal`` matches ``sum(deme.get(nm, 0) for nm in normal_names)`` because a normal
         genotype's id IS its type name."""
         total = n_normal = n_immune = n_epi = n_stro = n_host = 0
+        b_sum = d_sum = 0.0
+        lottery = self._lottery
         G = self.genotypes
         for gid, c in deme.items():
             total += c
-            tp = G[gid].type
+            rep = G[gid]
+            tp = rep.type
             if tp == "cancer":
+                if lottery:
+                    ep = rep.evolutionary_parameters
+                    b_sum += c * ep["division_rate"]
+                    d_sum += c * ep["death_rate"]
                 continue
             n_normal += c
             if tp == "immune":
@@ -909,7 +1137,12 @@ class GenotypeTumor:
                 n_stro += c
             elif tp == "host":
                 n_host += c
-        return (total, n_normal, n_immune, n_epi, n_stro, n_host)
+        if lottery:
+            n_cancer = total - n_normal
+            if n_cancer > 0:
+                b_sum /= n_cancer
+                d_sum /= n_cancer
+        return (total, n_normal, n_immune, n_epi, n_stro, n_host, b_sum, d_sum)
 
     def _compartment_fields(self):
         """Per-deme epithelial / stromal LIVE fractions, as two (n_demes,) arrays — the compartment
@@ -954,8 +1187,10 @@ class GenotypeTumor:
         old per-call scans) but drops the per-deme cost from O(#genotypes²) to O(#genotypes)."""
         rep = self.genotypes[gid]
         deme = self.demes[deme_idx]
+        if comp is None and self._lottery:
+            comp = self._deme_comp(deme)        # the lottery law needs the deme's mean cancer rates
         if comp is not None:
-            total, n_normal_c, n_immune_c, n_epi_c, n_stro_c, n_host_c = comp
+            total, n_normal_c, n_immune_c, n_epi_c, n_stro_c, n_host_c, b_bar_c, d_bar_c = comp
         elif total is None:
             total = sum(deme.values())
         base = rep.evolutionary_parameters["death_rate"]
@@ -980,7 +1215,25 @@ class GenotypeTumor:
             # Per-deme carrying capacity (DESIGN_ductal_field.md §3): duct demes cap at K_duct, stroma
             # at K_stroma. Uniform (= carrying_capacity) reproduces the scalar law byte-identically.
             K = self.carrying_capacity if self._deme_capacity is None else self._deme_capacity[deme_idx]
-            if self._crowding_mode == "fixed":
+            if self._crowding_mode == "lottery":
+                # Structural-cap law (DESIGN_crowding_v2.md §3.1). The crowding pressure is UNIFORM
+                # over the deme's cancer clones — it carries no `div`, so it cannot cancel out of
+                # net = div - death, and the selection differential between two clones in the deme is
+                # their bare (b_i - d_i) - (b_k - d_k), the SAME at the front as in the packed
+                # interior. It is deliberately set BELOW the deme's mean net growth (rho < 1), so the
+                # rate law alone would overfill and the STRUCTURAL slot cap is what sets density.
+                if self._crowding_reference == "fixed":
+                    slope = max(0.0, self._crowding_ref - base)
+                else:
+                    slope = max(0.0, b_bar_c - d_bar_c)
+                death = base + self._crowding_turnover * slope * min(1.0, total / K)
+                # Resident pressure is UNCHANGED: it is the fitness gate on entering normal-occupied
+                # tissue, and it does not cancel either (it carries no `div`).
+                n_normal = (n_normal_c if comp is not None
+                            else sum(deme.get(nm, 0) for nm in normal_names))
+                if n_normal:
+                    death += max(0.0, self._resident_ref - base) * steep * (n_normal / K)
+            elif self._crowding_mode == "fixed":
                 # Unified fixed-reference law: death ~ TOTAL occupancy relative to a fixed reference
                 # (not the clone's own division), so survival under crowding is fitness-DEPENDENT
                 # everywhere. Near-neutral at low density; at the crowded border only clones with
@@ -1040,6 +1293,58 @@ class GenotypeTumor:
     def _cancer_gids(self, deme):
         return [gid for gid in deme if self._is_cancer(gid)]
 
+    # --- origin confinement --------------------------------------------------
+    def _origin_tick(self, generations):
+        """Advance the founding acinus's confinement clock by ``generations`` and release it once the
+        lesion has filled the acinus and then distended it for long enough.
+
+        Called once per generation by the tau engine and once per event by the exact engine (which has
+        no generation notion, so a generation there is one event per cancer cell). A no-op — and not
+        even reached, since every caller guards on ``_origin_confined`` — when the feature is off.
+        """
+        if not self._origin_confined:
+            return
+        if self._origin_age is None:
+            # Without crowding a deme has no capacity to fill, so there is nothing to distend: the
+            # clock simply starts at once and `generations` alone sets the confinement window.
+            filled = not self._crowding or all(
+                sum(self.demes[di].values()) >= self._origin_established_at * self._cap_of(di)
+                for di in self._origin_demes)
+            if not filled:
+                return
+            self._origin_age = 0.0
+        self._origin_age += generations
+        if self._origin_age >= self._origin_generations:
+            self._origin_confined = False
+            self.events.append(dict(step=self.step, time=self.time, event="origin_release",
+                                    from_deme=int(self._origin_demes[0]) if self._origin_demes else -1,
+                                    genotype=self.founder_id, n=len(self._origin_demes)))
+
+    def _escape_factor(self, deme_idx):
+        """Fraction of would-be dispersing daughters that actually LEAVE ``deme_idx``.
+
+        1.0 everywhere — and everywhere at all times once the feature is off or released — except
+        inside the founding acinus while that acinus is still architecturally intact, where the
+        intact myoepithelial layer holds the daughter in (see the ``origin_confinement`` block in
+        ``__init__``). A daughter that cannot leave is not lost: it competes for a slot in its own
+        deme exactly like a daughter whose basement-membrane crossing failed.
+
+        This is deliberately a property of the *destination step*, not of the cell's rates. The
+        per-division MUTATION probability must not depend on whether a cell is allowed to move
+        (see the fate split in ``update`` / ``_tau_substep``).
+        """
+        if self._origin_confined and deme_idx in self._origin_demes:
+            return self._origin_disp_factor
+        return 1.0
+
+    def _dispersal_of(self, rep, deme_idx):
+        """This clone's EFFECTIVE dispersal rate as seen from ``deme_idx``: its own rate everywhere,
+        scaled by ``_escape_factor`` inside a still-intact founding acinus. Reported/diagnostic —
+        the engines split the division fate on the clone's own (unconfined) dispersal rate and apply
+        the escape factor to the dispersal branch, so that confinement changes where daughters go
+        without changing how often they mutate."""
+        return rep.evolutionary_parameters["dispersal_rate"] * self._escape_factor(deme_idx)
+
     def _deme_rate(self, deme_idx):
         """Total event rate of a deme. Cancer genotypes are always dynamic; NORMAL genotypes become
         (death-only) dynamic in a treated compartment under the off-target chemo toxicity hazard.
@@ -1059,6 +1364,25 @@ class GenotypeTumor:
 
     def _refresh_rate(self, deme_idx):
         self.deme_rates[deme_idx] = self._deme_rate(deme_idx)
+
+    def _active_demes(self):
+        """Ascending indices of the demes a tau substep can draw an event in.
+
+        A deme with no cancer cell and no treatment-sensitive resident draws NOTHING in
+        ``_tau_substep`` — the genotype loop is empty — yet the old ``range(len(self.demes))``
+        still paid a ``_deme_comp`` scan for each of them. In the ductal field EVERY deme is
+        non-empty (it is pre-filled with normal tissue), so that was ~grid_size**2 wasted scans
+        per substep whatever the lesion's size, and a lesion confined to ONE acinus paid all
+        28,900 of them at grid 170. Iterating the cancer-occupied set instead makes the per-substep
+        cost O(occupied demes). Purely an omission of no-op work: the skipped demes consume no rng
+        draw and change no state, so the trajectory is unchanged.
+
+        Under an active therapy normal cells DO die (``_tx_death_add``), so every deme is live and
+        the full range is returned — byte-identical to the old behaviour on the treated path.
+        """
+        if self._tx_death_add:
+            return range(len(self.demes))
+        return sorted(self._deme_cancer_n)
 
     # --- simulation ----------------------------------------------------------
     def is_extinct(self):
@@ -1095,6 +1419,10 @@ class GenotypeTumor:
     def update(self, rng):
         if self.is_extinct():
             return
+        if self._origin_confined:
+            # The exact engine fires ONE cell event per call and tracks no time, so a generation here
+            # is defined as one event per cancer cell.
+            self._origin_tick(1.0 / max(1, self.get_cancer_size()))
         di = int(rng.choice(len(self.demes), p=self.deme_rates / self.deme_rates.sum()))
         deme = self.demes[di]
         # pick a cancer genotype in the deme proportionally to count * (div + death),
@@ -1129,29 +1457,48 @@ class GenotypeTumor:
         if rng.random() < death / (div + death):
             self._remove(di, gid, 1)                       # death
         else:
+            # The division fate is split on the clone's OWN rates. Using the confinement-scaled
+            # dispersal rate here would make a cell inside a closed acinus mutate on every division
+            # (mut_prob -> 1) purely because the denominator lost its dispersal term — an artefact of
+            # how the fate is drawn, not biology. Confinement acts on the dispersal branch instead
+            # (``_escape_factor``), so mut_prob is identical confined or not.
             disp = rep.evolutionary_parameters["dispersal_rate"]
-            mut_prob = rep.mutation_rate / (rep.mutation_rate + disp)
+            denom = rep.mutation_rate + disp
+            mut_prob = rep.mutation_rate / denom if denom > 0 else 0.0
             if rng.random() < mut_prob:
-                child = rep.divide()
-                res = child.mutate(rng, self.selection,
-                                   func_mask=self._func_bits if self.coarsen_passengers else None)
-                if res == "passenger":
-                    # pure neutral daughter: identical dynamics, fold into the parent clone and tally
-                    # its passenger burden for lazy reconstruction. No genotype registered.
-                    self._add(di, gid, 1)
-                    self._pass_load[gid] += child._n_new_snv
-                    self._n_folded += 1
-                elif res:
-                    # functional (driver / CNV / WGD) daughter -> a new genotype, unless it breaches
-                    # the viability limits, in which case it is never born (see _is_viable): the
-                    # division is consumed but adds no cell.
-                    if self._is_viable(child):
-                        self._register(child)
-                        self.genotypes_parents[child.genotype_id] = rep.genotype_id
-                        self._add(di, child.genotype_id, 1)
+                # Under the structural cap the slot is contested BEFORE the mutation is drawn: a
+                # mutation-branch birth that cannot get a slot must never reach mutate(), or the
+                # registry would accumulate genotypes with no cells (DESIGN_crowding_v2.md §3.3).
+                if self._lottery and not self._can_place(di, total):
+                    pass                                       # birth fails; the division is consumed
                 else:
-                    # no-op mutation (saturated allele): same genotype, grows in place
-                    self._add(di, rep.genotype_id, 1)
+                    child = rep.divide()
+                    res = child.mutate(rng, self.selection,
+                                       func_mask=self._func_bits if self.coarsen_passengers else None)
+                    if res == "passenger":
+                        # pure neutral daughter: identical dynamics, fold into the parent clone and tally
+                        # its passenger burden for lazy reconstruction. No genotype registered.
+                        self._place_one(di, gid, rng)
+                        self._pass_load[gid] += child._n_new_snv
+                        self._n_folded += 1
+                    elif res:
+                        # functional (driver / CNV / WGD) daughter -> a new genotype, unless it breaches
+                        # the viability limits, in which case it is never born (see _is_viable): the
+                        # division is consumed but adds no cell.
+                        if self._is_viable(child):
+                            self._register(child)
+                            self.genotypes_parents[child.genotype_id] = rep.genotype_id
+                            self._place_one(di, child.genotype_id, rng)
+                    else:
+                        # no-op mutation (saturated allele): same genotype, grows in place
+                        self._place_one(di, rep.genotype_id, rng)
+            elif (esc := self._escape_factor(di)) < 1.0 and (
+                    esc <= 0.0 or rng.random() >= esc):
+                # The daughter set out but the intact acinus holds it in: it stays put and competes
+                # for a slot in its own deme, exactly like a failed basement-membrane crossing.
+                # Unreachable (no rng draw, no branch) whenever the escape factor is 1.0, i.e.
+                # always when origin confinement is absent or released -> byte-identical.
+                self._place_one(di, gid, rng)
             else:
                 # dispersal. Three routes, mutually exclusive by SOURCE compartment:
                 #  - met seeding (primary STROMAL deme = an invaded IDC cell): a fraction ~met_seed_kappa
@@ -1169,8 +1516,8 @@ class GenotypeTumor:
                         and rng.random() < self._met_seed_kappa / (1.0 + self._met_seed_kappa)):
                     took_met = True
                     ms = min(max(rep.evolutionary_parameters["met_survival"], 0.0), 1.0)
-                    if rng.random() < self._transit_prob(ms):
-                        self._add(self.met_vessel_idx, gid, 1)
+                    if rng.random() < self._transit_prob(ms) and self._place_one(
+                            self.met_vessel_idx, gid, rng):
                         self.events.append(dict(step=self.step, time=self.time, event="seeding",
                                                 from_deme=int(di), genotype=gid, n=1))
                         affected.append(self.met_vessel_idx)
@@ -1193,8 +1540,11 @@ class GenotypeTumor:
                         b = min(max(rep.evolutionary_parameters["breach"], 0.0), 1.0)
                         if rng.random() >= b:
                             tgt = di                      # crossing fails -> daughter stays in the duct
-                    self._add(tgt, gid, 1)
-                    affected.append(tgt)
+                    # The daughter still has to find a slot where it lands (including back in its own
+                    # duct after a failed crossing); if the target is full and holds no displaceable
+                    # resident, the birth fails. No redraw.
+                    if self._place_one(tgt, gid, rng):
+                        affected.append(tgt)
 
         for idx in affected:
             self._refresh_rate(idx)
@@ -1363,18 +1713,24 @@ class GenotypeTumor:
         randomness comes from the seeded `rng`, so runs are reproducible. Death rates are read
         from current deme totals, so carrying-capacity crowding self-limits across substeps.
         """
-        deaths, dispersals, mutants = [], [], []
-        for di in range(len(self.demes)):
+        if self._lottery:
+            return self._tau_substep_lottery(rng, dt)
+        deaths, dispersals, mutants, stayers = [], [], [], []
+        for di in self._active_demes():
             deme = self.demes[di]
             if not deme:
                 continue
             comp = self._deme_comp(deme)            # ONE composition scan reused by every genotype
             total = comp[0]
+            esc = self._escape_factor(di)
             for gid in sorted(self._cancer_gids(deme), key=lambda g: self.genotypes[g].ord):
                 c = deme[gid]
                 rep = self.genotypes[gid]
                 div = rep.evolutionary_parameters["division_rate"]
                 death = self._death_rate(gid, di, total, comp=comp)
+                # Fate is split on the clone's OWN dispersal rate, never the confinement-scaled one
+                # (see _escape_factor): a cell's mutation probability must not depend on whether it
+                # is allowed to move.
                 disp = rep.evolutionary_parameters["dispersal_rate"]
                 n_div = int(rng.poisson(div * c * dt))
                 n_death = int(rng.poisson(death * c * dt))
@@ -1387,6 +1743,13 @@ class GenotypeTumor:
                     n_disp = n_div - n_mut
                     if n_mut:
                         mutants.append((di, gid, n_mut))
+                    if n_disp and esc < 1.0:
+                        # Confined: only an `esc` fraction gets out; the rest stay and take a slot
+                        # at home. Skipped entirely (no draw) when esc == 1.0 -> byte-identical.
+                        n_out = int(rng.binomial(n_disp, esc)) if esc > 0.0 else 0
+                        if n_disp - n_out:
+                            stayers.append((di, gid, n_disp - n_out))
+                        n_disp = n_out
                     if n_disp:
                         dispersals.append((di, gid, n_disp))
             # NORMAL cells die under off-target chemo toxicity in a treated compartment (they are
@@ -1403,6 +1766,11 @@ class GenotypeTumor:
             n = min(n, self.demes[di].get(gid, 0))
             if n:
                 self._remove(di, gid, n)
+        # dispersal-branch daughters the intact acinus held in: plain in-place births of the SAME
+        # genotype (no mutation attempt — that is the mutation branch's job). Always empty when
+        # origin confinement is absent or released.
+        for di, gid, n in stayers:
+            self._add(di, gid, n)
         # mutation-branch births: each is one division that attempts a mutation. A successful
         # mutate() spawns a new genotype (count 1) unless it breaches the viability limits, in
         # which case nothing is born; a saturated allele grows the parent in place.
@@ -1486,6 +1854,201 @@ class GenotypeTumor:
                     tgt = nbrs[int(rng.integers(0, len(nbrs)))] if nbrs else di
                 self._add(tgt, gid, 1)
 
+    # --- tau-leaping under the structural cap (DESIGN_crowding_v2.md §3.3) ---
+    def _realise_mutation_births(self, di, gid, n, rng):
+        """Realise ``n`` accepted mutation-branch births of ``gid`` in deme ``di``: each is one
+        division that attempts a mutation, spawning a new genotype (unless it breaches the viability
+        limits, in which case nothing is born), folding into the parent when the daughter is purely
+        neutral, or growing the parent in place on a saturated allele. Adds AT MOST ``n`` cells."""
+        rep = self.genotypes[gid]
+        fmask = self._func_bits if self.coarsen_passengers else None
+        n_fold = 0
+        for _ in range(n):
+            child = rep.divide()
+            res = child.mutate(rng, self.selection, func_mask=fmask)
+            if res == "passenger":
+                n_fold += 1
+                self._pass_load[gid] += child._n_new_snv
+            elif res:
+                if self._is_viable(child):
+                    self._register(child)
+                    self.genotypes_parents[child.genotype_id] = rep.genotype_id
+                    self._add(di, child.genotype_id, 1)
+            else:
+                self._add(di, gid, 1)
+        if n_fold:
+            self._add(di, gid, n_fold)
+            self._n_folded += n_fold
+
+    def _tau_substep_lottery(self, rng, dt):
+        """One synchronous tau-leap of length `dt` under the ``crowding_mode="lottery"`` law.
+
+        The exact engine needs no allocation rule — it fires one event at a time, so a slot is taken
+        by whichever birth happens next and the Gillespie sampler already draws that birth with
+        probability ``b_i c_i / sum_k b_k c_k``. Tau-leaping cannot block individual events, so it
+        needs one, in four phases:
+
+        0/1. draw births and deaths per (deme, clone) from the PRE-step state exactly as the
+             unconstrained substep does, and apply the DEATHS first;
+        2.   route every candidate birth to its TARGET deme (in place for the mutation branch; the
+             drawn neighbour / cross-gland lumen / metastatic vessel for the dispersal branch, and
+             back to the source duct for a failed basement-membrane crossing), accumulating a
+             per-target candidate vector keyed by (channel, genotype);
+        3.   per target, in ascending deme order, allocate the ``S = floor(K) - n`` free slots among
+             the candidates with a MULTIVARIATE HYPERGEOMETRIC draw, then offer the leftovers a
+             second, nested draw for the slots that displacing residents would free;
+        4.   realise ONLY the accepted births — so a mutation-branch birth that loses the lottery
+             never reaches ``mutate()`` and registers no genotype.
+
+        The hypergeometric is not an expectation match, it is the exact conditional law: in the
+        event-by-event path the births in an interval are a superposition of Poisson processes, so
+        conditional on their counts their ORDER is a uniformly random permutation of the multiset,
+        the exact rule accepts the first ``S`` of that order, and the composition of the first ``S``
+        items of a uniformly random permutation of a multiset IS ``MVH(S; a_1..a_m)``. The residual
+        difference from the exact engine is the one tau-leaping already makes everywhere — births
+        and deaths treated as simultaneous within a substep — which biases slot supply by ~half a
+        substep's deaths. That is a RATE bias, never a cap violation: ``S`` is recomputed from the
+        real occupancy every substep and clipped at zero.
+        """
+        deaths, dispersals, mutants, stayers = [], [], [], []
+        for di in self._active_demes():
+            deme = self.demes[di]
+            if not deme:
+                continue
+            comp = self._deme_comp(deme)        # ONE composition scan reused by every genotype
+            total = comp[0]
+            esc = self._escape_factor(di)
+            for gid in sorted(self._cancer_gids(deme), key=lambda g: self.genotypes[g].ord):
+                c = deme[gid]
+                rep = self.genotypes[gid]
+                div = rep.evolutionary_parameters["division_rate"]
+                death = self._death_rate(gid, di, total, comp=comp)
+                # The clone's OWN dispersal rate, never the confinement-scaled one — confinement
+                # must not change how often a division mutates (see _escape_factor).
+                disp = rep.evolutionary_parameters["dispersal_rate"]
+                n_div = int(rng.poisson(div * c * dt))
+                n_death = int(rng.poisson(death * c * dt))
+                if n_death:
+                    deaths.append((di, gid, n_death))
+                if n_div:
+                    denom = rep.mutation_rate + disp
+                    mut_prob = rep.mutation_rate / denom if denom > 0 else 0.0
+                    n_mut = int(rng.binomial(n_div, mut_prob))
+                    n_disp = n_div - n_mut
+                    if n_mut:
+                        mutants.append((di, gid, n_mut))
+                    if n_disp and esc < 1.0:
+                        # Confined: only an `esc` fraction gets out, the rest stay and compete for a
+                        # slot at home. No draw at all when esc == 1.0 -> byte-identical.
+                        n_out = int(rng.binomial(n_disp, esc)) if esc > 0.0 else 0
+                        if n_disp - n_out:
+                            stayers.append((di, gid, n_disp - n_out))
+                        n_disp = n_out
+                    if n_disp:
+                        dispersals.append((di, gid, n_disp))
+            if self._tx_death_add and self._tx_applies(di):
+                for gid in sorted((g for g in deme if g in self._tx_death_add and not self._is_cancer(g)),
+                                  key=lambda g: self.genotypes[g].ord):
+                    n_death = int(rng.poisson(self._tx_death_add[gid] * deme[gid] * dt))
+                    if n_death:
+                        deaths.append((di, gid, n_death))
+
+        # --- Phase 1: deaths, capped at the pre-step count so a clone never goes negative --------
+        for di, gid, n in deaths:
+            n = min(n, self.demes[di].get(gid, 0))
+            if n:
+                self._remove(di, gid, n)
+
+        # --- Phase 2: route candidate births to their target demes -------------------------------
+        cand = {}                       # target deme -> {(channel, ...): n candidates}, insertion-ordered
+
+        def _cand(tgt, key, n):
+            if n > 0:
+                slots = cand.setdefault(tgt, {})
+                slots[key] = slots.get(key, 0) + int(n)
+
+        for di, gid, n in mutants:      # the mutation branch divides IN PLACE: target is the source
+            _cand(di, ("mut", gid), n)
+        # Daughters the intact founding acinus held in: ordinary candidates for a slot at HOME,
+        # exactly like a failed basement-membrane crossing. Always empty without confinement.
+        for di, gid, n in stayers:
+            _cand(di, ("plain", gid), n)
+        for di, gid, n in dispersals:
+            src_g = self.gland_id[di] if self.gland_id is not None else -1
+            n_met = 0
+            if self._met_enabled and self._met_seed_kappa > 0 and di < self.n_primary_demes and src_g == -1:
+                n_met = int(rng.binomial(n, self._met_seed_kappa / (1.0 + self._met_seed_kappa)))
+            if n_met:
+                ms = min(max(self.genotypes[gid].evolutionary_parameters["met_survival"], 0.0), 1.0)
+                n_survive = int(rng.binomial(n_met, self._transit_prob(ms)))
+                # Own channel, keyed by source, so the seeding event log can report the number that
+                # actually WON a slot in the vessel deme rather than the number that set out.
+                _cand(self.met_vessel_idx, ("met", di, gid), n_survive)
+            n_rest = n - n_met
+            n_cross = 0
+            if self.cross_gland_kappa > 0 and src_g != -1:
+                n_cross = int(rng.binomial(n_rest, self.cross_gland_kappa / (1.0 + self.cross_gland_kappa)))
+            n_local = n_rest - n_cross
+            if n_local > 0:
+                nbrs = self._neighbors(di)
+                if not nbrs:
+                    _cand(di, ("plain", gid), n_local)
+                else:
+                    idx = rng.integers(0, len(nbrs), size=n_local)
+                    u, cnts = np.unique(idx, return_counts=True)
+                    gate = (self._breach_gated_invasion and self.gland_id is not None
+                            and self.gland_id[di] >= 0)
+                    b = None
+                    for k, cnt in zip(u, cnts):
+                        tgt = nbrs[int(k)]; cnt = int(cnt)
+                        if gate and self.gland_id[tgt] < 0:
+                            if b is None:
+                                b = min(max(self.genotypes[gid].evolutionary_parameters["breach"], 0.0), 1.0)
+                            n_ok = int(rng.binomial(cnt, b)) if b > 0 else 0
+                            _cand(tgt, ("plain", gid), n_ok)
+                            # A failed crossing leaves the daughter in its own duct — where it still
+                            # has to win a slot like everyone else.
+                            _cand(di, ("plain", gid), cnt - n_ok)
+                        else:
+                            _cand(tgt, ("plain", gid), cnt)
+            for _ in range(n_cross):
+                tgt = self._cross_gland_target(src_g, rng)
+                if tgt is None:
+                    nbrs = self._neighbors(di)
+                    tgt = nbrs[int(rng.integers(0, len(nbrs)))] if nbrs else di
+                _cand(tgt, ("plain", gid), 1)
+
+        # --- Phase 3 + 4: allocate the slots, then realise only the accepted births ---------------
+        for tgt in sorted(cand):
+            items = cand[tgt]
+            keys = list(items)
+            a = np.array([items[k] for k in keys], dtype=np.int64)
+            n_slots = max(0, self._cap_of(tgt) - sum(self.demes[tgt].values()))
+            if int(a.sum()) <= n_slots:
+                acc = a
+            else:
+                acc = (rng.multivariate_hypergeometric(a, n_slots) if n_slots > 0
+                       else np.zeros(len(a), dtype=np.int64))
+                leftover = a - acc
+                n_evict = min(int(leftover.sum()), self._n_evictable(tgt))
+                if n_evict > 0:
+                    # The next `n_evict` items of the SAME uniformly random order — exact for the
+                    # same reason the first draw is.
+                    acc = acc + rng.multivariate_hypergeometric(leftover, n_evict)
+                    self._evict(tgt, n_evict, rng)
+            for key, n in zip(keys, acc):
+                n = int(n)
+                if n <= 0:
+                    continue
+                if key[0] == "mut":
+                    self._realise_mutation_births(tgt, key[1], n, rng)
+                elif key[0] == "met":
+                    self._add(tgt, key[2], n)
+                    self.events.append(dict(step=self.step, time=self.time, event="seeding",
+                                            from_deme=int(key[1]), genotype=key[2], n=n))
+                else:
+                    self._add(tgt, key[1], n)
+
     def _tau_generation(self, rng, tau):
         """Advance the whole tumour by one generation of length `tau`, adaptively sub-stepping so
         the largest single-cell event probability per substep stays in the accurate Poisson
@@ -1509,6 +2072,8 @@ class GenotypeTumor:
             self._tau_substep(rng, dt)
         self.step += 1
         self.time += tau
+        if self._origin_confined:
+            self._origin_tick(1.0)
         if self.step % self.snapshot_every == 0:
             self.traces.append(self._trace_snapshot())
             self.trace_times.append(self.time)

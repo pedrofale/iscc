@@ -15,16 +15,21 @@
 #                 exactly why the scalability engine below is needed.
 #   * VISIUM v1   100 um spot pitch = 2 demes, 55 um spot ~ 1 deme; a thin section -> ~5 cells/spot.
 #
-# BIOLOGY (single clonal founder; DCIS -> IDC). One cancer founds in ONE duct and grows confined
-# (DCIS, behind a high epithelial_barrier); its descendants spread along the ductal tree (cross_gland
-# dispersal — the ducts are connected in 3-D), filling ~8 duct cross-sections that are all ONE clone.
-# Invasion is BREACH-LIMITED: crossing the epithelial wall (`breach`) is RARE (low prop_breach), but
-# once a clone is out the stroma is PERMISSIVE (low stromal_hazard) and dispersal is fast, so the
-# escaped clone spreads readily into an INVASIVE (IDC) carcinoma. Because the breach clone also reaches
-# the connected ducts via cross_gland, invasion starts multifocally and COALESCES into a confluent
-# invasive region with residual DCIS ducts embedded — a realistic IDC-with-DCIS section (matches the
-# Janesick 10x Visium breast sample: several DCIS ducts + a dominant invasive region). All one clone
-# (see the by-driver Muller). `grow(n_steps=...)` sets how far the invasion has coalesced.
+# BIOLOGY (single founder; DCIS -> IDC). One cancer founds in ONE duct. It starts inside an intact
+# acinus, which holds its cells in place (see spatial_params.origin_confinement) — this long in-situ
+# phase is where the tumour's TRUNCAL copy-number alterations are made, since anything that takes over
+# the founding patch before a cell leaves is carried by every cell afterwards. When the architecture
+# gives way, the lesion's descendants spread along the ductal tree (cross_gland dispersal — the ducts
+# are connected in 3-D), filling ~8 duct cross-sections. Invasion is BREACH-LIMITED: crossing the
+# epithelial wall (`breach`) is RARE (low prop_breach), but once a clone is out the stroma is PERMISSIVE
+# (low stromal_hazard) and dispersal is fast, so the escaped clone spreads readily into an INVASIVE
+# (IDC) carcinoma. Because the breach clone also reaches the connected ducts via cross_gland, invasion
+# starts multifocally and COALESCES into a confluent invasive region with residual DCIS ducts embedded —
+# a realistic IDC-with-DCIS section (matches the Janesick 10x Visium breast sample: several DCIS ducts +
+# a dominant invasive region). The result is a tumour with a clonal copy-number backbone but SEVERAL
+# subclones in every duct and in the stroma — polyclonal in-situ disease and polyclonal invasion, which
+# is what single-cell studies of in-situ breast lesions find. `grow(n_steps=...)` sets how far the
+# invasion has coalesced.
 #
 # SCALE / COST. ~10^6 cells is affordable because (a) tau-leaping advances a whole clone (K cells) in
 # one Poisson draw, so cost scales with #clones x #demes, NOT #cells; (b) `coarsen_passengers` keeps
@@ -80,53 +85,77 @@ selection_params:
   # trait (breach/stromal/met/resistance) count toward it; a clone past the ceiling is non-viable. Caps
   # biologically-absurd many-driver clones. Engine default is 1000 (off) to preserve e.g. hypermutation.
   max_mut_drivers: 12
+  # WHAT THE INVASION / NICHE TRAITS READ OFF THE GENOME. The default, "dosage", lets any copy-number
+  # change move a trait, because the trait's genes are scattered over the genome and a gained segment
+  # is bound to carry some of them. Combined with the go-or-grow costs above — which charge a clone
+  # for HAVING a trait wherever it is — that made ordinary copy-number drift a proliferation tax and
+  # left essentially no copy-number change worth having, so nothing could sweep and the tumour had no
+  # clonal copy-number layer. "mutation" makes a trait something a clone has to EARN by mutating the
+  # trait's genes: gaining an arm full of unmutated invasion genes does not make a cell invasive. The
+  # traits still gate invasion exactly as before, and amplifying an already-mutated trait gene still
+  # strengthens the trait; only the free ride from copy number is removed.
+  trait_source: mutation
 
 cell_params:
   cancer:
     division_rate: 0.7
     death_rate: 0.05
-    max_birth_rate: 0.95
+    # HEADROOM FOR SELECTION. `max_birth_rate` is the ceiling a clone's division rate can evolve to.
+    # At 0.95 against a starting rate of 0.7 a clone runs out of room after one or two good hits, and
+    # from then on every further alteration is effectively neutral — nothing sweeps, everything drifts,
+    # and the tumour keeps no clonal structure. 2.0 leaves room for a lineage to keep winning, which is
+    # what makes an early alteration able to take over its patch of tissue. `maximum_death_rate` in
+    # deme_params is raised with it: crowding death has to be able to reach the fastest clone's
+    # division rate or the per-deme carrying capacity stops binding and demes overfill.
+    max_birth_rate: 2.0
     # cm-scale-realistic per-division mutational input: neutral diversity comes from POPULATION SIZE
     # (~10^6 cells), not per-cell hypermutation, so few driver-defining events/division and rare
     # CNA/WGD -> bounded #genotypes. The neutral passenger burden is reconstructed per sampled cell,
     # lineage-consistently, at assay time (coalescent SNV overlay). `n_snvs_per_allele` sets that
     # burden; 0.1 gives a realistic per-cell TMB (~40 mutated sites / 6000 genes) and enough shared
-    # passenger sites to resolve the lineage — at the tuned 6000-gene genome this keeps `mutation_rate`
-    # (the driver/clone-defining rate) at 0.3 so the clone count stays bounded.
-    mutation_rate: 0.3
+    # passenger sites to resolve the lineage. The driver/clone-defining rate that keeps the clone count
+    # bounded (`mutation_rate`, 0.3) now comes from the subtype preset below.
     n_snvs_per_allele: 0.1
     dispersal_rate: 0.9
-    # CHROMOSOMAL INSTABILITY. Breast carcinomas are copy-number-driven: a typical tumour has a large
-    # part of its genome at a non-diploid copy number and a sizeable minority of tumours have been
-    # through a whole-genome doubling. `cnv_prob` is the share of mutating divisions that produce a
-    # copy-number change rather than a point mutation, and it is the dial that sets how altered the
-    # genome ends up. Measured on this config at a reduced grid: 0.02 leaves the tumour essentially
-    # flat and diploid (0.5% of the genome altered), 0.15 gives 20%, and 0.35 gives 31% of the genome
-    # altered, an average ploidy of 2.6, a quarter of cells past a whole-genome doubling, and
-    # essentially every cell carrying at least one copy-number change. That last set of numbers is
-    # what a real breast tumour looks like, so 0.35 is the default.
-    cnv_prob: 0.35
-    # Whole-genome doubling rate per mutating division. Small, because a doubling is a rare one-off
-    # event, but not vanishing: at 0.02 roughly a quarter of the cells in the final tumour descend
-    # from a doubled ancestor, which is the proportion seen in real breast tumours. It is also what
-    # puts truncal variants on more than one copy, so a caller that assumes one copy per variant
-    # reports the clonal peak above 1 — exactly as it does on real part-doubled tumours.
-    wgd_rate: 0.02
+    # RECEPTOR SUBTYPE. Breast cancers differ in how chromosomally unstable they are, and this one
+    # word sets the three numbers that difference shows up in: how much of the genome ends up at a
+    # non-diploid copy number (`cnv_prob`), how often a whole-genome doubling happens (`wgd_rate`),
+    # and how fast new clone-defining events arise at all (`mutation_rate`).
+    #
+    #            cnv_prob   wgd_rate   mutation_rate
+    #   ER+        0.045      0.001         0.30      oestrogen-receptor-positive / luminal: the
+    #                                                 quieter genome — about a third of the genome
+    #                                                 altered, average ploidy near 2, with a doubling
+    #                                                 in a minority of runs
+    #   TNBC       0.100      0.006         0.45      triple-negative / basal-like: roughly twice the
+    #                                                 copy-number burden and several times the
+    #                                                 doubling rate
+    #
+    # This sample is ER+, the commoner subtype. Write `subtype: TNBC` for the other one, or write any
+    # of the three knobs explicitly below and your value wins over the preset. Nothing else about the
+    # subtypes is modelled — no receptor signalling, no subtype-specific drivers, no treatment
+    # response. They are three instability dials and that is all.
+    #
+    # These numbers are much lower than they used to be because `trait_source: mutation` above removed
+    # a hidden brake: copy-number change used to raise the invasion traits, which cost proliferation,
+    # which quietly purged most alterations. With that gone, `cnv_prob` is what sets the burden, and it
+    # has to be set honestly. A LOW ongoing rate is also what lets an early alteration stay clonal:
+    # every later copy-number change on the same segment overwrites the truncal state in that lineage,
+    # so a noisy genome erodes its own clonal layer as the tumour grows.
+    subtype: ER+
 
-# The mutations the founder cell already carried the moment it became cancer: the clock-like burden
-# its normal lineage had been accumulating for years, plus the driver hits that transformed it. These
-# are what a tumour's CLONAL peak is made of — they sit in the most recent common ancestor of every
-# tumour cell, so every cell inherits them. Without this block the founder genome is blank, and then
-# nothing can ever be clonal: a growing, spatially structured tumour does not sweep later mutations to
-# fixation, so the site-frequency spectrum comes out with no clonal peak at all. 40 neutral sites puts
-# about half of a sampled cell's mutated sites in the clonal peak at this tumour's size — the realistic
-# share — and a larger share in a small, barely-diversified lesion, which is what such a lesion really
-# looks like. 2 driver hits is the usual count for a transformed breast epithelial cell; they are the
-# only part of this block that changes the founder's fitness, and only oncogenes and tumour
-# suppressors are eligible, so the tumour does not start out already invasive or drug-resistant.
-founder_mutations:
-  n_passenger: 40
-  n_driver: 2
+# NOTHING IS SEEDED INTO THE FOUNDER. The founder cell starts with a blank genome — diploid on every
+# segment, carrying no mutation — and the tumour's whole CLONAL layer is built by the simulation. That
+# is the job of the closed founding acinus below (spatial_params.origin_confinement): while the acinus
+# is intact its cells cannot leave, so a lineage that acquires an alteration can sweep the patch, and
+# once it has, every cell that ever exists descends from it. Copy number and point mutations become
+# truncal by the same route, and the truncal burden is a measured outcome of the run rather than a
+# number written down here.
+#
+# (`founder_mutations: {n_passenger: N, n_driver: M}` is still supported and is the honest way to
+# represent a PRE-transformation burden — the clock-like sites a normal lineage accumulated over years
+# before it transformed — if a study needs one. It is deliberately not part of this configuration,
+# because seeding it on top of a sweep double-counts the trunk.)
 
 # The patient's own inherited variants — present in EVERY cell, tumour and normal alike, because the
 # patient was born with them. Two analyses need them. A bulk sample is a mixture of tumour and normal
@@ -144,6 +173,10 @@ deme_params:
   carrying_capacity: 30      # default (stroma); K_duct overrides duct demes below
   initial_cancer_cells: 20   # an established micro-lesion in ONE duct (a fraction of K_duct)
   resident_pressure_ref: 0.2
+  # Crowding death has to be able to out-run the FASTEST clone's division rate, or a clone that has
+  # evolved past it grows without limit and its deme overfills. Kept above cell_params.cancer's
+  # max_birth_rate (2.0), which is why raising that ceiling means raising this one too.
+  maximum_death_rate: 2.2
 
 spatial_params:
   grid_size: 170             # ~8.5 mm at ~50 um/deme — larger than a 6.5 mm Visium capture
@@ -165,3 +198,33 @@ spatial_params:
   breach_gated_invasion: true
   epithelial_barrier: 0.0
   stromal_hazard: 0.6        # PERMISSIVE stroma: once a clone breaches, it invades/disperses readily
+  # THE FOUNDING ACINUS IS CLOSED AT FIRST. A lesion starts inside one intact acinus: the myoepithelial
+  # layer is continuous, the basement membrane unbroken, and a daughter cell has nowhere to go. As the
+  # lesion grows it distends the duct and that architecture is progressively lost, after which its cells
+  # leave as freely as anywhere else. This is what gives the tumour a CLONAL copy-number layer: an
+  # alteration that takes over the founding patch before any cell has left is carried by every cell that
+  # ever exists, because every later cell descends from that patch. At the ordinary dispersal_rate cells
+  # leave within a couple of generations, far too early for anything to take hold, and the tumour ends
+  # up with no truncal copy-number alteration at all.
+  #
+  # It applies to the FOUNDING PATCH ONLY, and only for a while. Holding cells inside every duct would
+  # let one clone homogenise a whole duct and give monoclonal in-situ disease, which is not what the
+  # data show: profiled cell by cell, most in-situ breast lesions are polyclonal, and the same clones
+  # are found on both sides of the basement membrane. Polyclonal in-situ disease and polyclonal invasion
+  # are the correct behaviour here and this must not disturb them.
+  origin_confinement:
+    # Dispersal rate inside the founding patch, as a MULTIPLE of dispersal_rate above. 0 = closed: while
+    # the acinus is intact nothing gets out. A multiple rather than an absolute rate, so a clone that
+    # evolves its own dispersal still shows through. Absent (no origin_confinement block) = feature off.
+    dispersal_factor: 0.0
+    # The countdown does not start until the patch is this full — a handful of cells in an acinus is not
+    # distending anything yet. A fraction of the patch's carrying capacity, so it means the same thing
+    # at any grid size.
+    established_at: 0.5
+    # Generations of distension after that before the wall gives way — a long in-situ phase, which is
+    # what in-situ breast disease is. It has to be long because at this (deliberately low) instability
+    # a lineage needs time to acquire alterations AND take over the patch: measured on this config, the
+    # patch is at a single dominant altered state by ~1000-1200 generations and is still ONE deme.
+    # Shorter windows leave the founding lineage barely altered and the tumour ends up with no clonal
+    # copy-number layer. Once released, never re-confined.
+    generations: 1200

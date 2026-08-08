@@ -11,7 +11,7 @@ class Selection(object):
                  driver_effects=1.1, dispersal_effects=1.1, treatment_resistant_effects=1.1, immune_resistant_effects=1.1,
                  breach_effects=1.1, stromal_survival_effects=1.1, met_survival_effects=1.1,
                  breach_cost=0.0, stromal_survival_cost=0.0, met_survival_cost=0.0,
-                 treatment_resistance_cost=0.0,
+                 treatment_resistance_cost=0.0, trait_source="dosage",
                  selection_mode="gene", s_arm=None, arm_baseline=2.0,
                  max_ploidy=6, max_cn=12, max_nullisomy=2, max_mut_drivers=1000, rng=None,
                  epistasis_params=None, dependency_params=None, layout_seed=None, ):
@@ -71,6 +71,31 @@ class Selection(object):
         self.stromal_survival_cost = stromal_survival_cost
         self.met_survival_cost = met_survival_cost
         self.treatment_resistance_cost = treatment_resistance_cost
+
+        # What a dissemination/niche TRAIT reads off the genome — breach, stromal_survival,
+        # met_survival, immune_resistance and treatment_resistance only. The oncogene/TSG DRIVER
+        # fitness is untouched by this and always reads copy-number dosage (that is the CINner model
+        # and it is the point of the copy-number layer).
+        #
+        #   "dosage"   (default, historical): the trait reads the ploidy-normalised dosage of ALL
+        #              trait-gene copies, mutated or not. Because a trait axis is scattered uniformly
+        #              at ``prop_*``, a segment's trait-gene count fluctuates binomially around the
+        #              genome mean, so almost every copy-number change moves the trait — a gain of a
+        #              segment that happens to be trait-dense switches the trait on even though no
+        #              trait gene was ever mutated. Paired with a ``*_cost`` that makes the trait cost
+        #              proliferation everywhere, that turns ordinary copy-number drift into a
+        #              proliferation tax and leaves almost no CNA net-beneficial.
+        #   "mutation" (opt-in): the trait reads only SNV-MUTATED trait-gene copies. Formally it is
+        #              the dosage form divided by the same genome's all-wild-type trait fitness, so
+        #              the copy-number-only component cancels exactly: an arm-level gain of unmutated
+        #              invasion genes does not make a cell invasive. The trait still has to be EARNED
+        #              by mutation (and, in the ductal field, still gates invasion), and it is still
+        #              graded by the mutant allele's own dosage, so amplifying a mutated trait gene
+        #              still strengthens the trait and a whole-genome duplication leaves it unchanged.
+        if trait_source not in ("dosage", "mutation"):
+            raise ValueError(
+                f"trait_source must be 'dosage' or 'mutation', got {trait_source!r}")
+        self.trait_source = trait_source
 
         # Selection model. "gene" (default) = the abstract CINner gene-driver model
         # (oncogene/TSG mutation + copy-number fitness via n_wt/n_mut counts). "arm" = the
@@ -339,6 +364,29 @@ class Selection(object):
         log_base = 2 * n_total * log_wt          # baseline: 2*n_total wild-type copies, no mutations
         return float(np.exp(log_f - log_base))
 
+    def _trait_fitness(self, n_wt, n_mut, ploidy, n_total, effect):
+        """Relative fitness of ONE dissemination/niche trait axis, under ``trait_source``.
+
+        ``"dosage"`` is exactly :meth:`_rel_fitness` with (effect, effect**2) — the historical
+        behaviour, kept bit-for-bit.
+
+        ``"mutation"`` drops the wild-type dosage term, i.e. it measures the axis RELATIVE TO THE SAME
+        COPY-NUMBER STATE with every trait gene wild-type::
+
+            F_mut = F_dosage(n_wt, n_mut) / F_dosage(n_wt + n_mut, 0)
+                  = exp[(2 n_mut / ploidy) (log effect**2 - log effect)]
+                  = effect ** (2 n_mut / ploidy)
+
+        so the copy-number-only part cancels identically and only mutated copies move the trait. A
+        single heterozygous trait SNV in a diploid cell gives ``effect`` under BOTH modes — the two
+        agree on what a mutation is worth and disagree only about what a copy-number change is worth.
+        """
+        if self.trait_source == "dosage":
+            return self._rel_fitness(n_wt, n_mut, ploidy, n_total, effect, effect ** 2)
+        if ploidy <= 0 or n_total == 0:
+            return 1.0
+        return float(np.exp((2.0 * n_mut / ploidy) * np.log(effect)))
+
     def _arm_division_rate(self, genome_summary):
         """CINner per-arm copy-number fitness: prod_seg s_arm[seg] ** (cn[seg] - baseline).
 
@@ -382,28 +430,28 @@ class Selection(object):
 
     def update_immune_resistance(self, genome_summary, **kwargs):
         e = self.immune_resistant_effects
-        return self._rel_fitness(genome_summary['n_wt_ir'], genome_summary['n_mut_ir'],
-                                 genome_summary['ploidy'], self.N_ir, e, e**2)
+        return self._trait_fitness(genome_summary['n_wt_ir'], genome_summary['n_mut_ir'],
+                                   genome_summary['ploidy'], self.N_ir, e)
 
     def update_treatment_resistance(self, genome_summary, **kwargs):
         e = self.treatment_resistant_effects
-        return self._rel_fitness(genome_summary['n_wt_tr'], genome_summary['n_mut_tr'],
-                                 genome_summary['ploidy'], self.N_tr, e, e**2)
+        return self._trait_fitness(genome_summary['n_wt_tr'], genome_summary['n_mut_tr'],
+                                   genome_summary['ploidy'], self.N_tr, e)
 
     def update_breach(self, genome_summary, **kwargs):
         e = self.breach_effects
-        return self._rel_fitness(genome_summary['n_wt_breach'], genome_summary['n_mut_breach'],
-                                 genome_summary['ploidy'], self.N_breach, e, e**2)
+        return self._trait_fitness(genome_summary['n_wt_breach'], genome_summary['n_mut_breach'],
+                                   genome_summary['ploidy'], self.N_breach, e)
 
     def update_stromal_survival(self, genome_summary, **kwargs):
         e = self.stromal_survival_effects
-        return self._rel_fitness(genome_summary['n_wt_ss'], genome_summary['n_mut_ss'],
-                                 genome_summary['ploidy'], self.N_ss, e, e**2)
+        return self._trait_fitness(genome_summary['n_wt_ss'], genome_summary['n_mut_ss'],
+                                   genome_summary['ploidy'], self.N_ss, e)
 
     def update_met_survival(self, genome_summary, **kwargs):
         e = self.met_survival_effects
-        return self._rel_fitness(genome_summary['n_wt_ms'], genome_summary['n_mut_ms'],
-                                 genome_summary['ploidy'], self.N_ms, e, e**2)
+        return self._trait_fitness(genome_summary['n_wt_ms'], genome_summary['n_mut_ms'],
+                                   genome_summary['ploidy'], self.N_ms, e)
 
     def proliferation_cost(self, ep):
         """Go-or-grow trade-off multiplier on ``division_rate`` (R15): each dissemination/niche trait

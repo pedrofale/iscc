@@ -36,6 +36,11 @@ selection_params:
   met_survival_cost: 0.15
   treatment_resistance_cost: 0.3
   max_mut_drivers: 12
+  # Invasion / niche traits are EARNED BY MUTATION, not handed out by copy number — identical to the
+  # tutorial. See notebooks/example_config.yaml for why: under the dosage reading, every copy-number
+  # change nudged the traits, the go-or-grow costs then charged the clone for them, and the result was
+  # a proliferation tax that left no copy-number change worth having and no clonal copy-number layer.
+  trait_source: mutation
   # --- the landing's ADDITIONS: metastasis + treatment (0 in the tutorial) ---
   prop_met_survival: 0.015
   met_survival_effects: 3.0
@@ -50,23 +55,21 @@ cell_params:
   cancer:                  # identical to example_config.yaml
     division_rate: 0.7
     death_rate: 0.05
-    max_birth_rate: 0.95
-    mutation_rate: 0.3
+    # Headroom for selection, identical to example_config.yaml: at a ceiling of 0.95 a clone runs out
+    # of room after one or two good hits and nothing sweeps any more. deme_params.maximum_death_rate
+    # is raised with it so the per-deme carrying capacity still binds.
+    max_birth_rate: 2.0
     n_snvs_per_allele: 0.1
     dispersal_rate: 0.9
-    # Chromosomal instability, identical to example_config.yaml: 0.35 of mutating divisions produce a
-    # copy-number change rather than a point mutation, which lands the tumour at ~31% of the genome
-    # altered and an average ploidy of 2.6 — the range a real breast carcinoma sits in. A doubling
-    # rate of 0.02 leaves about a quarter of the final cells descended from a doubled ancestor.
-    cnv_prob: 0.35
-    wgd_rate: 0.02
+    # Receptor subtype, identical to example_config.yaml: one word for the three instability numbers
+    # the subtypes differ in — copy-number burden (cnv_prob 0.045), whole-genome-doubling rate
+    # (wgd_rate 0.001) and ongoing clone-defining mutation (mutation_rate 0.30). `TNBC` is the other
+    # preset (0.100 / 0.006 / 0.45); any knob written explicitly wins over the preset.
+    subtype: ER+
 
-# The mutations the founder already carried when it transformed — identical to example_config.yaml.
-# They are the tumour's clonal layer: present in the common ancestor of every tumour cell, so every
-# cell inherits them, and without them nothing in the tumour can ever be clonal.
-founder_mutations:
-  n_passenger: 40
-  n_driver: 2
+# Nothing is seeded into the founder — identical to example_config.yaml. The founder starts diploid
+# with a blank genome and the closed founding acinus below builds the whole clonal layer, copy number
+# and point mutations alike.
 
 # The patient's inherited variants — identical to example_config.yaml. Present in every cell, tumour and
 # normal, and drawn from the neutral genome so they never change how a cell behaves.
@@ -78,6 +81,7 @@ deme_params:              # identical to example_config.yaml
   carrying_capacity: 30
   initial_cancer_cells: 20
   resident_pressure_ref: 0.2
+  maximum_death_rate: 2.2   # must stay above cell_params.cancer.max_birth_rate or demes overfill
 
 spatial_params:
   # identical to example_config.yaml
@@ -94,6 +98,14 @@ spatial_params:
   breach_gated_invasion: true   # invasion requires breach (identical to example_config.yaml)
   epithelial_barrier: 0.0
   stromal_hazard: 0.6
+  # The founding acinus is closed at first — identical to example_config.yaml, and the reason this
+  # tumour has a clonal copy-number layer at all. It applies to the FOUNDING PATCH only and only until
+  # the lesion has distended it; every other duct stays free to be colonised by several clones, which
+  # is what keeps the in-situ disease and the invasion polyclonal.
+  origin_confinement:
+    dispersal_factor: 0.0   # 0 = nothing leaves while the acinus is intact (a multiple of dispersal_rate)
+    established_at: 0.5     # the countdown starts once the patch is half full
+    generations: 1200       # generations of distension before the wall gives way; then never re-confined
   # metastasis compartment (landing-only), same cell granularity as the primary
   met_grid_size: 170
   K_met: 60

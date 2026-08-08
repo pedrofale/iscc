@@ -164,6 +164,12 @@ class Cell(object):
         # stromal hazard), mapped from a relative fitness >=1 into [0,1) exactly like immune
         # resistance. With prop_breach/prop_stromal_survival=0 (default) N_*=0 -> update_* returns
         # 1 -> trait 0, so this is a no-op and growth is byte-identical.
+        #
+        # WHAT the update_* below read off the genome is the selection model's ``trait_source``:
+        # "dosage" (default) uses the total copies of the axis's genes, so copy-number change moves
+        # the trait; "mutation" uses only the SNV-mutated copies, so the trait has to be earned by
+        # mutation. The 1 - 1/F map is the same either way, and so is the oncogene/TSG driver fitness
+        # in update_division_rate above, which always reads dosage.
         self.evolutionary_parameters['breach'] = max(
             0.0, 1.0 - 1.0 / selection.update_breach(gs))
         self.evolutionary_parameters['stromal_survival'] = max(
@@ -259,6 +265,12 @@ class Cell(object):
         # allele's bitset; every driver position on it changes copy number by `sign`.
         # Wild-type copies that change = category positions in the segment minus the
         # mutated ones on this allele.
+        #
+        # Every category's wild-type count is maintained here whatever the selection model does with
+        # it: these counts are the genome's ground truth (and are read back by the assay/clone
+        # exports), not a fitness cache. Under ``trait_source="mutation"`` the n_wt_* of the four
+        # TRAIT axes simply stop feeding the trait value, so this bookkeeping is unchanged and only
+        # Selection's reading of it differs.
         n_mut_onc = int(allele_bits[selection.onc[seg]].sum())
         n_wt_onc = len(selection.onc[seg]) - n_mut_onc
         self.genome_summary['n_mut_onc'] += sign*n_mut_onc
