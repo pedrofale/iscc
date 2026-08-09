@@ -201,7 +201,7 @@ md(r"""Multi-focal disease: several separate duct foci, three of them inside the
 md(r"""## 3. The Visium slide on the tissue
 
 `section_frac=1.0` places the section on the fixed 10x v1 slide (78 x 64 = 4,992 spots) and renders
-the slide's own tissue image. `run` pools the cells under each spot and emits UMI counts.""")
+the slide's own tissue image. `run` pools the cells under each spot and emits unique-molecular-identifier (UMI) counts.""")
 
 code(r"""vz = Visium(seed=10, section_frac=1.0, spot_pitch=2.0, spot_radius=0.55, count_model="dm",
             mu_counts=8000.0, sigma_counts=0.45, field_lengthscale=14.0, field_sigma=0.6,

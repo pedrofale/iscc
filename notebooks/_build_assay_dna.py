@@ -28,8 +28,7 @@ The substrate is a centimetre-scale duct-and-stroma lesion: a single transformed
 that spread to its neighbours, broke through the basement membrane and invaded the stroma. It takes
 about two minutes to grow.
 
-`to_anndata` packs the whole thing into one `AnnData` — expression in `X`, the SNV and copy-number
-matrices in `layers`, clone / cell type / coordinates in `obs`, gene roles in `var`.""")
+`to_anndata` packs the whole thing into one `AnnData` — expression in `X`, the single-nucleotide-variant (SNV) and copy-number matrices in `layers`, clone / cell type / coordinates in `obs`, gene roles in `var`.""")
 
 code(r"""%matplotlib inline
 import os, sys, warnings
@@ -281,8 +280,7 @@ in the tube is normal. Everything in section 3 follows from that.""")
 md(r"""## 3. Bulk whole-genome sequencing
 
 `bulkDNA` pools every cell into one library. Coverage at a locus is proportional to the pooled copy
-number times a per-locus capture efficiency, and the alt count is a binomial draw at the pooled alt
-fraction with a sequencing-error floor.""")
+number times a per-locus capture efficiency, and the alt count is a binomial draw at the pooled alt fraction — the variant allele fraction, **VAF** — with a sequencing-error floor.""")
 
 code(r"""wgs = bulkDNA(breadth="wgs", seed=1, mu_depth=100.0).run(sample, germline_sites=tumor.germline_sites)
 h = wgs.hypers.to_dict()
@@ -401,8 +399,7 @@ from coverage alone. A segment that is 15% brighter than baseline could be a big
 a small gain in most cells, or a modest gain in a genome that is already more than diploid — purity
 and ploidy trade off against each other and depth cannot tell them apart.
 
-ASCAT, Battenberg, Sequenza, FACETS, PureCN and ABSOLUTE all break that tie the same way: fit **two**
-signals jointly, one from coverage and one from allele balance.
+ASCAT, Battenberg, Sequenza, FACETS, PureCN and ABSOLUTE all break that tie the same way: fit **two** signals jointly, one from coverage and one from allele balance (the B-allele frequency, **BAF**, the fraction of reads carrying the B allele).
 
 $$\text{LogR}\;\propto\;\rho\,(n_{\text{major}}+n_{\text{minor}}) + 2(1-\rho)
 \qquad

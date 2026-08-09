@@ -17,7 +17,8 @@ md(r"""# DNA read emission: count/coverage matrix -> FASTQ / BAM
 
 Read-level realism for DNA (`iscc.data.reads`), following SISTEM (Weiner & Bansal 2025):
 per-cell full reference -> copy-number coverage distribution -> third-party short-read
-simulator -> BAM.
+simulator -> BAM. Throughout, **VAF** is the variant allele fraction and **UMI** a unique
+molecular identifier.
 
 ```
 count/coverage matrix  ──►  Reference{synthetic|real}
