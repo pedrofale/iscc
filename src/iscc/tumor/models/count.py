@@ -2563,19 +2563,30 @@ class GenotypeTumor:
         return plan, subsample
 
     def primary_window(self, side, center=None):
-        """Deme indices of a ``side``×``side`` square window of the PRIMARY grid, centred on
-        ``center`` ``(row, col)`` or the grid centre. Pass to ``make_cell_data(region=...)`` to
-        materialise a dense spatial patch (e.g. a Visium slide's footprint) of a cm-scale tumour at
-        real cell density, rather than thinning the whole tumour to a uniform subsample."""
+        """Deme indices of a rectangular window of the PRIMARY grid, centred on ``center``
+        ``(row, col)`` or the grid centre. Pass to ``make_cell_data(region=...)`` to materialise a
+        dense spatial patch (e.g. a Visium slide's footprint) of a cm-scale tumour at real cell
+        density, rather than thinning the whole tumour to a uniform subsample.
+
+        Parameters
+        ----------
+        side : int or tuple of int
+            Window size in demes: an int for a ``side``×``side`` square, or ``(rows, cols)`` for a
+            rectangle. A real capture area is rarely square — the Visium v1 slide is 78×64 spots,
+            i.e. wider than it is tall — so a rectangle is what fills one.
+        center : tuple of int, optional
+            ``(row, col)`` centre. Defaults to the grid centre. A window that would overhang the
+            grid is SHIFTED back onto it, so the full requested size is always returned (clipped
+            only if it is larger than the grid) — size a window to a capture area and you get that
+            area, not a sliver of it.
+        """
         G = self.grid_size
+        n_r, n_c = (side, side) if np.isscalar(side) else side
+        n_r, n_c = min(int(n_r), G), min(int(n_c), G)
         cr, cc = center if center is not None else (G // 2, G // 2)
-        half = side // 2
-        demes = []
-        for r in range(max(0, cr - half), min(G, cr - half + side)):
-            row = r * G
-            for c in range(max(0, cc - half), min(G, cc - half + side)):
-                demes.append(row + c)
-        return demes
+        r0 = min(max(0, int(cr) - n_r // 2), G - n_r)
+        c0 = min(max(0, int(cc) - n_c // 2), G - n_c)
+        return [r * G + c for r in range(r0, r0 + n_r) for c in range(c0, c0 + n_c)]
 
     def make_cell_data(self, cell_prefix="C", max_cells=None, region=None, depth_frac=None, **kwargs):
         """Expand the per-deme genotype counts into per-cell ground-truth tables.

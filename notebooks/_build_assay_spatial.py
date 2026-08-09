@@ -36,7 +36,6 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import scanpy as sc
 import squidpy as sq
-from scipy.ndimage import uniform_filter
 from scipy.spatial import cKDTree
 
 sys.path.insert(0, os.getcwd())          # notebooks/ — the shared tumour substrate
@@ -45,6 +44,7 @@ import base_sim as B
 from iscc.data import (Visium, VisiumBatch, VisiumBatchHyperParams, morans_i,
                        estimate_visium, estimate_visium_from_assay)
 from iscc.integrations import to_anndata, clones_from_clades, clone_summary, biological_types
+from iscc.sample import Resection
 
 sc.settings.set_figure_params(dpi=80, facecolor="white")
 sc.settings.verbosity = 0
@@ -60,23 +60,30 @@ G = tumor.grid_size
 print(f"grid {G} x {G} demes, {tumor.get_tumor_size():,} cells alive, "
       f"{len(tumor.cell_data['cell_crd']):,} materialised as a whole-tumour subsample")""")
 
-md(r"""**The density trap.** A whole-tumour subsample spread over the full field leaves about *one*
-cell per Visium spot — nothing to deconvolve. So find the busiest window, then materialise **that
-window only**, at local density: `primary_window` picks the demes, `make_cell_data(region=...)`
-expands them. `depth_frac` thins each deme's cell column, which is what a thin physical section
-does.""")
+md(r"""**The density trap.** Materialising a cm-scale field means capping the cell count, and a
+capped subsample spread over the whole field leaves about *one* cell per spot — nothing to
+deconvolve. That thinning is an artefact of the cap, not of the section: raise `max_cells` and the
+density comes back.
 
-code(r"""SIDE = 90                       # window side, in demes
+So the window is set by the **slide**, not by convenience. A Visium v1 capture area is 78 × 64
+spots, which at this pitch is 156 × 110 demes — wider than it is tall, and smaller than the
+170 × 170 field. We take the densest window of exactly that shape, so the tissue covers the whole
+capture area: `primary_window` picks the demes, `make_cell_data(region=...)` expands them, and
+`depth_frac` thins each deme's cell column the way a thin physical section does.""")
+
+code(r"""WIN = Visium.capture_shape(spot_pitch=2.0)     # (110, 156) demes — what one v1 slide covers
 crd = tumor.cell_data["cell_crd"]
 cancer = biological_types(tumor.cell_data["cell_type"].iloc[:, 0]) == "cancer"
-dens, _, _ = np.histogram2d(crd["row"].values[cancer], crd["col"].values[cancer],
-                            bins=G, range=[[0, G], [0, G]])
-row_c, col_c = np.unravel_index(uniform_filter(dens, SIDE, mode="constant").argmax(), dens.shape)
+center = (int(crd["row"][cancer].median()), int(crd["col"][cancer].median()))   # sit it on the lesion
 
-section = tumor.make_cell_data(region=tumor.primary_window(side=SIDE, center=(row_c, col_c)),
-                               depth_frac=0.10, max_cells=60000)
+# Resection.slice, not tumor.make_cell_data: a section is a SAMPLE, and materialising it on the
+# tumour would replace `tumor.cell_data` with it. depth_frac 0.2 is the real section thickness — a
+# ~10 um microtome cut through a ~50 um deme column — and max_cells is set above what that implies
+# so the memory cap never governs the density instead.
+section = Resection(tumor).slice(tumor.primary_window(side=WIN, center=center),
+                                 depth_frac=0.20, max_cells=60000)
 types = pd.Series(biological_types(section["cell_type"].iloc[:, 0]), index=section["cell_crd"].index)
-print(f"window centred on deme ({row_c}, {col_c}), {SIDE} x {SIDE} demes")
+print(f"one capture area, {WIN[0]} x {WIN[1]} demes, centred on deme {center}")
 print(f"{len(section['cell_crd']):,} cells in the section  ->  "
       + ", ".join(f"{n:,} {t}" for t, n in types.value_counts().items()))""")
 
@@ -175,15 +182,16 @@ md(r"""## 2. An H&E image of the tumour
 just the cells we materialised. Dense duct cores read dark purple, loose stroma pale pink.""")
 
 code(r"""he, px = tumor.he_image(px=4, darkness=0.9, sigma_frac=0.5)
-lo_r, lo_c = int((row_c - SIDE // 2) * px), int((col_c - SIDE // 2) * px)
-span = int(SIDE * px)
+h_span, w_span = int(WIN[0] * px), int(WIN[1] * px)
+lo_r = int(np.clip((center[0] - WIN[0] // 2) * px, 0, he.shape[0] - h_span))
+lo_c = int(np.clip((center[1] - WIN[1] // 2) * px, 0, he.shape[1] - w_span))
 
 fig, axes = plt.subplots(1, 2, figsize=(12, 6))
 axes[0].imshow(he)
-axes[0].add_patch(patches.Rectangle((lo_c, lo_r), span, span, fill=False, ec="k", lw=1.6))
+axes[0].add_patch(patches.Rectangle((lo_c, lo_r), w_span, h_span, fill=False, ec="k", lw=1.6))
 axes[0].set_title(f"whole lesion, {G} x {G} demes  (box = the assayed window)")
-axes[1].imshow(he[lo_r:lo_r + span, lo_c:lo_c + span])
-axes[1].set_title(f"the window, {SIDE} x {SIDE} demes")
+axes[1].imshow(he[lo_r:lo_r + h_span, lo_c:lo_c + w_span])
+axes[1].set_title(f"the window, {WIN[0]} x {WIN[1]} demes = one capture area")
 for a in axes:
     a.axis("off")
 plt.tight_layout(); plt.show()""")
@@ -195,19 +203,35 @@ md(r"""## 3. The Visium slide on the tissue
 `section_frac=1.0` places the section on the fixed 10x v1 slide (78 x 64 = 4,992 spots) and renders
 the slide's own tissue image. `run` pools the cells under each spot and emits UMI counts.""")
 
-code(r"""vz = Visium(seed=10, section_frac=1.0, spot_pitch=2.0, spot_radius=1.2, count_model="dm",
+code(r"""vz = Visium(seed=10, section_frac=1.0, spot_pitch=2.0, spot_radius=0.55, count_model="dm",
             mu_counts=8000.0, sigma_counts=0.45, field_lengthscale=14.0, field_sigma=0.6,
             edge_sigma=0.3, ambient_frac=0.05).run(section)
 spots = vz.to_anndata()
-on_tissue = spots.obs["n_cells"].values > 0
+n_cells = spots.obs["n_cells"].values
+on_tissue = n_cells > 0
 print(f"{spots.n_obs} spots on the slide, {on_tissue.sum()} of them over tissue")
-print(f"cells per on-tissue spot: median {np.median(spots.obs['n_cells'][on_tissue]):.0f}, "
-      f"mean {spots.obs['n_cells'][on_tissue].mean():.1f}, max {spots.obs['n_cells'].max()}")""")
 
-md(r"""**Median 5 cells per spot** — the real Visium range. `spot_members` lists the cell ids under
-each spot, so the ground-truth label of a spot is a majority vote over its cells. Vote over the
-clone labels, never over the raw genotype id: there are more than a thousand distinct genotypes in
-this section.""")
+# Cells per spot is NOT one number: it tracks the tissue. Report it by what the spot is sitting on,
+# or a capture area that is mostly healthy stroma averages the structure away.
+ctype = dict(zip(section["cell_crd"].index, types.values))
+cancer_frac = np.array([np.mean([ctype[i] == "cancer" for i in ids.split(",") if i]) if ids else np.nan
+                        for ids in vz.spot_cell_ids["cell_ids"].values], float)
+for lab, m in (("tumour (>50% cancer)", on_tissue & (cancer_frac > 0.5)),
+               ("margin (10-50%)     ", on_tissue & (cancer_frac > 0.1) & (cancer_frac <= 0.5)),
+               ("stroma (<10%)       ", on_tissue & (cancer_frac <= 0.1))):
+    v = n_cells[m]
+    if len(v):
+        print(f"  {lab}: {m.sum():>5,} spots | cells/spot median {np.median(v):.0f}, "
+              f"90th pct {np.percentile(v, 90):.0f}, max {v.max()}")""")
+
+md(r"""**Tumour spots hold 5-10 cells, healthy stroma 2** — both the real Visium range, and the
+gradient is the point: spot resolution is not a fixed number, it is whatever the tissue under the
+spot happens to be. A single median over the whole capture area would hide that, because most of a
+6.5 mm slide laid on this lesion is stroma.
+
+`spot_cell_ids` lists the cells under each spot, so the ground-truth label of a spot is a majority
+vote over them. Vote over the clone labels, never over the raw genotype id: there are more than a
+thousand distinct genotypes in this section.""")
 
 code(r"""def majority(labels, empty):
     # per-spot majority vote of a per-cell label Series; NaNs (e.g. normal cells) ignored
@@ -317,9 +341,9 @@ markers = list(np.log2((by_type_expr.loc["cancer"] + 1) / (by_type_expr.loc["str
 
 fig, axes = plt.subplots(1, 3, figsize=(15, 4.6))
 for ax, s in zip(axes, [0.0, 2.0, 6.0]):
-    a = Visium(seed=10, section_frac=1.0, spot_pitch=2.0, spot_radius=1.2, diffusion_sigma=s,
+    a = Visium(seed=10, section_frac=1.0, spot_pitch=2.0, spot_radius=0.55, diffusion_sigma=s,
                mu_counts=8000.0, field_sigma=0.0, edge_sigma=0.0,
-               ambient_frac=0.0).run(section, grid_side=SIDE)
+               ambient_frac=0.0).run(section)
     keep = a.obs["n_cells"].values > 0
     frac = (a.spot_counts[markers].sum(1) / a.obs["n_counts"].replace(0, np.nan)).values[keep]
     ax.scatter(a.spot_coords[keep, 1], a.spot_coords[keep, 0], c=frac, cmap="magma", s=9,
@@ -487,7 +511,7 @@ Visium preset keeps its own value instead of taking this one.""")
 
 md(r"""## Recap
 
-* A cm-scale field has to be **windowed** before it is assayable — `primary_window` +
+* Spot density is set by how much you **materialise**, not by the field's size — `primary_window` +
   `make_cell_data(region=..., depth_frac=...)` got us to a median of 5 cells per spot.
 * Every spot keeps its cell list, so the clone and cell-type label of a spot is a majority vote
   over ground truth, and every count can be checked against the cells that produced it.

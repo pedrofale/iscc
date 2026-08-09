@@ -35,6 +35,9 @@ import os
 import numpy as np
 import pandas as pd
 
+# The fixed 10x Visium v1 capture array: 78 x 64 hexagonally-packed spots = 4,992.
+V1_SPOT_COLS, V1_SPOT_ROWS = 78, 64
+
 
 def morans_i(values, coords, lengthscale=None):
     """Moran's I — global spatial autocorrelation of `values` at `coords` (n, 2).
@@ -216,13 +219,28 @@ class Visium(Assay):
         return np.asarray(coords, dtype=float)
 
     # -- fixed v1 slide + section placement --------------------------------------------
+    @staticmethod
+    def capture_shape(spot_pitch=2.0):
+        """``(rows, cols)`` extent of the v1 capture area, in the units ``spot_pitch`` is given in.
+
+        With ``spot_pitch`` in deme-widths this is the window of tissue one slide covers, so it is
+        what to pass to ``tumor.primary_window(side=...)`` to section exactly one capture area::
+
+            win = Visium.capture_shape(spot_pitch=2.0)          # (110, 156) demes
+            tumor.make_cell_data(region=tumor.primary_window(side=win, center=...))
+
+        The area is **wider than it is tall** (78 x 64 spots), so a tall section captures far more
+        of itself placed on the slide at ``rotation=90``."""
+        return (int(round(V1_SPOT_ROWS * spot_pitch * np.sqrt(3.0) / 2.0)),
+                int(round(V1_SPOT_COLS * spot_pitch)))
+
     def _visium_v1_layout(self):
         """The fixed 10x Visium v1 capture array: 78 x 64 hexagonally-packed spots (**4,992**).
 
         A real slide is a fixed grid of spots regardless of the tissue placed on it; ``spot_pitch``
         sets the physical spacing (100 um in v1 = one coordinate unit at the default pitch)."""
         pitch = float(self.hypers.spot_pitch)
-        n_cols, n_rows = 78, 64
+        n_cols, n_rows = V1_SPOT_COLS, V1_SPOT_ROWS
         row_dy = pitch * np.sqrt(3.0) / 2.0
         coords = [(pitch / 2.0 + ri * row_dy, pitch / 2.0 + (pitch / 2.0 if ri % 2 else 0.0) + ci * pitch)
                   for ri in range(n_rows) for ci in range(n_cols)]

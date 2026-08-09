@@ -15,15 +15,15 @@ code = lambda s: cells.append(nbf.v4.new_code_cell(s))
 
 md(r"""# DNA read emission: count/coverage matrix -> FASTQ / BAM
 
-Read-level realism for DNA (`src/iscc/data/reads/`, DESIGN_features **§C C2/C3**, milestone
-**SISTEM-faithful** (Weiner & Bansal 2025): per-cell full reference -> copy-number
-coverage distribution -> third-party short-read simulator -> BAM.
+Read-level realism for DNA (`iscc.data.reads`), following SISTEM (Weiner & Bansal 2025):
+per-cell full reference -> copy-number coverage distribution -> third-party short-read
+simulator -> BAM.
 
 ```
 count/coverage matrix  ──►  Reference{synthetic|real}
    (the universal             │  apply CNAs (dup/del) + SNVs (substitute, allele-aware)
-    interface, C1)            ▼
-                         per-cell FASTA  ──►  C1 coverage (∝ copy number, breadth-aware)
+    interface)                ▼
+                         per-cell FASTA  ──►  coverage (∝ copy number, breadth-aware)
                                               │  variants.inject(total=coverage, alt=DNA-VAF)
                                               ▼
                               DWGSIM (default) / ART  ──►  FASTQ  ──►  bwa+samtools  ──►  BAM
@@ -111,11 +111,11 @@ print("fastq              :", res["fastq"] or "(none — binary absent)")
 print("bam                :", res["bam"] or "(none — binary absent)")""")
 
 md(r"""**Backends:** synthetic reference (default, implemented) + real-genome reference (seam,
-ingests a user FASTA via the same interface, anchored to M3b). **Simulators:** DWGSIM (default)
+ingests a user FASTA via the same interface). **Simulators:** DWGSIM (default)
 + ART. **To actually emit:** `dwgsim>=0.1.13` (or `art_illumina`) for FASTQ, `bwa` + `samtools`
 for the BAM. The `variants.inject` seam is modality-generic and reused unchanged by scRNA.""")
 
-md(r"""## 5. Mutation-aware scRNA reads — and why variant calling from scRNA is hard (F7b)
+md(r"""## 5. Mutation-aware scRNA reads — and why variant calling from scRNA is hard
 
 The **same** variant seam drives scRNA: `emit_scrna_reads` conserves the assay's UMI totals and, at a
 mutated locus, splits UMIs into alt/ref at the observed RNA-VAF (`cell_rna_vaf × obs_fidelity`).

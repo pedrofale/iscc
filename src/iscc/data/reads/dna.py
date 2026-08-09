@@ -353,7 +353,13 @@ class DwgsimAdapter:
     def emit(self, ref_fa, out_prefix, coverage, **opts):
         args = self.build_command(ref_fa, out_prefix, coverage, **opts)
         run_binary(self.binary, args)
-        return collect_fastq(out_prefix) or self.expected_fastq(out_prefix)
+        # Prefer the declared read files over a glob. DWGSIM also writes a `.bfast.fastq.gz`
+        # holding the SAME reads interleaved, so globbing returns three files: that double-counts
+        # the library and hands `bwa mem` more read files than it accepts.
+        expected = self.expected_fastq(out_prefix)
+        if expected and all(os.path.exists(p) for p in expected):
+            return expected
+        return collect_fastq(out_prefix) or expected
 
 
 class ArtAdapter:
@@ -381,7 +387,13 @@ class ArtAdapter:
     def emit(self, ref_fa, out_prefix, coverage, **opts):
         args = self.build_command(ref_fa, out_prefix, coverage, **opts)
         run_binary(self.binary, args)
-        return collect_fastq(out_prefix) or self.expected_fastq(out_prefix)
+        # Prefer the declared read files over a glob. DWGSIM also writes a `.bfast.fastq.gz`
+        # holding the SAME reads interleaved, so globbing returns three files: that double-counts
+        # the library and hands `bwa mem` more read files than it accepts.
+        expected = self.expected_fastq(out_prefix)
+        if expected and all(os.path.exists(p) for p in expected):
+            return expected
+        return collect_fastq(out_prefix) or expected
 
 
 SIMULATORS = {"dwgsim": DwgsimAdapter, "art": ArtAdapter}

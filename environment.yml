@@ -1,0 +1,26 @@
+# Non-Python dependencies. iscc's own Python packages come from poetry — this file covers only what
+# pip cannot install: native binaries that iscc shells out to, and the system Graphviz library.
+#
+#   conda env create -f environment.yml
+#   conda activate iscc
+#   poetry install                      # add --with extra for the notebook/tutorial stack
+#
+# Everything here is OPTIONAL for the core simulator: growth, sampling and the DNA/RNA/spatial assays
+# run on the Python stack alone. These are needed for the two features that call out to other tools.
+name: iscc
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python >=3.10,<3.14
+
+  # Graph drawing: `pygraphviz` builds against the system Graphviz library.
+  - graphviz
+
+  # Read-level DNA simulation (`iscc.data.reads`, and the "Sequencing reads" tutorial). DWGSIM turns
+  # a per-cell FASTA into FASTQ; bwa + samtools align it back to a sorted, indexed BAM. iscc locates
+  # them with `shutil.which`, so they only need to be on $PATH — hence conda rather than poetry.
+  # DWGSIM must report program version >= 0.1.13 (bioconda package 1.1.x).
+  - dwgsim >=1.1.14
+  - bwa >=0.7.19
+  - samtools >=1.21

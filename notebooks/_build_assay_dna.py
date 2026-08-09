@@ -65,18 +65,20 @@ print(f"\ncancer-cell mean ploidy {adata.layers['cell_cnv'][is_cancer].mean():.2
       f"{adata.obs['is_wgd'][is_cancer].mean():.0%} of cells past a whole-genome doubling")""")
 
 
-md(r"""### The variant layers the tumour started with
+md(r"""### The trunk, and the germline
 
-Two layers exist before growth, and most of section 3 turns on them.
+Two layers matter for everything below, and neither was placed by hand.
 
-* **`tumor.truncal_sites`** — what the founder cell already carried when it transformed. Every
-  cancer cell inherits them, so these are the tumour's **clonal** mutations.
+* **The trunk.** The founder cell starts blank — diploid, no mutations — so the tumour's clonal
+  variants are not planted. They **fixed** in the founding duct while the lesion was still shut
+  inside it and going nowhere, before it spread. We recover them the way a real study would: the
+  somatic sites carried by at least 95% of cancer cells.
 * **`tumor.germline_sites`** — the patient's inherited variants, in **every** cell including the
   normal ones. The heterozygous ones sit at one copy of two, so they read at ~50% of the reads
   whatever the tumour/normal mixture is. That is the purity anchor.
 
-We fold both, plus each locus's true multiplicity and cancer-cell fraction, straight into
-`adata.var` so every later section can index the truth by locus name.""")
+Both, plus each locus's true multiplicity and cancer-cell fraction, go into `adata.var`, so every
+later section can index the truth by locus name.""")
 
 code(r"""snv = adata.layers["cell_snv"]          # per-cell alt fraction at each locus
 cnv = adata.layers["cell_cnv"]          # per-cell total copy number
@@ -86,8 +88,6 @@ def mask(idx):
     m = np.zeros(adata.n_vars, bool); m[np.asarray(idx, int)] = True; return m
 
 zyg = np.asarray(tumor.germline_zygosity)
-adata.var["truncal"] = mask(tumor.truncal_sites)
-adata.var["truncal_driver"] = mask(np.asarray(tumor.truncal_sites)[np.asarray(tumor.truncal_is_driver)])
 adata.var["germline_het"] = mask(np.asarray(tumor.germline_sites)[zyg == "het"])
 adata.var["germline_hom"] = mask(np.asarray(tumor.germline_sites)[zyg == "hom"])
 adata.var["driver"] = mask(np.concatenate([sel.get_oncogenes(), sel.get_tsgs()]))
@@ -101,9 +101,13 @@ n_carrier = carrier.sum(0)
 adata.var["ccf_true"] = n_carrier / is_cancer.sum()
 adata.var["multiplicity"] = np.where(n_carrier > 0, (snv * cnv * carrier).sum(0) / np.maximum(n_carrier, 1), np.nan)
 adata.var["somatic"] = (n_carrier > 0) & ~adata.var["germline_het"] & ~adata.var["germline_hom"]
+# the trunk, MEASURED not planted: 0.95 is the clonal cutoff real studies use
+adata.var["truncal"] = adata.var["somatic"] & (adata.var["ccf_true"] >= 0.95)
+adata.var["truncal_driver"] = adata.var["truncal"] & adata.var["driver"]
 
 V = adata.var
-print(f"{int(V.truncal.sum())} truncal sites ({int(V.truncal_driver.sum())} of them in driver genes), "
+print(f"{int(V.truncal.sum())} truncal sites ({int(V.truncal_driver.sum())} in driver genes, "
+      f"{int((V.truncal & V.trait).sum())} in trait genes), "
       f"{int(V.germline_het.sum())} germline hets, {int(V.germline_hom.sum())} germline homs")
 print(f"truncal sites: carried by {V.ccf_true[V.truncal].mean():.1%} of cancer cells "
       f"on {V.multiplicity[V.truncal].mean():.2f} copies on average")
@@ -146,9 +150,9 @@ plt.tight_layout(); plt.show()
 
 print(clones.value_counts().loc[lambda s: s > 0].to_string())""")
 
-md(r"""Ten clones, the biggest holding an eighth of the cancer cells. Half the cells sit in `other`:
-in a growing, spatially structured tumour much of the population is still ancestral backbone rather
-than a well-separated subclone.""")
+md(r"""Six clones, the biggest holding about a quarter of the sampled cancer cells, and 43% of cells
+sitting in `other`: in a growing, spatially structured tumour much of the population is still
+ancestral backbone rather than a well-separated subclone.""")
 
 
 md(r"""### SNV and copy number, with the tree down the side
@@ -156,10 +160,11 @@ md(r"""### SNV and copy number, with the tree down the side
 Same cells, same order, both matrices. Loci are the most variable SNV sites plus every truncal and
 clone-defining one, laid out along the genome; driver and trait genes are ticked underneath.""")
 
-code(r"""# clone-defining sites: variants in a clone's founding genotype that the tumour founder lacked
+code(r"""# clone-defining sites: variants in a clone's founding genotype that are NOT part of the trunk.
+# (Subtracting the founder's genome would do nothing here — the founder cell starts blank.)
 summary = clone_summary(tumor, clones)
-founder_snv = tumor.genotypes[tumor.founder_id].get_snvs() > 0
-defining = {lab: np.flatnonzero((tumor.genotypes[str(g)].get_snvs() > 0) & ~founder_snv)
+trunk = V["truncal"].values
+defining = {lab: np.flatnonzero((tumor.genotypes[str(g)].get_snvs() > 0) & ~trunk)
             for lab, g in summary["genotype"].items() if not pd.isna(g)}
 adata.var["clone_defining"] = mask(np.unique(np.concatenate([v for v in defining.values() if len(v)])))
 
@@ -245,10 +250,11 @@ for lab, row in summary.iterrows():
     n = len(defining.get(lab, []))
     print(f"{lab}: {row['n_cells']} cells, {row['traits']}, {n} clone-defining SNVs")""")
 
-md(r"""All ten carry the two transforming oncogene hits the founder had. What separates them is what
-came after: `breach` (the mutation that lets a cell cross the basement membrane), immune resistance,
-an extra oncogene or tumour suppressor. Half of them have **no** clone-defining SNV at all — they
-differ from the trunk by copy number only. Remember that when section 4 asks what a panel can see.""")
+md(r"""Every clone inherits the trunk, drivers included. What separates them is what came after:
+extra oncogene or tumour-suppressor hits, `breach` (the mutation that lets a cell cross the basement
+membrane), immune resistance. The clone-defining SNV counts above **exclude** the trunk, so they are
+what a method would actually have to find to tell these clones apart. Remember that when section 4
+asks what a panel can see.""")
 
 
 # ======================================================================================
@@ -358,17 +364,17 @@ md(r"""**The VAF plot.** Two peaks, and neither is where a naive reading expects
 
 * The **germline heterozygous** sites sit at 0.5. They are on one of two copies in *every* cell, so
   the mixture cannot move them. That is the ruler.
-* The **truncal** somatic sites — every cancer cell has them — pile up near 0.15, not 0.5, because
-  only 23% of the DNA is cancer.
+* The **truncal** somatic sites — every cancer cell has them — pile up near 0.1, not 0.5, because
+  only 23% of the DNA is cancer and the genome under them is ~3.7 copies deep.
 * Nearly nothing else is called. Subclonal variants in this tumour are carried by a fraction of a
   fraction; at 23% purity and 100x they are below the noise. Bulk WGS sees the trunk and little else.
-* The two truncal **driver** hits sit inside the same peak as the 40 truncal **passengers**. VAF
+* The three truncal **driver** hits sit inside the same peak as the 65 truncal **passengers**. VAF
   measures *how many cells carry a variant*, not whether it does anything. Nothing in this plot
   separates a driver from a passenger.
 
-**The log2 ratio.** The truth (red) is flat, even though 58% of each cancer genome is altered. The
+**The log2 ratio.** The truth (red) is flat, even though 90% of each cancer genome is altered. The
 copy-number changes here are subclonal — almost every cell has a different set — so pooling averages
-them out, and the 77% normal DNA flattens what is left. The binned measurement (black) barely
+them out, and the 76% normal DNA flattens what is left. The binned measurement (black) barely
 improves from 10x to 100x, because its scatter comes from how *unevenly* reads spread over the
 genome, not from how many there are. Aggregate all the way to whole chromosome segments and the
 measurement scatter is still larger than the real signal. Section 5 recovers these CNAs one cell at
@@ -501,7 +507,7 @@ print(f"inversion, from the measured coverage: pooled measurement scatter "
 print(f"                                       correlation with truth: "
       f"{np.corrcoef(invert(cn_meas), cn_cancer)[0, 1]:.2f}")""")
 
-md(r"""**The compression is severe.** At 23% purity a doubling to 4 copies reads as +0.30 in log2
+md(r"""**The compression is severe.** At 23% purity a doubling to 4 copies reads as +0.31 in log2
 instead of +1.0 — under a third of the amplitude — and a hemizygous loss reads as −0.18 instead of
 −1.0. That is before a single read of noise. Raise the purity and the curve straightens out; the
 black line at purity 1.0 is the undiluted truth.
@@ -575,10 +581,10 @@ ax.set_xlabel("VAF"); ax.set_ylabel("loci"); ax.legend(fontsize=8, frameon=False
 ax.set_title("the germline ruler")
 
 ax = axes[1]
-ax.hist(v.multiplicity[v.truncal.values].dropna(), bins=np.linspace(0.9, 2.1, 25), color="C4")
-ax.axvline(1, color="k", ls="--")
-ax.set_xlim(0.9, 2.1); ax.set_xlabel("true mean multiplicity"); ax.set_ylabel("truncal loci")
-ax.set_title("truncal variants sit on >1 copy")
+ax.hist(v.multiplicity[v.truncal.values].dropna(), bins=np.linspace(0.9, 3.2, 25), color="C4")
+ax.axvline(1, color="k", ls="--"); ax.axvline(2, color="0.4", ls=":")
+ax.set_xlim(0.9, 3.2); ax.set_xlabel("true mean multiplicity"); ax.set_ylabel("truncal loci")
+ax.set_title("~1 copy = after the doubling, ~2 = before")
 
 ccf_naive = od["vaf"] * od["true_cn"] / wgs.purity
 ccf_corr = ccf_naive / v["multiplicity"].fillna(1.0)
@@ -601,13 +607,17 @@ print(f"mean true multiplicity at truncal sites: {v.multiplicity[v.truncal.value
       f"({adata.obs['is_wgd'][is_cancer].mean():.0%} of cancer cells are post-doubling)")""")
 
 md(r"""**The clonal peak does not land at 1.0.** Assume one mutated copy per locus and it comes out
-around 1.5. The purity read the same naive way overshoots by the same factor — 0.31 against a true
-0.23.
+at 1.27. The purity read the same naive way overshoots by the same factor — 0.26 against a true 0.24.
 
-That is not an error, it is **multiplicity**. Roughly half the cancer cells here have been through a
-whole-genome doubling, and a doubling copies the truncal variants along with everything else, so a
-truncal site sits on ~1.55 copies on average rather than 1. Divide by the true multiplicity and both
-numbers land: the clonal peak just under 1.0, purity within a hundredth of the truth.
+That is not an error, it is **multiplicity**. *Every* cancer cell here is past a whole-genome
+doubling, and a doubling copies along whatever variants already existed — so the handful of truncal
+sites that predate it sit on two copies or more, while the majority, which arose after it, sit on
+one copy of a ~3.7-copy genome. Averaged over the trunk that is 1.22 copies, not 1. Divide by the
+true multiplicity and both numbers land: the clonal peak at 1.10, purity within about a hundredth of
+the truth.
+
+The spread in the middle panel is therefore a **timing** readout: a truncal variant on ~2 copies
+predates the doubling, one on ~1 copy postdates it.
 
 Real callers (ABSOLUTE, MutationTimeR) have to *infer* multiplicity from the allele-specific copy
 number, jointly with purity, and then decide per variant whether it predates or postdates the
@@ -618,9 +628,9 @@ Here the simulator knows the answer, so the correction can be checked instead of
 # ======================================================================================
 md(r"""## 4. Targeted panel
 
-Same tube, same cells, ~50x the depth on 30 loci instead of 30x on all of them. A real panel
-targets recurrent cancer genes, so we build one from driver and trait genes and include the
-tumour's two truncal driver hits — the best case for a panel.""")
+Same tube, same cells, 15x the depth on ~30 loci instead of 100x on all 6,000. A real panel
+targets recurrent cancer genes, so we build one from driver and trait genes and force in every
+truncal driver hit the tumour has — the best case for a panel.""")
 
 code(r"""pool = np.unique(np.concatenate([np.flatnonzero(V.driver), np.flatnonzero(V.trait)]))
 truncal_drivers = np.flatnonzero(V.truncal_driver)
@@ -666,11 +676,10 @@ uniq = np.flatnonzero(V.clone_defining)
 print(f"clone-defining sites on the panel: {sum(int(s) in covered for s in uniq)} of {len(uniq)}")
 print(f"truncal driver hits on the panel: {sum(int(s) in covered for s in truncal_drivers)} of {len(truncal_drivers)}")""")
 
-md(r"""The panel catches the trunk — both transforming driver hits are on it, by construction — and
-one clone-defining mutation out of twenty-one. Clone-defining variants sit in whatever gene the
-lineage happened to hit, and a 30-gene design covering 0.5% of the genome will not have guessed
-them; half the clones here have no defining SNV to catch in the first place. A panel tells you what
-the tumour is. It does not tell you how many clones it has.""")
+md(r"""The panel catches the trunk — all three truncal driver hits are on it, by construction — and
+**one** clone-defining mutation out of 114. Clone-defining variants sit in whatever gene the lineage
+happened to hit, and a 31-gene design covering 0.5% of the genome will not have guessed them. A
+panel tells you what the tumour is. It does not tell you how many clones it has.""")
 
 code(r"""fig, axes = plt.subplots(1, 2, figsize=(12, 3.6), sharex=True)
 for ax, (nm, a) in zip(axes, [("WGS", wgs), ("panel", panel)]):
@@ -908,14 +917,14 @@ md(r"""## What to take away
 
 * **Purity first.** A whole-lesion dissociation was 23% cancer. Germline heterozygous sites read at
   0.5 whatever the mixture, which is what makes purity estimable at all.
-* **Then multiplicity.** Half these cells are post-whole-genome-doubling, so truncal variants sit on
-  ~1.5 copies and the naive clonal peak lands at 1.5 instead of 1.0. Correcting for multiplicity
-  fixes it, and fixes the purity estimate with it.
+* **Then multiplicity.** Every cell here is post-whole-genome-doubling, so truncal variants sit on
+  1.22 copies on average and the naive clonal peak lands at 1.27 instead of 1.0. Correcting for
+  multiplicity fixes it, and fixes the purity estimate with it.
 * **Bulk sees the trunk.** At 100x and 23% purity, subclonal variants are below the noise, and the
   copy-number profile is flat because the CNAs are subclonal and average out.
-* **A panel is for mutations.** It caught both transforming drivers and 1 of the 21 clone-defining
-  variants, and its systematic per-amplicon coverage spread plus one-to-five loci per segment make
-  copy-number calling from it hopeless.
+* **A panel is for mutations.** It caught all three truncal drivers but only 1 of the 114
+  clone-defining variants, and its systematic per-amplicon coverage spread plus two-to-four loci per
+  segment make copy-number calling from it hopeless.
 * **Single cell trades noise for resolution.** Amplification lumpiness and allelic dropout are the
   two dominant artifacts; with usable coverage, per-cell copy number recovers what bulk averaged
   away and the clones partially cluster back out.""")
