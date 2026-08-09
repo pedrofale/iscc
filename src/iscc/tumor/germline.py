@@ -269,8 +269,8 @@ def seed_founder_mutations(tumor, n_passenger=40, n_driver=2, seed=None):
     1.5 rather than 1.0. That is a real property of multiplicity-1 calling on a part-duplicated
     tumour, not an artefact.)
 
-    The ground truth is recorded on the tumour as ``truncal_sites``, ``truncal_homolog`` and
-    ``truncal_is_driver``, so a plot can label the clonal peak and split it into its driver and
+    The ground truth is recorded on the tumour as ``seeded_truncal_sites``, ``seeded_truncal_homolog`` and
+    ``seeded_truncal_is_driver``, so a plot can label the clonal peak and split it into its driver and
     passenger parts.
     """
     n_passenger = max(0, int(n_passenger))
@@ -310,9 +310,9 @@ def seed_founder_mutations(tumor, n_passenger=40, n_driver=2, seed=None):
     # built from them) are refreshed.
     founder.update_evolutionary_parameters(selection)
 
-    tumor.truncal_sites = sites
-    tumor.truncal_homolog = homologs
-    tumor.truncal_is_driver = is_driver
+    tumor.seeded_truncal_sites = sites
+    tumor.seeded_truncal_homolog = homologs
+    tumor.seeded_truncal_is_driver = is_driver
     _refresh_deme_rates(tumor)
 
     return {"n_passenger": int(n_pass), "n_driver": int(n_drv), "n_sites": int(len(sites)),

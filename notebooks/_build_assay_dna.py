@@ -102,7 +102,7 @@ adata.var["ccf_true"] = n_carrier / is_cancer.sum()
 adata.var["multiplicity"] = np.where(n_carrier > 0, (snv * cnv * carrier).sum(0) / np.maximum(n_carrier, 1), np.nan)
 adata.var["somatic"] = (n_carrier > 0) & ~adata.var["germline_het"] & ~adata.var["germline_hom"]
 # the trunk, MEASURED not planted: 0.95 is the clonal cutoff real studies use
-adata.var["truncal"] = adata.var["somatic"] & (adata.var["ccf_true"] >= 0.95)
+adata.var["truncal"] = mask(tumor.truncal_sites(ccf=0.95))
 adata.var["truncal_driver"] = adata.var["truncal"] & adata.var["driver"]
 
 V = adata.var

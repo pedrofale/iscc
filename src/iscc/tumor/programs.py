@@ -45,7 +45,7 @@ RUN_OFFSET_SNV_CLASS = 7717    # each SNV's functional class (LoF / missense / s
 # The interpretable program names. `seeded_programs` anchors program k to a known signature so that
 # the phenotype/niche maps below can refer to programs by NAME rather than by index — otherwise
 # "which program is proliferation" would depend on the draw. Programs beyond the seeded ones are
-# unnamed ("program_5", …) and are the generic co-expression background.
+# unnamed ("background_1", …) and are the generic co-expression background.
 DEFAULT_SEEDED_PROGRAMS = ("proliferation", "emt", "hypoxia", "drug_resistance", "immune_evasion")
 
 # Route 1 (the DEFAULT coupling): each evolved per-clone phenotype drives one program. The chain is
@@ -144,7 +144,12 @@ class ProgramDictionary:
         if seeded_programs is None:
             seeded_programs = list(DEFAULT_SEEDED_PROGRAMS)
         seeded = [str(s) for s in seeded_programs][:self.n_programs]
-        self.program_names = seeded + [f"program_{k}" for k in range(len(seeded), self.n_programs)]
+        # Programs past the seeded ones are deliberately anonymous — generic co-expression background,
+        # the structure NO phenotype and NO niche field drives. Named "background_N" rather than
+        # "program_N" so it reads as intentional, and not after a real meta-program, which would
+        # claim a biological identity they have not been calibrated to.
+        self.program_names = seeded + [f"background_{k}"
+                                       for k in range(1, self.n_programs - len(seeded) + 1)]
         self.program_index = {name: k for k, name in enumerate(self.program_names)}
 
         self.loading = np.zeros((self.n_programs, self.n_genes))

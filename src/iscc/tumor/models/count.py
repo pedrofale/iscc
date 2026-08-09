@@ -19,6 +19,7 @@ immune killing is additive contact pressure (see _death_rate); the immune compar
 static (recruitment/migration are future work).
 """
 import os
+import warnings
 from collections import Counter
 from pathlib import Path
 
@@ -711,9 +712,9 @@ class GenotypeTumor:
         # any growth, which is what makes them clonal by descent rather than by reconstruction. Like
         # the germline it uses its own seeded rng, so `founder_mutations=None` is an early return and
         # the run is byte-identical to one built before the layer existed.
-        self.truncal_sites = np.array([], dtype=int)
-        self.truncal_homolog = np.array([], dtype="<U4")
-        self.truncal_is_driver = np.array([], dtype=bool)
+        self.seeded_truncal_sites = np.array([], dtype=int)
+        self.seeded_truncal_homolog = np.array([], dtype="<U4")
+        self.seeded_truncal_is_driver = np.array([], dtype=bool)
         if self.founder_mutations:
             fm = dict(self.founder_mutations)
             fm.setdefault("seed", self.seed)
@@ -2242,7 +2243,7 @@ class GenotypeTumor:
         # are in every cancer cell and form the clonal peak). A reconstructed passenger never shares a
         # position with either, so a caller can tell the layers apart. Neither present -> the pool is
         # untouched -> byte-identical to a run without them.
-        for taken in (getattr(self, "germline_sites", None), getattr(self, "truncal_sites", None)):
+        for taken in (getattr(self, "germline_sites", None), getattr(self, "seeded_truncal_sites", None)):
             if taken is not None and len(taken):
                 neutral = neutral[~np.isin(neutral, taken)]
         seg_of = self._gene_segment
@@ -2543,7 +2544,7 @@ class GenotypeTumor:
             total = sum(sum(src[d].values()) for d in scope)
         subsample = max_cells is not None and total > max_cells and total > 0
         if not subsample and reg is None and depth_frac is None:
-            return [dict(d) for d in self.demes], False
+            return [dict(d) for d in self.demes], False, total
         frac = (max_cells / total) if subsample else 1.0
         mrng = np.random.default_rng(self.seed + 20240730)
         plan = []
@@ -2560,7 +2561,48 @@ class GenotypeTumor:
                 if n:
                     keep[gid] = n
             plan.append(keep)
-        return plan, subsample
+        return plan, subsample, total
+
+    def truncal_sites(self, ccf=0.95, cell_ids=None):
+        """Locus indices of the tumour's **trunk** — the somatic variants essentially every cancer
+        cell carries — MEASURED from the cells rather than looked up.
+
+        The founder starts with a blank genome, so a tumour's clonal layer is not planted: it fixes
+        in the founding duct before the lesion spreads. There is nothing to look up, and
+        :attr:`seeded_truncal_sites` is empty unless ``founder_mutations`` was configured. This finds
+        the trunk the way a study does — the somatic sites carried by at least ``ccf`` of cancer
+        cells. Germline variants are excluded: they sit in every cell, tumour and normal alike, so
+        they would otherwise pass the same test.
+
+        Parameters
+        ----------
+        ccf : float, default 0.95
+            Minimum cancer-cell fraction for a site to count as truncal. 0.95 is the usual clonal
+            cutoff. The count is sensitive to it — a convention, not a constant of the tumour — so
+            report the cutoff with the number.
+        cell_ids : sequence of str, optional
+            Restrict to these cells (e.g. one sample's). Defaults to every materialised cell.
+
+        Returns
+        -------
+        numpy.ndarray
+            Sorted locus indices, i.e. positions along the gene axis of ``cell_data["cell_snv"]``.
+        """
+        if self.cell_data is None:
+            raise ValueError("cell_data is not materialised; call make_cell_data() first")
+        snv = self.cell_data["cell_snv"]
+        gids = self.cell_data["cell_type"].iloc[:, 0]
+        if cell_ids is not None:
+            snv, gids = snv.loc[list(cell_ids)], gids.loc[list(cell_ids)]
+        is_cancer = np.array([self._is_cancer(g) for g in gids], dtype=bool)
+        if not is_cancer.any():
+            return np.array([], dtype=int)
+        carried = (snv.values[is_cancer] > 0).mean(axis=0)
+        germline = np.zeros(snv.shape[1], dtype=bool)
+        sites = getattr(self, "germline_sites", None)
+        if sites is not None and np.size(sites):
+            germline[np.asarray(sites, dtype=int)] = True
+        return np.flatnonzero((carried >= ccf) & ~germline)
 
     def primary_window(self, side, center=None):
         """Deme indices of a rectangular window of the PRIMARY grid, centred on ``center``
@@ -2627,7 +2669,21 @@ class GenotypeTumor:
         """
         if max_cells is None:
             max_cells = self.max_cells
-        mat_plan, _subsampled = self._materialize_plan(max_cells, region=region, depth_frac=depth_frac)
+        mat_plan, subsampled, want = self._materialize_plan(max_cells, region=region,
+                                                            depth_frac=depth_frac)
+        # Only for an explicit SECTION (region / depth_frac). A plain whole-tumour materialisation
+        # being capped is the documented representative-biopsy behaviour, and warning on it would
+        # fire on every cm-scale grow(). The trap is asking for a physical section and silently
+        # getting a memory budget instead: the cap, not depth_frac, then sets the density, and a
+        # Visium section capped this way reads ~1 cell/spot — a budget artefact that looks like a
+        # modelling result. Note `max_cells=None` means "the tumour's own cap", NOT "uncapped".
+        if subsampled and (region is not None or depth_frac is not None):
+            warnings.warn(
+                f"max_cells={max_cells} capped this section: {want:,} cells were selected by "
+                f"region/depth_frac but only ~{max_cells:,} are materialised ({max_cells / want:.1%}). "
+                f"The cap, not depth_frac, is setting the cell density. Pass a larger max_cells "
+                f"(~{int(want * 1.2):,}) to let the physical section govern.",
+                stacklevel=2)
         gene_names = self.selection.get_gene_names()
         onc_idx, tsg_idx = self.selection.get_oncogenes(), self.selection.get_tsgs()
         disp_idx, ir_idx, tr_idx = (self.selection.get_dispersal_genes(),
@@ -2771,12 +2827,25 @@ class GenotypeTumor:
         # off or nothing was folded). Built once and reused for cell_rna_vaf below.
         snv_mat = np.array(rows_snv) if rows_snv else empty
         snv_alleles = self._reconstruct_passengers(snv_mat, types)
+        # DTYPES. These frames are (n_cells x n_genes) and dominate the memory at cm-scale, so they
+        # are stored no wider than the values need. Copy number is a small non-negative integer
+        # (int16 covers 0..32767 against a realistic ceiling of ~10): LOSSLESS at a quarter of int64.
+        # Expression is float32 — a level, nowhere near float64's 15 significant digits.
+        # `cell_snv` STAYS float64 on purpose. Several suites pin a golden md5 of its raw bytes to
+        # assert that turning a feature off leaves the growth stream byte-identical; narrowing it
+        # would force those baselines to be regenerated, and a re-blessed baseline is exactly how a
+        # real perturbation would slip past them. It is also the layer that least needs it — 1.4%
+        # non-zero, and a pure function of the genotype, so sparsity or de-duplication beat a
+        # narrower dtype without touching the digests.
+        def _frame(mat, dtype):
+            return pd.DataFrame(np.asarray(mat, dtype=dtype), index=idx, columns=gene_names)
+
         self.cell_data = dict(
             cell_evo=pd.DataFrame(rows_evo, index=idx),
-            cell_snv=pd.DataFrame(snv_mat, index=idx, columns=gene_names),
-            cell_cnv=pd.DataFrame(np.array(rows_cnv) if rows_cnv else empty, index=idx, columns=gene_names),
+            cell_snv=_frame(snv_mat, np.float64),
+            cell_cnv=_frame(np.array(rows_cnv) if rows_cnv else empty, np.int16),
             # NB `len(...)`, not truthiness: with the program layer on, `rows_exp` is an ndarray.
-            cell_exp=pd.DataFrame(np.array(rows_exp) if len(rows_exp) else empty, index=idx, columns=gene_names),
+            cell_exp=_frame(np.array(rows_exp) if len(rows_exp) else empty, np.float32),
             cell_crd=pd.DataFrame(crd if crd else np.empty((0, 2)), index=idx, columns=["row", "col"]).astype(int),
             cell_type=pd.DataFrame(types, index=idx, columns=["cell_id"]),
             cell_deme=pd.DataFrame(demes_col, index=idx, columns=["deme_id"]),
@@ -2787,8 +2856,8 @@ class GenotypeTumor:
         # so the base schema is unchanged otherwise — the F8 off-by-default discipline.
         if snv_alleles is not None:
             snv_p, snv_m = snv_alleles
-            self.cell_data["cell_snv_p"] = pd.DataFrame(snv_p, index=idx, columns=gene_names)
-            self.cell_data["cell_snv_m"] = pd.DataFrame(snv_m, index=idx, columns=gene_names)
+            self.cell_data["cell_snv_p"] = _frame(snv_p, np.float64)
+            self.cell_data["cell_snv_m"] = _frame(snv_m, np.float64)
         # cell_rna_vaf (F7b): the EXPECTED allele FRACTION in RNA (not an observed VAF). With m
         # mutant + w wt copies at a locus and per-locus expression effect e (selection.mut_effects:
         # oncogene=2, TSG=0.5, else 1), the fraction of expression from mutant alleles is
@@ -2807,7 +2876,7 @@ class GenotypeTumor:
         num = v * flat_eff
         denom = num + (1.0 - v)
         rna_vaf = np.divide(num, denom, out=np.zeros_like(v, dtype=float), where=denom > 0)
-        self.cell_data["cell_rna_vaf"] = pd.DataFrame(rna_vaf, index=idx, columns=gene_names)
+        self.cell_data["cell_rna_vaf"] = _frame(rna_vaf, np.float64)
         # WGD ground truth (DESIGN_focal_cna.md v1): the per-genotype `is_wgd` flag surfaced per cell,
         # so downstream CNA / BAF benchmarks (e.g. Numbat) can score WGD detection against the truth.
         # Gated on WGD being enabled — off -> the frame is absent and the base schema is unchanged

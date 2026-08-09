@@ -19,6 +19,7 @@ Everything is computed from per-deme genotype counts, never from a materialised 
 import collections
 import hashlib
 import json
+import warnings
 
 import numpy as np
 import pytest
@@ -399,3 +400,52 @@ def test_no_subtype_key_changes_nothing():
     for attr in ("cnv_prob", "wgd_rate", "mutation_rate"):
         assert getattr(a.genotypes[a.founder_id], attr) == getattr(b.genotypes[b.founder_id], attr)
     assert a.subtype is None
+
+
+# ------------------------------------------------- the trunk is MEASURED, not looked up
+def test_truncal_sites_measures_the_trunk_and_seeded_record_is_empty(grown):
+    """With no `founder_mutations`, `seeded_truncal_sites` is empty — nothing was planted — while
+    `truncal_sites()` still finds the trunk the confined acinus built. Reading the empty attribute
+    as if it were the trunk is what silently produced nan purity estimates downstream."""
+    T = grown["confined"]
+    T.make_cell_data()
+    assert len(T.seeded_truncal_sites) == 0
+
+    trunk = T.truncal_sites(ccf=0.95)
+    snv = T.cell_data["cell_snv"].values
+    is_cancer = np.array([T._is_cancer(g) for g in T.cell_data["cell_type"].iloc[:, 0]], bool)
+    assert is_cancer.any()
+    carried = (snv[is_cancer] > 0).mean(axis=0)
+    assert np.all(carried[trunk] >= 0.95)          # everything returned really is at the cutoff
+    germline = np.zeros(snv.shape[1], bool)
+    if np.size(getattr(T, "germline_sites", [])):
+        germline[np.asarray(T.germline_sites, int)] = True
+    assert set(np.flatnonzero((carried >= 0.95) & ~germline)) == set(trunk)   # and nothing missed
+
+
+def test_truncal_sites_excludes_germline_and_tightens_with_the_cutoff(grown):
+    """Germline variants sit in EVERY cell, so a naive frequency test would call them truncal. And
+    the count is a function of the cutoff, not a constant of the tumour."""
+    T = grown["confined"]
+    T.make_cell_data()
+    trunk = T.truncal_sites(ccf=0.95)
+    if np.size(getattr(T, "germline_sites", [])):
+        assert not set(trunk.tolist()) & set(np.asarray(T.germline_sites, int).tolist())
+    assert len(T.truncal_sites(ccf=0.99)) <= len(trunk) <= len(T.truncal_sites(ccf=0.5))
+
+
+def test_max_cells_warns_only_when_it_caps_an_explicit_section(grown):
+    """The cap is a MEMORY budget applied after region/depth_frac. When it binds on a section it,
+    not the physical request, sets the density — silently, until now. A plain whole-tumour
+    materialisation being capped is the documented representative-biopsy behaviour, not a warning."""
+    T = grown["confined"]
+    small = max(1, T.get_tumor_size() // 10)
+
+    with pytest.warns(UserWarning, match="setting the cell density"):
+        T.make_cell_data(depth_frac=0.5, max_cells=small)
+    with warnings.catch_warnings():          # generous cap -> depth_frac governs -> silence
+        warnings.simplefilter("error")
+        T.make_cell_data(depth_frac=0.5, max_cells=10 ** 9)
+    with warnings.catch_warnings():          # whole-tumour subsample -> expected, not a warning
+        warnings.simplefilter("error")
+        T.make_cell_data(max_cells=small)
