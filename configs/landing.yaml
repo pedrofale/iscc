@@ -8,7 +8,12 @@
 mode: genotype
 update_mode: tau
 tau: 0.5
-snapshot_every: 1          # per-generation traces for a smooth Muller (capture cadence, not biology)
+snapshot_every: 3          # Muller trace cadence (capture cadence, NOT biology). Matched to the
+                           # GIF's own frame cadence below (pre_seed_every 4 / post_seed_every 3)
+                           # so every rendered frame still has a real trace row behind it. Per-
+                           # generation (1) is not worth it: the trace is DENSE over every clone
+                           # ever seen (>200k columns by the relapse), so each row is ~400 kB and
+                           # writing it dominates the runtime — hours and multiple GB for the arc.
 coarsen_passengers: true
 max_cells: 8000
 

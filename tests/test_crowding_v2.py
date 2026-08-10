@@ -362,3 +362,62 @@ def test_growth_cost_is_bounded():
             t._tau_generation(rng, 1.0)
         walls[mode] = time.time() - t0
     assert walls["lottery"] < 3.0 * walls["own"], walls
+
+
+# --------------------------------------------------- the deme-model (Noble) crowding law
+def test_noble_law_is_a_two_valued_step_at_the_carrying_capacity():
+    """Noble et al. 2022 ("Within-deme dynamics"): the within-deme death rate takes a fixed value d0
+    at or below the carrying capacity and a different fixed value d1 above it. NOT a continuous
+    function of density — a deme below capacity is not crowded and carries no crowding death."""
+    K = 10
+    t = _tumour(mode="lottery", K=K,
+                deme={"crowding_law": "noble", "crowding_d1": 3.0, "crowding_overfill": 2.0,
+                      "maximum_death_rate": 3.5})       # or the clamp clips d1 back
+    g = t.founder_id
+    base = t.genotypes[g].evolutionary_parameters["death_rate"]
+
+    def death_at(n):
+        t.demes[0].clear(); t.genotypes_counts.clear(); t._add(0, g, n)
+        return t._death_rate(g, 0)
+
+    for n in (1, 3, 7, K):                       # at or below K -> d0, flat
+        assert death_at(n) == pytest.approx(base), f"density-dependent death below K at n={n}"
+    for n in (K + 1, K + 4):                     # above K -> d1, flat
+        assert death_at(n) == pytest.approx(3.0)
+
+
+def test_noble_law_rejects_a_d1_below_the_attainable_division_rate():
+    """d1 must exceed the largest attainable division rate — that is what makes the cap unbreakable
+    however far selection pushes birth rates. The 2026-07 overfill bug was precisely a rate-expressed
+    cap sitting below the evolved division rate, so this is checked at construction."""
+    with pytest.raises(ValueError, match="largest attainable division rate"):
+        _tumour(mode="lottery", K=10, deme={"crowding_law": "noble", "crowding_d1": 0.1})
+
+
+def test_noble_law_preserves_the_selection_differential_at_the_cap():
+    """The step carries no `div`, so unlike `own` it cannot cancel out of net = div - death: two
+    clones in the SAME full deme keep their bare fitness difference."""
+    K = 10
+    t = _tumour(mode="lottery", K=K,
+                deme={"crowding_law": "noble", "crowding_d1": 3.0, "crowding_overfill": 2.0,
+                      "maximum_death_rate": 3.5})
+    fast = t.genotypes[t.founder_id].divide(); fast.genotype_id = "fast"
+    fast.evolutionary_parameters = dict(fast.evolutionary_parameters)
+    fast.evolutionary_parameters["division_rate"] = 0.9
+    slow = t.genotypes[t.founder_id].divide(); slow.genotype_id = "slow"
+    slow.evolutionary_parameters = dict(slow.evolutionary_parameters)
+    slow.evolutionary_parameters["division_rate"] = 0.5
+    t._register(fast); t._register(slow)
+    t.demes[0].clear(); t.genotypes_counts.clear()
+    t._add(0, "fast", K // 2); t._add(0, "slow", K // 2)          # deme exactly at K
+    net_fast = 0.9 - t._death_rate("fast", 0)
+    net_slow = 0.5 - t._death_rate("slow", 0)
+    assert net_fast - net_slow == pytest.approx(0.4)              # the bare difference, undiminished
+
+
+def test_noble_law_rejects_a_d1_clamped_below_the_division_rate_by_maximum_death_rate():
+    """The 2026-07 overfill bug in miniature: a d1 that LOOKS high enough but is clipped back by
+    `maximum_death_rate`. The check must use the effective (post-clamp) value, not the request."""
+    with pytest.raises(ValueError, match="EFFECTIVE d1"):
+        _tumour(mode="lottery", K=10,
+                deme={"crowding_law": "noble", "crowding_d1": 99.0, "maximum_death_rate": 0.5})

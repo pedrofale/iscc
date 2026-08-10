@@ -248,6 +248,42 @@ def build_trajectory(t, frames, marks, min_freq):
     )
 
 
+def trim_confinement(trajectory, min_demes=2):
+    """Drop the opening stretch where the lesion is still shut inside its founding deme.
+
+    Origin confinement holds the founder in one acinus for hundreds of generations — biologically the
+    point (it is where the clonal trunk is built), but visually nothing happens, and a uniform capture
+    cadence spends most of the animation on an unchanging duct. This trims the trajectory to start at
+    the moment the lesion FIRST disperses, i.e. the first captured frame occupying ``min_demes``
+    cancer demes.
+
+    Purely a render-time transform on the trajectory dict: frames before that point are dropped, and
+    the traces, per-frame cursors and event marks are all rebased so the Muller x-axis starts there
+    too (trimming frames alone would leave the Mullers drawing the flat confined stretch).
+
+    Returns a NEW trajectory; the original is untouched. A trajectory that never disperses, or one
+    that is already dispersed at frame 0, comes back unchanged.
+    """
+    frames = trajectory["frames"]
+    n_prim = int(trajectory["n_primary_demes"])
+
+    def cancer_demes(frame):
+        # cancer genotypes are the numeric ids; normal cell types are named (stromal/epithelial/host)
+        return sum(1 for d in frame["demes"][:n_prim]
+                   if any(str(g) not in normal_names for g in d))
+
+    start = next((i for i, f in enumerate(frames) if cancer_demes(f) >= min_demes), None)
+    if not start:                          # None (never disperses) or 0 (already dispersed)
+        return trajectory
+
+    k = int(frames[start]["cursor"])
+    out = dict(trajectory)
+    out["frames"] = [dict(f, cursor=int(f["cursor"]) - k) for f in frames[start:]]
+    out["traces"] = trajectory["traces"][k:]
+    out["marks"] = [(int(i) - k, l) for i, l in trajectory["marks"] if int(i) >= k]
+    return out
+
+
 def write_trajectory(output_path, trajectory):
     """Persist the trajectory pickle under ``output_path`` (the isccsim output dir)."""
     os.makedirs(output_path, exist_ok=True)

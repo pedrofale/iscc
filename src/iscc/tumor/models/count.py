@@ -521,6 +521,48 @@ class GenotypeTumor:
         # -- the rate law alone has to want to overfill, otherwise the structural cap never binds and
         # the whole law is inert (DESIGN_crowding_v2.md §8, amendment 1).
         self._crowding_turnover = float(deme_params.get("crowding_turnover", 0.6))
+        # Deme-model crowding (Noble et al. 2022, Nat Ecol Evol, "Within-deme dynamics"): the
+        # within-deme death rate is a TWO-VALUED STEP, not a continuous function of density —
+        #   "When the deme population size is less than or equal to the carrying capacity, the death
+        #    rate takes a fixed value d0 that is less than the initial division rate. When the deme
+        #    population size exceeds carrying capacity, the death rate takes a different fixed value
+        #    d1 that is much greater than the largest attainable division rate."
+        # d1 being above the LARGEST ATTAINABLE division rate is what makes the cap unbreakable: it
+        # is the exact property the 2026-07 overfill bug lacked, where the death cap sat BELOW the
+        # evolved division rate. Both values are constants, so the law carries no `div` and cannot
+        # cancel out of net = div - death — clone-vs-clone competition survives for free.
+        # `crowding_law="logistic"` (default) keeps the shipped ramp; "noble" selects the step.
+        self._crowding_law = str(deme_params.get("crowding_law", "logistic"))
+        if self._crowding_law not in ("logistic", "noble"):
+            raise ValueError("crowding_law must be 'logistic' or 'noble'")
+        # d0 defaults to the clone's own baseline death rate (Noble uses a single global constant,
+        # and sets it to 0 in the spatial simulations); d1 to maximum_death_rate, which the shipped
+        # configs already hold above max_birth_rate.
+        self._crowding_d0 = deme_params.get("crowding_d0")          # None -> the clone's own base
+        self._crowding_d1 = deme_params.get("crowding_d1")          # None -> maximum_death_rate
+        self._crowding_overfill = float(deme_params.get("crowding_overfill", 1.0))
+        if self._crowding_overfill < 1.0:
+            raise ValueError("crowding_overfill must be >= 1 (1 = the slot cap sits exactly on K)")
+        if self._crowding_law == "noble":
+            # d1 MUST exceed the largest attainable division rate, which is what makes the cap
+            # unbreakable however far selection pushes birth rates up. This is not a style check:
+            # the 2026-07 overfill bug was exactly a density cap expressed as a rate that sat BELOW
+            # the evolved division rate (`maximum_death_rate` 0.5 against an evolved 0.8), and the
+            # tumour piled 1,200-4,200 cells into demes of nominal capacity 10. Fail loudly at
+            # construction rather than silently overfill after thousands of generations.
+            _d1 = self.maximum_death_rate if self._crowding_d1 is None else float(self._crowding_d1)
+            # The EFFECTIVE d1 is what survives the `min(death, maximum_death_rate)` clamp at the end
+            # of _death_rate. Checking the requested value alone would wave through exactly the 2026-07
+            # configuration — a large d1 silently clipped back below the evolved division rate.
+            _eff = min(_d1, self.maximum_death_rate)
+            _max_b = float(getattr(self.genotypes[self.founder_id], "max_birth_rate", 0.0))
+            if _eff <= _max_b:
+                raise ValueError(
+                    f"crowding_law='noble' needs d1 > the largest attainable division rate, but the "
+                    f"EFFECTIVE d1 is {_eff:g} <= max_birth_rate={_max_b:g} "
+                    f"(requested d1={_d1:g}, clamped by maximum_death_rate={self.maximum_death_rate:g}). "
+                    f"Raise BOTH crowding_d1 and maximum_death_rate above max_birth_rate — a density "
+                    f"cap expressed as a rate below the evolved division rate cannot bound a deme.")
         # Which rate the uniform pressure references: the deme's own cell-weighted mean cancer
         # division rate ("deme_mean", RELATIVE purifying selection -- a costly clone is disadvantaged,
         # not lethal) or a fixed config scalar ("fixed" = `crowding_ref`, ABSOLUTE purifying selection).
@@ -937,6 +979,15 @@ class GenotypeTumor:
              else self._deme_capacity[deme_idx])
         return int(K)
 
+    def _slot_cap_of(self, deme_idx):
+        """The deme's structural slot count — ``crowding_overfill`` x its carrying capacity.
+
+        Separate from :meth:`_cap_of`, which stays the DENSITY REFERENCE K used by the crowding law.
+        At the default overfill of 1.0 the two coincide and a deme is hard-capped at K. Above 1.0 the
+        deme may overshoot into the accelerating region of the density term, which is what makes the
+        Noble-style over-capacity response reachable instead of dead code."""
+        return int(self._cap_of(deme_idx) * self._crowding_overfill)
+
     def _evictable_gids(self, deme_idx):
         """The deme's displaceable resident genotypes, in creation-ordinal order (deterministic)."""
         if not self._evict_residents:
@@ -983,7 +1034,7 @@ class GenotypeTumor:
         from a displaceable resident."""
         if total is None:
             total = sum(self.demes[deme_idx].values())
-        if total < self._cap_of(deme_idx):
+        if total < self._slot_cap_of(deme_idx):
             return True
         return self._evict_residents and self._n_evictable(deme_idx) > 0
 
@@ -996,7 +1047,7 @@ class GenotypeTumor:
         if not self._lottery:
             self._add(deme_idx, gid, 1)
             return True
-        if sum(self.demes[deme_idx].values()) >= self._cap_of(deme_idx) and not self._evict(deme_idx, 1, rng):
+        if sum(self.demes[deme_idx].values()) >= self._slot_cap_of(deme_idx) and not self._evict(deme_idx, 1, rng):
             return False
         self._add(deme_idx, gid, 1)
         return True
@@ -1227,7 +1278,29 @@ class GenotypeTumor:
                     slope = max(0.0, self._crowding_ref - base)
                 else:
                     slope = max(0.0, b_bar_c - d_bar_c)
-                death = base + self._crowding_turnover * slope * min(1.0, total / K)
+                # Density term. Below K it is linear in occupancy; ABOVE K it accelerates, so an
+                # over-capacity deme is pushed back rather than merely held. Crucially this stays
+                # UNIFORM over the deme's cancer clones (it carries no `div`), so it cannot cancel
+                # out of net = div - death and clone-vs-clone competition survives — the shape of
+                # the density response and the preservation of selection are independent properties.
+                if self._crowding_law == "noble":
+                    # Two-valued step (see __init__): no density term at or below K; above it a
+                    # fixed rate chosen to exceed any attainable division rate. `death` then falls
+                    # through to the resident / immune / treatment terms and the clamp below,
+                    # exactly as the logistic branch does.
+                    if total <= K:
+                        death = base if self._crowding_d0 is None else float(self._crowding_d0)
+                    else:
+                        d1 = (self.maximum_death_rate if self._crowding_d1 is None
+                              else float(self._crowding_d1))
+                        death = max(base, d1)
+                else:
+                    # float(): K may be a numpy scalar (per-deme capacity array), and the old
+                    # `min(1.0, total/K)` returned a PYTHON float at the cap. Keeping the type
+                    # identical matters — a numpy float here turns downstream `is True` comparisons
+                    # into numpy.bool_ identity checks that silently fail.
+                    x = float(total) / float(K)
+                    death = base + self._crowding_turnover * slope * min(1.0, x)
                 # Resident pressure is UNCHANGED: it is the fitness gate on entering normal-occupied
                 # tissue, and it does not cancel either (it carries no `div`).
                 n_normal = (n_normal_c if comp is not None
@@ -2024,7 +2097,7 @@ class GenotypeTumor:
             items = cand[tgt]
             keys = list(items)
             a = np.array([items[k] for k in keys], dtype=np.int64)
-            n_slots = max(0, self._cap_of(tgt) - sum(self.demes[tgt].values()))
+            n_slots = max(0, self._slot_cap_of(tgt) - sum(self.demes[tgt].values()))
             if int(a.sum()) <= n_slots:
                 acc = a
             else:

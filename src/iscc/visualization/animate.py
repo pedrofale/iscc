@@ -44,6 +44,12 @@ from pymuller import muller
                    "'Primary'/'Metastasis' titles, per-panel event labels). Default: fully labelled.")
 @click.option("--poster", is_flag=True,
               help="With --compartment: also write a poster PNG (final frame) next to the GIF.")
+@click.option("--skip-confinement", is_flag=True,
+              help="With --compartment: start the animation where the lesion FIRST disperses out of "
+                   "its founding deme, instead of at t=0. Origin confinement keeps the founder in one "
+                   "acinus for hundreds of generations — that is where the clonal trunk is built, but "
+                   "nothing moves on screen, so a uniform capture cadence spends most of the frames on "
+                   "an unchanging duct. Trims frames, traces, cursors and event marks together.")
 @click.option("--scale", default=1.0, type=float,
               help="With --compartment: render-dpi multiplier (<1 lightens each frame, so a large "
                    "grid still yields a web-friendly GIF).")
@@ -69,6 +75,7 @@ def main(
     splash,
     poster,
     scale,
+    skip_confinement,
     colormap,
     figw,
     figh,
@@ -81,7 +88,8 @@ def main(
     output_path,
 ):
     if compartment:
-        return _render_compartment(grids_dir, splash, output_path, poster, scale=scale)
+        return _render_compartment(grids_dir, splash, output_path, poster, scale=scale,
+                                   skip_confinement=skip_confinement)
 
     if genotype_counts is None or genotype_parents is None:
         raise click.UsageError(
@@ -116,7 +124,8 @@ def main(
     animation.save(os.path.join(output_path, f'slice{suffix}.gif'))
 
 
-def _render_compartment(grids_dir, splash, output_path, poster=False, scale=1.0):
+def _render_compartment(grids_dir, splash, output_path, poster=False, scale=1.0,
+                        skip_confinement=False):
     """Render the primary+metastasis composite GIF from the isccsim compartment trajectory in
     GRIDS-DIR (the isccsim output directory). Promotes the landing-animation build_figure/centered-
     Muller/GIF logic into the CLI (see iscc.visualization.compartment)."""
@@ -124,6 +133,11 @@ def _render_compartment(grids_dir, splash, output_path, poster=False, scale=1.0)
     from . import compartment as comp
 
     traj = arc.read_trajectory(grids_dir)
+    if skip_confinement:
+        n_before = len(traj["frames"])
+        traj = arc.trim_confinement(traj)
+        click.echo(f"skip-confinement: {n_before} -> {len(traj['frames'])} frames "
+                   f"(dropped {n_before - len(traj['frames'])} pre-dispersal)")
 
     # -o is the output GIF path in this mode; a path with no .gif suffix is a directory to drop the
     # default-named GIF into.
