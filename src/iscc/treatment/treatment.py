@@ -49,7 +49,8 @@ class Treatment(object):
     def __init__(self, adaptive=False, start=0, duration=None,
                  dosage_decay=0.5, rounds=4,
                  rate_multiplier=2., toxicity=0.1, effectiveness=0.9,
-                 kill_rate=1.5, max_tumor_size=100_000, sites="both"):
+                 kill_rate=1.5, max_tumor_size=100_000, sites="both",
+                 mutagenicity=1.0, kill_mode="additive"):
         self.adaptive = adaptive
         self.start = start
         self.duration = duration
@@ -67,6 +68,25 @@ class Treatment(object):
         # "met" (adjuvant after primary resection), or "primary" (neoadjuvant / local). The engine
         # gates the per-genotype death/immune override by the deme's compartment (GenotypeTumor._death_rate).
         self.sites = sites
+        # HOW the kill scales with the cell (genotype engine). "additive" (default) gives every clone
+        # the same absolute extra death, so survival under drug is decided by birth rate and a
+        # fast-dividing clone simply outruns the dose -- the drug then selects for the fittest clones
+        # and the lesion regrows mid-course. "proliferation" scales the hazard by the clone's own
+        # division rate (net = b*(1 - kill_rate) - death), so at kill_rate 1.0 every clone declines at
+        # its death rate whatever its fitness, and above 1.0 the faster ones decline faster. That is
+        # also the biology: cytotoxic chemotherapy kills cells as they replicate, which is why it
+        # spares quiescent tissue and why fast-growing tumours respond best.
+        self.kill_mode = kill_mode
+        # THERAPY-INDUCED MUTATOR PHENOTYPE. Cytotoxic therapy damages DNA and can permanently impair
+        # repair (temozolomide-driven mismatch-repair loss in glioma is the classic case; platinums
+        # leave lasting mutational signatures), so an exposed cell's mutation rate rises and STAYS
+        # risen — and its descendants inherit it. Multiplies `mutation_rate` ONCE per genotype on
+        # first exposure, never compounding per step and never reverting when the drug stops.
+        # 1.0 (default) -> no genotype is ever touched -> byte-identical to before.
+        # NOTE the effect saturates: iscc draws mutation as an alternative FATE to dispersal
+        # (mut_prob = mutation_rate / (mutation_rate + dispersal_rate)), so mut_prob -> 1 at most,
+        # i.e. at the shipped rates the mutant fraction can rise 0.25 -> 1.0, a ceiling of 4x.
+        self.mutagenicity = float(mutagenicity)
         self.dosage_trace = []  # list of (step, dosage) for every queried step
 
     def _apply(self, cell):

@@ -221,7 +221,9 @@ def execute_schedule(t, schedule):
                 kill_rate=float(spec.get("kill_rate", 1.5)),
                 effectiveness=float(spec.get("effectiveness", 0.9)),
                 toxicity=float(spec.get("toxicity", 0.1)),
-                sites=spec.get("sites", "both"))
+                sites=spec.get("sites", "both"),
+                mutagenicity=float(spec.get("mutagenicity", 1.0)),
+                kill_mode=str(spec.get("kill_mode", "additive")))
             for _ in range(n_steps):
                 t.grow(n_steps=1, seed=seed, treatment=chemo)
                 capture(label)

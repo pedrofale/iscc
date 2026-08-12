@@ -29,6 +29,7 @@ class Cell(object):
         n_breach=0,
         n_ss=0,
         n_ms=0,
+        n_dt=0,
     ):
         self.n_segments = n_segments
         # Segments may have unequal sizes (real-genome mode: segment size proportional to
@@ -51,6 +52,7 @@ class Cell(object):
         self.n_breach = n_breach
         self.n_ss = n_ss
         self.n_ms = n_ms
+        self.n_dt = n_dt
         self.type = "healthy"
         self.parent = parent
         if parent is None:
@@ -77,6 +79,8 @@ class Cell(object):
                                     'n_mut_ss': 0,
                                     'n_wt_ms': n_ms * 2,
                                     'n_mut_ms': 0,
+                                    'n_wt_dt': n_dt * 2,
+                                    'n_mut_dt': 0,
                                     'ploidy': 2,
                                     'highest_cn': 2,
                                     'nullisomy_count': 0,
@@ -132,6 +136,7 @@ class Cell(object):
         self.evolutionary_parameters['breach'] = 0.                # wild-type: cannot breach the epithelial ring
         self.evolutionary_parameters['stromal_survival'] = 0.      # wild-type: no stromal survival advantage
         self.evolutionary_parameters['met_survival'] = 0.          # wild-type: no metastatic-host survival advantage
+        self.evolutionary_parameters['drug_tolerance'] = 0.        # wild-type: no persister state
         self.evolutionary_parameters['viability'] = 1.
 
     def update_evolutionary_parameters(self, selection):
@@ -157,8 +162,18 @@ class Cell(object):
             self.baseline_rates['dispersal_rate'] * selection.update_dispersal_rate(gs), 1.0)
         self.evolutionary_parameters['immune_resistance'] = max(
             0.0, 1.0 - 1.0 / selection.update_immune_resistance(gs))
-        self.evolutionary_parameters['treatment_resistance'] = max(
-            0.0, 1.0 - 1.0 / selection.update_treatment_resistance(gs))
+        # All-or-nothing resistance (Selection.treatment_resistance_binary): any mutated copy makes
+        # the cell FULLY resistant -- trait exactly 1.0, so the drug's (1 - trait) factor is exactly
+        # 0 and chemotherapy does not touch it, at any dose and any ploidy. Off by default.
+        self.evolutionary_parameters['treatment_resistance'] = (
+            1.0 if (getattr(selection, "treatment_resistance_binary", False)
+                    and gs.get('n_mut_tr', 0) > 0)
+            else max(0.0, 1.0 - 1.0 / selection.update_treatment_resistance(gs)))
+        # Drug tolerance (persister axis): same [0,1) mapping. It attenuates the drug the same way
+        # resistance does, but its go-or-grow cost is what makes it a WAITING state rather than a
+        # regrowing one -- see Selection.prop_drug_tolerance.
+        self.evolutionary_parameters['drug_tolerance'] = max(
+            0.0, 1.0 - 1.0 / selection.update_drug_tolerance(gs))
         # Compartment-selection traits (v1): heritable resistances that attenuate a matching
         # compartment hazard in _death_rate (breach <- epithelial barrier, stromal_survival <-
         # stromal hazard), mapped from a relative fitness >=1 into [0,1) exactly like immune
@@ -235,6 +250,10 @@ class Cell(object):
         self.genome_summary['n_mut_tr'] += n_new_tr
         self.genome_summary['n_wt_tr'] -= n_new_tr
 
+        n_new_dt = int(mut_bits[selection.drug_tolerance[seg]].sum())
+        self.genome_summary['n_mut_dt'] += n_new_dt
+        self.genome_summary['n_wt_dt'] -= n_new_dt
+
         n_new_breach = int(mut_bits[selection.breach[seg]].sum())
         self.genome_summary['n_mut_breach'] += n_new_breach
         self.genome_summary['n_wt_breach'] -= n_new_breach
@@ -295,6 +314,11 @@ class Cell(object):
         n_wt_tr = len(selection.treatment_resistance[seg]) - n_mut_tr
         self.genome_summary['n_mut_tr'] += sign*n_mut_tr
         self.genome_summary['n_wt_tr'] += sign*n_wt_tr
+
+        n_mut_dt = int(allele_bits[selection.drug_tolerance[seg]].sum())
+        n_wt_dt = len(selection.drug_tolerance[seg]) - n_mut_dt
+        self.genome_summary['n_mut_dt'] += sign*n_mut_dt
+        self.genome_summary['n_wt_dt'] += sign*n_wt_dt
 
         n_mut_breach = int(allele_bits[selection.breach[seg]].sum())
         n_wt_breach = len(selection.breach[seg]) - n_mut_breach

@@ -358,7 +358,7 @@ class GenotypeTumor:
             func = np.zeros(int(sel.segment_sizes[seg]), dtype=bool)
             for idx in (sel.drivers[seg], sel.dispersal[seg], sel.immune_resistance[seg],
                         sel.treatment_resistance[seg], sel.breach[seg], sel.stromal_survival[seg],
-                        sel.met_survival[seg]):
+                        sel.met_survival[seg], sel.drug_tolerance[seg]):
                 if len(idx):
                     func[np.asarray(idx, dtype=int)] = True
             self._func_bits.append(func)
@@ -436,6 +436,20 @@ class GenotypeTumor:
         self._immune_prob_kill = (immune_cell_params or {}).get("prob_kill", 0.01)
         self._tx_death_add = {}
         self._tx_immune_resist = {}
+        # The active dose's context, kept alongside the override dicts so the hazard for a genotype
+        # MINTED MID-STEP (by a division-mutation during update / _tau_generation, after this step's
+        # _apply_treatment already froze the dicts) can be computed on demand rather than defaulting
+        # to zero. Without this a newborn clone escapes the drug for one whole step -- worst exactly
+        # in therapy-induced-mutagenesis runs, where mid-step minting is most frequent. None => no
+        # active treatment => the on-demand paths return the untreated defaults (byte-identical).
+        self._tx_treatment = None
+        self._tx_dosage = 0.0
+        # Per-genotype division multiplier that applies ONLY while the drug is on (drug-tolerant
+        # persisters). The tolerant state is DRUG-INDUCED: off drug a tolerant cell is an ordinary
+        # cell and pays nothing, so this cost cannot live in `division_rate`, which is baked at
+        # genotype level and would apply everywhere and always -- purging the tolerant pool long
+        # before the first dose. Empty dict => no override => byte-identical.
+        self._tx_div_mult = {}
         self._tx_sites = "both"  # active treatment's target compartment(s): both / met / primary (R9)
         # Compartment-dependent selection (v1, DESIGN_phenotype_plasticity.md §2). Two local hazards,
         # each contributed by a resident normal compartment the gland geometry seeds and each
@@ -464,6 +478,7 @@ class GenotypeTumor:
             n_breach=len(self.selection.get_breach()),
             n_ss=len(self.selection.get_stromal_survival()),
             n_ms=len(self.selection.get_met_survival()),
+            n_dt=len(self.selection.get_drug_tolerance()),
             **cancer_cell_params,
         )
         founder.set_genotype_id()
@@ -1222,6 +1237,102 @@ class GenotypeTumor:
         is_met = deme_idx >= self.n_primary_demes
         return is_met if self._tx_sites == "met" else (not is_met)
 
+    def _div_rate(self, gid, deme_idx, rep=None):
+        """The clone's division rate here and now, including the drug-tolerance cost while a dose is
+        active in this deme's compartment.
+
+        Every OTHER trait cost is folded into ``division_rate`` once, at genotype level, because those
+        traits are permanent. Tolerance is not: it is a drug-induced state, so its cost has to be
+        applied at the point of use and gated to the treated compartment, exactly like the treatment's
+        death hazard. ``_tx_div_mult`` is empty unless a dose is active AND some clone actually carries
+        the trait, so with the feature off this is a dict lookup returning the untouched rate."""
+        rep = rep if rep is not None else self.genotypes[gid]
+        div = rep.evolutionary_parameters["division_rate"]
+        if not self._tx_div_mult:
+            return div
+        m = self._tx_div_mult.get(gid)
+        if m is None or not self._tx_applies(deme_idx):
+            return div
+        return div * m
+
+    def _kill_amount(self, rep, intensity, treatment=None):
+        """Extra death hazard a dose of ``intensity`` imposes on this clone.
+
+        ``kill_mode="additive"`` (default) adds the SAME absolute hazard to every clone, so whether a
+        cell survives is decided by how fast it divides: at kill_rate 1.5 an ordinary met clone
+        (b=1.02) sits at net -0.72 and dies, while a driver-saturated one (b=1.70, at the
+        max_birth_rate cap) sits at net -0.04 and merely hovers. The drug then SELECTS for the fast
+        clones and the deposit regrows mid-course; the only escape is a dose large enough to
+        annihilate everything, which leaves too few divisions for resistance to arise. One absolute
+        number cannot serve clones whose birth rates differ threefold.
+
+        ``kill_mode="proliferation"`` scales the hazard by the clone's own division rate, so
+        ``net = b(1 - kill_rate) - death``: at kill_rate 1.0 every clone declines at exactly its death
+        rate regardless of fitness, and above 1.0 the FASTER clones die faster. Dividing quickly stops
+        being an escape and starts being a liability -- which is also the biology, since cytotoxic
+        chemotherapy damages cells as they replicate (hence its sparing of quiescent tissue). The
+        cell-based engine already multiplies the death rate this way in ``Chemotherapy._apply``; it is
+        the count engine that diverged to additive."""
+        tx = treatment if treatment is not None else self._tx_treatment
+        kill_rate = getattr(tx, "kill_rate", 0.8)
+        if getattr(tx, "kill_mode", "additive") == "proliferation":
+            return intensity * kill_rate * rep.evolutionary_parameters["division_rate"]
+        return intensity * max(kill_rate - rep.evolutionary_parameters["death_rate"], 0.0)
+
+    def _tx_death_add_for(self, gid, rep=None):
+        """The active treatment's extra death hazard for ``gid`` -- the value ``_apply_treatment``
+        stored, or, for a genotype minted AFTER that step's rebuild, the same value computed on demand
+        and memoised so it is charged from its very first step instead of leaking a drug-free step.
+
+        The formula mirrors ``_apply_treatment``'s death-rate branch EXACTLY (same target test, same
+        ``max(treatment_resistance, drug_tolerance)`` protection, same ``kill_rate - death_rate``
+        intensity), so a memoised entry and an on-demand one are identical -- a newborn clone and its
+        already-registered siblings take the same hazard. Returns 0.0 (and memoises nothing) when no
+        death-rate dose is active, so untreated / immunotherapy-only runs are byte-identical."""
+        val = self._tx_death_add.get(gid)
+        if val is not None:
+            return val
+        tx = self._tx_treatment
+        if tx is None or getattr(tx, "affects", "death_rate") == "immune_resistance":
+            return 0.0
+        rep = rep if rep is not None else self.genotypes[gid]
+        if self._is_cancer(gid):
+            target = self._is_treatment_target(tx, rep)
+            tr = max(rep.evolutionary_parameters["treatment_resistance"],
+                     rep.evolutionary_parameters.get("drug_tolerance", 0.0))
+            p = tx.effectiveness if target else tx.toxicity
+        else:
+            tr, p = 0.0, tx.toxicity
+        intensity = self._tx_dosage * p * (1.0 - min(max(tr, 0.0), 1.0))
+        if intensity <= 0:
+            return 0.0                          # matches _apply_treatment's `continue` (no entry)
+        val = self._kill_amount(rep, intensity, tx)
+        self._tx_death_add[gid] = val           # memoise: charged identically on every later step
+        return val
+
+    def _tx_immune_resist_for(self, gid, rep, base_ir):
+        """The immunotherapy-stripped immune resistance for ``gid``: the stored override, or -- for a
+        genotype minted after this step's rebuild -- the same ``ir * (1 - intensity)`` computed on
+        demand and memoised. Mirrors ``_apply_treatment``'s immune_resistance branch. Returns the
+        clone's untouched ``base_ir`` (and memoises nothing) when no immunotherapy dose reaches it, so
+        untreated / death-rate-therapy runs are byte-identical to the old ``.get(gid, base_ir)``."""
+        val = self._tx_immune_resist.get(gid)
+        if val is not None:
+            return val
+        tx = self._tx_treatment
+        if (tx is None or getattr(tx, "affects", "death_rate") != "immune_resistance"
+                or not self._is_cancer(gid)):
+            return base_ir
+        target = self._is_treatment_target(tx, rep)
+        tr = rep.evolutionary_parameters["treatment_resistance"]
+        p = tx.effectiveness if target else tx.toxicity
+        intensity = self._tx_dosage * p * (1.0 - min(max(tr, 0.0), 1.0))
+        if intensity <= 0:
+            return base_ir                      # matches _apply_treatment's `continue` (no entry)
+        val = rep.evolutionary_parameters["immune_resistance"] * (1.0 - intensity)
+        self._tx_immune_resist[gid] = val       # memoise: read identically on every later step
+        return val
+
     def _death_rate(self, gid, deme_idx, total=None, comp=None):
         """Cancer death rate = crowding-modulated baseline + local immune killing + treatment.
 
@@ -1262,7 +1373,7 @@ class GenotypeTumor:
             #
             # A cancer-only deme has n_normal = 0, so term (2) vanishes and the result is byte-
             # identical to the previous `slope * (total / K)` form.
-            div = rep.evolutionary_parameters["division_rate"]
+            div = self._div_rate(gid, deme_idx, rep)
             steep = 1.0 + self.crowding_margin
             # Per-deme carrying capacity (DESIGN_ductal_field.md §3): duct demes cap at K_duct, stroma
             # at K_stroma. Uniform (= carrying_capacity) reproduces the scalar law byte-identically.
@@ -1328,7 +1439,7 @@ class GenotypeTumor:
         # Immune resistance may be transiently stripped by immunotherapy; that override is gated to the
         # treated compartment(s) (R9), so an untreated site keeps the clone's baseline resistance.
         base_ir = rep.evolutionary_parameters["immune_resistance"]
-        ir = self._tx_immune_resist.get(gid, base_ir) if self._tx_applies(deme_idx) else base_ir
+        ir = self._tx_immune_resist_for(gid, rep, base_ir) if self._tx_applies(deme_idx) else base_ir
         ir = min(max(ir, 0.0), 1.0)
         imm_frac = ((n_immune_c / total if total else 0.0) if comp is not None
                     else self._immune_fraction(deme, total))
@@ -1360,8 +1471,11 @@ class GenotypeTumor:
 
         # Chemo/targeted death hazard, gated to the treated compartment(s) (R9): systemic ('both')
         # hits everywhere, 'met'/'primary' only their site. 'both' is byte-identical to before.
+        # A genotype minted mid-step is absent from _tx_death_add (frozen by this step's
+        # _apply_treatment); _tx_death_add_for computes and memoises its hazard on demand rather than
+        # letting a bare `.get(..., 0.0)` grant it a drug-free step.
         if self._tx_applies(deme_idx):
-            death += self._tx_death_add.get(gid, 0.0)
+            death += self._tx_death_add_for(gid, rep)
         return death
 
     def _cancer_gids(self, deme):
@@ -1428,7 +1542,7 @@ class GenotypeTumor:
         total = comp[0]
         rate = 0.0
         for gid in self._cancer_gids(deme):
-            div = self.genotypes[gid].evolutionary_parameters["division_rate"]
+            div = self._div_rate(gid, deme_idx)
             rate += deme[gid] * (div + self._death_rate(gid, deme_idx, total, comp=comp))
         if self._tx_death_add and self._tx_applies(deme_idx):
             for gid, cnt in deme.items():
@@ -1505,7 +1619,7 @@ class GenotypeTumor:
         comp = self._deme_comp(deme)                # ONE composition scan reused by every genotype
         total = comp[0]
         weights = [
-            deme[gid] * (self.genotypes[gid].evolutionary_parameters["division_rate"]
+            deme[gid] * (self._div_rate(gid, di)
                          + self._death_rate(gid, di, total, comp=comp))
             for gid in gids
         ]
@@ -1524,7 +1638,7 @@ class GenotypeTumor:
             return
         gid = gids[pick]
         rep = self.genotypes[gid]
-        div = rep.evolutionary_parameters["division_rate"]
+        div = self._div_rate(gid, di, rep)
         death = self._death_rate(gid, di, total, comp=comp)
 
         affected = [di]
@@ -1650,11 +1764,45 @@ class GenotypeTumor:
         """
         self._tx_death_add = {}
         self._tx_immune_resist = {}
+        self._tx_div_mult = {}
         self._tx_sites = getattr(treatment, "sites", "both") if treatment is not None else "both"
         if treatment is None or dosage <= 0:
+            self._tx_treatment, self._tx_dosage = None, 0.0
             return
+        # Keep the active dose's context so a mid-step-minted genotype's hazard can be recomputed
+        # on demand (see _tx_death_add_for / _tx_immune_resist_for) with the exact inputs used below.
+        self._tx_treatment, self._tx_dosage = treatment, dosage
         affects = getattr(treatment, "affects", "death_rate")
         kill_rate = getattr(treatment, "kill_rate", 0.8)
+        # Persister cost, charged only for the duration of the dose (see Selection.proliferation_cost
+        # for why it cannot be baked into division_rate). 0.0 by default -> dict stays empty.
+        dt_cost = float(getattr(self.selection, "drug_tolerance_cost", 0.0) or 0.0)
+        # Therapy-induced mutator phenotype: raise an EXPOSED clone's mutation rate ONCE and leave it
+        # raised (see Treatment.mutagenicity). Applied here because this runs every treated step with
+        # the live genotype set; `_tx_mutagenized` makes it idempotent so a 100-step course does not
+        # compound the factor 100 times. Descendants inherit it through `rep.divide()`, so the
+        # phenotype outlives the drug — which is the point: the de novo resistant clone must arise
+        # AFTER exposure, and the elevated rate is what makes that likely.
+        mutagenicity = float(getattr(treatment, "mutagenicity", 1.0) or 1.0)
+        if mutagenicity != 1.0:
+            if self._tx_sites == "both":
+                exposed = [g for g in self.genotypes_counts if self._is_cancer(g)]
+            else:                       # only clones with cells in a treated compartment are exposed
+                exposed = set()
+                for di, deme in enumerate(self.demes):
+                    if deme and self._tx_applies(di):
+                        exposed.update(deme)
+                exposed = [g for g in exposed if self._is_cancer(g)]
+            for gid in exposed:
+                rep = self.genotypes[gid]
+                # The flag lives on the REP, not in a gid set: `Cell.divide()` shallow-copies, so a
+                # daughter inherits BOTH the raised mutation_rate and the flag. Keying off a gid set
+                # would re-multiply every newly minted child that is still under drug, compounding
+                # the factor once per generation instead of applying it once per lineage.
+                if getattr(rep, "_tx_mutagenized", False):
+                    continue
+                rep.mutation_rate = float(rep.mutation_rate) * mutagenicity
+                rep._tx_mutagenized = True
         for gid in list(self.genotypes_counts):
             is_cancer = self._is_cancer(gid)
             rep = self.genotypes[gid]
@@ -1679,15 +1827,33 @@ class GenotypeTumor:
                 # update / _tau_substep). Cancer entries are unchanged, so the cancer path is byte-identical.
                 if is_cancer:
                     target = self._is_treatment_target(treatment, rep)
-                    tr = rep.evolutionary_parameters["treatment_resistance"]
+                    tr = max(rep.evolutionary_parameters["treatment_resistance"],
+                             rep.evolutionary_parameters.get("drug_tolerance", 0.0))
                     p = treatment.effectiveness if target else treatment.toxicity
                 else:
                     tr, p = 0.0, treatment.toxicity
+                # A persister pays its division cost for as long as the drug is present, INCLUDING
+                # when it is tolerant enough to take no kill at all -- so this must precede the
+                # `intensity <= 0` short-circuit below, or the fully tolerant cell (the one the
+                # mechanism exists for) would be the only one that escapes the cost.
+                if is_cancer and dt_cost:
+                    dt = rep.evolutionary_parameters.get("drug_tolerance", 0.0)
+                    # ...but only while tolerance is what is actually keeping the cell alive. The
+                    # protection above is max(resistance, tolerance), so the cost follows the same
+                    # max: a cell whose RESISTANCE already covers the drug has no reason to sit in a
+                    # stress-induced persister state, and charging it anyway is what makes the de
+                    # novo resistant clone the most heavily taxed thing in the deposit -- it would
+                    # inherit its persister parent's cost on top of its own resistance cost and
+                    # crawl at 0.41 of normal division, so the relapse ends up made of tolerant
+                    # cells instead of resistant ones (measured: resistance reached only 0.69% of
+                    # the deposit at chemo end).
+                    if dt > rep.evolutionary_parameters["treatment_resistance"]:
+                        self._tx_div_mult[gid] = max(0.0, 1.0 - dt_cost * dt)
                 intensity = dosage * p * (1.0 - min(max(tr, 0.0), 1.0))  # in [0, 1]
                 if intensity <= 0:
                     continue
                 base = rep.evolutionary_parameters["death_rate"]
-                self._tx_death_add[gid] = intensity * max(kill_rate - base, 0.0)
+                self._tx_death_add[gid] = self._kill_amount(rep, intensity, treatment)
 
     def _resect(self, site="primary"):
         """Surgical resection (R9): remove EVERY cell (cancer + immortal residents) from the target
@@ -1717,8 +1883,10 @@ class GenotypeTumor:
         grow with no active treatment (or an inactive window) sees no stale hazard on cancer OR normal
         tissue. Refreshes the rate vector only when it actually clears something, so it is a byte-
         identical no-op whenever there was nothing left over (e.g. a fresh or never-treated tumour)."""
-        if self._tx_death_add or self._tx_immune_resist:
+        if self._tx_death_add or self._tx_immune_resist or self._tx_div_mult:
             self._tx_death_add, self._tx_immune_resist, self._tx_sites = {}, {}, "both"
+            self._tx_div_mult = {}
+            self._tx_treatment, self._tx_dosage = None, 0.0
             self.deme_rates = np.array([self._deme_rate(i) for i in range(len(self.demes))], dtype=float)
 
     def grow(self, n_steps=1000, seed=None, treatment=None, **kwargs):
@@ -1800,7 +1968,7 @@ class GenotypeTumor:
             for gid in sorted(self._cancer_gids(deme), key=lambda g: self.genotypes[g].ord):
                 c = deme[gid]
                 rep = self.genotypes[gid]
-                div = rep.evolutionary_parameters["division_rate"]
+                div = self._div_rate(gid, di, rep)
                 death = self._death_rate(gid, di, total, comp=comp)
                 # Fate is split on the clone's OWN dispersal rate, never the confinement-scaled one
                 # (see _escape_factor): a cell's mutation probability must not depend on whether it
@@ -1995,7 +2163,7 @@ class GenotypeTumor:
             for gid in sorted(self._cancer_gids(deme), key=lambda g: self.genotypes[g].ord):
                 c = deme[gid]
                 rep = self.genotypes[gid]
-                div = rep.evolutionary_parameters["division_rate"]
+                div = self._div_rate(gid, di, rep)
                 death = self._death_rate(gid, di, total, comp=comp)
                 # The clone's OWN dispersal rate, never the confinement-scaled one — confinement
                 # must not change how often a division mutates (see _escape_factor).
@@ -2764,6 +2932,7 @@ class GenotypeTumor:
                                     self.selection.get_treatment_resistant())
         breach_idx, ss_idx = self.selection.get_breach(), self.selection.get_stromal_survival()
         ms_idx = self.selection.get_met_survival()
+        dt_idx = self.selection.get_drug_tolerance()
         snv_cache, cnv_cache, exp_cache, evo_cache = {}, {}, {}, {}
         # R13: per-genotype allele-resolved expression + the per-clone program drive (routes 1+2).
         # Both are per-CLONE, so they belong in this cache; the per-CELL `z` is drawn later.
@@ -2816,6 +2985,7 @@ class GenotypeTumor:
             evo["n_mut_breach"] = int((snv[breach_idx] > 0).sum())
             evo["n_mut_ss"] = int((snv[ss_idx] > 0).sum())
             evo["n_mut_ms"] = int((snv[ms_idx] > 0).sum())
+            evo["n_mut_dt"] = int((snv[dt_idx] > 0).sum())
             evo_cache[gid] = evo
 
         # F8: per-deme expression modifier (None -> disabled -> exp is bit-identical to the base
@@ -3043,7 +3213,7 @@ class GenotypeTumor:
         s = self.selection
         parts = [s.get_oncogenes(), s.get_tsgs(), s.get_dispersal_genes(), s.get_immune_resistant(),
                  s.get_treatment_resistant(), s.get_breach(), s.get_stromal_survival(),
-                 s.get_met_survival()]
+                 s.get_met_survival(), s.get_drug_tolerance()]
         parts = [np.asarray(p, dtype=int) for p in parts if len(p)]
         if not parts:
             return {}

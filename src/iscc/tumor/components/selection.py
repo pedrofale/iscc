@@ -8,10 +8,13 @@ class Selection(object):
     def __init__(self, n_segments=10, segment_size=1000, segment_sizes=None,
                  prop_driver=0.1, prop_dispersal=0.1, prop_treatment_resistance=0.1, prop_immune_resistance=0.1,
                  prop_breach=0.0, prop_stromal_survival=0.0, prop_met_survival=0.0,
+                 prop_drug_tolerance=0.0,
                  driver_effects=1.1, dispersal_effects=1.1, treatment_resistant_effects=1.1, immune_resistant_effects=1.1,
                  breach_effects=1.1, stromal_survival_effects=1.1, met_survival_effects=1.1,
+                 drug_tolerance_effects=1.1,
                  breach_cost=0.0, stromal_survival_cost=0.0, met_survival_cost=0.0,
-                 treatment_resistance_cost=0.0, trait_source="dosage",
+                 treatment_resistance_cost=0.0, drug_tolerance_cost=0.0, trait_source="dosage",
+                 treatment_resistance_binary=False,
                  selection_mode="gene", s_arm=None, arm_baseline=2.0,
                  max_ploidy=6, max_cn=12, max_nullisomy=2, max_mut_drivers=1000, rng=None,
                  epistasis_params=None, dependency_params=None, layout_seed=None, ):
@@ -51,6 +54,20 @@ class Selection(object):
         # and biases transit survival on the primary->met migration hop. OFF by default (prop 0 -> empty
         # axis -> N_ms=0 -> update_met_survival returns 1 -> trait 0 -> zero met terms -> byte-identical).
         self.prop_met_survival = prop_met_survival
+        # DRUG TOLERANCE — the persister axis (Sharma et al. 2010; Hata et al. 2016). Deliberately NOT
+        # a second flavour of resistance: a tolerant clone SURVIVES therapy but barely proliferates,
+        # so it forms the residual-disease floor that outlasts the drug WITHOUT being able to regrow
+        # under it. Resistance is what regrows; tolerance is what waits. Mode IV needs both, because a
+        # de novo resistance mutation has to arise in something that is still alive and still dividing
+        # once the sensitive bulk is gone (which at kill_rate 1.5 takes only ~9 generations).
+        # MODELLING CAVEAT, deliberate: a real persister state is NON-genetic and reversible, whereas
+        # this is a heritable trait, so the tolerant pool is standing genetic variation rather than a
+        # state any cell can enter. It reproduces the population DYNAMICS that mode IV requires, not
+        # the chromatin biology. NOTE ALSO that iscc draws mutation as a fate of DIVISION, so a
+        # tolerant clone must keep dividing (slowly) to mutate at all — set ``drug_tolerance_cost`` to
+        # SLOW persisters, never to stop them, or the pool becomes a mutational dead end.
+        # OFF by default (prop 0 -> empty axis -> N_dt=0 -> update returns 1 -> trait 0 -> no effect).
+        self.prop_drug_tolerance = prop_drug_tolerance
 
         # Fixed about fitness
         self.driver_effects = driver_effects
@@ -60,6 +77,7 @@ class Selection(object):
         self.breach_effects = breach_effects
         self.stromal_survival_effects = stromal_survival_effects
         self.met_survival_effects = met_survival_effects
+        self.drug_tolerance_effects = drug_tolerance_effects
         # Compartment-context fitness TRADE-OFFS (R15, go-or-grow): each niche/dissemination trait
         # carries a PROLIFERATION cost that applies EVERYWHERE, while its BENEFIT (attenuating a hazard)
         # is gated to its compartment in _death_rate. So a trait is net-favoured only where its niche
@@ -71,6 +89,19 @@ class Selection(object):
         self.stromal_survival_cost = stromal_survival_cost
         self.met_survival_cost = met_survival_cost
         self.treatment_resistance_cost = treatment_resistance_cost
+        # ALL-OR-NOTHING resistance. The graded map (trait = 1 - 1/effects^(2*n_mut/ploidy)) means a
+        # cell with one mutated copy at the shipped effects 2.8 is only 64% resistant -- it still
+        # absorbs 36% of the kill and dies alongside the sensitive bulk, just slower, which is why a
+        # "resistant" clone could not expand DURING treatment. It also leaks resistance back on a
+        # whole-genome doubling, which halves the exponent (one mutated copy at effects 20 falls from
+        # 0.95 to 0.78). With this flag ANY resistance mutation sets the trait to exactly 1.0: the
+        # drug term (1 - trait) becomes exactly zero -- the cell is untouched by chemotherapy -- and
+        # the clone pays the FULL treatment_resistance_cost, so resistance is a clean all-or-nothing
+        # trade instead of a sliding scale. Default False -> the graded map, byte-identical.
+        self.treatment_resistance_binary = bool(treatment_resistance_binary)
+        # Tolerance is COSTLY by construction: that is what keeps persisters rare before therapy
+        # (out-competed in a crowded deme) instead of taking over the tumour.
+        self.drug_tolerance_cost = drug_tolerance_cost
 
         # What a dissemination/niche TRAIT reads off the genome — breach, stromal_survival,
         # met_survival, immune_resistance and treatment_resistance only. The oncogene/TSG DRIVER
@@ -130,6 +161,11 @@ class Selection(object):
         self.make_stromal_survival()
         self.make_met_survival()
         self.make_expmap()
+        # LAST on purpose: make_drug_tolerance() draws from the layout rng even when
+        # prop_drug_tolerance is 0 (binomial(1, 0.0, size=N) still consumes state), so calling it
+        # before make_expmap would shift the expression-map layout of every EXISTING config. Called
+        # last, an off-by-default tolerance axis leaves every other gene-role layout untouched.
+        self.make_drug_tolerance()
 
         # Total number of genes in each category, used to make fitness *relative* to the
         # all-wild-type diploid baseline (so the baseline is neutral and only deviations
@@ -142,6 +178,7 @@ class Selection(object):
         self.N_breach = sum(len(x) for x in self.breach)
         self.N_ss = sum(len(x) for x in self.stromal_survival)
         self.N_ms = sum(len(x) for x in self.met_survival)
+        self.N_dt = sum(len(x) for x in self.drug_tolerance)
         self.update_dict = {'viability': self.update_viability,
                             'division_rate': self.update_division_rate,
                             'dispersal_rate': self.update_dispersal_rate,
@@ -150,6 +187,7 @@ class Selection(object):
                             'breach': self.update_breach,
                             'stromal_survival': self.update_stromal_survival,
                             'met_survival': self.update_met_survival,
+                            'drug_tolerance': self.update_drug_tolerance,
                             'death_rate': self.update_death_rate,}
         
         self.gene_names = self.get_gene_names()
@@ -336,7 +374,8 @@ class Selection(object):
                 + int(genome_summary.get('n_mut_breach', 0) > 0)
                 + int(genome_summary.get('n_mut_ss', 0) > 0)
                 + int(genome_summary.get('n_mut_ms', 0) > 0)
-                + int(genome_summary.get('n_mut_tr', 0) > 0))
+                + int(genome_summary.get('n_mut_tr', 0) > 0)
+                + int(genome_summary.get('n_mut_dt', 0) > 0))
         if load > self.max_mut_drivers:
             return 0
         return 1
@@ -433,6 +472,27 @@ class Selection(object):
         return self._trait_fitness(genome_summary['n_wt_ir'], genome_summary['n_mut_ir'],
                                    genome_summary['ploidy'], self.N_ir, e)
 
+    def make_drug_tolerance(self):
+        """Sites that, when mutated, let a cell ENTER the drug-tolerant persister state."""
+        self.drug_tolerance_types = []
+        self.drug_tolerance = []
+        for seg in range(self.n_segments):
+            confers = self.rng.binomial(1, self.prop_drug_tolerance, size=self.segment_sizes[seg])
+            self.drug_tolerance_types.append(confers)
+            self.drug_tolerance.append(np.where(confers == 1)[0])
+
+    def get_drug_tolerance(self):
+        genes = []
+        for seg in range(self.n_segments):
+            idx = np.where(self.drug_tolerance_types[seg] == 1)[0]
+            genes.append(idx + self._seg_offsets[seg])
+        return np.concatenate(genes) if genes else np.array([], dtype=int)
+
+    def update_drug_tolerance(self, genome_summary, **kwargs):
+        e = self.drug_tolerance_effects
+        return self._trait_fitness(genome_summary['n_wt_dt'], genome_summary['n_mut_dt'],
+                                   genome_summary['ploidy'], self.N_dt, e)
+
     def update_treatment_resistance(self, genome_summary, **kwargs):
         e = self.treatment_resistant_effects
         return self._trait_fitness(genome_summary['n_wt_tr'], genome_summary['n_mut_tr'],
@@ -463,6 +523,12 @@ class Selection(object):
                 * max(0.0, 1.0 - self.stromal_survival_cost * ep.get("stromal_survival", 0.0))
                 * max(0.0, 1.0 - self.met_survival_cost * ep.get("met_survival", 0.0))
                 * max(0.0, 1.0 - self.treatment_resistance_cost * ep.get("treatment_resistance", 0.0)))
+        # NOTE drug_tolerance is deliberately NOT charged here. Every other trait's cost is permanent
+        # because the trait is permanent, but the persister state only exists while the drug does --
+        # a tolerant cell off drug is an ordinary cell. Charging it here made the trait unusable: a
+        # cost high enough to hold the pool at a residual-disease floor under drug also purged that
+        # pool to ~0.1% before treatment ever started. GenotypeTumor._apply_treatment applies
+        # drug_tolerance_cost as a division multiplier for the duration of the dose instead.
 
     def get_gene_names(self, gene_prefix='G'):
         gene_names = []

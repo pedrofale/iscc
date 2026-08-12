@@ -56,7 +56,7 @@ def neutral_positions(selection):
         for idx in (selection.drivers[seg], selection.dispersal[seg],
                     selection.immune_resistance[seg], selection.treatment_resistance[seg],
                     selection.breach[seg], selection.stromal_survival[seg],
-                    selection.met_survival[seg]):
+                    selection.met_survival[seg], selection.drug_tolerance[seg]):
             if len(idx):
                 functional[np.asarray(idx, dtype=int)] = True
         pool.append(int(selection._seg_offsets[seg]) + np.flatnonzero(~functional))
