@@ -66,7 +66,7 @@ PHASE_CAPTION = {
 TRAJECTORY_FILE = "compartment_trajectory.pkl"
 
 
-def stage_of(rep):
+def stage_of(rep, in_primary=False):
     """The cascade stage of a cancer clone: which trait MUTATIONS it carries, taken as the furthest
     along the metastatic arc — resistance > met > stromal > breach > proliferation > none. ``None`` for
     normal cells.
@@ -75,14 +75,21 @@ def stage_of(rep):
     value is >0 iff a gene for it is mutated). A cell that carries several trait mutations is coloured by
     the last one in the arc. (Because a clone can carry multiple traits at once — asexual linked
     selection means a sweeping clone hitchhikes them together — the same clone can be, e.g., both
-    met-survival and resistance; it then reads as the later stage, resistance.)"""
+    met-survival and resistance; it then reads as the later stage, resistance.)
+
+    ``in_primary=True`` reads the clone AS IT STANDS IN THE PRIMARY, where met-survival is not a stage
+    a cell can be at: there is no host parenchyma to survive in the duct, and the trait's BENEFIT is
+    already gated to the met compartment in ``_death_rate``. Without this the stage is meaningless at
+    realistic mutation supply — with ``prop_met_survival`` 0.015 (90 of 6,000 genes) and mutation_rate
+    0.30 over ~1,800 generations, essentially EVERY lineage picks one up, so 99% of the in-situ primary
+    reads 'met' and the DCIS→IDC cascade it is supposed to show (breach, stromal) is painted over."""
     if getattr(rep, "type", None) != "cancer":
         return None
     ep = rep.evolutionary_parameters
     base_div = getattr(rep, "baseline_rates", {}).get("division_rate", ep["division_rate"])
     if ep.get("treatment_resistance", 0) > 0:
         return "resistance"
-    if ep.get("met_survival", 0) > 0:
+    if not in_primary and ep.get("met_survival", 0) > 0:
         return "met"
     if ep.get("stromal_survival", 0) > 0:
         return "stromal"
@@ -93,7 +100,7 @@ def stage_of(rep):
     return "none"
 
 
-def story_colors(t, min_freq=None):
+def story_colors(t, min_freq=None, in_primary=False):
     """{str(gid) -> rgba}: ONE shared clone colormap for the grids AND the Mullers.
 
     PER-CELL colouring: every cancer genotype takes the colour of ITS OWN cascade stage (``stage_of`` —
@@ -102,14 +109,18 @@ def story_colors(t, min_freq=None):
     Muller alike. This is the "colour cells/clones by whether they carry each trait's mutations" view: a
     small breach/stromal/… sub-clone keeps its own trait colour instead of being folded (band-dominant or
     by founder) into a bulk that is mostly stage 'none' and washed grey. ``min_freq`` is accepted for
-    call-site compatibility but unused (no band merging happens in the colour map). Normals stay muted."""
+    call-site compatibility but unused (no band merging happens in the colour map). Normals stay muted.
+
+    ``in_primary=True`` returns the PRIMARY-compartment reading of the same clones (see ``stage_of``):
+    identical except that met-survival no longer claims a clone, so the duct field shows the invasion
+    cascade it actually has instead of going uniformly purple."""
     out = {}
     for gid, rep in t.genotypes.items():
         sgid = str(gid)
         if getattr(rep, "type", None) != "cancer":
             out[sgid] = NORMAL_MUTED.get(getattr(rep, "type", None), (0.7, 0.7, 0.7, 1.0))
             continue
-        st = stage_of(rep)
+        st = stage_of(rep, in_primary=in_primary)
         out[sgid] = STAGE_COL["none" if st is None else st]
     for n in normal_names:
         out[n] = NORMAL_MUTED[n]
@@ -239,6 +250,10 @@ def build_trajectory(t, frames, marks, min_freq):
         deme_coords=[(int(r), int(c)) for r, c in t.deme_coords],
         gid_ord={str(g): int(rep.ord) for g, rep in t.genotypes.items()},
         colors={str(g): tuple(float(x) for x in c) for g, c in story_colors(t, min_freq).items()},
+        # the SAME clones read in the primary compartment, where met-survival is not a stage a cell
+        # can be at (see stage_of). The renderer uses this for the primary grid + primary Muller only.
+        colors_primary={str(g): tuple(float(x) for x in c)
+                        for g, c in story_colors(t, min_freq, in_primary=True).items()},
         driver_map={str(g): tuple(int(i) for i in v)
                     for g, v in t._functional_signatures().items()},
         min_freq=float(min_freq),

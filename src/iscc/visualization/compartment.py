@@ -101,7 +101,12 @@ def build_figure(traj, splash=False, scale=1.0):
 
     viz.plot_muller_compartments(traces, parents, axes=(ax_mp, ax_mm),
                                  driver_map=traj["driver_map"], min_freq=traj["min_freq"],
-                                 clone_colors=colors, mark_generations=marks, star_genotype=None,
+                                 clone_colors=colors,
+                                 # the primary band reads the same clones in the PRIMARY compartment,
+                                 # where met-survival is not a stage (arc.stage_of); older trajectories
+                                 # without the key fall back to the shared map.
+                                 clone_colors_primary=traj.get("colors_primary"),
+                                 mark_generations=marks, star_genotype=None,
                                  # smoothing_std is a Gaussian width in GENERATIONS: the pymuller default
                                  # (0.1) is ~no smoothing, so the stacked band edges kink at every step.
                                  # 3.0 is small vs the ~230-generation arc — it removes the per-step wobble
@@ -201,6 +206,9 @@ def render_animation(traj, out_path, splash=False, poster=True, scale=1.0):
     render dpi so each frame is lighter — a bigger tumour/grid stays a web-friendly GIF. Returns the MB."""
     frames = traj["frames"]
     colors = traj["colors"]
+    # primary-compartment reading of the same clones (arc.stage_of): met-survival is not a stage a duct
+    # cell can be at. Trajectories written before this key existed fall back to the shared map.
+    colors_primary = traj.get("colors_primary") or colors
     deme_coords = traj["deme_coords"]
     n_primary = traj["n_primary_demes"]
     gid_ord = traj["gid_ord"]
@@ -233,7 +241,8 @@ def render_animation(traj, out_path, splash=False, poster=True, scale=1.0):
             mask = comp == val
             sub = {k: df[mask] for k, df in cd.items()}
             title = grid_titles[key] if splash else f"{grid_titles[key]}   ({int(mask.sum()):,} cells)"
-            draw_grid(ax, sub, gsz, colors, title, title_color=SPLASH_TITLE if splash else INK)
+            grid_colors = colors_primary if key == "primary" else colors
+            draw_grid(ax, sub, gsz, grid_colors, title, title_color=SPLASH_TITLE if splash else INK)
         tl = frame["cursor"]
         for a in cursor_artists:
             a.remove()
