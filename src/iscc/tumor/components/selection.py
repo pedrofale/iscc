@@ -23,7 +23,14 @@ class Selection(object):
         # make_treatment_resistant / make_immune_resistant), never for evolution — so the engines
         # hand it a dedicated LAYOUT rng seeded by a config-determined ``layout_seed`` (shared across
         # same-config runs), decoupled from the per-run evolution seed. See DESIGN_cohort.md §1.
-        self.rng = rng if rng is not None else np.random.default_rng()
+        # ``layout_seed`` is resolved HERE, before ``self.rng``, so that ``layout_seed`` ALONE is
+        # enough to reproduce the layout: constructed without an explicit ``rng`` (probes, tests,
+        # notebooks) the generator is seeded from it, drawing the SAME layout the engines draw —
+        # they build ``default_rng(layout_seed)`` themselves and pass it in as ``rng``, so their
+        # behaviour is unchanged. Without this a bare ``Selection(layout_seed=42)`` re-drew a fresh
+        # random layout on every call, silently varying which loci are drivers or resistant.
+        self.layout_seed = DEFAULT_LAYOUT_SEED if layout_seed is None else layout_seed
+        self.rng = rng if rng is not None else np.random.default_rng(self.layout_seed)
         # Fixed about the genome. Segments may have unequal sizes (real-genome mode: size
         # proportional to chromosome-arm length); ``segment_sizes`` overrides the uniform scalar.
         self.n_segments = n_segments
@@ -199,8 +206,8 @@ class Selection(object):
         # than from ``self.rng``: the network is part of the SHARED landscape (every patient of a
         # cohort must evolve under the SAME network for MHN/TreeMHN to be well-posed), and using a
         # sub-stream means turning epistasis on — or changing n_interactions/topology — leaves the
-        # gene-role layout drawn from ``self.rng`` above untouched.
-        self.layout_seed = DEFAULT_LAYOUT_SEED if layout_seed is None else layout_seed
+        # gene-role layout drawn from ``self.rng`` above untouched. (``self.layout_seed`` itself is
+        # resolved at the top of __init__, since ``self.rng`` now defaults to a stream seeded by it.)
         self.epistasis_params = epistasis_params
         self.dependency_params = dependency_params
         self.epistasis = None
