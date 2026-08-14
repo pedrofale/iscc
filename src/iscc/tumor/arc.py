@@ -44,11 +44,16 @@ STAGE_COL = {
     "breach":     (0.98, 0.62, 0.09, 1.0),   # orange — escape the duct (breach)
     "stromal":    (0.18, 0.75, 0.44, 1.0),   # green  — survive the stroma
     "met":        (0.68, 0.40, 0.86, 1.0),   # purple — establish the metastasis
+    # pale red, deliberately a LIGHTER shade of the resistance red rather than a new hue: tolerance is
+    # the other way of surviving the same drug, so the pair reads as one mechanism class, and the two
+    # stay apart under red-green CVD (where both desaturate) by lightness rather than by hue.
+    "tolerance":  (0.98, 0.60, 0.65, 1.0),   # rose   — wait out chemo (persister tolerance)
     "resistance": (0.94, 0.24, 0.28, 1.0),   # red    — escape chemo (resistance)
 }
-STAGE_ORDER = ["prolif", "breach", "stromal", "met", "resistance"]
+STAGE_ORDER = ["prolif", "breach", "stromal", "met", "tolerance", "resistance"]
 STAGE_LABEL = {"prolif": "proliferation", "breach": "duct escape", "stromal": "stromal survival",
-               "met": "met establishment", "resistance": "chemo resistance"}
+               "met": "met establishment", "tolerance": "drug tolerance",
+               "resistance": "chemo resistance"}
 # muted normal tissue: barely above the dark page colour so the cancer pops and the grids blend into
 # the splash background (no filled-square seam).
 NORMAL_MUTED = {"epithelial": (0.15, 0.29, 0.23, 1.0), "stromal": (0.18, 0.15, 0.18, 1.0),
@@ -68,14 +73,25 @@ TRAJECTORY_FILE = "compartment_trajectory.pkl"
 
 def stage_of(rep, in_primary=False):
     """The cascade stage of a cancer clone: which trait MUTATIONS it carries, taken as the furthest
-    along the metastatic arc — resistance > met > stromal > breach > proliferation > none. ``None`` for
-    normal cells.
+    along the metastatic arc — resistance > tolerance > met > stromal > breach > proliferation > none.
+    ``None`` for normal cells.
 
     No value thresholds: a clone is at a stage iff it carries ≥1 mutation giving that trait (the trait
     value is >0 iff a gene for it is mutated). A cell that carries several trait mutations is coloured by
     the last one in the arc. (Because a clone can carry multiple traits at once — asexual linked
     selection means a sweeping clone hitchhikes them together — the same clone can be, e.g., both
     met-survival and resistance; it then reads as the later stage, resistance.)
+
+    The one place values are compared rather than merely thresholded is the DRUG-ESCAPE pair, because
+    the engine itself compares them: protection from a death-rate therapy is
+    ``max(treatment_resistance, drug_tolerance)`` (``_apply_treatment`` / ``_tx_death_add_for``), so a
+    pure persister — resistance 0, tolerance 1 — takes ZERO drug and must not read as a drug-sensitive
+    stage. Tolerance keeps its OWN stage instead of being folded into resistance: they are different
+    mechanisms with different dynamics (resistance regrows under the drug, tolerance only waits out the
+    dose and pays a division cost to do it), so collapsing them would make the residual-disease floor
+    and the relapsing clone the same colour in every figure. Which of the two claims a cell follows the
+    engine's own tie-break: tolerance only when it STRICTLY exceeds resistance, i.e. only while it is
+    what is actually keeping the cell alive (the same test that decides who pays the persister cost).
 
     ``in_primary=True`` reads the clone AS IT STANDS IN THE PRIMARY, where met-survival is not a stage
     a cell can be at: there is no host parenchyma to survive in the duct, and the trait's BENEFIT is
@@ -87,8 +103,10 @@ def stage_of(rep, in_primary=False):
         return None
     ep = rep.evolutionary_parameters
     base_div = getattr(rep, "baseline_rates", {}).get("division_rate", ep["division_rate"])
-    if ep.get("treatment_resistance", 0) > 0:
-        return "resistance"
+    tr = ep.get("treatment_resistance", 0)
+    dt = ep.get("drug_tolerance", 0.0)
+    if max(tr, dt) > 0:
+        return "tolerance" if dt > tr else "resistance"
     if not in_primary and ep.get("met_survival", 0) > 0:
         return "met"
     if ep.get("stromal_survival", 0) > 0:

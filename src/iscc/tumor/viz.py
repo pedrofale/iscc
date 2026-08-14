@@ -694,18 +694,23 @@ def _band_y_at(pop_df, anc, band_id, gen, smoothing_std):
 # Stage-dominant driver colouring (todo #14): a clone is coloured by the HIGHEST arc-stage driver it
 # carries, so the selection cascade reads as a few categories rather than a per-clone rainbow. Order:
 # proliferation (onc/TSG, in the ducts) -> invasion (breach/stromal_survival, in the stroma) ->
-# met survival (in the deposit) -> chemo resistance (under treatment). GenotypeTumor._stage_colors maps
-# each genotype to STAGE_PALETTE[stage]; here we only own the palette + drawing.
-# 6 stages, SAME colours as the landing hero (iscc.tumor.arc.STAGE_COL) so plot_tissue(color="stage")
+# met survival (in the deposit) -> drug tolerance -> chemo resistance (both under treatment).
+# GenotypeTumor._stage_colors maps each genotype to STAGE_PALETTE[stage]; here we only own the palette
+# + drawing.
+# 7 stages, SAME colours as the landing hero (iscc.tumor.arc.STAGE_COL) so plot_tissue(color="stage")
 # and the by_stage Muller read identically to the animation: breach (duct escape) is its OWN orange
-# stage, distinct from green stromal_survival, rather than folded into a combined "invasion".
+# stage, distinct from green stromal_survival, rather than folded into a combined "invasion", and drug
+# tolerance is its OWN rose stage, distinct from red resistance — the engine protects both from the
+# drug (max(treatment_resistance, drug_tolerance)) but only resistance can REGROW under it.
+# INDEX-COUPLED to GenotypeTumor._stage_of, which returns positions in these lists.
 STAGE_NAMES = ["no driver", "proliferation", "duct escape (breach)",
-               "stromal survival", "met survival", "chemo resistance"]
+               "stromal survival", "met survival", "drug tolerance", "chemo resistance"]
 STAGE_PALETTE = [(0.50, 0.53, 0.60, 1.0),   # none — grey
                  (0.23, 0.51, 0.84, 1.0),   # proliferation — blue
                  (0.98, 0.62, 0.09, 1.0),   # duct escape (breach) — orange
                  (0.18, 0.75, 0.44, 1.0),   # stromal survival — green
                  (0.68, 0.40, 0.86, 1.0),   # met survival — purple
+                 (0.98, 0.60, 0.65, 1.0),   # drug tolerance (persister) — rose
                  (0.94, 0.24, 0.28, 1.0)]   # chemo resistance — red
 
 

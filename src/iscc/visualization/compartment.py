@@ -220,9 +220,12 @@ def render_animation(traj, out_path, splash=False, poster=True, scale=1.0):
     if not splash:
         legend_handles = [Patch(facecolor=col, edgecolor="none", label=f"{i+1}. {lbl}")
                           for i, (lbl, col) in enumerate(traj["stage_legend"])]
+        # one row, however many stages the trajectory carries (older trajectories predate the
+        # tolerance stage and legend 5) -- a hardcoded ncol wraps the extra stage onto a second row
+        # that then overlaps the phase caption below it.
         fig.legend(handles=legend_handles, loc="upper center", bbox_to_anchor=(0.5, 0.985),
-                   ncol=5, fontsize=9.5, frameon=False, labelcolor=INK, handlelength=1.1,
-                   columnspacing=1.6, handletextpad=0.5)
+                   ncol=max(1, len(legend_handles)), fontsize=9.5, frameon=False, labelcolor=INK,
+                   handlelength=1.1, columnspacing=1.6, handletextpad=0.5)
         caption = fig.text(0.5, 0.918, "", ha="center", va="top", color=SUBINK, fontsize=10.5)
 
     grid_titles = {"primary": "Primary", "metastasis": "Metastasis"} if splash else \
