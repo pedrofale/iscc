@@ -1270,9 +1270,15 @@ class GenotypeTumor:
         ``net = b(1 - kill_rate) - death``: at kill_rate 1.0 every clone declines at exactly its death
         rate regardless of fitness, and above 1.0 the FASTER clones die faster. Dividing quickly stops
         being an escape and starts being a liability -- which is also the biology, since cytotoxic
-        chemotherapy damages cells as they replicate (hence its sparing of quiescent tissue). The
-        cell-based engine already multiplies the death rate this way in ``Chemotherapy._apply``; it is
-        the count engine that diverged to additive."""
+        chemotherapy damages cells as they replicate (hence its sparing of quiescent tissue).
+
+        NOTE the CELL engine is a THIRD model, not either of these: ``Chemotherapy._apply``
+        (iscc/treatment/chemotherapy.py) does ``death *= rate_multiplier ** (1 - treatment_resistance)``
+        -- multiplicative on the death rate, with no division-rate term at all. So a clone's hazard
+        there scales with how fast it was ALREADY dying, not with how fast it divides, and neither
+        count-engine mode reproduces it. The two engines therefore do NOT agree under treatment;
+        "proliferation" is a new model rather than a restoration of parity. (An earlier version of
+        this docstring claimed the cell engine already did the proliferation scaling. It does not.)"""
         tx = treatment if treatment is not None else self._tx_treatment
         kill_rate = getattr(tx, "kill_rate", 0.8)
         if getattr(tx, "kill_mode", "additive") == "proliferation":
