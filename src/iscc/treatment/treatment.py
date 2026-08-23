@@ -50,7 +50,8 @@ class Treatment(object):
                  dosage_decay=0.5, rounds=4,
                  rate_multiplier=2., toxicity=0.1, effectiveness=0.9,
                  kill_rate=1.5, max_tumor_size=100_000, sites="both",
-                 mutagenicity=1.0, kill_mode="additive"):
+                 mutagenicity=1.0, kill_mode="additive",
+                 mutagenicity_mode="uniform", mutagenicity_target="all"):
         self.adaptive = adaptive
         self.start = start
         self.duration = duration
@@ -87,6 +88,35 @@ class Treatment(object):
         # (mut_prob = mutation_rate / (mutation_rate + dispersal_rate)), so mut_prob -> 1 at most,
         # i.e. at the shipped rates the mutant fraction can rise 0.25 -> 1.0, a ceiling of 4x.
         self.mutagenicity = float(mutagenicity)
+        # WHO gets the mutator phenotype. "uniform" (default) raises it for every cancer clone in a
+        # treated compartment, regardless of resistance — so a clone taking ZERO drug still mutates
+        # 4x faster, permanently. That is the only drug effect in the engine NOT scaled by
+        # (1 - treatment_resistance): the kill, immunotherapy's resistance stripping and the persister
+        # cost all are. It also cuts against the mutator's own purpose — the elevated rate that makes
+        # de novo resistance likely is inherited by the resistant clone, where its main effect is to
+        # multiply the CNA rate that DELETES the resistance allele (reversion), ~4x.
+        # "dose" scales the boost by the dose the clone actually receives,
+        #     factor = 1 + (mutagenicity - 1) * (1 - tr),
+        # exactly as `_kill_amount` scales the hazard: a sensitive cell gets the full multiplier, a
+        # fully resistant one gets none. Mechanistically this says the mutagenesis comes from drug
+        # that reaches the DNA — true of efflux/detoxification resistance, weaker for target-site
+        # resistance where the drug still enters. Default "uniform" -> byte-identical to before.
+        self.mutagenicity_mode = str(mutagenicity_mode)
+        # WHAT the mutator accelerates. `mutagenicity` multiplies `mutation_rate`, i.e. the chance a
+        # division takes the MUTATION fate at all; the SNV/CNA split happens downstream on
+        # snv_prob/cnv_prob, so point mutations and copy-number events scale TOGETHER. That couples
+        # the two processes this model cares about: resistance is ACQUIRED by an SNV landing on a
+        # resistance locus and LOST by a CNA deleting the copy that carries it. Measured, the
+        # acquisition:reversion ratio is 0.09 at mutagenicity 1.0 and 0.09 at 4.0 — turning the
+        # mutator up cannot shift the balance, only the scale.
+        # "snv" makes the drug a POINT MUTAGEN rather than a clastogen: cnv_prob is lowered by
+        # exactly the factor that keeps the ABSOLUTE per-division CNA rate where it was, so extra
+        # mutating divisions all become SNVs. Measured: reversion 1.10e-3 -> 5.83e-4 (back to the
+        # no-mutator baseline) with acquisition held, ratio 0.09 -> 0.27. This is a claim about the
+        # AGENT — platinums and alkylators are base-damaging and leave substitution signatures, which
+        # is mechanistically distinct from inducing chromosome missegregation.
+        # Default "all" -> both scale together -> byte-identical to before.
+        self.mutagenicity_target = str(mutagenicity_target)
         self.dosage_trace = []  # list of (step, dosage) for every queried step
 
     def _apply(self, cell):

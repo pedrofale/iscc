@@ -1799,6 +1799,13 @@ class GenotypeTumor:
                     if deme and self._tx_applies(di):
                         exposed.update(deme)
                 exposed = [g for g in exposed if self._is_cancer(g)]
+            # Treatment.mutagenicity_mode "dose": scale the boost by the dose the clone actually
+            # receives, the same (1 - tr) factor `_kill_amount` uses, instead of handing every clone
+            # in a treated compartment the full multiplier. Under "uniform" a clone taking ZERO drug
+            # still mutates `mutagenicity`x faster forever — which mostly serves to multiply the CNA
+            # rate that deletes its own resistance allele. Default "uniform" -> byte-identical.
+            dose_scaled = getattr(treatment, "mutagenicity_mode", "uniform") == "dose"
+            snv_only = getattr(treatment, "mutagenicity_target", "all") == "snv"
             for gid in exposed:
                 rep = self.genotypes[gid]
                 # The flag lives on the REP, not in a gid set: `Cell.divide()` shallow-copies, so a
@@ -1807,7 +1814,32 @@ class GenotypeTumor:
                 # the factor once per generation instead of applying it once per lineage.
                 if getattr(rep, "_tx_mutagenized", False):
                     continue
-                rep.mutation_rate = float(rep.mutation_rate) * mutagenicity
+                factor = mutagenicity
+                if dose_scaled:
+                    tr = max(rep.evolutionary_parameters["treatment_resistance"],
+                             rep.evolutionary_parameters.get("drug_tolerance", 0.0))
+                    factor = 1.0 + (mutagenicity - 1.0) * (1.0 - min(max(tr, 0.0), 1.0))
+                if factor == 1.0:
+                    # Fully protected: no drug reaches the DNA, so no mutator phenotype -- and NO
+                    # flag, so a descendant that later loses resistance is mutagenized on its own
+                    # terms rather than inheriting an exemption it no longer earns.
+                    continue
+                if snv_only:
+                    # POINT MUTAGEN. `mutation_rate` is not a mutation rate: it is the mutate-vs-
+                    # disperse FATE probability, and mutate() picks the event type from
+                    # cnv_prob/snv_prob BEFORE drawing SNVs -- so scaling it scales point mutations
+                    # and copy-number events in lockstep and cannot shift the balance between them
+                    # (measured acquisition:reversion = 0.14 at mutagenicity 1.0 AND at 4.0).
+                    # `n_snvs_per_allele` is the actual per-division point-mutation count and feeds
+                    # ONLY the SNV branch, so scaling it raises the chance of an SNV landing on a
+                    # resistance locus while leaving the CNA rate that DELETES one untouched --
+                    # by construction, not by a compensating adjustment. Measured at x20:
+                    # acquisition 6.25e-5 -> 7.46e-4, reversion 4.63e-4 -> 4.29e-4 (flat),
+                    # ratio 0.14 -> 1.74. It also has no ceiling, unlike mut_prob = m/(m + dispersal)
+                    # which saturates at 1 (a nominal 4x realises only 2.29x).
+                    rep.n_snvs_per_allele = float(rep.n_snvs_per_allele) * factor
+                else:
+                    rep.mutation_rate = float(rep.mutation_rate) * factor
                 rep._tx_mutagenized = True
         for gid in list(self.genotypes_counts):
             is_cancer = self._is_cancer(gid)

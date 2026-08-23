@@ -241,7 +241,9 @@ def execute_schedule(t, schedule):
                 toxicity=float(spec.get("toxicity", 0.1)),
                 sites=spec.get("sites", "both"),
                 mutagenicity=float(spec.get("mutagenicity", 1.0)),
-                kill_mode=str(spec.get("kill_mode", "additive")))
+                kill_mode=str(spec.get("kill_mode", "additive")),
+                mutagenicity_mode=str(spec.get("mutagenicity_mode", "uniform")),
+                mutagenicity_target=str(spec.get("mutagenicity_target", "all")))
             for _ in range(n_steps):
                 t.grow(n_steps=1, seed=seed, treatment=chemo)
                 capture(label)
