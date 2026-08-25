@@ -288,8 +288,17 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   - DNA cohort progression: **MHN, TreeMHN**, CBN/H-CBN, REVOLVER ◑ — R14 (epistasis) DONE, so the
     planted network + the scoring seam (`iscc.integrations.progression`: `to_mhn_matrix` /
     `to_treemhn_trees` / `score_edges` / `score_order`) now EXIST and the built-in co-occurrence
-    baseline runs (`validation/validate_epistasis.py`). Running the REAL tools in their own
-    `iscc-mhn` / `iscc-treemhn` envs is what remains.
+    baseline runs (`validation/validate_epistasis.py`). **DONE — the REAL tools now run** in
+    `iscc-mhn` (MHN 1.2.3, Schill et al. 2020) and `iscc-treemhn` (TreeMHN, Luo/Kuipers/Beerenwinkel
+    2023) via `validation/mhn_runner.py` + `validation/treemhn_runner.R`, scored in the manuscript
+    §"which planted evolutionary dependencies can cohort progression models recover?". This line said
+    "what remains" until 2026-08-25 and was stale — the work had already shipped.
+    **The finding: the OBSERVABLE, not the cohort size, decides recovery.** iscc's pairwise `E` acts
+    on FITNESS (how large the carrying clones grow), not on the rate at which events arise, so a
+    binary "did this patient ever acquire event i" matrix — MHN's input — saturates and is nearly
+    blind to it. TreeMHN reads tree TOPOLOGY, so what it adds is ORDER, not frequency; fitness
+    epistasis generates no order, so its advantage is orthogonal and it cannot beat MHN on pairwise
+    `E` for STRUCTURAL reasons rather than want of data.
   - pooled demultiplexing: vireo/souporcell (DNA), cell-hashing + scDblFinder (RNA) ✅
   - subclonal deconvolution (multi-region bulk): PyClone-VI / Pairtree / Clomial ◑ (oracle deconv done)
   - **DONE — gene-program / GEP inference: `scDEF` FLAGSHIP + `cNMF` comparator** (Hotspot still
