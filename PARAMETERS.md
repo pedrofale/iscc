@@ -82,10 +82,63 @@ Defaults are those in `notebooks/example_config.yaml`. Set them under the matchi
 | `prop_driver` | 0.04 | 0.05–0.3 | high × strong effect → selective sweep (monoclonal) |
 | `driver_effects` | 1.1 | 1.0–2 | ≫ 1 at low mutation rate → monoclonal sweep |
 | `prop_dispersal` / `dispersal_effects` | 0.0 / 1.1 | as above | strong → invasion dominates, structure washes out |
-| `prop_treatment_resistance` / `prop_immune_resistance` (+ effects) | 0.1 (treatment) / 0.02 (immune); effects 1.1 | as above | resistance is meant to **emerge**, not be pre-seeded |
+| `prop_treatment_resistance` / `prop_immune_resistance` (+ `treatment_resistant_effects` / `immune_resistant_effects`) | 0.1 (treatment) / 0.02 (immune); effects 1.1 | as above | resistance is meant to **emerge**, not be pre-seeded |
 | `prop_breach` / `breach_effects` | 0.001 / 2.8 (prop 0.0 = off in the bare engine) | compartment-selection axis: sites that if mutated let a clone cross the epithelial ring (attenuate `epithelial_barrier`); heritable, sequenceable | pairs with `spatial_params.epithelial_barrier`; both must be > 0 to have any effect |
 | `prop_stromal_survival` / `stromal_survival_effects` | 0.02 / 2.2 (prop 0.0 = off in the bare engine) | compartment-selection axis: sites that if mutated let a clone survive the stroma (attenuate `stromal_hazard`) | pairs with `spatial_params.stromal_hazard` |
 | `breach_cost` / `stromal_survival_cost` / `met_survival_cost` / `treatment_resistance_cost` | 0.0 (off) | 0.0–1.0 | **R15 go-or-grow trade-off** (compartment-context fitness): each dissemination/niche trait costs this fraction of `division_rate` per unit of the trait, applied **everywhere**, while its benefit (attenuating its compartment hazard) is compartment-gated. So a trait is net-favoured **only in its niche** and selected against elsewhere — this is what stops one super-clone from hitchhiking every trait into every compartment (proliferation stays in the DCIS, stromal in the IDC, met-survival in the deposit, resistance under chemo). | too high suppresses the trait even in its niche (e.g. a high `met_survival_cost` starves the metastasis; a high `treatment_resistance_cost` keeps resistance a rare pre-chemo subclone, which is usually what you want) |
+
+#### Metastasis & drug-tolerance axes — `selection_params`
+
+| Knob | Default | Valid range | Outside the range |
+|---|---|---|---|
+| `prop_met_survival` / `met_survival_effects` | 0.0 (off) / 1.1 | as the other trait axes | the dissemination axis for the metastatic compartment; attenuates the deposit's `met_hazard`. Pairs with `met_survival_cost` — a high cost starves the deposit |
+| `prop_drug_tolerance` / `drug_tolerance_effects` / `drug_tolerance_cost` | 0.0 (off) / 1.1 / 0.0 | 0–1 / ≥1 / 0–1 | a **non-genetic persister** axis, distinct from `treatment_resistance`. **Currently NOT usable for a residual-disease floor** — the trait is a division discount, and a discount cannot hold a population at a floor under a proliferation-scaled kill (that needs dormancy, i.e. a division rate of ~0). Left in, default-off, until dormancy exists. |
+
+!!! warning "`drug_tolerance_cost` is charged differently from every other cost"
+    Every other `*_cost` is permanent, because the trait is permanent, and is applied in the
+    division-cost factor. A persister state only exists while the drug does, so charging it
+    permanently made the trait unusable — a cost high enough to hold the pool under drug also purged
+    it to ~0.1% *before* treatment started. It is instead applied as a division multiplier **for the
+    duration of the dose** (`GenotypeTumor._apply_treatment`).
+
+#### Drug-induced resistance STATE — `selection_params` (optional; **all off by default**)
+
+Resistance as a **carried cell state** rather than (only) a genomic allele, so that a CNA deleting
+the triggering allele does not restore sensitivity (`DESIGN_phenotype_plasticity.md` §3.3–3.4). Every
+knob defaults to its inert value; `Selection.resistance_state_on` is then `False` and division is
+**byte-identical** to the no-state engine.
+
+| Knob | Default | Valid range | Outside the range |
+|---|---|---|---|
+| `resistance_state_genetic` | `False` | bool | `True` → acquiring `n_mut_tr > 0` sets the state, which is then carried independently of the genome. This is the entry path every published result uses |
+| `resistance_state_effect` | 0.0 | 0–1 | the protection a state cell gets, on the same scale as `treatment_resistance`. 0.99 ≈ takes essentially no drug |
+| `resistance_state_cost` | 0.0 | 0–1 | division × `(1 − cost × state)`, charged **always**, on *and* off drug. It **stacks multiplicatively** with `treatment_resistance_cost`, so setting both to *c* charges an allele-anchored cell twice and an exited revertant not at all. To price the two routes equally, set `treatment_resistance_cost = 0` and charge the state only |
+| `resistance_state_induction` | 0.0 | 0–1 | per-generation P(a sensitive cell is reprogrammed) = `induction × intensity`, where `intensity` is the dose the cell actually receives — a cell the drug cannot reach is not reprogrammed by it. **Never yet exercised at figure level** |
+| `resistance_state_relax` | 0.0 | 0–1 | per-generation P(exit), i.e. τ = 1/`relax` generations. Applies **only** to cells with `n_mut_tr == 0` — a cell still carrying the allele keeps its genetic attractor and never relaxes. `0` is the permanent (τ→∞) limit |
+| `resistance_state_noise` | 0.0 | 0–1 | environment-independent switching, in both directions |
+
+!!! note "`induction`, `relax` and `noise` are TAU-ENGINE ONLY"
+    The reversible transitions live in `_tau_generation`. The *genetic* entry clause and the
+    drug-protection term are in shared code and so are active under the exact engine too, but on an
+    exact-engine run a non-zero `relax` is silently inert. Check `update_mode` before concluding that
+    a result survived a finite exit rate.
+
+!!! note "τ→∞ is a figure choice, not a requirement"
+    Measured on the mode-IV rig: at `relax = 0.02` with fair single-charge pricing the relapse is
+    97.7% resistant with the clean start intact, versus 100.0000% at `relax = 0`. The permanence buys
+    the last ~2 percentage points. See `DESIGN_phenotype_plasticity.md` §3.4 for the 2×2.
+
+#### Trait and selection model — `selection_params`
+
+| Knob | Default | Valid range | Outside the range |
+|---|---|---|---|
+| `trait_source` | `"dosage"` | `"dosage"` \| `"mutation"` | what moves a dissemination/niche trait. `"dosage"` (historical, bit-for-bit) counts copy number *and* mutation; `"mutation"` divides out the wild-type dosage term so **only mutated copies move the trait**. The two agree on what a single heterozygous SNV is worth and differ only on what a copy-number change is worth |
+| `treatment_resistance_binary` | `False` | bool | `True` → **any** resistance mutation sets the trait to exactly 1.0 (the cell takes zero drug). **Not recommended**: it is unnecessary (a graded one-copy clone expands fine under a proliferation-scaled kill) and it *breaks* escape modes II and III by letting a rare pre-existing clone blunt the whole tumour's response. It also flattens the copy-number gradient, so nothing selects for amplifying the resistance locus |
+| `selection_mode` | `"gene"` | `"gene"` \| `"arm"` | `"arm"` switches to CINner-style per-arm copy-number fitness, `∏_seg s_arm[seg] ** (cn[seg] − arm_baseline)`, read from the per-segment copy numbers iscc already maintains |
+| `s_arm` | `None` (→ all 1.0) | length-`n_segments` array | per-arm selection coefficients. `s_arm[seg] > 1` → amplifying that arm is beneficial (oncogene-dominated); `< 1` → deleting it is (TSG-dominated). All 1.0 = arm selection off |
+| `arm_baseline` | 2.0 | ≥ 0 | the copy number at which an arm is fitness-neutral; 2.0 = diploid |
+| `rng` | `None` | — | **internal.** A `numpy` Generator for the layout draw; pass `layout_seed` instead if you want a reproducible gene layout |
+| `segment_sizes` | `None` (→ uniform `segment_size`) | length-`n_segments` array | per-segment gene counts, for a genome with unequal arms. `None` gives every segment `segment_size` genes |
 
 #### Viability limits — `selection_params`
 
@@ -125,6 +178,34 @@ matter once you tighten them or push amplification/deletion hard.
     segments outright, so the limit fires and default-config **tau** trajectories are slightly
     tighter than before viability was enforced. Default-config **exact** trajectories are
     unchanged (the gate never fires there).
+
+### Therapy — `Treatment` ops (`chemotherapy`, `targeted_therapy`, `immunotherapy`)
+
+Scheduling and dosing knobs shared by every therapy op. **The two engines do not implement the drug
+the same way** — see the warning below before comparing runs across engines.
+
+| Knob | Default | Valid range | Outside the range |
+|---|---|---|---|
+| `start` / `duration` | 0 / `None` | steps | when dosing starts, and for how long. `None` = until the phase ends |
+| `rounds` | 4 | ≥ 1 | number of dosing rounds |
+| `dosage_decay` | 0.5 | 0–1 | how much the dose falls between rounds |
+| `effectiveness` / `toxicity` | 0.9 / 0.1 | 0–1 | probability the drug acts on an **on-target** cell / on an off-target one. Off-target toxicity also kills the metastasis's host parenchyma, which progressively makes the deposit *safer* for the cancer |
+| `sites` | `"both"` | `"both"` \| primary \| met | which compartment is dosed |
+| `max_tumor_size` | 100000 | ≥ 1 | with `adaptive`, the burden threshold above which dosing resumes |
+| `adaptive` | `False` | bool | `True` → dose only above `max_tumor_size`, the adaptive-therapy regimen |
+| `kill_rate` | 1.5 | ≥ 0 | the drug's strength, read by the **count** engine |
+| `kill_mode` | `"additive"` | `"additive"` \| `"proliferation"` | **the most consequential therapy knob.** `"additive"` gives every clone the same *absolute* extra death, so survival is decided by birth rate and a driver-saturated clone simply outruns the dose. `"proliferation"` scales the hazard with the clone's **own** division rate (`added_death = intensity × kill_rate × division_rate`), so every clone declines at its own rate whatever its fitness — and a cell at `division_rate = 0` takes exactly zero drug death. This is also the biology (chemotherapy kills replicating cells) |
+| `rate_multiplier` | 2.0 | ≥ 1 | the **cell** engine's drug model: `death × rate_multiplier ** (1 − treatment_resistance)`. Unused by the count engine |
+| `mutagenicity` | 1.0 (off) | ≥ 1 | multiplies `mutation_rate` while dosed. **This is not a mutation rate**: `mutation_rate` is the mutate-vs-disperse *fate* probability, so the realised boost saturates (`m/(m + dispersal_rate)`) — a nominal ×4 realises ×2.29. It also moves SNVs and CNAs in lockstep, so it **cannot** shift the balance between acquiring resistance and reverting it (measured identical at 1.0 and 4.0) |
+| `mutagenicity_target` | `"all"` | `"all"` \| `"snv"` | `"snv"` makes the drug a **point mutagen**: it scales `n_snvs_per_allele` instead, which feeds only the SNV branch, so acquiring a resistance SNV gets likelier while the CNA that deletes one stays flat. This is what decouples acquisition from reversion (acquisition:reversion 0.14 → 1.74 at ×20) |
+| `mutagenicity_mode` | `"uniform"` | `"uniform"` \| `"dose"` | `"dose"` scales the mutator by `(1 − treatment_resistance)`, like every other drug effect. Note this is a **no-op for a de novo resistant clone**, which descends from a drug-exposed *sensitive* ancestor and inherits the raised rate through division — correct biology for a permanent repair-impairment mutator. It does protect a *pre-existing* resistant clone |
+
+!!! warning "Three different drug models live in this codebase"
+    `kill_mode="additive"` and `kill_mode="proliferation"` are the count engine's two models; the
+    **cell** engine instead uses `death × rate_multiplier ** (1 − tr)`
+    (`Chemotherapy._apply`). They are not calibrated against one another, so a `kill_rate` tuned on
+    one engine does not transfer, and a cross-engine comparison of therapy response is not
+    like-for-like.
 
 ### Genome — `genome_params`
 | Knob | Default | Valid range | Outside the range |
