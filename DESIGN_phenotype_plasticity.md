@@ -313,6 +313,78 @@ genomes and different states are different engine entities. Genotype ids already
 than genome content (`Cell.set_genotype_id`), so this is expressible, but it inflates the append-only
 registry and that is the real scalability question to answer before building.
 
+### 3.4 §3.3 BUILT AND MEASURED (2026-08-25) — results, and one correction to §3.3
+
+The therapy arm shipped in `ad86f23` (`resistance_state_*` on `Selection`, all knobs default-inert, so
+`resistance_state_on` is False and division is byte-identical when off). Verified independently: **908
+passed / 1 skipped**, +21 over the 887 baseline, golden hashes unaffected.
+
+**Headline.** On the mode-IV rig, seed 5, like-for-like against the genomic-only baseline (`PM5`, 749
+sensitive / 99.095%): **749 → 0 sensitive, 100.0000% resistant, all four mode-IV criteria pass**, with the
+full 90-generation drug-free tail and `cnv_prob`/`amp_prob` untouched. Reversion is NOT suppressed —
+**12,545 of the 86,117 relapse cells (14.6%) have actually deleted the allele**; the state reclassifies them
+rather than preventing the deletion. That is exactly the decoupling §3.3 was built for.
+
+**CORRECTION to the "Exit" bullet above.** That bullet presents `τ_relax → ∞` as how one gets permanent
+resistance, and the acceptance run duly used `relax = 0, cost = 0` — the most latch-like corner of the
+feature, which is a poor advertisement for a mechanism whose whole defence is that exit remains possible.
+A 2×2 over (relax, cost) at the original rig, seed 5, gives the actual structure:
+
+    sensitive cells at relapse      cost=0      cost=0.35
+                     relax=0             0              0      (100.0000% resistant)
+                     relax=0.02     11,180         15,755
+
+**Exit is the load-bearing knob; the cost is not.** Cost ALONE leaves the count at exactly 0 — with no exit
+a revertant keeps the state and stays classified resistant — and only amplifies (~+40%) once exit is on.
+Note exit is gated to cells with `n_mut_tr == 0` (`count.py:_apply_state_transitions`), i.e. precisely the
+CNA revertants; an allele-anchored cell keeps its genetic attractor and never relaxes.
+
+**But τ→∞ is NOT actually required, and the 15,755 was an artefact of MY parameterisation.** Setting both
+costs to 0.35 does not price the two resistance routes equally: costs stack multiplicatively
+(`selection.py:_division_cost_factor`), so an allele-anchored state cell divides at
+`(1 - 0.35*0.6429) * (1 - 0.35) = 0.504` while an exited revertant pays neither and divides at 1.0 — a ~2×
+per-generation edge over an 89-generation tail. Because `resistance_state_genetic` puts every allele-carrier
+INTO the state, the state cost can simply REPLACE the genomic one:
+
+    treatment_resistance_cost = 0.0    resistance_state_cost = 0.35    relax = 0.02
+
+Then every in-state cell pays exactly 0.35 whether or not it still carries the allele, and only an EXITED
+cell pays nothing. Measured: **2,029 sensitive, 97.658% resistant, 4/4 criteria, and 0 resistant at the
+first dose** — the clean start survives, because the state cost is charged from the moment the allele is
+acquired and so keeps resistance rare pre-treatment. That is **5.5× fewer sensitives than exit-only** and
+7.8× fewer than the double-charged run.
+
+So the two claims to keep separate when writing this up:
+- **mode IV as a CLASSIFICATION is robust to a finite exit rate** — it passes 4/4 even at `relax=0.02` with
+  no cost at all (11,180 sensitive, 87% resistant);
+- **a relapse that READS as uniformly resistant needs only fair pricing, not permanence** — 97.66% at
+  `relax=0.02`. The `τ→∞` corner buys the last 2.3 percentage points and nothing else.
+
+**A SHARED MUTAGEN ACROSS ALL FOUR PANELS IS IMPOSSIBLE — and this is a result, not a tuning failure.**
+Mode IV needs a mutagenic drug to manufacture its de novo clone. Putting that same drug on every panel
+(`mutagenicity=20 mutagenicity_target=snv`) collapses II, III and IV into one story:
+
+    mode   with shared mutagen                    without (the panels as published)
+    I      315 (100.0%)   9.0x  PRE-EXISTING      2,297 (100.0%)   1.0x  PRE-EXISTING
+    II      16 (  0.5%)   6.0x  DE NOVO           2,594 ( 97.5%)   1.0x  PRE-EXISTING
+    III     21 (  0.8%)   5.1x  DE NOVO              33 (  1.5%)  11.7x  PRE-EXISTING
+    IV       0 (  0.0%)  39.5x  DE NOVO               0 (  0.0%)  39.5x  DE NOVO
+
+The mutagen seeds de novo resistance in II and III as well, and that lineage outruns the pre-existing clone
+those panels are built around: II never completes its pre-treatment sweep (0.5% vs 97.5%) and III drops
+below its own ≥10× responder bar (5.1× vs 11.7×). Since **III and IV differ only in where the relapse
+lineage came from**, the drug that makes IV possible is exactly the drug that destroys III. Do not try to
+retune this away — state the asymmetry in the caption.
+
+**Registry cost, answered.** §3.3's closing paragraph flags genotype minting as "the real scalability
+question to answer before building". Measured: at `induction = relax = 0` no twins are minted and the
+genotype count equals the genomic baseline. With the state active the registry reaches ~556k genotypes on
+the mode-IV rig (~616k for the fair-pricing run) against ~324k for a no-state panel — roughly a 1.7-1.9×
+inflation, which the tau engine carries at rig scale without swapping. Not free, not prohibitive.
+
+**Still not exercised at figure level:** the drug-induced ENTRY arm (`resistance_state_induction`). Every
+result above uses genetic entry only; induction is unit-tested but has never driven a figure.
+
 ## 4. Staging / scope
 - **v1 (build first):** ~4 selection params into `Selection` + `_death_rate`, plus feeding compartment into the
   existing R13/F8 niche→program input (no new dynamics knobs). Ships spatial invasion + the
