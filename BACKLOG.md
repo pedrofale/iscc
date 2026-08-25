@@ -655,6 +655,34 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
 - **LATER — RESEARCH_QUESTIONS R1–R11** — 3D (R1), AI histology (R2), metastasis/multi-site (R9),
   focal CNAs/WGD (R10), recommender (R11), etc. Each a substantial new track; promote when committed.
 
+## Engine/docs bug — WGD saturates at 100% (found 2026-08-25, NOT fixed)
+- **NOW.** Re-executing the tutorials against the current engine moved WGD from a third of malignant
+  cells to **all** of them:
+      base_simulation        WGD fraction (malig)  32.8% -> 100.0%
+      wgd_allele_cna         33% of malignant WGD  ->    100%; mean ploidy "malig non-WGD" = **nan**
+      combining_scdna_scrna  allelic imbalance     21%   ->  65%
+  This **contradicts `wgd_allele_cna`'s own markdown** ("roughly a third of human tumours (PCAWG)
+  carry one"), which the old 33% appeared to confirm, and it leaves the WGD-vs-non-WGD contrast with
+  no non-WGD cells — hence the `nan`.
+- **It is not a WGD code change.** No commit since 2026-08-09 touches WGD meaningfully (≤3 diff
+  lines each). `wgd_rate` is 0.05 per **mutating division** and `Cell.is_wgd` is inherited and never
+  reset (`cell.py:128`), so the fraction is a function of divisions-per-lineage and drifts toward
+  saturation. **The old 33% was never pinned to the PCAWG anchor** — it was where that run length
+  happened to land. Most likely tipped by `2af92d3` (layout rng reseed) pushing a near-binary WGD
+  sweep over the line; NOT `de3ccb7`, whose `crowding_law` defaults to "logistic" (off).
+- **Fix before the next `publish-main.sh`:** recalibrate so the tutorial lands near 1/3 at its own run
+  length (or pin the anchor another way, e.g. report WGD at a fixed generation). A published tutorial
+  must not print `nan` or contradict its own text. Check `manuscript/figures/validation_wgd.png` and
+  `validation/validate_wgd.py` at the same time — the same drift may affect the paper figure.
+
+## Notebook execution — PATH gotcha (2026-08-25)
+- `reads.ipynb` shells out to `dwgsim` / `bwa` / `samtools`. Executed via nbconvert **without the env's
+  `bin` on `PATH`**, `shutil.which` returns `None` for all of them and the notebook silently degrades
+  to a no-op that still exits 0 — committing that pass would publish a broken tutorial. Re-run with
+  `PATH="$CONDA_PREFIX/bin:$PATH"`. Only `reads.ipynb` is affected (checked across all 17).
+- Runtimes for the two slow ones, so future caps are not set too low: `base_simulation` 22 min,
+  `compartment_selection_confound` 43 min. Full pass ≈ 1h50m, serial.
+
 ## Housekeeping
 - **DONE — commit the backlog of uncommitted `dev` work.** The tree is clean; that item had gone
   stale. (Was: manuscript catch-up + positioning edits, re-executed notebooks, `DESIGN_recommender.md`,
