@@ -331,6 +331,57 @@ genotype-count engine + tau-leaping (interaction is a pure function of a genotyp
 per genotype). **Serves:** the DNA cohort-progression benchmark row (MHN/TreeMHN/CBN/REVOLVER); pairs
 with the cohort milestone. Design: `DESIGN_epistasis.md`. Ties to R6 (identifiability), R10 (CNA events).
 
+### R15. Does polyploidization→depolyploidization leave a detectable signature, and have real tumours been through it?
+
+**The question, aside from iscc entirely.** Therapy- (or oncogene-) induced arrest → endoreplication →
+unequal/multipolar division → aneuploid progeny is a plausible route by which cancer genomes acquire
+their karyotypes (`DESIGN_senescence_escape.md`). If it leaves a **signature**, and that signature is
+present in real tumours, that is evidence they passed through the process — most interestingly during
+INITIATION rather than under therapy.
+
+**Transcriptional vs genomic answer different questions.** A transcriptional signature marks cells
+*currently* doing it — senescence markers, SASP, and a reported re-expression of **meiosis /
+spermatogenesis** programs during these atypical divisions (mechanistically apt: neosis is a reductive
+division borrowing a germline program). Useful for catching the act in a treated biopsy, useless for
+history, because expression does not record the past. **Only the genome records a past event.**
+
+**The predicted genomic event shape.** WGD, then **near-random WHOLE-CHROMOSOME missegregation with
+frequent nullisomies** — many chromosomes redistributed in ONE division rather than lost one at a time.
+
+**The discriminating statistic is TIMING/CORRELATION, not the events.** Gradual CIN loses chromosomes
+independently over many divisions, so losses spread across phylogenetic branches; a neosis event dumps
+them on ONE branch simultaneously. This is exactly how **chromothripsis** is identified (clustered
+breakpoints, oscillating CN, randomness of fragment order — one catastrophe vs slow accumulation).
+**Neosis would be to whole-chromosome aneuploidy what chromothripsis is to rearrangements.**
+
+**The observation may already exist.** Navin's **punctuated copy-number evolution** (Gao et al.,
+*Nat Genet* 2016, ng.3641): in TNBC most CN alterations are acquired **at the earliest stages in short
+punctuated bursts**, followed by stable clonal expansion, with phylogenetics + modelling rejecting
+gradual accumulation. That is the exact shape this mechanism predicts — burst, early, then stasis — and
+nobody appears to have connected it mechanistically to polyploidization/depolyploidization.
+
+**But consistent is not diagnostic.** Chromothripsis, breakage-fusion-bridge, or a single catastrophic
+mitosis WITHOUT polyploidy all give punctuated bursts. Two tests separate them:
+1. **4n-by-loss vs 2n-by-gain.** Neosis goes THROUGH a polyploid intermediate, so the burst should be
+   preceded by WGD and the karyotype better explained as subtraction from tetraploid than addition to
+   diploid. Copy-number timing methods can pose this.
+2. **Homozygous losses unsurvivable from 2n.** THE SHARPER TEST. Multipolar division produces frequent
+   nullisomies, and a 4n cell can lose regions that would be immediately lethal from 2n. A tumour
+   carrying homozygous deletions of loci essential in a diploid context **needed a polyploid
+   intermediate to get there** — a footprint of the ROUTE, not just the endpoint.
+
+**Limitation: selection overwrites.** A tumour that did this at initiation and then grew for years has
+had its karyotype reshaped and the randomness fingerprint degrades toward whatever was selected. Argues
+for **early lesions** (DCIS, adenomas) and tumours where WGD is CLONAL, i.e. demonstrably early.
+
+**Where iscc and the cell lines come in.** The cell-line system (`DESIGN_senescence_escape.md` §1) gives
+the segregation kernel and the FRESH signature, before selection touches it — the calibration for what
+to look for in the messy case. iscc could then run the forward model: apply a measured segregation
+kernel, evolve under selection, and ask how long the signature survives and which statistics retain
+power. **Blocked on the same gap as everything else here: `Cell.divide()` produces exactly equal
+daughters, so iscc cannot currently simulate the event whose signature this question is about.**
+**Serves:** a distinct paper from the escape-mode work; ties to R10 (WGD / whole-chromosome events).
+
 ---
 
 ## How to use this file
