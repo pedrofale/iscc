@@ -105,6 +105,14 @@ def stage_of(rep, in_primary=False):
     base_div = getattr(rep, "baseline_rates", {}).get("division_rate", ep["division_rate"])
     tr = ep.get("treatment_resistance", 0)
     dt = ep.get("drug_tolerance", 0.0)
+    # Drug-induced resistance STATE (DESIGN_phenotype_plasticity.md §3.3): a cell carrying the
+    # non-genetic resistance state reads as "resistance" — it escapes the drug via the carried state,
+    # which is precisely the mode-IV relapse the red wedge draws. Checked BEFORE the tr/dt tie-break so
+    # a state cell can never fall through to "tolerance" (which the mode-IV trace counts as SENSITIVE).
+    # This is the ground-truth reclassification that makes a revertant (allele deleted, state kept)
+    # count as resistant, not sensitive. Off -> the attribute is 0.0 -> skipped -> byte-identical.
+    if getattr(rep, "resistance_state", 0.0) > 0.0:
+        return "resistance"
     if max(tr, dt) > 0:
         return "tolerance" if dt > tr else "resistance"
     if not in_primary and ep.get("met_survival", 0) > 0:

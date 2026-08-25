@@ -127,6 +127,17 @@ class Cell(object):
         # Monotone: a WGD is never "undone", so once True it stays True down the lineage.
         self.is_wgd = False if parent is None else parent.is_wgd
 
+        # Drug-induced resistance STATE level (DESIGN_phenotype_plasticity.md §3.3): a carried,
+        # heritable epistate in [0, 1] (binary 0/1 for now) that is INDEPENDENT of the genome — so a
+        # CNA that deletes the triggering resistance allele leaves the cell in the state. Kept as a
+        # PLAIN ATTRIBUTE (like is_wgd), never in genome_summary and never seeded into
+        # evolutionary_parameters here, so with the feature off it adds no cell_evo column and the base
+        # schema is unchanged. Propagated by value through the shallow copy() in divide() (a daughter
+        # inherits it, exactly like _tx_mutagenized) and through the parent branch above; the engine's
+        # update_evolutionary_parameters reads it (only when the feature is on) to fold the state into
+        # the drug-protection max() and to charge its proliferation cost.
+        self.resistance_state = 0.0 if parent is None else getattr(parent, "resistance_state", 0.0)
+
         self.evolutionary_parameters = dict()
         self.evolutionary_parameters['division_rate'] = division_rate
         self.evolutionary_parameters['death_rate'] = death_rate
@@ -148,6 +159,16 @@ class Cell(object):
         blow-up of the raw multiplicative form for many-gene genomes.
         """
         gs = self.genome_summary
+        # Drug-induced resistance STATE — genetic entry (beta_bias, DESIGN_phenotype_plasticity.md §3.3).
+        # Acquiring >=1 mutated treatment-resistance copy SETS the carried state. This is a MONOTONE set
+        # (never an else that clears it): a later CNA that deletes the allele mints a child which inherits
+        # the state through divide(), and this clause — now seeing n_mut_tr==0 — does NOT clear it, so the
+        # cell stays in the state with the allele gone. That is the whole feature. Guarded on the genetic
+        # knob, so it is a no-op when the feature is off (byte-identical). Never runs on a would-be EXIT
+        # twin: the engine only builds exit twins from n_mut_tr==0 sources, so this cannot re-fire and
+        # silently defeat exit.
+        if selection.resistance_state_genetic and gs.get('n_mut_tr', 0) > 0:
+            self.resistance_state = 1.0
         self.evolutionary_parameters['viability'] = selection.update_viability(gs)
         self.evolutionary_parameters['division_rate'] = min(
             self.baseline_rates['division_rate'] * selection.update_division_rate(
@@ -191,6 +212,12 @@ class Cell(object):
             0.0, 1.0 - 1.0 / selection.update_stromal_survival(gs))
         self.evolutionary_parameters['met_survival'] = max(
             0.0, 1.0 - 1.0 / selection.update_met_survival(gs))
+        # Drug-induced resistance STATE (§3.3): surface the carried state LEVEL into
+        # evolutionary_parameters so proliferation_cost can charge it (below) and the engine's
+        # protection term can read it. Injected ONLY when the feature is on, so with it off the
+        # evolutionary_parameters dict — and hence the cell_evo schema — is byte-identical.
+        if selection.resistance_state_on:
+            self.evolutionary_parameters['resistance_state'] = self.resistance_state
         # Go-or-grow trade-off (R15): the dissemination/niche traits cost proliferation everywhere,
         # while their benefits are compartment-gated in _death_rate, so each is net-favoured only in its
         # niche. Applied AFTER the traits are known; a no-op (x1.0) unless a *_cost is configured.

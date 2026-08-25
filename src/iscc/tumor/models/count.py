@@ -423,6 +423,13 @@ class GenotypeTumor:
         self.genotypes_parents = {}
         self.genotypes_counts = Counter()
         self._next_ord = 0
+        # Drug-induced resistance STATE (DESIGN_phenotype_plasticity.md §3.3): the (genotype x epistate)
+        # sublineage registry. Maps a genotype id -> a SHARED dict {state_level -> gid} holding every
+        # state-variant of the SAME genome; a state transition of g to level s' looks up the twin here
+        # and mints it (via _state_twin) only once, reusing it across generations, so the state costs a
+        # small multiplier on the genotype count rather than one new id per transitioning cell. Empty and
+        # never touched unless the feature is on (all population happens in the gated transition path).
+        self._state_families = {}
         # Running max of (division + dispersal) over cancer genotypes, maintained incrementally in
         # _register so the tau-leap substep count doesn't need an O(#genotypes) scan every generation
         # (only under coarsen_passengers, where #genotypes can still be large; the exact-engine path
@@ -1255,6 +1262,15 @@ class GenotypeTumor:
             return div
         return div * m
 
+    def _state_protection(self, rep):
+        """Drug protection conferred by the carried resistance STATE (DESIGN_phenotype_plasticity.md
+        §3.3): the cell's state level x the configured ``resistance_state_effect``. Folded into the
+        ``max(treatment_resistance, drug_tolerance, ...)`` protection everywhere the drug's
+        ``(1 - protection)`` factor is computed. Returns 0.0 when the feature is off (effect 0.0) or the
+        cell is not in the state, so every ``max(tr, dt, self._state_protection(rep))`` is byte-identical
+        to ``max(tr, dt)`` when off."""
+        return getattr(rep, "resistance_state", 0.0) * self.selection.resistance_state_effect
+
     def _kill_amount(self, rep, intensity, treatment=None):
         """Extra death hazard a dose of ``intensity`` imposes on this clone.
 
@@ -1305,7 +1321,8 @@ class GenotypeTumor:
         if self._is_cancer(gid):
             target = self._is_treatment_target(tx, rep)
             tr = max(rep.evolutionary_parameters["treatment_resistance"],
-                     rep.evolutionary_parameters.get("drug_tolerance", 0.0))
+                     rep.evolutionary_parameters.get("drug_tolerance", 0.0),
+                     self._state_protection(rep))            # §3.3 carried resistance state
             p = tx.effectiveness if target else tx.toxicity
         else:
             tr, p = 0.0, tx.toxicity
@@ -1817,7 +1834,8 @@ class GenotypeTumor:
                 factor = mutagenicity
                 if dose_scaled:
                     tr = max(rep.evolutionary_parameters["treatment_resistance"],
-                             rep.evolutionary_parameters.get("drug_tolerance", 0.0))
+                             rep.evolutionary_parameters.get("drug_tolerance", 0.0),
+                             self._state_protection(rep))    # §3.3 carried resistance state
                     factor = 1.0 + (mutagenicity - 1.0) * (1.0 - min(max(tr, 0.0), 1.0))
                 if factor == 1.0:
                     # Fully protected: no drug reaches the DNA, so no mutator phenotype -- and NO
@@ -1866,7 +1884,8 @@ class GenotypeTumor:
                 if is_cancer:
                     target = self._is_treatment_target(treatment, rep)
                     tr = max(rep.evolutionary_parameters["treatment_resistance"],
-                             rep.evolutionary_parameters.get("drug_tolerance", 0.0))
+                             rep.evolutionary_parameters.get("drug_tolerance", 0.0),
+                             self._state_protection(rep))    # §3.3 carried resistance state
                     p = treatment.effectiveness if target else treatment.toxicity
                 else:
                     tr, p = 0.0, treatment.toxicity
@@ -2329,6 +2348,106 @@ class GenotypeTumor:
                 else:
                     self._add(tgt, key[1], n)
 
+    def _state_twin(self, gid, target_state):
+        """Get-or-create the genotype with ``gid``'s genome but ``resistance_state == target_state`` —
+        the (genotype x epistate) sublineage the state feature needs (DESIGN_phenotype_plasticity.md §3,
+        §3.3).
+
+        A state transition cannot be derived from the genome (the whole point), so it MINTS A NEW
+        GENOTYPE ID: two cells with identical genomes and different states are different engine entities.
+        The twin is minted ONCE per (genome, state) and REUSED across generations via a per-genome
+        ``_state_families`` dict shared between every state-variant of that genome, so the state costs a
+        small multiplier on the genotype count, not one id per transitioning cell. The twin shares the
+        source's genome by copy-on-write (``divide()``), recomputes its rates for the new state
+        (``update_evolutionary_parameters`` applies the state cost/effect), and is recorded as the
+        source's genealogy child so viz and the trace subtree walks stay complete."""
+        fam = self._state_families.get(gid)
+        if fam is None:
+            fam = {self.genotypes[gid].resistance_state: gid}
+            self._state_families[gid] = fam
+        dest = fam.get(target_state)
+        if dest is not None:
+            return dest
+        rep = self.genotypes[gid]
+        twin = rep.divide()                                  # shares genome (COW); inherits attributes
+        twin.resistance_state = target_state
+        twin.update_evolutionary_parameters(self.selection)  # rates reflect the new state (cost/effect)
+        twin.set_genotype_id()
+        self._register(twin)
+        self.genotypes_parents[twin.genotype_id] = gid       # genealogy child of the split-from genotype
+        fam[target_state] = twin.genotype_id
+        self._state_families[twin.genotype_id] = fam         # share the SAME family dict both ways
+        return twin.genotype_id
+
+    def _apply_state_transitions(self, rng):
+        """Drug-induced ENTRY into, and off-drug EXIT from, the carried resistance state — once per
+        generation (DESIGN_phenotype_plasticity.md §3.3). Only called when ``resistance_state_on``.
+
+        ENTRY (plasticity): while a death-rate dose reaches a deme, each sensitive (state 0) cell has a
+        per-generation probability ``induction * intensity`` of being reprogrammed into the state, where
+        ``intensity = dosage * p * (1 - protection)`` is the dose the cell actually receives — the same
+        factor ``_tx_death_add_for`` / ``_kill_amount`` use — so a cell the drug cannot reach is not
+        reprogrammed by it. EXIT (relaxation): where no dose reaches, each state cell with NO genetic
+        anchor (``n_mut_tr == 0``) relaxes back to sensitive with probability ``relax`` (= 1/tau_relax);
+        a cell that still carries the resistance allele keeps its genetic attractor and does not relax
+        (which also stops the genetic-entry clause from re-firing on an exit twin). NOISE:
+        env-independent switching at ``noise``. Every transition moves cells between the source genotype
+        and its ``_state_twin`` (a new/reused genotype id). Moves are collected first and applied after,
+        mirroring the substep's death/mutation batching, so the deme/count dicts are not mutated mid-scan.
+
+        Tau-engine only (called from ``_tau_generation``); the genetic-entry arm and the drug-protection
+        term live in shared code and so are active under the exact engine too, but the reversible
+        induction/relaxation transitions are not."""
+        sel = self.selection
+        induction, relax, noise = (sel.resistance_state_induction,
+                                   sel.resistance_state_relax, sel.resistance_state_noise)
+        tx = self._tx_treatment
+        dose_active = (tx is not None and self._tx_dosage > 0.0
+                       and getattr(tx, "affects", "death_rate") != "immune_resistance")
+        moves = []                                           # (deme_idx, src_gid, dst_gid, n)
+        for di, deme in enumerate(self.demes):
+            if not deme:
+                continue
+            treated = dose_active and self._tx_applies(di)
+            for gid in sorted(self._cancer_gids(deme), key=lambda g: self.genotypes[g].ord):
+                c = deme[gid]
+                if c <= 0:
+                    continue
+                rep = self.genotypes[gid]
+                s = getattr(rep, "resistance_state", 0.0)
+                if s <= 0.0:
+                    # ENTRY: a sensitive cell is reprogrammed only where the drug actually reaches it
+                    # (plus env-independent noise), scaled by the dose it receives.
+                    p_in = noise
+                    if treated and induction > 0.0:
+                        target = self._is_treatment_target(tx, rep)
+                        prot = max(rep.evolutionary_parameters["treatment_resistance"],
+                                   rep.evolutionary_parameters.get("drug_tolerance", 0.0),
+                                   self._state_protection(rep))
+                        p_eff = tx.effectiveness if target else tx.toxicity
+                        intensity = self._tx_dosage * p_eff * (1.0 - min(max(prot, 0.0), 1.0))
+                        p_in += induction * intensity
+                    p_in = min(max(p_in, 0.0), 1.0)
+                    if p_in > 0.0:
+                        n = int(rng.binomial(c, p_in))
+                        if n:
+                            moves.append((di, gid, self._state_twin(gid, 1.0), n))
+                elif rep.genome_summary.get("n_mut_tr", 0) == 0:
+                    # EXIT: only a cell with the resistance allele already gone can relax back (a
+                    # still-anchored cell keeps its genetic attractor). Relaxation only where the drug
+                    # is not reaching it; noise switches regardless.
+                    p_out = noise + (relax if (not treated and relax > 0.0) else 0.0)
+                    p_out = min(max(p_out, 0.0), 1.0)
+                    if p_out > 0.0:
+                        n = int(rng.binomial(c, p_out))
+                        if n:
+                            moves.append((di, gid, self._state_twin(gid, 0.0), n))
+        for di, src, dst, n in moves:
+            n = min(n, self.demes[di].get(src, 0))           # never drive a clone negative
+            if n:
+                self._remove(di, src, n)
+                self._add(di, dst, n)
+
     def _tau_generation(self, rng, tau):
         """Advance the whole tumour by one generation of length `tau`, adaptively sub-stepping so
         the largest single-cell event probability per substep stays in the accurate Poisson
@@ -2350,6 +2469,11 @@ class GenotypeTumor:
         dt = tau / n_sub
         for _ in range(n_sub):
             self._tau_substep(rng, dt)
+        # Drug-induced resistance-state entry/exit (DESIGN_phenotype_plasticity.md §3.3), once per
+        # generation on the settled counts, before the snapshot. Gated: no draw / no genotype minted
+        # when the feature is off, so the growth stream is byte-identical.
+        if self.selection.resistance_state_on:
+            self._apply_state_transitions(rng)
         self.step += 1
         self.time += tau
         if self._origin_confined:
@@ -3165,6 +3289,15 @@ class GenotypeTumor:
         if self._cancer_params is not None and self._cancer_params.get("wgd_rate", 0):
             self.cell_data["cell_wgd"] = pd.DataFrame(
                 {"is_wgd": [bool(self.genotypes[g].is_wgd) for g in types]}, index=idx)
+        # Drug-induced resistance-state ground truth (DESIGN_phenotype_plasticity.md §3.3): the
+        # per-genotype carried state level surfaced per cell, so a downstream method can be scored on
+        # telling a non-genetic tolerant STATE from a resistance DRIVER (the Whiting & Graham
+        # plasticity-vs-genetic split, with iscc's lineage tracing as ground truth). Gated on the
+        # feature being on, so off -> the frame is absent and the base schema is unchanged.
+        if self.selection.resistance_state_on:
+            self.cell_data["cell_resistance_state"] = pd.DataFrame(
+                {"resistance_state": [float(getattr(self.genotypes[g], "resistance_state", 0.0))
+                                      for g in types]}, index=idx)
         # F8: surface the per-cell cell-extrinsic levels (ground truth for the intrinsic-vs-extrinsic
         # decomposition benchmark). Only added when F8 is enabled, so the base schema is unchanged.
         if deme_mod is not None:

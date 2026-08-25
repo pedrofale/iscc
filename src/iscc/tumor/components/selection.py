@@ -15,6 +15,9 @@ class Selection(object):
                  breach_cost=0.0, stromal_survival_cost=0.0, met_survival_cost=0.0,
                  treatment_resistance_cost=0.0, drug_tolerance_cost=0.0, trait_source="dosage",
                  treatment_resistance_binary=False,
+                 resistance_state_genetic=False, resistance_state_effect=0.0,
+                 resistance_state_cost=0.0, resistance_state_induction=0.0,
+                 resistance_state_relax=0.0, resistance_state_noise=0.0,
                  selection_mode="gene", s_arm=None, arm_baseline=2.0,
                  max_ploidy=6, max_cn=12, max_nullisomy=2, max_mut_drivers=1000, rng=None,
                  epistasis_params=None, dependency_params=None, layout_seed=None, ):
@@ -109,6 +112,31 @@ class Selection(object):
         # Tolerance is COSTLY by construction: that is what keeps persisters rare before therapy
         # (out-competed in a crowded deme) instead of taking over the tumour.
         self.drug_tolerance_cost = drug_tolerance_cost
+
+        # DRUG-INDUCED RESISTANCE STATE (DESIGN_phenotype_plasticity.md §3.3). A carried, heritable
+        # cell-state INDEPENDENT of the genome, so a CNA that deletes the triggering resistance allele
+        # does NOT restore sensitivity — the whole point being that iscc's genomic-only resistance is
+        # losable by copy-number accident (measured ~4.3e-4/division), which is why mode IV relapses at
+        # 99.1% resistant instead of a clean 100%. The state is carried on the cell (Cell.resistance_state),
+        # NOT in genome_summary; a state transition MINTS A NEW GENOTYPE ID (the engine's _state_twin).
+        # Whiting & Graham's plasticity+noise categories, the two iscc's four (all-genetic) escape modes
+        # lacked. ALL knobs default to the inert value; ``resistance_state_on`` is then False and every
+        # new code path is skipped -> growth is byte-identical (the F8 off-by-default discipline).
+        #   genetic   : acquiring n_mut_tr>0 SETS the state (beta_bias); retained if the allele is later lost.
+        #   effect    : drug protection conferred while in the state, folded into the max(...) protection.
+        #   cost      : proliferation cost per unit state, charged ALWAYS (like the other trait costs), so
+        #               OFF drug a cell that exits is fitter -> the state also reverts by SELECTION.
+        #   induction : per-generation drug-induced entry probability scale (plasticity, tau engine).
+        #   relax     : per-generation OFF-drug exit probability = 1/tau_relax. >0 => exit is possible
+        #               (relax->inf-tau is permanent resistance; short tau is a classical persister). This
+        #               is NOT the rejected trait LATCH: exit is a first-class tunable knob, not forbidden.
+        #   noise     : env-independent stochastic switching (sigma_noise).
+        self.resistance_state_genetic = bool(resistance_state_genetic)
+        self.resistance_state_effect = float(resistance_state_effect)
+        self.resistance_state_cost = float(resistance_state_cost)
+        self.resistance_state_induction = float(resistance_state_induction)
+        self.resistance_state_relax = float(resistance_state_relax)
+        self.resistance_state_noise = float(resistance_state_noise)
 
         # What a dissemination/niche TRAIT reads off the genome — breach, stromal_survival,
         # met_survival, immune_resistance and treatment_resistance only. The oncogene/TSG DRIVER
@@ -218,6 +246,18 @@ class Selection(object):
                 segment_sizes=self.segment_sizes,
                 rng=np.random.default_rng(self.layout_seed + LAYOUT_OFFSET_EPISTASIS),
                 epistasis_params=epistasis_params, dependency_params=dependency_params)
+
+    @property
+    def resistance_state_on(self):
+        """Whether the drug-induced resistance-state feature is active. False (every knob at its inert
+        default) gates OFF all new code — no genetic entry, no ep injection, no cost, no transitions,
+        no ground-truth column — so growth and the golden hashes are byte-identical to before."""
+        return bool(self.resistance_state_genetic
+                    or self.resistance_state_effect > 0.0
+                    or self.resistance_state_cost > 0.0
+                    or self.resistance_state_induction > 0.0
+                    or self.resistance_state_relax > 0.0
+                    or self.resistance_state_noise > 0.0)
 
     def get_evolutionary_parameters(self):
         return list(self.update_dict.keys())
@@ -529,7 +569,14 @@ class Selection(object):
         return (max(0.0, 1.0 - self.breach_cost * ep.get("breach", 0.0))
                 * max(0.0, 1.0 - self.stromal_survival_cost * ep.get("stromal_survival", 0.0))
                 * max(0.0, 1.0 - self.met_survival_cost * ep.get("met_survival", 0.0))
-                * max(0.0, 1.0 - self.treatment_resistance_cost * ep.get("treatment_resistance", 0.0)))
+                * max(0.0, 1.0 - self.treatment_resistance_cost * ep.get("treatment_resistance", 0.0))
+                # Drug-induced resistance STATE (§3.3): the tolerant level charges proliferation like the
+                # other traits and, unlike drug_tolerance, ALWAYS (on or off drug) — that permanent cost
+                # is what makes an exited (reverted) cell fitter off drug, so the state reverts by
+                # SELECTION as well as by relaxation. ``ep.get`` (never a bare subscript): the key is
+                # absent when the feature is off, and cost defaults 0.0, so the factor is exactly 1.0 ->
+                # division byte-identical.
+                * max(0.0, 1.0 - self.resistance_state_cost * ep.get("resistance_state", 0.0)))
         # NOTE drug_tolerance is deliberately NOT charged here. Every other trait's cost is permanent
         # because the trait is permanent, but the persister state only exists while the drug does --
         # a tolerant cell off drug is an ordinary cell. Charging it here made the trait unusable: a
