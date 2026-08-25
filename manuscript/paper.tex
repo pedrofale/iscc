@@ -257,6 +257,25 @@ cross-gland dispersal rate abstracts intraductal spread through the (out-of-plan
 single founder therefore gives rise to multiple, spatially separate but clonally related foci --- the
 multi-focal pattern of ductal carcinoma \textit{in situ} --- and the inter-gland colonisation history
 is retained as ground truth for spatial-phylogeography benchmarks.
+\Cref{fig:ductalfield} follows one such field from a single founder: cancer appears in one gland,
+crosses to the others through low-rate lumen-to-lumen dispersal, and by generation 18 all four glands
+carry a clonally related focus, each reaching a comparable cancer-cell load.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{validation_ductal_field.png}
+  \caption{\textbf{The ductal-field substrate: multi-focal, clonally related foci from one founder.}
+  \textbf{A}~Growth of a four-gland field, shown as the per-deme cancer fraction (top) and the same
+  timepoints at cell resolution in a 2D section (bottom; green epithelial wall, red cancer, pink
+  stroma). Cancer starts in one gland and reaches all four by generation~18 through cross-gland
+  (island) dispersal; the connecting ducts are out of plane and not drawn. \textbf{B}~Glands
+  colonised over time and the final per-gland cancer load. \textbf{C}~Mean pairwise SNV difference
+  within a focus and between foci. Every focus descends from the single founder, so the lesion is
+  clonal in origin; note that the within-focus value exceeds the between-focus value here, which is
+  the opposite of the sharp island bottleneck the model is meant to impose --- the between-focus
+  statistic is computed on focus means and so averages over the within-focus spread.}
+  \label{fig:ductalfield}
+\end{figure}
 
 Cancer-cell fitness follows a copy-number-aware selection model in the spirit of
 CINner~\cite{dinh_cinner_2025}: oncogene and tumor-suppressor copies and mutations modulate the
@@ -557,6 +576,32 @@ layer is on or off.
   with the epithelial fraction of a cell's niche; \texttt{iscc} knows both the genetic and the niche
   contribution to the program and quantifies the split (the niche dominates here).}
   \label{fig:compartment}
+\end{figure}
+
+Read spatially, the same run separates the structure a genotype-level map hides
+(\Cref{fig:spatialdiag}). Under infinite sites almost every division spawns a fresh genotype id, so
+colouring demes by dominant genotype looks like noise even where clonal structure exists; the first
+principal component of the per-cell SNV matrix instead resolves contiguous genetic territories
+(Moran's $I=0.70$). The heritable compartment traits are spatially patchy where selection acts, and
+the expression layer separates by driver: the invasive (emt) program tracks the epithelial gland
+walls closely (correlation $0.95$ with the local epithelial fraction), whereas the proliferation
+program, driven by genotype rather than niche, is spatially much flatter --- the same confound of
+\Cref{fig:compartment}, seen in space.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{validation_spatial_diagnostic.png}
+  \caption{\textbf{Spatial diagnostics of a growing ductal-field lesion} (generation~22, before the
+  cancer fills the field). \textbf{A}~Per-deme mean genetic PC1 at two dispersal rates, with the
+  per-cell SNV burden; positive Moran's $I$ indicates contiguous, genetically distinct territories.
+  Lower dispersal tends to sharpen these territories, but the two runs shown differ only slightly
+  ($I=0.70$ versus $0.66$), so this is a tendency across seeds rather than a per-run guarantee.
+  \textbf{B}~The heritable \emph{breach} and \emph{stromal survival} traits, patchy where the
+  corresponding compartment pressure acts. \textbf{C}~Per-deme mean copy number: spatial gain/loss
+  subclones. \textbf{D}~Expression programs by driver --- the niche-driven emt program lights up on
+  the gland walls (correlation $0.95$ with the epithelial fraction) while the genotype-driven
+  proliferation program is flatter.}
+  \label{fig:spatialdiag}
 \end{figure}
 
 \subsection{Biopsy and dissociation shape the sampled data}
