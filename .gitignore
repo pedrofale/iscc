@@ -21,3 +21,11 @@ notebooks/example_out/
 validation/data/_cache/
 validation/data/**/__pycache__/
 validation/.cache_escape_modes/
+
+# LaTeX build artifacts
+manuscript/*.aux
+manuscript/*.log
+manuscript/*.blg
+manuscript/*.bbl
+manuscript/*.out
+manuscript/*.pdf

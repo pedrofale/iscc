@@ -27,12 +27,14 @@
 \graphicspath{{figures/}}
 
 % Fallback definition of the affiliations environment (nature-style) in case the
-% document class does not provide it.
-\providecommand{\affiliations}{}
+% document class does not provide it. Define it only if absent: \providecommand here
+% would GUARANTEE the name exists and so make the \newenvironment below always fail
+% with "Command \affiliations already defined".
 \makeatletter
-\@ifundefined{affiliations}{}{}
+\@ifundefined{affiliations}{%
+  \newenvironment{affiliations}{\begin{flushleft}\small}{\end{flushleft}}%
+}{}
 \makeatother
-\newenvironment{affiliations}{\begin{flushleft}\small}{\end{flushleft}}
 
 \DeclareMathOperator*{\argmax}{arg\,max}
 \DeclareMathOperator*{\argmin}{arg\,min}
@@ -83,7 +85,7 @@ command-line tool and Python library.
 \end{abstract}
 
 
-\section*{Introduction}
+\section{Introduction}
 \label{sec:introduction}
 In computational oncology, simulation studies are frequently used to develop and test data
 analysis approaches. Often, these studies rely on simplistic assumptions about the underlying
@@ -194,10 +196,10 @@ also connects data analysis to treatment decision-making.
 \end{table}
 
 
-\section*{Results}
+\section{Results}
 \label{sec:results}
 
-\subsection*{Overview}
+\subsection{Overview}
 \label{sec:overview}
 \texttt{iscc} provides an end-to-end simulation framework from tumor growth to molecular data
 generation (\Cref{fig:overview}). The tumor growth model draws from 2D deme-based spatial
@@ -243,7 +245,7 @@ demand at the data-generation step.
   \label{fig:overview}
 \end{figure}
 
-\subsection*{\texttt{iscc} simulates tumors with realistic growth dynamics}
+\subsection{\texttt{iscc} simulates tumors with realistic growth dynamics}
 \label{sec:tumor}
 The model simulates cells with multiple phenotypes that influence the evolutionary dynamics of
 the tumor, including normal epithelial and stromal cells and, optionally, immune cells. The
@@ -365,7 +367,7 @@ genome-wide copy-number mechanism, at WGD parity with CINner and SISTEM (\Cref{t
   \label{fig:validation_wgd}
 \end{figure}
 
-\subsection*{A genotype-level engine scales to large tumors}
+\subsection{A genotype-level engine scales to large tumors}
 \label{sec:scalability}
 Benchmarking copy-number and phylogenetic methods requires tumors of realistic size, which is
 costly for cell-by-cell agent-based simulators. \texttt{iscc} represents the population as
@@ -402,7 +404,7 @@ of occupied demes, so spatially resolved tumors of that size are correspondingly
   \label{fig:tau}
 \end{figure}
 
-\subsection*{\texttt{iscc} generates multi-modal molecular and spatial data}
+\subsection{\texttt{iscc} generates multi-modal molecular and spatial data}
 \label{sec:data}
 The data module turns the cell populations captured by a biopsy or dissociation into observed
 molecular data. For bulk and single-cell DNA sequencing, it generates per-gene coverage and
@@ -470,7 +472,7 @@ re-simulating a fitted 10x Visium breast-cancer section (\Cref{fig:validation_vi
   \label{fig:validation_scrna}
 \end{figure}
 
-\subsection*{\texttt{iscc} reproduces spatial microenvironment structure}
+\subsection{\texttt{iscc} reproduces spatial microenvironment structure}
 \label{sec:microenv}
 Beyond clonal and copy-number structure, real tumor expression is shaped by the microenvironment:
 cells in a poorly perfused core become hypoxic, and paracrine signalling couples neighbouring cells.
@@ -503,7 +505,7 @@ analyses.
   \label{fig:microenv}
 \end{figure}
 
-\subsection*{Compartment-dependent selection and the genetic--niche expression confound}
+\subsection{Compartment-dependent selection and the genetic--niche expression confound}
 \label{sec:compartment}
 Selection in a structured tissue is not uniform: a clone's fitness depends on which normal
 compartment surrounds it. \texttt{iscc} models this with the same mechanism it uses for immune
@@ -557,7 +559,7 @@ layer is on or off.
   \label{fig:compartment}
 \end{figure}
 
-\subsection*{Biopsy and dissociation shape the sampled data}
+\subsection{Biopsy and dissociation shape the sampled data}
 \label{sec:sampling}
 The choices made when a tumor is sampled --- where it is biopsied, how the tissue is
 dissociated, and which assay is used --- shape the data before any sequencing happens, yet are
@@ -585,7 +587,7 @@ subpopulation (here a $15\%$ shift in mean dispersal signal relative to uniform 
   \label{fig:sampling}
 \end{figure}
 
-\subsection*{Assay parameters can be inferred from real data}
+\subsection{Assay parameters can be inferred from real data}
 \label{sec:inference}
 Because realism depends on parameter values that vary across platforms and datasets,
 \texttt{iscc} can infer them rather than relying on hand-tuning. Two inference problems are
@@ -640,7 +642,7 @@ interchangeable with an exact-update reference for this fit, confirming that the
   \label{fig:inference_realgenome}
 \end{figure}
 
-\subsection*{Read-level output reveals the difficulty of variant calling from scRNA}
+\subsection{Read-level output reveals the difficulty of variant calling from scRNA}
 \label{sec:reads}
 Beyond count and coverage matrices, \texttt{iscc} can emit aligned sequencing reads. The compact
 genome stores explicit per-position alleles, from which a per-cell reference sequence is built ---
@@ -675,7 +677,7 @@ mutations are detectable and why.
   \label{fig:scrna_snv}
 \end{figure}
 
-\subsection*{\texttt{iscc} implements conventional and adaptive therapy strategies}
+\subsection{\texttt{iscc} implements conventional and adaptive therapy strategies}
 \label{sec:treatment}
 A central goal in computational oncology is to use detailed molecular profiles of tumors to
 propose treatments tailored to each tumor. \texttt{iscc} includes a treatment module with
@@ -709,7 +711,7 @@ strategies on a shared evolutionary ground truth.
 \end{figure}
 
 
-\subsection*{\texttt{iscc} reproduces the four modes of therapeutic escape}
+\subsection{\texttt{iscc} reproduces the four modes of therapeutic escape}
 \label{sec:escape}
 Resistance to therapy is conventionally classified by \emph{when} the resistant lineage arose and
 \emph{whether} the tumor ever responded. Kane et al.~\cite{kane_fitness_2026} organize this into four modes of
@@ -767,7 +769,7 @@ data alone.
 \end{figure}
 
 
-\subsection*{Operating regimes: which parameters yield realistic tumors}
+\subsection{Operating regimes: which parameters yield realistic tumors}
 \label{sec:envelope}
 Because a simulator's realism holds only within a range of its parameters, we characterize
 \texttt{iscc}'s \emph{operating envelope} --- the region of parameter space that produces realistic
@@ -877,7 +879,7 @@ usable region and actively protects the calibration and benchmarks that depend o
 \end{table}
 
 
-\subsection*{A ground-truth benchmark: a lineage--space confound in spatial lineage tracing}
+\subsection{A ground-truth benchmark: a lineage--space confound in spatial lineage tracing}
 \label{sec:petracer}
 Because every simulated cell carries both its lineage and its spatial niche as ground truth,
 \texttt{iscc} can be used to benchmark methods that analyse spatial lineage-tracing data --- the same
@@ -933,7 +935,7 @@ guide the interpretation of state-of-the-art spatial lineage-tracing experiments
   \label{fig:petracer_real}
 \end{figure}
 
-\subsection*{A ground-truth benchmark: multi-region bulk ``sample trees'' are not phylogenies}
+\subsection{A ground-truth benchmark: multi-region bulk ``sample trees'' are not phylogenies}
 \label{sec:multiregion}
 The same coupling of lineage and space lets \texttt{iscc} quantify a second, long-argued error.
 Alves, Prieto and Posada observed that a tree built from bulk multi-region tumor samples is not a
@@ -979,7 +981,7 @@ from the data alone (\Cref{sec:synthesis}).
   \label{fig:multiregion}
 \end{figure}
 
-\subsection*{A ground-truth benchmark: copy-number burden manufactures spurious expression
+\subsection{A ground-truth benchmark: copy-number burden manufactures spurious expression
 ``programs''}
 \label{sec:programs}
 The two preceding confounds are spatial. A third is genomic, and it reaches the other major class of
@@ -1056,7 +1058,7 @@ generating programs are known.
   \label{fig:programs}
 \end{figure}
 
-\subsection*{\texttt{iscc} provides non-circular ground truth for multi-modal integration}
+\subsection{\texttt{iscc} provides non-circular ground truth for multi-modal integration}
 \label{sec:integration}
 The same logic extends to methods that \emph{integrate} DNA and RNA. Two widely used tools invert the
 relationship between copy number and expression: clonealign~\cite{campbell_clonealign_2019} assigns
@@ -1228,7 +1230,7 @@ methods are otherwise validated without.
   \label{fig:numbat_wgd}
 \end{figure}
 
-\subsection*{\texttt{iscc} provides cohort-level ground truth: shared-vs-private states and the need for personalized medicine}
+\subsection{\texttt{iscc} provides cohort-level ground truth: shared-vs-private states and the need for personalized medicine}
 \label{sec:cohort}
 The benchmarks so far concern a single tumor, but many of the hardest analysis problems --- batch
 integration, demultiplexing, recurrent-driver detection, patient stratification --- are defined only
@@ -1315,7 +1317,7 @@ which concentrates selection on specific chromosome arms, is the sharper substra
 \end{figure}
 
 
-\subsection*{A ground-truth benchmark: which planted evolutionary dependencies can cohort progression models recover?}
+\subsection{A ground-truth benchmark: which planted evolutionary dependencies can cohort progression models recover?}
 \label{sec:epistasis}
 Cohort progression models --- MHN~\cite{schill_modelling_2020}, TreeMHN~\cite{luo_joint_2023},
 conjunctive Bayesian networks~\cite{gerstung_quantifying_2009} and
@@ -1395,7 +1397,7 @@ never develops --- but the mechanism (\Cref{fig:epistasis}B) and the tool--signa
 \end{figure}
 
 
-\subsection*{Taken together: the structure an analysis ignores is the structure that breaks it}
+\subsection{Taken together: the structure an analysis ignores is the structure that breaks it}
 \label{sec:synthesis}
 The benchmarks above are not a set of unrelated curiosities. In each, a structure the analysis does not
 model masquerades as the signal it is looking for, and the resulting error is undiagnosable from the
@@ -1423,7 +1425,7 @@ one selection-driven tumor carried through sampling and assay, not a term writte
 model to be recovered later. That is the sense in which internal consistency is not a convenience but
 the precondition for the result.
 
-\subsection*{Outlook: from benchmarking to experimental design}
+\subsection{Outlook: from benchmarking to experimental design}
 \label{sec:outlook}
 Because \texttt{iscc} connects a known evolutionary ground truth to the data an analyst actually
 observes, it can be run not only forwards --- to generate benchmark data --- but also as a planning
@@ -1435,12 +1437,12 @@ sampling geometry and treatment monitoring. We develop this ``recommender'' mode
 paper; here we establish the consistent generative engine on which it rests.
 
 
-\section*{Methods}
+\section{Methods}
 \label{sec:methods}
 In the following we outline the modules that constitute the package: tumor, treatment, sample
 and data, together with the inference routines that fit them to real data.
 
-\subsection*{The \texttt{tumor} module}
+\subsection{The \texttt{tumor} module}
 \label{sec:methods_tumor}
 This module contains the building blocks of a tumor as classes: \texttt{Genome},
 \texttt{Cell}, \texttt{Deme} and \texttt{Selection}. A tumor can be instantiated as a glandular
@@ -1488,7 +1490,7 @@ alone). MHN and TreeMHN are run at their published defaults in dedicated environ
 because their $\Theta$ is a rate modifier rather than a fitness coefficient we score recovered
 \emph{edges} (symmetrized over the two directions, since $E$ is symmetric) rather than values.
 
-\subsection*{Gene-program expression}
+\subsection{Gene-program expression}
 \label{sec:methods_expression}
 Expression is modelled as a program backbone with two gene-level genotype overlays. Each cell carries
 an activity vector $z$ over $K$ programs, and a program's effect on a gene is given by a
@@ -1529,7 +1531,7 @@ are properties of the genome and are drawn from the configuration-determined lay
 independent sub-streams), so patients sharing a configuration share their programs exactly as they
 share their driver landscape, while per-cell activity and each variant's class are per-run draws.
 
-\subsection*{The \texttt{treatment} module}
+\subsection{The \texttt{treatment} module}
 This module includes chemotherapy, targeted therapy and immunotherapy. Each treatment is applied
 during \texttt{tumor.grow()} according to a dosing schedule. At the genotype level the per-cell
 stochastic effect becomes a dose-scaled modifier of a clone's effective rates, refreshed each
@@ -1541,7 +1543,7 @@ density and is attenuated by immune resistance; the immune compartment is curren
 recruitment and migration dynamics left for future work. Treatments can be configured as adaptive
 regimens that adjust dosing in response to tumor burden~\cite{west_survey_2023}.
 
-\subsection*{The \texttt{sample} module}
+\subsection{The \texttt{sample} module}
 This module corresponds to processing a tumor to prepare it for a data assay, via
 \texttt{Biopsy} and \texttt{Dissociation} steps that select a subset of cells from the
 simulated tumor while preserving their ground-truth state. A biopsy selects cells from one or
@@ -1551,7 +1553,7 @@ selection toward cells with a chosen phenotype (e.g.\ high dispersal). These ste
 multi-region under-sampling, composition bias and selective enrichment of real protocols
 (\Cref{fig:sampling}).
 
-\subsection*{The \texttt{data} module}
+\subsection{The \texttt{data} module}
 The data module generates data from the cells obtained through a biopsy or dissociation of the
 simulated tumor. This includes bulk and single-cell DNA and RNA sequencing, as well as
 spot-based spatial transcriptomics following the 10x Visium technology. Bulk and single-cell
@@ -1572,7 +1574,7 @@ path~\cite{yan_screadsim_2023} for RNA) writes FASTQ, optionally aligned to BAM.
 allele map and the error step across modalities keeps a variant consistent --- same position,
 same alternate base, single error source --- between DNA, RNA and spatial reads.
 
-\subsection*{Inference}
+\subsection{Inference}
 \label{sec:inference_methods}
 Two kinds of parameters can be inferred from data. Tumor-level evolutionary rates are estimated
 by approximate Bayesian computation with random forests~\cite{raynal_abc_2019}: a reference table
@@ -1586,7 +1588,7 @@ length-scale and per-spot concentration for Visium. The package ships defaults c
 fits; only scale-free, unit-reconciled parameters are transferred, while gene-set- and
 unit-dependent quantities are re-fit per reference dataset.
 
-\subsection*{Validation}
+\subsection{Validation}
 \label{sec:validation}
 Validation scripts for each modality are distributed with the software in the \texttt{validation}
 module and can be pointed at any reference dataset. Simulated single-cell RNA-seq is compared to a
