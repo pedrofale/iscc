@@ -709,6 +709,64 @@ strategies on a shared evolutionary ground truth.
 \end{figure}
 
 
+\subsection*{\texttt{iscc} reproduces the four modes of therapeutic escape}
+\label{sec:escape}
+Resistance to therapy is conventionally classified by \emph{when} the resistant lineage arose and
+\emph{whether} the tumor ever responded. Kane et al.~\cite{kane_fitness_2026} organize this into four modes of
+clonal expansion under treatment: two in which resistance is already established at the first dose
+so the tumor never responds (differing in whether resistance is common and cost-free, or
+advantageous enough to have swept beforehand), and two in which the tumor responds and then
+relapses --- distinguished only by whether the relapsing lineage pre-existed treatment as a rare
+clone or arose \emph{de novo} while the tumor was on drug. The distinction matters clinically,
+because only the last case can be prevented by shortening or intensifying the course, and it is
+exactly the distinction that bulk sequencing at relapse cannot make: the relapsed tumor looks
+resistant either way.
+
+\texttt{iscc} reproduces all four modes in a metastatic deposit under a single kill model
+(\Cref{fig:escape}), with the resistance \emph{genetics} as the only difference between panels ---
+the frequency of resistance in the founding population and its proliferative cost. Modes I and II
+never respond: resistance is present in essentially the whole deposit at the first dose, either
+because it is common and free (100\% of cells) or because a negative cost let it sweep to fixation
+before therapy (97.5\%). Modes III and IV both regress and then relapse, and the ground-truth
+lineage record separates them: in III the relapsing clone is present at the first dose at 1.5\% and
+the tumor regresses 11.7-fold before it expands; in IV the deposit contains \emph{zero} resistant
+cells at the first dose, regresses 39.5-fold, and the relapse descends from a lineage that first
+acquired resistance 24 generations into dosing.
+
+Two features of this experiment are worth stating explicitly. First, mode IV is stochastic by
+construction --- it requires both a metastatic deposit founded without resistance and a \emph{de
+novo} lineage that establishes rather than drifting out, and the metastatic bottleneck makes
+standing resistance in the deposit bimodal rather than smoothly Poisson; roughly one seed in six
+yields the mode, and the panel shown is a selected seed. Second, mode IV alone is dosed with a
+mutagenic drug. This asymmetry is forced rather than incidental: because III and IV differ
+\emph{only} in the origin of the relapsing lineage, a drug mutagenic enough to generate mode IV's
+\emph{de novo} clone also generates one in mode III, where it outcompetes the pre-existing clone
+that defines the mode --- we measured mode III falling below its own response threshold (5.1-fold)
+and relapsing from a \emph{de novo} lineage when given the same mutagen. No single drug produces
+all four modes.
+
+Because \texttt{iscc} records which cell first acquired resistance and the full descent of the
+relapsing population, modes III and IV are separable in the simulation by construction --- which is
+what makes the pair usable as a testbed for methods that attempt the same separation from sequencing
+data alone.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{validation_escape_modes.png}
+  \caption{\textbf{The four modes of therapeutic escape reproduced in \texttt{iscc}.} Metastatic
+  deposit composition (sensitive, blue; resistant, red) through a chemotherapy course (shaded) and a
+  drug-free relapse period, on a linear scale; time is relative to the first dose. Panels differ
+  only in the resistance genetics --- its frequency in the founding population and its proliferative
+  cost --- not in the therapy, except that mode IV is dosed with a mutagenic drug (see text).
+  \textbf{I}~and~\textbf{II}: resistance is established before therapy and the tumor does not
+  respond. \textbf{III}~and~\textbf{IV}: the tumor responds and relapses; in III the relapsing clone
+  pre-exists the first dose at 1.5\% of the deposit, whereas in IV the deposit starts free of
+  resistance and the relapse descends from a lineage that arose during dosing. Mode IV is a selected
+  seed (see text).}
+  \label{fig:escape}
+\end{figure}
+
+
 \subsection*{Operating regimes: which parameters yield realistic tumors}
 \label{sec:envelope}
 Because a simulator's realism holds only within a range of its parameters, we characterize
