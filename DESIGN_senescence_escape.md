@@ -144,6 +144,62 @@ sequencing as the test rather than the calibration. That is the opposite of the 
 (`DESIGN_phenotype_plasticity.md` §0) where every parameter was unmeasurable — here every parameter is
 directly observable.
 
+### 6.1 Sequencing design — bulk WGS on single-cell expansions from escapers
+
+Bulk WGS of a **clonal expansion** is the right instrument here: ~100% purity, high effective depth per
+allele, no single-cell amplification artefacts. But nearly all the power comes from one design choice.
+
+**SEQUENCE THE PARENT, AND MANY INDEPENDENT ESCAPER CLONES.** Then you are not inferring history from
+one genome — you difference each escaper against a KNOWN ancestral karyotype, and the distribution of
+outcomes across independent clones **IS the segregation kernel, measured directly**. That is the thing
+nobody has. **n ≈ 10-20 clones**, more if outcomes are heterogeneous. Depth buys resolution WITHIN one
+clone; the founder karyotype is clonal by construction, so it does not need it.
+
+**Core readout: ALLELE-SPECIFIC copy number, not total.** The parental line is heterozygous at millions
+of SNPs, giving a phasing backbone — so per chromosome per escaper you get not just *how many copies*
+but *which parental homolog*.
+
+**The sharpest signature — homolog identity.** From 2n (1 maternal + 1 paternal) you can lose a copy,
+but you cannot obtain **two copies of the SAME homolog** without a duplication event. From 4n
+(2M + 2P) a random three-way split readily hands a daughter 2M + 0P — copy number 2, normal on TOTAL
+CN, but copy-neutral LOH **with homolog identity**. Many chromosomes showing two copies of one parental
+homolog in a single clone, with no duplication signature, is hard to reach from a diploid lineage and
+easy from a tetraploid one. **A footprint of the ROUTE, not the endpoint.**
+
+**Supporting readouts:** whole-chromosome vs arm-level event ratio (multipolar mis-segregation moves
+WHOLE chromosomes; replication stress / BFB give arm-level and focal); nullisomies and homozygous losses
+of regions lethal from 2n (the R15 test); SNV multiplicity to time the WGD against the mutation clock;
+SV burden and pattern, mainly to EXCLUDE chromothripsis (clustered breakpoints + oscillating CN rather
+than clean whole-chromosome changes).
+
+**Two controls not to skip.** (1) **Single-cell expansions from UNTREATED cells** — without a baseline
+drift rate nothing is attributable, cell lines drift. (2) **Escaper clones that were never polyploid**,
+identified by imaging before picking — the internal control separating "escape" from "escape VIA
+polyploidy". The imaging is what makes (2) possible at all.
+
+**COVERAGE REALITY: ~10-20x is available, and that is mostly fine.**
+- **Holds.** Allele-specific CN is a SEGMENT-level statistic aggregated over thousands of het SNPs (a
+  10 Mb segment has ~10,000), so per-SNP noise at 15x averages out — LOH calling, copy-neutral-LOH vs
+  hemizygous loss, and the homolog-identity test all survive. Total CN/ploidy is robust (a 1 Mb bin has
+  ~1,500 reads at 15x). ~100% purity + a sequenced parent removes the two things that make tumour CN
+  calling hard.
+- **Degrades.** Subclonal CN resolvable only above ~25-30% cell fraction; subclonal SNV clusters
+  essentially not at all. WGD timing by SNV multiplicity becomes marginal (per-mutation VAF too noisy at
+  15x; only the aggregate distribution is usable, and it depends on mutation burden). SV
+  characterisation limited — enough to notice gross chromothripsis, not to rule it out properly.
+- **The trade: spend on CLONES, not depth.** 20 clones at 15x beats 3 at 100x, because the kernel is a
+  distribution ACROSS independent events.
+- **For the ongoing-instability question, deep bulk is the wrong tool.** "One-off event or persistent
+  state" is measured directly by **low-pass single-cell CNV sequencing** (0.01-0.1x per cell, hundreds
+  of cells) — mature, cheap, and how the punctuated-evolution work was done. Bulk answers it only by
+  inference at any depth.
+- **Pick clones early** regardless: fewer generations means less drift, which at 15x you cannot see but
+  which still shifts segment-level calls.
+
+**The unique asset:** each sequenced clone can be paired with imaging of the actual division that
+produced it — the segregation kernel AND its genomic consequence for the SAME event. That pairing does
+not appear to exist anywhere.
+
 ## 7. Cheap things to do first, before building anything
 
 - **Re-treatment as a diagnostic, in the simulator, today.** Add a second chemotherapy phase to the
