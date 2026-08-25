@@ -93,6 +93,35 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   spine/assay notebooks re-executed and feature-complete (estimation/tau/reads demos).
 - **LATER — bib hygiene**: verify the "auto-added — verify" entries in `references.bib`.
 
+## Therapeutic escape + the manuscript build ✅ DONE (2026-08-25)
+- **All four Kane/Maley escape modes reproduce**, one kill model and schedule, resistance genetics the
+  only difference between panels. Figure `validation_escape_modes.png`, manuscript §"reproduces the
+  four modes of therapeutic escape", citation `kane_fitness_2026` (v2, posted 2026-08-04, verified at
+  source). Reproducible from the repo: `validation/validate_escape_modes.py`, whose four panels come
+  out **byte-identical** to the published runs. Runtime ~25-40 min, per-panel npz cache, `--only`/`--force`.
+- **Drug-induced resistance STATE** (`ad86f23`, plasticity §3.3) verified: 908 passed / 1 skipped,
+  749 → 0 sensitive on the original rig. §3.4 records the 2x2 decomposition — **exit is the
+  load-bearing knob, not the cost** — and that **tau→∞ is NOT required**: pricing resistance once
+  instead of twice gives 97.7% resistant at relax=0.02 with the clean start intact.
+- **A mutagen shared across all four panels is IMPOSSIBLE, and that is a result.** III and IV differ
+  only in the relapsing lineage's origin, so the drug that manufactures IV's de novo clone also
+  manufactures one in III and overwrites the pre-existing clone that defines it. Do not retune it away.
+- **The manuscript had NEVER been compiled.** Three pre-existing bugs fixed (`4083d9d`): a
+  `\providecommand{\affiliations}` that guaranteed the collision it was meant to prevent; 21
+  `\Cref{sec:...}` pointing at STARRED sections (body sections now numbered — reversible, but then
+  those refs need rewriting); and **18 bib entries with an inline `% auto-added` comment after the
+  key**, which BibTeX parsed as the first field name — 17 references were rendering with no author,
+  title, journal or year. Now 35 pages, zero undefined refs, zero BibTeX warnings.
+  **Build with `tectonic -X compile paper.tex`** (self-contained, runs BibTeX). BasicTeX needs sudo;
+  conda `texlive-core` is a plain-TeX stub with no `latex.ltx`.
+- **Orphaned figures triaged.** `validation_ductal_field.png` + `validation_spatial_diagnostic.png`
+  wired in (`1b855c8`) with honest captions — the ductal-field divergence panel reads BACKWARDS for an
+  island bottleneck (within-focus 0.108 > between-focus 0.044, likely a focus-means artefact) and the
+  Moran's I contrast is only 0.70 vs 0.66. **NEEDS REVIEW.** The other two deliberately left out:
+  `programs_cohort` (n=1, already deferred by the user) and `evolution_modes` (a NEGATIVE result —
+  "5% of real tumours in iscc hull"; check like-for-likeness first, since iscc's D is full ground
+  truth and Noble's is sparse multi-region sequencing).
+
 ## F8 — microenvironment-driven expression (the integration keystone) ✅ DONE
 - **DONE** — `models/count.py`: per-deme × gene modifier at materialisation (hypoxia `_o2_field` +
   CCI `_cci_field`), OPTIONAL via `microenv_params`, OFF ⇒ bit-identical, growth byte-identical
@@ -618,6 +647,8 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   focal CNAs/WGD (R10), recommender (R11), etc. Each a substantial new track; promote when committed.
 
 ## Housekeeping
-- **NOW — commit** the uncommitted work on `dev`: manuscript catch-up + positioning edits, the
-  re-executed notebooks, `DESIGN_recommender.md`, `DESIGN_features.md` F8, `RESEARCH_QUESTIONS.md` R11,
-  `handoffs/F8_*.md`, this `BACKLOG.md`, and `notebooks/TUTORIALS_PLAN.md`.
+- **DONE — commit the backlog of uncommitted `dev` work.** The tree is clean; that item had gone
+  stale. (Was: manuscript catch-up + positioning edits, re-executed notebooks, `DESIGN_recommender.md`,
+  `DESIGN_features.md` F8, `RESEARCH_QUESTIONS.md` R11, `handoffs/F8_*.md`, `notebooks/TUTORIALS_PLAN.md`.)
+- **DONE (2026-08-25) — `../STATUS.md` rewritten.** It still described the predecessor project
+  `tumorevo` and was dated Jan 2025.
