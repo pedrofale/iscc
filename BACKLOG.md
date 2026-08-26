@@ -655,8 +655,21 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
 - **LATER — RESEARCH_QUESTIONS R1–R11** — 3D (R1), AI histology (R2), metastasis/multi-site (R9),
   focal CNAs/WGD (R10), recommender (R11), etc. Each a substantial new track; promote when committed.
 
-## Engine/docs bug — WGD saturates at 100% (found 2026-08-25, NOT fixed)
-- **NOW.** Re-executing the tutorials against the current engine moved WGD from a third of malignant
+## Engine/docs bug — WGD saturates at 100% ✅ RESOLVED 2026-08-26 (it was a CATEGORY ERROR)
+- **RESOLVED.** Not a calibration problem and not an engine regression: the tutorial compared a
+  WITHIN-TUMOUR cell fraction against PCAWG's COHORT statistic (fraction of *tumours* that are WGD).
+  100% is correct behaviour — WGD is early and clonal, so a WGD+ tumour is WGD throughout. Lowering
+  `wgd_rate` to force 33% would have fitted a number to the wrong denominator AND put the tutorial at
+  odds with `validate_wgd.py`, which already does it correctly (majority-of-cells => tumour is WGD,
+  PCAWG band applied to cohort prevalence). Fixed in `c0328e1`: prose reads the number at the right
+  level, the printed line is labelled a within-tumour fraction, and the mean-ploidy line guards the
+  now-empty non-WGD set (was printing `nan`).
+- **Paper verified, no edit needed.** Full 20-seed sweep: prevalence moves through the PCAWG 30-50%
+  band, calibrated rate **0.05 -> 45%**, ploidy bimodal (2.01 vs 4.01). NOTE a `--quick` (6-seed) run
+  reports 0.08 -> 33%, which is NOISE — at 20 seeds 0.08 gives 85%. **Do not pick a rate from
+  `--quick`.** `wgd_allele_cna.ipynb` uses 0.05, matching the calibrated rate.
+- Original report kept below for context.
+- **WAS:** Re-executing the tutorials against the current engine moved WGD from a third of malignant
   cells to **all** of them:
       base_simulation        WGD fraction (malig)  32.8% -> 100.0%
       wgd_allele_cna         33% of malignant WGD  ->    100%; mean ploidy "malig non-WGD" = **nan**
