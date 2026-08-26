@@ -122,6 +122,7 @@ nav:
           - Spatial (Visium): tutorials/assay_spatial.ipynb
           - Sequencing reads: tutorials/reads.ipynb
       - Data analysis examples:
+          - The analysis dataset and its ground truth: tutorials/analysis_ground_truth.ipynb
           - Combining scDNA and scRNA: tutorials/combining_scdna_scrna.ipynb
           - Integrating scDNA and scRNA with clonealign: tutorials/tool_clonealign_R.ipynb
           - Whole-genome doubling and the allele layer: tutorials/wgd_allele_cna.ipynb

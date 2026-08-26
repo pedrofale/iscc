@@ -290,8 +290,18 @@ def main():
         version = getattr(iscc, "__version__", "unknown")
     except Exception:
         version = "unknown"
-    with open(os.path.join(args.out, "manifest.json"), "w") as fh:
-        json.dump({"iscc_version": version, "datasets": manifest}, fh, indent=2)
+    # MERGE, do not overwrite: `--only rctd` used to rewrite the manifest with rctd alone, silently
+    # erasing the record of every other dataset that was still sitting on disk.
+    man_path = os.path.join(args.out, "manifest.json")
+    existing = {}
+    if os.path.exists(man_path):
+        try:
+            existing = json.load(open(man_path)).get("datasets", {})
+        except Exception:
+            existing = {}
+    existing.update(manifest)
+    with open(man_path, "w") as fh:
+        json.dump({"iscc_version": version, "datasets": existing}, fh, indent=2)
     print(f"\nmanifest -> {os.path.join(args.out, 'manifest.json')}")
 
 
