@@ -145,7 +145,15 @@ def run_tool(tool, adata, k, seed=0, n_epoch=300, n_iter=20, batch_key=None):
             cmd.append(batch_key or "none")
         elif batch_key is not None:
             raise ValueError("cNMF has no batch-correction path; batch_key is scDEF-only")
-        proc = subprocess.run(cmd, capture_output=True, text=True)
+        # Sanitise the child's environment. A Jupyter kernel exports
+        # MPLBACKEND=module://matplotlib_inline.backend_inline, subprocess inherits os.environ, and
+        # the tool env's matplotlib has no matplotlib_inline — so `import scdef` dies at import time
+        # with "Key backend: ... is not a valid value". The tool then works from a shell and fails
+        # from a notebook, which is how this hid behind a silent NMF fallback. PYTHONPATH is dropped
+        # for the same reason: it would let the PARENT env's packages shadow the tool env's.
+        env = {k: v for k, v in os.environ.items() if k not in ("MPLBACKEND", "PYTHONPATH")}
+        env["MPLBACKEND"] = "Agg"          # headless, always importable
+        proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
         if proc.returncode != 0 or not os.path.exists(out_npz):
             raise RuntimeError(f"{tool} runner failed:\n{proc.stdout[-2000:]}\n{proc.stderr[-2000:]}")
         d_npz = np.load(out_npz, allow_pickle=True)
