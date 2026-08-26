@@ -112,10 +112,15 @@ def edges_to_treemhn(edges, names, patient_id):
     TreeMHN's convention (its README): the root is ``Node_ID = 1`` with ``Mutation_ID = 0`` and is
     **its own parent**; events are numbered 1..n. SCITE labels mutations by the names it was given,
     so the mapping back to event indices is by position in ``names``.
+
+    ``Tree_ID`` must be UNIQUE PER PATIENT, not a constant. Node ids restart at 1 in every tree, so
+    a shared Tree_ID makes TreeMHN read the whole cohort as one tree; its ``remove_duplicates`` then
+    resolves a parent by ``which(Node_ID == j)``, matches one row per patient, and dies with
+    "the condition has length > 1". iscc's own ``to_treemhn_trees`` numbers them per patient too.
     """
     idx = {nm: i + 1 for i, nm in enumerate(names)}          # E0 -> Mutation_ID 1
     node_of = {"Root": 1}
-    rows = [dict(Patient_ID=patient_id, Tree_ID=1, Node_ID=1, Mutation_ID=0, Parent_ID=1)]
+    rows = [dict(Patient_ID=patient_id, Tree_ID=patient_id, Node_ID=1, Mutation_ID=0, Parent_ID=1)]
     # SCITE's edge list is not guaranteed to be parent-before-child, so walk it from the root.
     children = {}
     for parent, child in edges:
@@ -128,7 +133,7 @@ def edges_to_treemhn(edges, names, patient_id):
                 continue
             node = len(rows) + 1
             node_of[child] = node
-            rows.append(dict(Patient_ID=patient_id, Tree_ID=1, Node_ID=node,
+            rows.append(dict(Patient_ID=patient_id, Tree_ID=patient_id, Node_ID=node,
                              Mutation_ID=idx[child], Parent_ID=node_of[parent]))
             stack.append(child)
     return pd.DataFrame(rows)
