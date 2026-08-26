@@ -745,6 +745,57 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   (the plan already in `realistic-regime-migration`), or state the substrate and defend it explicitly
   in the manuscript. Right now the paper implies realistic data and does not say otherwise.
 
+## Real tools in the notebooks ✅ MOSTLY DONE (2026-08-26)
+
+**Architecture (user decision):** analysis notebooks LOAD pre-generated data; they never simulate.
+`validation/make_analysis_data.py` does the `iscc` half once and writes plain tables to
+`analysis_data/` (GITIGNORED — numbat alone is ~80 MB). This is what makes an R-kernel notebook
+possible at all: a notebook has one kernel, and growing a tumour is Python.
+
+**Four R notebooks, each on its own kernel, all succeeding:**
+
+    tool_clonealign_R.ipynb   accuracy 0.81 (chance 0.25, majority 0.49), ARI 0.47, AUC 0.94
+    tool_numbat_R.ipynb       malignant-vs-normal AUC 0.977 over 1,677 cells
+    tool_rctd_R.ipynb         MAE 0.043 vs 0.325 flat baseline, mean per-type r 0.989
+    tool_treemhn_R.ipynb      both planted DAG edges recovered as the TOP 2 of 12 off-diagonals
+
+IRkernel is installed in all four `iscc-<tool>` envs; kernelspecs `ir-clonealign` / `ir-numbat` /
+`ir-rctd` / `ir-treemhn` are written directly (`IRkernel::installspec` shells out to `jupyter`, which
+is not on those envs' PATH). `notebooks/r_preamble.R` carries the RETICULATE_PYTHON fix — without it
+reticulate searches a cached uv interpreter and reports "Valid installation of TensorFlow not found"
+for a correctly installed package.
+
+**Cohort integration FIXED — Harmony and scDEF were never actually running.** Four stacked faults:
+harmonypy not installed; `sc.external.pp.harmony_integrate` incompatible with harmonypy 2.0 (it
+transposes Z_corr, right for 1.x, wrong for 2.x — Harmony converges and the result is discarded, so
+call `harmonypy.run_harmony` directly); Jupyter's `MPLBACKEND=module://matplotlib_inline...` inherited
+by the subprocess, which the tool env cannot import, killing `import scdef` (run_tool now strips
+MPLBACKEND/PYTHONPATH — this covers cNMF too); and `n_epoch=100`, which is validate_programs'
+`--quick` setting and under-trains scDEF to noise. Now: Harmony runs, scDEF mean cosine 0.08 -> 0.39.
+
+**THE STRUCTURAL LESSON, worth more than any individual bug:** every one of these failures produced
+plausible output and exit code 0. `reads.ipynb` silently produced nothing when binaries were off PATH;
+`cohort_shared_programs` silently substituted per-batch centring and in-core NMF. The handler also
+truncated exceptions to `str(e)[:200]`, so every scDEF failure read as a bare "import scdef". Fixed
+structurally: untruncated errors, and every fallback prints `!! <TOOL> DID NOT RUN`.
+
+### Outstanding
+- **cNMF clean recovery (DEFERRED by user 2026-08-26).** cNMF now runs in `gene_programs.ipynb` but
+  scores 0.07 mean cosine vs sklearn NMF's 0.30 — not the ~0.5 validate_programs reports. Cause is
+  the TUMOUR, not the tool: `base_sim.EXPR()` layers a strong niche arm (`niche_program_strength=3.0`,
+  epithelial -> emt) because that notebook demonstrates the genetic-vs-niche CONFOUND, so much of the
+  variance is compartment-driven and cNMF's consensus keeps the niche structure. Ruled out by
+  measurement: gene misalignment, normal-cell dilution (0.02->0.05), the dropout matrix (0.05->0.07).
+  Fix would be a separate small cNMF notebook over a dataset built with the validation expression
+  config — keeps `gene_programs` as the confound demo it was designed to be.
+- **rctd dataset is NOT on the realistic ductal field.** It grows `deconv_common`'s grid-26 / one-ring
+  / 300-gene substrate because `build_section`'s spot radius / pitch / section radius are tuned to that
+  grid; repointing them at grid-96 would silently change how many cells land in a spot, which is the
+  quantity the deconvolution benchmark measures. Migrate the GEOMETRY with it.
+- **The integration benchmarks' realistic regime is opt-in, not default.** `regime="realistic"` /
+  `ISCC_INTEGRATION_REGIME=realistic`, default still "toy". Switching the default restates published
+  numbers, so it needs a deliberate pass per benchmark.
+
 ## Housekeeping
 - **DONE — commit the backlog of uncommitted `dev` work.** The tree is clean; that item had gone
   stale. (Was: manuscript catch-up + positioning edits, re-executed notebooks, `DESIGN_recommender.md`,
