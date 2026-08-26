@@ -242,8 +242,56 @@ def _treemhn(out_dir, seed, scale, n_clones):
     return meta
 
 
+def _cohort(out_dir, seed, scale, n_clones):
+    """A multi-patient scRNA cohort: counts, patient/batch labels, and the true program dictionary.
+
+    The cohort shares ONE program dictionary (every patient draws from the same gene sets) while each
+    patient's tumour evolves privately. That is what makes cohort integration measurable: a method
+    must pull the shared programs out despite each patient having its own clones, its own copy-number
+    landscape and its own batch effect.
+    """
+    import programs_common as PC
+
+    n_patients = 5
+    Xs, obs_rows, loading, Z = [], [], None, []
+    for i in range(n_patients):
+        t = PC.grow_tumor(seed=seed + i)
+        a, z = PC.counts_anndata(t, seed=seed + i, max_cells=300)
+        Xs.append(np.asarray(a.X, dtype=np.float32))
+        Z.append(np.asarray(z))
+        obs_rows += [(f"P{i}", f"batch{i}")] * a.n_obs
+        if loading is None:
+            # `program_truth` is where iscc records the planted dictionary: the loading matrix
+            # (programs x genes) and the per-cell activities. It is the same object validate_programs
+            # scores against.
+            loading = np.asarray(t.program_truth["loading"])
+            var_names = list(a.var_names)
+        del t
+
+    X = np.vstack(Xs)
+    os.makedirs(out_dir, exist_ok=True)
+    cells = [f"C{i}" for i in range(X.shape[0])]
+    pd.DataFrame(X, index=cells, columns=var_names).to_csv(
+        os.path.join(out_dir, "counts.csv.gz"))
+    pd.DataFrame(obs_rows, index=cells, columns=["patient", "batch"]).to_csv(
+        os.path.join(out_dir, "obs.csv"))
+    # Ground truth: the shared program dictionary, and each cell's true program activities.
+    pd.DataFrame(loading, index=[f"program{k}" for k in range(loading.shape[0])],
+                 columns=var_names).to_csv(os.path.join(out_dir, "truth_loading.csv.gz"))
+    pd.DataFrame(np.vstack(Z), index=cells,
+                 columns=[f"program{k}" for k in range(np.vstack(Z).shape[1])]).to_csv(
+        os.path.join(out_dir, "truth_activity.csv.gz"))
+
+    meta = dict(n_patients=int(n_patients), n_cells=int(X.shape[0]), n_genes=int(X.shape[1]),
+                n_programs=int(loading.shape[0]),
+                cells_per_patient=int(X.shape[0] // n_patients))
+    with open(os.path.join(out_dir, "meta.json"), "w") as fh:
+        json.dump(meta, fh, indent=2)
+    return meta
+
+
 DATASETS = {"clonealign": _clonealign, "numbat": _numbat,
-            "rctd": _rctd, "treemhn": _treemhn}
+            "rctd": _rctd, "treemhn": _treemhn, "cohort": _cohort}
 
 # Per-dataset seed overrides. These notebooks demonstrate that iscc's output is AMENABLE to the real
 # tools, so each dataset uses a tumour where the signal the tool reads is actually present. That is a
