@@ -58,8 +58,45 @@ CANCER = {"division_rate": 0.6, "death_rate": 0.03, "max_birth_rate": 0.98,
           "mutation_rate": 1.1, "dispersal_rate": 0.5}
 
 
-def grow_tumor(seed=3, steps=750, genome=None, spatial=None, cancer=None, deme=None):
-    """Grow the shared multi-clone tumour (cancer + diploid normal compartment)."""
+# ---------------------------------------------------------------------------------------------
+# SUBSTRATE: the toy rig above, or the REALISTIC ductal field the rest of iscc is calibrated to.
+#
+# The constants above are a TOY: grid 20x20, K=8 (<=3,200 cells), one epithelial ring, and 12 x 50 =
+# 600 genes. `validation/realistic_regime.py` — the regime the notebooks (via notebooks/base_sim.py),
+# the sweeps and the tests all use — is grid 48/96/170, a ductal FIELD of 3/5/8 glands, 12 x 500 =
+# 6,000 genes. Every real-tool benchmark here ran on the toy one, so the paper's integration results
+# were REAL TOOLS on UNREALISTIC DATA. 600 genes matters most for the gene x cell tools (scDEF, cNMF,
+# inferCNV, cell2location), where real matrices carry ~20k.
+#
+# The switch is OPT-IN so the migration can go one benchmark at a time and nothing changes silently:
+# pass regime="realistic" (or set ISCC_INTEGRATION_REGIME=realistic to flip a whole run). `scale` is
+# the cost dial — "small" keeps the ductal field and the 6,000-gene genome while staying affordable;
+# "cm" is the paper-scale field.
+REGIME = os.environ.get("ISCC_INTEGRATION_REGIME", "toy")
+# Cancer-cell targets per scale. "small" is deliberately close to the toy rig's ~3k cells, so the
+# FIRST thing that changes is the substrate (field + gene count), not the sample size — otherwise a
+# score shift cannot be attributed.
+SCALE_TARGETS = {"small": 4_000, "mid": 20_000, "cm": 150_000}
+
+
+def grow_tumor(seed=3, steps=750, genome=None, spatial=None, cancer=None, deme=None,
+               regime=None, scale="small", target_cancer=None, max_cells=6_000):
+    """Grow the shared multi-clone tumour (cancer + diploid normal compartment).
+
+    ``regime="toy"`` (default) is the historical small rig. ``regime="realistic"`` grows the
+    calibrated breach-gated ductal field instead, via ``realistic_regime.grow_realistic`` — same
+    return contract (``cell_data`` materialised), so every helper below and every caller works
+    unchanged. ``steps`` is ignored under the realistic regime, which grows to a cancer-cell TARGET
+    rather than for a fixed number of steps.
+    """
+    regime = regime or REGIME
+    if regime == "realistic":
+        import realistic_regime as RR
+        return RR.grow_realistic(
+            seed=seed, scale=scale,
+            target_cancer=target_cancer or SCALE_TARGETS[scale],
+            genome=genome, cancer=cancer, deme=deme, spatial=spatial,
+            materialise=True, max_cells=max_cells)
     from iscc.tumor.models import GenotypeTumor
     t = GenotypeTumor(seed=seed,
                       genome_params=genome or GENOME, selection_params=SELECTION,
