@@ -108,8 +108,8 @@ nav:
   - Home: index.md
   - Overview: overview.md
   - Installation: installation.md
-  - iscc overview: tutorials/01_pipeline_walkthrough.ipynb
   - Tutorials:
+      - iscc overview: tutorials/01_pipeline_walkthrough.ipynb
       - Tumor evolution:
           - Exploring the tumor: tutorials/02_tumor_growth.ipynb
           - The shared tumour: tutorials/base_simulation.ipynb
@@ -123,15 +123,11 @@ nav:
           - Sequencing reads: tutorials/reads.ipynb
       - Data analysis examples:
           - The analysis dataset and its ground truth: tutorials/analysis_ground_truth.ipynb
-          - Combining scDNA and scRNA: tutorials/combining_scdna_scrna.ipynb
           - Integrating scDNA and scRNA with clonealign: tutorials/tool_clonealign_R.ipynb
-          - Whole-genome doubling and the allele layer: tutorials/wgd_allele_cna.ipynb
           - Calling copy number from scRNA with Numbat: tutorials/tool_numbat_R.ipynb
           - Clonal trees from DNA: tutorials/tree_inference_dna.ipynb
-          - Integrating scRNA with Visium: tutorials/scrna_visium_integration.ipynb
           - Deconvolving Visium spots with RCTD: tutorials/tool_rctd_R.ipynb
           - Gene-expression programs: tutorials/gene_programs.ipynb
-          - Cohort DNA — recurrent mutations: tutorials/cohort_mhn_recurrence.ipynb
           - Recovering progression constraints with TreeMHN: tutorials/tool_treemhn_R.ipynb
           - Cohort integration — shared programs: tutorials/cohort_shared_programs.ipynb
   - API Reference:
