@@ -15,11 +15,9 @@ REGIME. `clonealign` and `numbat` come from the realistic breach-gated ductal fi
 (`realistic_regime.py`) — grid 96 / 5 glands / 6,000 genes at `scale="mid"`, versus the old toy rig's
 grid 20, one ring, 600 genes.
 
-**`rctd` does NOT yet**, and `treemhn` is a different kind of dataset entirely (a cohort of mutation
-trees, no assay). `rctd` still grows through `deconv_common.grow_tumor`, whose substrate is grid 26 /
-one ring / 10 x 30 = 300 genes, because the Visium section geometry (`build_section`: spot radius,
-pitch, section radius) is tuned to that grid and does not transfer unchanged. Migrating it is
-outstanding — see the per-function note in `_rctd`.
+`rctd` is migrated too (2026-08-26), with the section geometry re-anchored physically (Visium v1 at
+~50 um/deme) and the field grown dense enough for spots to be genuine mixtures — see `_rctd`.
+`treemhn` is a different kind of dataset entirely: a cohort of mutation trees, no assay.
 
 Output (default `analysis_data/`, gitignored — the matrices are tens of MB):
 
@@ -116,19 +114,57 @@ def _numbat(out_dir, seed, scale, n_clones):
     return meta
 
 
+# Visium v1 geometry in DEME units, from DESIGN_ductal_field.md: a deme is ~50 um in-plane, so the
+# 55 um spot is ~1 deme across (radius 0.55) and the 100 um centre-to-centre pitch is 2 demes. The old
+# toy values (radius 0.9, pitch 1.5) are NOT a physical target to preserve — at 50 um/deme they
+# describe 180 um spots overlapping at 75 um pitch, which no Visium slide has.
+VISIUM_V1 = dict(spot_radius=0.55, spot_pitch=2.0, section_radius=None)
+# Cancer-cell target for the deconvolution field. Density is what decides whether this benchmark
+# means anything: a spot must contain a MIXTURE. Measured on the realistic field at Visium v1 geometry
+#   target   cells/spot   spot purity   spots with >=2 types
+#    1.5k        1.7          0.98              6%     <- degenerate: nothing to deconvolve
+#     20k        4.9          0.96             11%
+#     60k        5.0          0.89             34%     <- comparable to the old toy rig (0.88 / 60%)
+RCTD_TARGET_CANCER = 60_000
+# Immune density. The ductal field ships with no immune compartment, and without one the section is
+# essentially cancer + stroma: RCTD then fits TWO types and the benchmark is much weaker than the toy
+# rig it replaces. Turning immune on (the same 0.12 deconv_common's rig used) restores a genuinely
+# mixed section — and overtakes the toy rig on the measure that matters:
+#                          spot purity   >=2 types   >=3 types
+#   old toy rig (grid 26)      0.88          60%         10%
+#   realistic, no immune       0.89          34%          0%
+#   realistic + immune 0.12    0.72          75%         21%
+# NOTE epithelial stays vestigial (~0.4%) at this density: a confluent IDC has consumed the gland
+# walls. That is biologically coherent, so this is effectively a THREE-type deconvolution.
+RCTD_IMMUNE_DENSITY = 0.12
+
+
 def _rctd(out_dir, seed, scale, n_clones):
     """RCTD's inputs: a spatial section (counts + coordinates) and a paired scRNA reference.
 
-    NOT YET MIGRATED to the realistic regime. This grows `deconv_common`'s own substrate — grid 26,
-    one epithelial ring, 300 genes — not the ductal field. The blocker is geometric rather than
-    conceptual: `build_section`'s spot radius / pitch / section radius are tuned to that grid, so
-    pointing it at a grid-96 ductal field would silently change how many cells land in a spot, which
-    is the quantity the whole deconvolution benchmark is about. Migrate the geometry with it.
+    Migrated to the realistic breach-gated ductal field (2026-08-26). Two things had to move WITH the
+    substrate, and neither is a substrate swap:
+
+    * **Geometry.** The section geometry is in deme units, and a deme on the ductal field is ~50 um
+      (DESIGN_ductal_field.md), so Visium v1 is a 0.55-deme radius at 2-deme pitch — see VISIUM_V1.
+    * **Density.** At the default mid-scale target the field is far too sparse: 1.7 cells per spot,
+      98% of spots a single cell type, so RCTD's task degenerates from deconvolution into
+      classification and any score is meaningless. Growing to RCTD_TARGET_CANCER restores genuine
+      within-spot mixtures.
+
+    Note this resolves ST at DEME resolution: a spot is ~one deme, so each spot's cells are a
+    within-deme mixture rather than sub-spot structure. That is the physical tension the design doc
+    settles — sub-spot deconvolution would need deme << spot, i.e. ~cell-sized demes, which iscc
+    deliberately rejects.
     """
     import deconv_common as D
+    import integration_common as C
 
-    t = D.grow_tumor(seed=seed)
-    section = D.build_section(t, spot_radius=0.9, spot_pitch=1.5, section_radius=9.0)
+    t = C.grow_tumor(seed=seed, regime="realistic", scale=scale,
+                     target_cancer=RCTD_TARGET_CANCER, max_cells=40_000,
+                     spatial={"immune_density": RCTD_IMMUNE_DENSITY},
+                     expression=D.expression_params(allele_specific=False))
+    section = D.build_section(t, **VISIUM_V1)
     ref = D.build_reference(t, section, mode="oracle", n_cells=450, seed=11)
     os.makedirs(out_dir, exist_ok=True)
     # _write_csvs lays down ref_counts / ref_labels / sp_counts / sp_coords — the four files
@@ -142,10 +178,17 @@ def _rctd(out_dir, seed, scale, n_clones):
     pd.DataFrame(np.asarray(section["true_clone"]), index=section["spot_names"],
                  columns=[str(c) for c in section["clone_categories"]]).to_csv(
         os.path.join(out_dir, "truth_clone_composition.csv"))
+    import numpy as _np
+    T = _np.asarray(section["true_type"]); nmix = (T > 0).sum(1)
     meta = dict(n_spots=int(len(section["spot_names"])),
                 n_ref_cells=int(ref["counts"].shape[0]),
                 cell_types=[str(c) for c in section["type_categories"]],
-                clone_categories=[str(c) for c in section["clone_categories"]])
+                clone_categories=[str(c) for c in section["clone_categories"]],
+                cells_per_spot_mean=float(_np.mean(section["n_cells"])),
+                # The benchmark is only meaningful where spots are MIXTURES; record it so a
+                # degenerate section is visible in the manifest rather than only in the score.
+                spot_purity_mean=float(T.max(1).mean()),
+                frac_spots_multitype=float((nmix >= 2).mean()))
     with open(os.path.join(out_dir, "meta.json"), "w") as fh:
         json.dump(meta, fh, indent=2)
     return meta
