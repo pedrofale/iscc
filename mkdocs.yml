@@ -118,6 +118,11 @@ nav:
           - Single-cell RNA: tutorials/assay_scrna.ipynb
           - Spatial (Visium): tutorials/assay_spatial.ipynb
           - Sequencing reads: tutorials/reads.ipynb
+      - Real tools on iscc data:
+          - clonealign (R) — clone assignment: tutorials/tool_clonealign_R.ipynb
+          - Numbat (R) — CNA from expression: tutorials/tool_numbat_R.ipynb
+          - RCTD (R) — spatial deconvolution: tutorials/tool_rctd_R.ipynb
+          - TreeMHN (R) — cohort progression: tutorials/tool_treemhn_R.ipynb
       - Examples:
           - The shared tumour: tutorials/base_simulation.ipynb
           - scDNA + scRNA integration: tutorials/combining_scdna_scrna.ipynb
