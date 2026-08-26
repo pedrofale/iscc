@@ -816,17 +816,34 @@ structurally: untruncated errors, and every fallback prints `!! <TOOL> DID NOT R
   against +5.09/+4.44 on the true trees — the cost of inferring through dropout).
   Gotcha worth remembering: `Tree_ID` must be unique per patient or TreeMHN reads the cohort as one
   tree and dies in `remove_duplicates`.
-- **NOW — clonealign's `L` is still the true copy number.** `build_clonealign_inputs` derives the
-  genes x clones matrix from iscc's true CN rather than from a CNV caller. Same class of problem as
-  the trees were; the fix is a copy-number-calling step upstream (SCICoNE, or HMMcopy which is
-  already packaged). SCICoNE packaging is with the author in a separate session (recommendation:
-  bioconda/conda-forge recipe + a `shutil.which` fallback for `binary_path`, then wheels via
-  scikit-build-core/cibuildwheel, then pybind11 to drop the subprocess entirely).
-- **NEXT — finish replacing `tree_inference_dna`.** The user's rule was to replace it with "Tree
-  reconstruction with SCITE and <a bulk DNA tool>". The SCITE half exists; the bulk half does not.
-  PyClone-VI is installed (`iscc-pyclonevi`) but yields mutation clusters and CCFs, not a tree, so
-  it needs either a tree-builder on top or a different framing. `tree_inference_dna` is still in the
-  nav until that lands.
+- **DONE 2026-08-26 — clonealign's `L` is now HMMcopy's call.** `_clonealign` reads the per-clone
+  profiles from `analysis_data/dna/hmmcopy/clone_cn_called.csv` instead of iscc's true per-segment
+  CN. Cost of closing it: accuracy 0.81 -> 0.54 (majority 0.49), mean AUC 0.94 -> 0.88. The two
+  small clones stay near-perfect; the two large ones, which truly differ in ONE segment of twelve,
+  do not survive depth-based calling on a WGD genome. Swap HMMcopy for SCICoNE when it is packaged
+  (author is doing that separately; recommendation: bioconda/conda-forge recipe + a `shutil.which`
+  fallback for `binary_path`, then scikit-build-core/cibuildwheel wheels, then pybind11 to drop the
+  subprocess entirely).
+- **DONE 2026-08-26 — `tree_inference_dna` retired**, replaced by three notebooks on ONE tumour:
+  `tool_hmmcopy_R` (CN from depth), `tool_scite_trees` (tree from single-cell genotypes),
+  `tool_pyclonevi` (clones from bulk).
+
+### Gotchas from that build, worth not rediscovering
+
+- **HMMcopy needs UNIFORM amplification.** scDNA's MDA/MALBAC defaults (kappa=5) leave the median
+  locus at zero reads and `correctReadcount`'s GC loess dies with "span is too small". Use
+  `kappa=500, mu_depth=60` (DLP+-like) and aggregate loci into bins.
+- `HMMsegment(NULL, getparam=TRUE)` returns a template with `mu = NA`; passing it gives "missing
+  value where TRUE/FALSE needed". Let `HMMsegment` derive parameters from the corrected data.
+- `correctReadcount(mappability = 0.6)`, not the 0.9 default — iscc's mappability spans ~0.33-1.0.
+- `plotBias` needs `KernSmooth`.
+- **Ploidy is not identifiable from depth**, even with diploid cells in the run: a fixed read budget
+  makes a tetraploid cell's total depth look diploid. Anchoring pins the reference to exactly 2 and
+  leaves the tumour at ~2 when the truth is 4. Recovering it needs allele fractions (ichorCNA-style
+  purity/ploidy search). This is the same wall `_scdna_concordance` documents.
+- **PyClone-VI's truth must be the CARRIER SET**, not "the clone that carries it most" — the latter
+  splits truncal mutations across labels and gives ARI 0.00 on a fit that is actually fine.
+- Bulk on the raw field is 19% purity and only the truncal cluster separates; macro-dissect to ~50%.
 
 ## MHN needed its own cohort — why (settled 2026-08-26)
 
