@@ -754,10 +754,17 @@ possible at all: a notebook has one kernel, and growing a tumour is Python.
 
 **Four R notebooks, each on its own kernel, all succeeding:**
 
-    tool_clonealign_R.ipynb   accuracy 0.81 (chance 0.25, majority 0.49), ARI 0.47, AUC 0.94
+    tool_clonealign_R.ipynb   accuracy 0.54 (chance 0.25, majority 0.49), ARI 0.26, AUC 0.88
+                              (was 0.81/0.47/0.94 while L came from iscc's TRUE copy number; it
+                              now comes from HMMcopy's call, which is the whole point)
     tool_numbat_R.ipynb       malignant-vs-normal AUC 0.977 over 1,677 cells
-    tool_rctd_R.ipynb         MAE 0.043 vs 0.325 flat baseline, mean per-type r 0.989
-    tool_treemhn_R.ipynb      both planted DAG edges recovered as the TOP 2 of 12 off-diagonals
+    tool_rctd_R.ipynb         MAE 0.058 vs 0.277 flat baseline, mean per-type r 0.974
+    tool_treemhn_R.ipynb      both planted DAG edges the TOP 2 of 12, on SCITE-inferred trees
+    tool_scite_trees.ipynb    ancestor-descendant recall 0.91, precision 0.80
+    tool_hmmcopy_R.ipynb      within 1 copy on ~2/3 of (clone, segment) entries
+    tool_pyclonevi.ipynb      prevalence vs true CCF r 0.96, clustering ARI 0.73
+    tool_mhn_bulk.ipynb       planted edge rank 1 of 12 at every CV lambda; control finds none
+    tool_scdef_cohort.ipynb   shared-program recovery mean matched cosine 0.50
 
 IRkernel is installed in all four `iscc-<tool>` envs; kernelspecs `ir-clonealign` / `ir-numbat` /
 `ir-rctd` / `ir-treemhn` are written directly (`IRkernel::installspec` shells out to `jupyter`, which
