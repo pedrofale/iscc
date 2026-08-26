@@ -77,10 +77,17 @@ REGIME = os.environ.get("ISCC_INTEGRATION_REGIME", "toy")
 # FIRST thing that changes is the substrate (field + gene count), not the sample size — otherwise a
 # score shift cannot be attributed.
 SCALE_TARGETS = {"small": 4_000, "mid": 20_000, "cm": 150_000}
+# Clone-detection threshold. 5% was tuned on the toy rig; on the realistic ductal field it merges the
+# smaller clones away (mid-scale: 3 clones at 5%, but 4 at 2% — sizes 994/254/211/68). 2% is not a
+# fitted convenience: it is the SAME detection limit at which iscc's clonal-diversity index matches
+# real multi-region phylogenies (median D 4.11 vs the empirical 3.96, hull coverage 5% -> 53%; see
+# mode4_scratch/evomode_threshold_test.py). Two independent lines of evidence land on ~2%, which is
+# also what multi-region bulk can actually resolve.
+MIN_CLONE_FRAC = 0.02 if REGIME == "realistic" else 0.05
 
 
 def grow_tumor(seed=3, steps=750, genome=None, spatial=None, cancer=None, deme=None,
-               regime=None, scale="small", target_cancer=None, max_cells=6_000):
+               regime=None, scale="mid", target_cancer=None, max_cells=8_000):
     """Grow the shared multi-clone tumour (cancer + diploid normal compartment).
 
     ``regime="toy"`` (default) is the historical small rig. ``regime="realistic"`` grows the
@@ -151,7 +158,7 @@ def segment_allele_cn(tumor):
     return out
 
 
-def define_clones(seg_cn_cancer, n_clones=4, min_frac=0.05, random_state=0):
+def define_clones(seg_cn_cancer, n_clones=4, min_frac=None, random_state=0):
     """Group cancer cells into ``n_clones`` clones by their per-segment CN profile (the standard
     clonealign setup: clones + their integer CN profiles come from the DNA modality). Returns
     (labels, consensus) where ``consensus`` is the integer per-segment CN of each clone.
@@ -159,7 +166,13 @@ def define_clones(seg_cn_cancer, n_clones=4, min_frac=0.05, random_state=0):
     Agglomerative clustering on the discrete segment-CN vectors recovers the dominant CN states; the
     consensus (rounded mean) is the clone's copy-number profile. Clones below ``min_frac`` of cells
     are merged into their nearest surviving clone (by CN L1 distance) so every clone is well-sampled.
+
+    ``min_frac=None`` (default) resolves to :data:`MIN_CLONE_FRAC`, which tracks the regime — 5% on
+    the toy rig, 2% on the realistic field, where 5% merges away clones a real multi-region study
+    would resolve.
     """
+    if min_frac is None:
+        min_frac = MIN_CLONE_FRAC
     from sklearn.cluster import AgglomerativeClustering
     n = len(seg_cn_cancer)
     k = min(n_clones, max(1, len(np.unique(seg_cn_cancer, axis=0))))
@@ -237,6 +250,14 @@ def _scdna_concordance(tumor, cancer_cells, lab_by_cell, consensus, gene_seg, br
     Returns the fraction of (clone, segment) entries whose rounded scDNA CN equals the true state."""
     from iscc.data import scDNA
     n_seg = consensus.shape[1]
+    # NOTE this reconstruction is only valid for a NEAR-DIPLOID tumour. `2 * cov / median(cov)`
+    # assumes the median segment is CN 2, and scDNA coverage is per-cell library-size normalised, so
+    # on the WGD+ realistic ductal field (clones at CN 4 across nearly every segment) it returns ~1
+    # where the truth is 4 and concordance collapses to 0.00 — for a set of clone profiles that are
+    # perfectly correct. A diploid NORMAL reference is not sufficient either: a tetraploid cell
+    # spreads the same read budget over twice the genome, so per-copy coverage FALLS. Recovering
+    # absolute CN here needs ploidy-aware renormalisation. Until then this diagnostic is meaningful
+    # ONLY on the toy regime; it does not affect `L`, which is built from the TRUE per-segment CN.
     dna = scDNA(n_cells=len(cancer_cells), breadth=breadth, seed=seed).run(
         tumor.cell_data, cell_subset=cancer_cells)
     seg_ids = np.array([int(g.split("_")[1]) for g in dna.genes])
@@ -274,9 +295,16 @@ def run_clonealign(Y, L, work_dir, max_iter=200, n_repeats=3, seed=1):
     Y.to_csv(os.path.join(in_dir, "Y.csv"))
     L.to_csv(os.path.join(in_dir, "L.csv"))
     runner = os.path.join(REPO, "validation", "clonealign_runner.R")
-    subprocess.run([CLONEALIGN_RSCRIPT, runner, in_dir, out_dir,
-                    str(int(max_iter)), str(int(n_repeats)), str(int(seed))],
-                   check=True, capture_output=True, text=True)
+    r = subprocess.run([CLONEALIGN_RSCRIPT, runner, in_dir, out_dir,
+                        str(int(max_iter)), str(int(n_repeats)), str(int(seed))],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        # check=True raises CalledProcessError with R's stderr buried in an attribute nothing prints,
+        # so a failure surfaces as a bare "non-zero exit status 1" and the real R message is lost.
+        # Put it in the exception text.
+        raise RuntimeError(
+            f"clonealign (R) failed with exit {r.returncode}. Inputs: Y {Y.shape}, L {L.shape}.\n"
+            f"--- R stderr ---\n{r.stderr[-2000:]}")
     probs = pd.read_csv(os.path.join(out_dir, "clone_probs.csv"), index_col=0)
     return probs.reindex(Y.index)
 
