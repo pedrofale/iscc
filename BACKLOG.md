@@ -696,6 +696,55 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
 - Runtimes for the two slow ones, so future caps are not set too low: `base_simulation` 22 min,
   `compartment_selection_confound` 43 min. Full pass ≈ 1h50m, serial.
 
+## Evolution modes vs real tumours ✅ SOLVED 2026-08-26 — the "5% in hull" was an ARTEFACT
+- `validate_evolution_modes.py` reports only **5% of real tumours inside iscc's (n, D) hull**, which
+  reads as "iscc is far more clonally diverse than real tumours". **It is an observation-model
+  mismatch, not a modelling failure.** iscc's `D` is inverse-Simpson over the FULL genotype census
+  (no detection limit); the empirical `D` comes from published multi-region phylogenies with a
+  handful of RESOLVED clones — **median 7, max 22** over the 43 tumours. Inverse-Simpson over k
+  categories is bounded by k, and `D <= n_clones` holds for **all 43** rows (observed max D 11.25).
+  A real tumour in that dataset *cannot* score D=30; its phylogeny has ~7 nodes.
+- **Measured (`mode4_scratch/evomode_threshold_test.py`, same 64-tumour sweep, pooling — not
+  dropping — every driver combination below a cancer-cell-fraction threshold):**
+
+        CCF thresh   sim D median   sim clones med   D in real band   hull coverage
+          0.00 (census)    26.98            59              17%             5%
+          0.01              9.31            26              73%            51%
+          0.02              4.11            12             100%            53%
+          0.05              1.64             4              75%            37%
+          0.10              1.25             2              60%            23%
+
+  At a **2% detection limit** — what multi-region bulk actually resolves — iscc's median D is **4.11
+  against the real median 3.96**, every simulated tumour lands in the real D range, and hull coverage
+  goes **5% -> 53%**. The control behaves exactly as predicted: `n` is a per-cell mean, is
+  threshold-independent (0.89-16.41), and agreed with the real 0.48-12.90 all along. Coverage PEAKS
+  at ~2% and falls at 5-10% (over-thresholding collapses D below the real median) — and ~2% is the
+  limit that yields clone counts near the empirical median of 7. Self-consistent.
+- **To promote:** add a matched-observation panel to `validate_evolution_modes.py` (report hull
+  coverage at census AND at a 2% CCF limit, stating why the census comparison is not like-for-like),
+  then the figure becomes publishable — it currently sits unused precisely because the census number
+  looks like a failure.
+
+## Integration benchmarks: REAL tools, but NOT realistic data (found 2026-08-26)
+- **Tools: genuine, verified.** `clonealign_runner.R` -> `library(clonealign)`, `numbat_runner.R` ->
+  `library(numbat)`, `rctd_runner.R` -> `library(spacexr)`, `treemhn_runner.R` -> `library(TreeMHN)`;
+  Python side scDEF 0.6.1 / cNMF 1.7.1 / mhn 1.2.3 / cell2location / harmony / infercnvpy, each in its
+  own `iscc-<tool>` env. Versions agree between the paper, `README_integration.md` and what is installed.
+- **Data: a TOY substrate.** Every real-tool benchmark grows its tumour from `integration_common.py`:
+  **grid 20x20, K=8 (<=3,200 cells), `structure_radius=5` (ONE ring), 12 x 50 = 600 genes, 750 steps.**
+  `validation/realistic_regime.py` — built, tested, and the regime everything else is calibrated to —
+  is **grid 48/96/170, a ductal FIELD of 3/5/8 glands, 12 x 500 = 6,000 genes, max_cells 50,000**.
+  So the benchmarks carrying the paper's central integration thesis run at ~1/10 the genes and a
+  single ring instead of the field. `realistic_regime` is imported by `sweep_calibration.py`,
+  `sweep_score.py`, `notebooks/base_sim.py` and four tests — **by no integration benchmark**.
+- **No rationale is recorded.** `integration_common.py`'s comment justifies the STRUCTURE (segments
+  for CNAs, a normal compartment for inferCNV's reference, time for subclones) but never mentions
+  scale, and neither does `README_integration.md`. 600 genes is a real concern for the gene x cell
+  tools specifically (scDEF, cNMF, inferCNV, cell2location) where real data is ~20k genes.
+- **Decide before submission:** either migrate the integration benchmarks onto `realistic_regime`
+  (the plan already in `realistic-regime-migration`), or state the substrate and defend it explicitly
+  in the manuscript. Right now the paper implies realistic data and does not say otherwise.
+
 ## Housekeeping
 - **DONE — commit the backlog of uncommitted `dev` work.** The tree is clean; that item had gone
   stale. (Was: manuscript catch-up + positioning edits, re-executed notebooks, `DESIGN_recommender.md`,
