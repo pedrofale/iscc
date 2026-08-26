@@ -195,48 +195,171 @@ def _rctd(out_dir, seed, scale, n_clones):
 
 
 def _treemhn(out_dir, seed, scale, n_clones):
-    """TreeMHN's input: one mutation tree per patient, plus the planted dependency network."""
+    """A progression cohort: SCITE-reconstructed mutation trees, plus the cross-sectional view.
+
+    TREES ARE INFERRED, NOT READ. iscc knows every patient's true mutation tree, and an earlier
+    version of this dataset handed it straight to TreeMHN — which makes the benchmark vacuous, since
+    the method would be estimating rates from the topology it is supposed to infer. Here each
+    patient is genotyped single-cell (with dropout and false positives) and SCITE reconstructs the
+    tree from that noisy matrix, which is the pipeline a real study runs. iscc's true trees are
+    still written out, as ground truth for scoring the reconstruction.
+
+    A cohort grown over PLANTED ORDERED CONSTRAINTS -- a DAG saying which events must precede which.
+
+    Gating mode is the load-bearing choice. "accessibility" gates the MUTATION PROCESS itself, so
+    the constraint survives into every observable including tree topology, which is what TreeMHN
+    reads. "fitness" gating plants the same DAG but expresses it only through how large the
+    carrying clones grow, leaving no ordering trace -- TreeMHN estimates RATES, so it recovers
+    nothing from it (validate_epistasis panel D measures exactly this contrast).
+
+    These notebooks demonstrate that iscc's output is amenable to the real tools, so the dataset
+    uses the regime where the planted signal is genuinely present in the observable the tool reads.
+    The fitness-gated case is a benchmark result and belongs in validate_epistasis, not here.
+    event_size=8, NOT the default 2. A gated child needs its parent to have occurred first, and at
+    event_size=2 it arises in 0-2 of 40 patients -- there is then nothing in the data to recover, no
+    matter how good the tool. validate_epistasis' panel D hits the same wall and makes the same
+    choice: the ordered-constraint half of this benchmark needs a COMMONER alphabet than the
+    presence half. 40 patients for the same reason.
+
+    That same choice saturates the CROSS-SECTIONAL view: at event_size=8 the planted parents are
+    acquired by every patient, and an event present in all of them carries no information for a
+    presence/absence method. The continuous cancer-cell-fraction matrix is therefore written
+    alongside the binary one, so a detection floor -- which is what a real assay imposes anyway --
+    can be applied downstream rather than baked in here at min_freq=0.
+    """
     import validate_epistasis as VE
+    import scite_common as SCITE
     from iscc.integrations import progression as ig
     from iscc.constants import DEFAULT_LAYOUT_SEED
 
-    # A cohort grown over PLANTED ORDERED CONSTRAINTS — a DAG saying which events must precede which.
-    #
-    # Gating mode is the load-bearing choice. "accessibility" gates the MUTATION PROCESS itself, so
-    # the constraint survives into every observable including tree topology, which is what TreeMHN
-    # reads. "fitness" gating plants the same DAG but expresses it only through how large the
-    # carrying clones grow, leaving no ordering trace — TreeMHN estimates RATES, so it recovers
-    # nothing from it (validate_epistasis panel D measures exactly this contrast).
-    #
-    # These notebooks demonstrate that iscc's output is amenable to the real tools, so the dataset
-    # uses the regime where the planted signal is genuinely present in the observable the tool reads.
-    # The fitness-gated case is a benchmark result and belongs in validate_epistasis, not here.
-    # event_size=8, NOT the default 2. A gated child needs its parent to have occurred first, and at
-    # event_size=2 it arises in 0-2 of 40 patients — there is then nothing in the data to recover, no
-    # matter how good the tool. validate_epistasis' panel D hits the same wall and makes the same
-    # choice: the ordered-constraint half of this benchmark needs a COMMONER alphabet than the
-    # presence half. 40 patients for the same reason.
     strength = 2.0
     net = dict(VE.epi(n_interactions=2, strength=strength), event_size=8)
     dep = dict(n_constraints=2, dag_depth=2, dag_branching=1, gating_mode="accessibility")
     tumors = VE.run_cohort(40, net, dependency_params=dep, seed0=1 + seed,
                            layout_seed=DEFAULT_LAYOUT_SEED, inject_E=strength)
-    trees = ig.to_treemhn_trees(tumors)
     os.makedirs(out_dir, exist_ok=True)
+
+    # --- the tool's input: trees SCITE reconstructed from noisy single-cell genotypes
+    trees, matrices, kept = SCITE.reconstruct_cohort(tumors, seed=seed)
     trees.to_csv(os.path.join(out_dir, "trees.csv"), index=False)
-    X = ig.to_mhn_matrix(tumors)                 # MHN's binary-presence view of the same cohort
+
+    # SCITE's own input, kept so the reconstruction notebook can re-run it rather than take the
+    # trees on faith. Same seeds, so it lands on the same trees.
+    sc_dir = os.path.join(out_dir, "sc")
+    os.makedirs(sc_dir, exist_ok=True)
+    for old in os.listdir(sc_dir):
+        os.remove(os.path.join(sc_dir, old))
+    event_names = list(tumors[0].selection.epistasis.event_names())
+    for pid, obs in enumerate(matrices, start=1):
+        pd.DataFrame(obs, index=event_names,
+                     columns=[f"cell{c}" for c in range(obs.shape[1])]).to_csv(
+            os.path.join(sc_dir, f"P{pid}.csv"))
+
+    # --- ground truth, held back: iscc's own trees for the SAME patients, in the same layout
+    truth_trees = ig.to_treemhn_trees([tumors[i] for i in kept], drop_empty=False)
+    truth_trees.to_csv(os.path.join(out_dir, "truth_trees.csv"), index=False)
+
+    # --- the cross-sectional view of the same cohort (MHN), binary and continuous
+    X = ig.to_mhn_matrix(tumors)
     X.to_csv(os.path.join(out_dir, "X_presence.csv"))
-    # The REALISED DAG (which event must precede which), not just the spec — this is what a
+    F = ig.to_cell_fraction_matrix(tumors)
+    F.to_csv(os.path.join(out_dir, "X_cellfraction.csv"))
+
+    # The REALISED DAG (which event must precede which), not just the spec -- this is what a
     # recovered ordering is scored against.
     dag = tumors[0].selection.epistasis.true_dag_edges() if tumors else []
     with open(os.path.join(out_dir, "truth_network.json"), "w") as fh:
         json.dump({"epistasis_params": net, "dependency_params": dep,
                    "interaction_strength": strength,
                    "true_dag_edges": [[int(a), int(b)] for a, b in dag]}, fh, indent=2)
-    meta = dict(n_patients=int(len(tumors)), n_tree_rows=int(trees.shape[0]),
-                n_events=int(VE.N_EVENTS), interaction_strength=strength,
-                gating_mode=dep["gating_mode"], n_constraints=dep["n_constraints"],
-                n_dag_edges=int(len(dag)), event_size=int(net["event_size"]))
+    meta = dict(n_patients=int(len(tumors)), n_trees=int(trees["Patient_ID"].nunique()),
+                n_tree_rows=int(trees.shape[0]), n_events=int(VE.N_EVENTS),
+                interaction_strength=strength, gating_mode=dep["gating_mode"],
+                n_constraints=dep["n_constraints"], n_dag_edges=int(len(dag)),
+                event_size=int(net["event_size"]),
+                trees_from="SCITE", n_cells_sequenced=int(SCITE.N_CELLS_SEQUENCED),
+                scite_fd=SCITE.FALSE_POSITIVE, scite_ad=SCITE.DROPOUT,
+                event_frequency={k: float(v) for k, v in X.mean(axis=0).items()})
+    with open(os.path.join(out_dir, "meta.json"), "w") as fh:
+        json.dump(meta, fh, indent=2)
+    return meta
+
+
+# MHN's cohort, chosen by sweeping for an identifiable cross-section. The binding constraint is that
+# the PARENTS must not fix: a column present in every patient has no variance and nothing about it is
+# estimable. event_size sets how often an event is acquired, and grow_steps sets how long the cohort
+# has to acquire it -- and TIME turned out to be the operative lever. At the treemhn cohort's 500
+# steps every parent is at 1.00 whatever event_size is used; at 150 steps with event_size=7 the
+# parents sit at 0.78 / 0.83 while the gated children still reach 0.06 / 0.25, which is the window.
+# Measured at these values: both planted edges come out as the top two promoting off-diagonals of
+# twelve, and the no-DAG control recovers neither.
+MHN_EVENT_SIZE = 7
+MHN_STEPS = 150
+MHN_N_PATIENTS = 300
+
+
+def _mhn(out_dir, seed, scale, n_clones, event_size=MHN_EVENT_SIZE,
+         n_patients=MHN_N_PATIENTS, steps=MHN_STEPS):
+    """MHN's input: a cross-sectional cohort whose planted constraints survive into presence.
+
+    A SEPARATE cohort from `treemhn`, and it has to be -- the two observables want the same KIND of
+    signal but at opposite densities, and one cohort cannot serve both.
+
+    WHICH SIGNAL. iscc plants two different things, and only one of them is visible to a
+    presence/absence method:
+
+      * pairwise fitness epistasis `E` decides how large the clones carrying a combination GROW. It
+        does not change the rate at which events arise, so a favoured combination is already present
+        at E=0 -- it simply arises many times independently. The binary column is then the same with
+        and without the interaction (verified: a planted-E cohort and a matched zero-E control have
+        identical presence marginals). This is validate_epistasis' headline finding: the signal lives
+        in clone FREQUENCY, and MHN is not an observable that keeps frequency.
+      * an ACCESSIBILITY-gated DAG acts on the mutation process itself: a child cannot arise until
+        its parent has. That is a hard zero in the joint distribution -- P(child and not parent) = 0
+        -- which is exactly what MHN reads.
+
+    So the constraint here is the gated DAG, the same one TreeMHN is scored on, and the difference
+    between the two benchmarks is the observable rather than the truth.
+
+    WHICH DENSITY. `treemhn` uses event_size=8 so a gated child occurs often enough to leave an
+    ordering trace in tree topology. That saturates presence: all four events turn up somewhere in
+    every patient, so every column is constant and nothing is identifiable. Lowering event_size
+    makes events rarer per patient and restores the variance, at the cost of needing more patients.
+
+    A CONTROL cohort is generated alongside with the DAG removed and everything else held: same
+    seeds, same modules, same growth. Anything the same pipeline reports there is a false positive,
+    which is the only honest way to read the main arm.
+    """
+    import validate_epistasis as VE
+    from iscc.integrations import progression as ig
+    from iscc.constants import DEFAULT_LAYOUT_SEED
+
+    strength = 2.0
+    net = dict(VE.epi(n_interactions=2, strength=strength), event_size=event_size)
+    dep = dict(n_constraints=2, dag_depth=2, dag_branching=1, gating_mode="accessibility")
+    common = dict(epistasis_params=net, seed0=1 + seed, steps=steps,
+                  layout_seed=DEFAULT_LAYOUT_SEED, inject_E=strength)
+    tumors = VE.run_cohort(n_patients, dependency_params=dep, **common)
+    control = VE.run_cohort(n_patients, dependency_params=None, **common)
+
+    os.makedirs(out_dir, exist_ok=True)
+    X = ig.to_mhn_matrix(tumors)
+    X.to_csv(os.path.join(out_dir, "X_presence.csv"))
+    ig.to_mhn_matrix(control).to_csv(os.path.join(out_dir, "X_presence_control.csv"))
+    # The continuous view as well: a detection floor is an assay property, so keeping the raw
+    # cancer-cell fractions lets the analysis vary it instead of inheriting min_freq=0 from here.
+    ig.to_cell_fraction_matrix(tumors).to_csv(os.path.join(out_dir, "X_cellfraction.csv"))
+
+    dag = tumors[0].selection.epistasis.true_dag_edges() if tumors else []
+    with open(os.path.join(out_dir, "truth_network.json"), "w") as fh:
+        json.dump({"epistasis_params": net, "dependency_params": dep,
+                   "interaction_strength": strength,
+                   "true_dag_edges": [[int(a), int(b)] for a, b in dag]}, fh, indent=2)
+    meta = dict(n_patients=int(len(tumors)), n_control_patients=int(len(control)),
+                n_events=int(VE.N_EVENTS), event_size=int(event_size), grow_steps=int(steps),
+                gating_mode=dep["gating_mode"], n_dag_edges=int(len(dag)),
+                n_off_diagonal=int(VE.N_EVENTS * (VE.N_EVENTS - 1)),
+                event_frequency={k: float(v) for k, v in X.mean(axis=0).items()})
     with open(os.path.join(out_dir, "meta.json"), "w") as fh:
         json.dump(meta, fh, indent=2)
     return meta
@@ -291,7 +414,7 @@ def _cohort(out_dir, seed, scale, n_clones):
 
 
 DATASETS = {"clonealign": _clonealign, "numbat": _numbat,
-            "rctd": _rctd, "treemhn": _treemhn, "cohort": _cohort}
+            "rctd": _rctd, "treemhn": _treemhn, "mhn": _mhn, "cohort": _cohort}
 
 # Per-dataset seed overrides. These notebooks demonstrate that iscc's output is AMENABLE to the real
 # tools, so each dataset uses a tumour where the signal the tool reads is actually present. That is a
