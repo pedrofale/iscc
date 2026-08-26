@@ -87,7 +87,7 @@ MIN_CLONE_FRAC = 0.02 if REGIME == "realistic" else 0.05
 
 
 def grow_tumor(seed=3, steps=750, genome=None, spatial=None, cancer=None, deme=None,
-               regime=None, scale="mid", target_cancer=None, max_cells=8_000):
+               regime=None, scale="mid", target_cancer=None, max_cells=8_000, expression=None):
     """Grow the shared multi-clone tumour (cancer + diploid normal compartment).
 
     ``regime="toy"`` (default) is the historical small rig. ``regime="realistic"`` grows the
@@ -99,11 +99,14 @@ def grow_tumor(seed=3, steps=750, genome=None, spatial=None, cancer=None, deme=N
     regime = regime or REGIME
     if regime == "realistic":
         import realistic_regime as RR
+        # `expression` is off by default in grow_realistic, which leaves cell_data without the
+        # expression/allele layers. An allele-aware tool (Numbat) needs `cell_rna_baf`, so it must
+        # pass allele-specific expression params here or the build fails with KeyError.
         return RR.grow_realistic(
             seed=seed, scale=scale,
             target_cancer=target_cancer or SCALE_TARGETS[scale],
             genome=genome, cancer=cancer, deme=deme, spatial=spatial,
-            materialise=True, max_cells=max_cells)
+            expression=expression, materialise=True, max_cells=max_cells)
     from iscc.tumor.models import GenotypeTumor
     t = GenotypeTumor(seed=seed,
                       genome_params=genome or GENOME, selection_params=SELECTION,

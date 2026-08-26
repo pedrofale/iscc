@@ -29,3 +29,7 @@ manuscript/*.blg
 manuscript/*.bbl
 manuscript/*.out
 manuscript/*.pdf
+
+# Generated analysis datasets (numbat alone is ~80 MB). Regenerate with:
+#   python validation/make_analysis_data.py
+analysis_data/
