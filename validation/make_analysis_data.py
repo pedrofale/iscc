@@ -49,12 +49,28 @@ sys.path.insert(0, HERE)
 
 
 def _clonealign(out_dir, seed, scale, n_clones):
-    """scRNA counts + per-gene clone copy number + the true clone of each cell."""
+    """scRNA counts + per-gene clone copy number + the true clone of each cell.
+
+    The copy number handed to clonealign is CALLED, not iscc's. `build_clonealign_inputs` builds `L`
+    from the true per-segment states, which would mean the benchmark is told the answer to half its
+    own question; here that matrix is replaced by the per-clone profiles HMMcopy called from
+    single-cell read depth in the `dna` dataset. That is the workflow a real study runs — a CNV
+    caller first, clonealign second — and it is what makes the assignment score mean anything.
+    """
     import integration_common as C
+
+    called_path = os.path.join(os.path.dirname(out_dir), "dna", "hmmcopy", "clone_cn_called.csv")
+    if not os.path.exists(called_path):
+        raise FileNotFoundError(
+            f"clonealign needs HMMcopy's called copy number at {called_path}\n"
+            "  generate it first:  python validation/make_analysis_data.py --only dna")
 
     t = C.grow_tumor(seed=seed, regime="realistic", scale=scale)
     inp = C.build_clonealign_inputs(t, n_clones=n_clones, seed=0)
-    Y, L, labels = inp["Y"], inp["L"], np.asarray(inp["labels"])
+    Y, labels = inp["Y"], np.asarray(inp["labels"])
+    called = pd.read_csv(called_path, index_col=0)
+    L = pd.DataFrame(called.values[:, inp["gene_seg"]].T.astype(float),
+                     index=list(Y.columns), columns=inp["clone_names"])
 
     os.makedirs(out_dir, exist_ok=True)
     Y.to_csv(os.path.join(out_dir, "Y.csv.gz"))
@@ -73,6 +89,8 @@ def _clonealign(out_dir, seed, scale, n_clones):
         # The consensus is what makes the difficulty legible: on the realistic WGD+ field the clones
         # differ in only one or two of the twelve segments, so a pure dosage model has little to go on.
         cn_consensus=inp["consensus"].astype(int).tolist(),
+        cn_called=called.values.astype(int).tolist(),
+        cn_source="HMMcopy (analysis_data/dna/hmmcopy)",
     )
     with open(os.path.join(out_dir, "meta.json"), "w") as fh:
         json.dump(meta, fh, indent=2)
@@ -293,6 +311,12 @@ def _treemhn(out_dir, seed, scale, n_clones):
 # parents sit at 0.78 / 0.83 while the gated children still reach 0.06 / 0.25, which is the window.
 # Measured at these values: both planted edges come out as the top two promoting off-diagonals of
 # twelve, and the no-DAG control recovers neither.
+DNA_N_CELLS = 200            # cells a single-cell DNA run would realistically sequence
+DNA_BINS_PER_SEGMENT = 20    # loci are aggregated into bins, as any real CNV pipeline does
+DNA_N_NORMALS = 60           # diploid cells sequenced alongside: the ploidy anchor
+DNA_N_MUTATIONS = 20         # mutations carried into a tree; SCITE is O(n^2) per MCMC move
+DNA_N_BULK_MUTATIONS = 300   # loci carried into the bulk clustering
+
 MHN_EVENT_SIZE = 7
 MHN_STEPS = 150
 MHN_N_PATIENTS = 300
@@ -365,6 +389,205 @@ def _mhn(out_dir, seed, scale, n_clones, event_size=MHN_EVENT_SIZE,
     return meta
 
 
+def _dna(out_dir, seed, scale, n_clones):
+    """The DNA analysis chain, all from ONE tumour: copy number, single-cell trees, bulk clones.
+
+    Three datasets share a tumour on purpose — it is the same lesion clonealign is run on, so the
+    copy-number profiles called here are the ones that benchmark consumes, and the clones a bulk
+    caller finds can be held against the clones a single-cell tree finds.
+
+    Nothing a tool reads is copied from iscc's truth. Copy number is CALLED from read depth by
+    HMMcopy, trees are reconstructed by SCITE from genotype calls that carry the assay's own dropout,
+    and bulk clusters come from PyClone-VI's own fit to read counts.
+
+      hmmcopy/    reads x bins + a bin table with GC and mappability  -> HMMcopy
+      scite/      a mutations x cells binary genotype matrix          -> SCITE
+      pyclonevi/  per-mutation bulk read counts with called CN        -> PyClone-VI
+    """
+    import integration_common as C
+    import subprocess
+    from iscc.data import bulkDNA, scDNA
+
+    t = C.grow_tumor(seed=DATASET_SEEDS["clonealign"], regime="realistic", scale=scale)
+    types = C.cell_types(t)
+    seg, gene_seg = C.segment_cn(t)
+    cancer = types == "cancer"
+    cancer_cells = list(np.asarray(t.cell_data["cell_exp"].index)[cancer])
+    labels, consensus = C.define_clones(seg[cancer], n_clones=n_clones)
+    lab_by_cell = {c: int(labels[i]) for i, c in enumerate(cancer_cells)}
+    n_seg = consensus.shape[1]
+
+    # ---------------------------------------------------------------- hmmcopy: CN from read depth
+    hm = os.path.join(out_dir, "hmmcopy"); os.makedirs(hm, exist_ok=True)
+    rng = np.random.default_rng(seed)
+    sub = sorted(rng.choice(cancer_cells, size=min(DNA_N_CELLS, len(cancer_cells)), replace=False),
+                 key=cancer_cells.index)
+    # Normal cells go into the SAME run, and they are not decoration. HMMcopy calls each cell's own
+    # modal state neutral, so a whole-genome-doubled tumour comes back uniformly halved and two
+    # clones that differ only in level become identical. Diploid cells sequenced alongside are the
+    # anchor that turns relative copy number back into absolute -- which is exactly why real
+    # single-cell CNV runs include them.
+    normal_pool = list(np.asarray(t.cell_data["cell_exp"].index)[~cancer])
+    normals = sorted(rng.choice(normal_pool, size=min(DNA_N_NORMALS, len(normal_pool)),
+                                replace=False), key=normal_pool.index)
+    # kappa=500 / mu_depth=60, not the scDNA defaults. The defaults model MDA/MALBAC, whose lumpy
+    # amplification (kappa=5) leaves the median locus at ZERO reads -- fine for genotyping, useless
+    # for depth-based copy number, and HMMcopy's GC loess cannot even fit. Depth-based single-cell
+    # CNV is done on DLP+-style uniformly amplified shallow WGS, which is what these values are.
+    dna = scDNA(breadth="wgs", kappa=500.0, mu_depth=60.0, seed=200 + seed).run(
+        t.cell_data, cell_subset=list(sub) + list(normals))
+    loci = list(dna.genes)
+    seg_of = np.array([int(g.split("_")[1]) for g in loci])
+    # HMMcopy reads a bin table: a contig, a position, GC and mappability. iscc's genome is a run of
+    # segments rather than named chromosomes, so each segment is handed over as its own contig --
+    # which is also what stops the HMM from smoothing a real breakpoint away across a boundary.
+    # Loci are aggregated into coarse BINS, which is what a real single-cell CNV pipeline does and
+    # for the same reason: one locus of shallow single-cell coverage is mostly zeros, and copy number
+    # is a property of a stretch of genome rather than of a base.
+    gc_all, map_all = np.asarray(dna.gc), np.asarray(dna.mappability)
+    cov = dna.coverage.values
+    rows, groups, names = [], [], []
+    for sgm in range(n_seg):
+        w = np.where(seg_of == sgm)[0]
+        for b, chunk in enumerate(np.array_split(w, DNA_BINS_PER_SEGMENT)):
+            rows.append(dict(chr=f"chr{sgm}", start=b * 1000 + 1, end=b * 1000 + 1000,
+                             gc=float(gc_all[chunk].mean()), map=float(map_all[chunk].mean())))
+            groups.append(chunk); names.append(f"chr{sgm}_b{b}")
+    bins = pd.DataFrame(rows, index=pd.Index(names, name="locus"))
+    reads = pd.DataFrame(
+        np.stack([cov[:, chunk].sum(1) for chunk in groups]),      # bins x cells
+        index=bins.index, columns=list(dna.coverage.index)).astype(int)
+    bins.to_csv(os.path.join(hm, "bins.csv"))
+    reads.to_csv(os.path.join(hm, "reads.csv"))
+    # -1 marks a diploid normal: the tool is TOLD which cells are the reference (a real run knows
+    # which wells held normal tissue), but never which clone a tumour cell belongs to.
+    dna_lab = np.array([lab_by_cell.get(c, -1) for c in dna.cells])
+    pd.DataFrame({"cell": dna.cells, "is_normal": (dna_lab < 0).astype(int)}).to_csv(
+        os.path.join(hm, "cell_annotation.csv"), index=False)
+    pd.DataFrame({"cell": dna.cells, "true_clone": dna_lab}).to_csv(
+        os.path.join(hm, "truth_clone.csv"), index=False)
+    pd.DataFrame(consensus.astype(int), index=[f"clone{c}" for c in range(consensus.shape[0])],
+                 columns=[f"seg{s}" for s in range(n_seg)]).to_csv(
+        os.path.join(hm, "truth_consensus.csv"))
+
+    # Run it now, so the CN the downstream datasets use is CALLED copy number rather than iscc's.
+    called = os.path.join(hm, "cell_cn_called.csv")
+    rscript = os.path.expanduser("~/miniconda3/envs/iscc-hmmcopy/bin/Rscript")
+    proc = subprocess.run([rscript, os.path.join(REPO, "validation", "hmmcopy_runner.R"),
+                           os.path.join(hm, "reads.csv"), os.path.join(hm, "bins.csv"), called],
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f"hmmcopy_runner failed: {proc.stderr[-500:]}")
+    print("   ", proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else "hmmcopy ok")
+    # HMMcopy states are 1..6 for CN 0..5+. It calls each cell's MODAL segment neutral, so on a
+    # WGD tumour the level is relative -- the between-clone contrast, which is what clonealign uses,
+    # is what survives.
+    # Ploidy anchoring: HMMcopy's corrected log2 depth is relative to each cell's own library, so a
+    # cell's absolute copy number is 2 x its depth ratio against the diploid normals.
+    cop = pd.read_csv(called.replace(".csv", "_copy.csv"), index_col=0)[list(reads.columns)]
+    lin = np.power(2.0, cop.values)                                   # back to linear depth
+    is_norm = dna_lab < 0
+    ref = np.nanmedian(lin[:, is_norm], axis=1, keepdims=True)
+    cn_abs = 2.0 * lin / np.where(ref > 0, ref, np.nan)
+    seg_called = pd.DataFrame(
+        {f"seg{s}": np.nanmedian(cn_abs[(bins["chr"] == f"chr{s}").values], axis=0)
+         for s in range(n_seg)}, index=list(reads.columns))
+    clone_cn = np.stack([np.rint(np.nanmedian(seg_called.values[dna_lab == c], axis=0))
+                         for c in range(consensus.shape[0])])
+    pd.DataFrame(clone_cn.astype(int),
+                 index=[f"clone{c}" for c in range(clone_cn.shape[0])],
+                 columns=[f"seg{s}" for s in range(n_seg)]).to_csv(
+        os.path.join(hm, "clone_cn_called.csv"))
+
+    # ---------------------------------------------------------------- scite: trees from genotypes
+    sc = os.path.join(out_dir, "scite"); os.makedirs(sc, exist_ok=True)
+    gt = scDNA(breadth="wgs", data_mode="binary", kappa=500.0, mu_depth=60.0,
+               seed=300 + seed).run(t.cell_data, cell_subset=list(sub))
+    obs = gt.observed_snvs
+    true_snv = t.cell_data["cell_snv"].loc[list(obs.index), list(obs.columns)].values > 0
+    # Pick the mutations a study would actually carry into a tree: present in a real fraction of
+    # cells but not in all of them (a truncal mutation separates nobody). Spread the selection ACROSS
+    # the frequency range rather than taking the commonest -- mutations that all sit at one frequency
+    # are all at the same depth, and the tree collapses to a chain nothing can be ordered within.
+    frac = true_snv.mean(0)
+    cand = np.where((frac >= 0.05) & (frac <= 0.95))[0]
+    cand = cand[np.argsort(-frac[cand])]
+    step = max(1, len(cand) // DNA_N_MUTATIONS)
+    pick = cand[::step][:DNA_N_MUTATIONS]
+    muts = [obs.columns[i] for i in pick]
+    obs[muts].T.rename_axis("mutation").to_csv(os.path.join(sc, "sc_mutations.csv"))
+    pd.DataFrame(true_snv[:, pick].astype(int), index=obs.index, columns=muts).T.rename_axis(
+        "mutation").to_csv(os.path.join(sc, "truth_genotypes.csv"))
+    pd.DataFrame({"cell": list(obs.index),
+                  "true_clone": [lab_by_cell[c] for c in obs.index]}).to_csv(
+        os.path.join(sc, "truth_clone.csv"), index=False)
+
+    # ---------------------------------------------------------------- pyclone-vi: clones from bulk
+    pc = os.path.join(out_dir, "pyclonevi"); os.makedirs(pc, exist_ok=True)
+    # Bulk on a MACRO-DISSECTED block, not the whole section. Sequencing the raw field gives ~19%
+    # tumour content, and at that purity every VAF is squeezed towards zero and only the truncal
+    # cluster separates. Real bulk studies dissect to enrich; here the pool is every cancer cell plus
+    # enough normal tissue to land near 50%, which is an ordinary purity for a solid tumour.
+    n_contam = min(len(normal_pool), len(cancer_cells))
+    block = list(cancer_cells) + list(rng.choice(normal_pool, size=n_contam, replace=False))
+    bulk = bulkDNA(breadth="wgs", seed=400 + seed).run(t.cell_data, cell_subset=block)
+    bd = bulk.observed_data
+    somatic = bd[(bd["alt_counts"] > 0) & (bd["coverage"] >= 10)]
+    if "is_germline" in somatic:
+        somatic = somatic[~somatic["is_germline"].astype(bool)]
+    somatic = somatic.loc[[g for g in somatic.index if g in set(t.cell_data["cell_snv"].columns)]]
+    keep = somatic.sample(n=min(DNA_N_BULK_MUTATIONS, len(somatic)), random_state=seed).sort_index()
+    # Copy number comes from the HMMcopy call above, NOT from iscc. PyClone-VI wants major/minor;
+    # depth-based calling gives TOTAL copy number only, so the total is split the conventional way
+    # (one minor copy whenever the total allows it) and that assumption is stated rather than hidden.
+    tot = np.rint(np.clip(clone_cn.mean(0), 0, None)).astype(int)
+    seg_idx = keep["segment"].astype(int).values
+    total_cn = np.clip(tot[np.clip(seg_idx, 0, len(tot) - 1)], 1, None)
+    minor = np.where(total_cn >= 2, 1, 0)
+    pd.DataFrame({
+        "mutation_id": keep.index,
+        "sample_id": "bulk",
+        "ref_counts": (keep["coverage"] - keep["alt_counts"]).astype(int).values,
+        "alt_counts": keep["alt_counts"].astype(int).values,
+        "major_cn": (total_cn - minor).astype(int),
+        "minor_cn": minor.astype(int),
+        "normal_cn": 2,
+        "tumour_content": float(bulk.purity) if bulk.purity is not None else 1.0,
+    }).to_csv(os.path.join(pc, "input.tsv"), sep="\t", index=False)
+    # Truth: each mutation's cancer-cell fraction, and its CLONAL IDENTITY. The identity is the SET
+    # of clones carrying it, not "the clone that carries it most" -- a truncal mutation is in every
+    # clone, and forcing it into one makes the clustering unscoreable (mutations that genuinely
+    # belong together get split across labels). Mutations sharing a carrier set are one clone, which
+    # is exactly the grouping PyClone-VI estimates.
+    snv = t.cell_data["cell_snv"]
+    sub_by_clone = [[c for c in cancer_cells if lab_by_cell[c] == k]
+                    for k in range(consensus.shape[0])]
+    carried = np.stack([(snv.loc[cells_k, list(keep.index)].values > 0).mean(0) > 0.5
+                        for cells_k in sub_by_clone])            # clones x mutations
+    sig = ["c" + "".join("1" if carried[k, j] else "0" for k in range(carried.shape[0]))
+           for j in range(carried.shape[1])]
+    codes = {s_: i for i, s_ in enumerate(sorted(set(sig)))}
+    ccf = (snv.loc[cancer_cells, list(keep.index)].values > 0).mean(0)
+    pd.DataFrame({"mutation_id": keep.index, "true_ccf": ccf,
+                  "carrier_clones": sig,
+                  "true_cluster": [codes[s_] for s_ in sig]}).to_csv(
+        os.path.join(pc, "truth.csv"), index=False)
+
+    meta = dict(
+        tumour_seed=int(DATASET_SEEDS["clonealign"]), n_clones=int(consensus.shape[0]),
+        n_segments=int(n_seg), n_cancer_cells=int(len(cancer_cells)),
+        hmmcopy=dict(n_cells=int(reads.shape[1]), n_bins=int(reads.shape[0])),
+        scite=dict(n_cells=int(obs.shape[0]), n_mutations=int(len(muts)),
+                   ado_rate=float(gt.hypers.to_dict().get("ado_rate", 0.2))),
+        pyclonevi=dict(n_mutations=int(len(keep)),
+                       purity=float(bulk.purity) if bulk.purity is not None else None),
+        true_clone_sizes=np.bincount(labels, minlength=consensus.shape[0]).tolist(),
+    )
+    with open(os.path.join(out_dir, "meta.json"), "w") as fh:
+        json.dump(meta, fh, indent=2)
+    return meta
+
+
 def _cohort(out_dir, seed, scale, n_clones):
     """A multi-patient scRNA cohort: counts, patient/batch labels, and the true program dictionary.
 
@@ -414,7 +637,8 @@ def _cohort(out_dir, seed, scale, n_clones):
 
 
 DATASETS = {"clonealign": _clonealign, "numbat": _numbat,
-            "rctd": _rctd, "treemhn": _treemhn, "mhn": _mhn, "cohort": _cohort}
+            "rctd": _rctd, "treemhn": _treemhn, "mhn": _mhn, "cohort": _cohort,
+            "dna": _dna}
 
 # Per-dataset seed overrides. These notebooks demonstrate that iscc's output is AMENABLE to the real
 # tools, so each dataset uses a tumour where the signal the tool reads is actually present. That is a

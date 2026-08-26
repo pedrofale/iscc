@@ -123,11 +123,12 @@ nav:
           - Sequencing reads: tutorials/reads.ipynb
       - Data analysis examples:
           - The analysis dataset and its ground truth: tutorials/analysis_ground_truth.ipynb
+          - Calling copy number from single-cell DNA with HMMcopy: tutorials/tool_hmmcopy_R.ipynb
+          - Tree reconstruction from single-cell DNA with SCITE: tutorials/tool_scite_trees.ipynb
+          - Clone inference from bulk DNA with PyClone-VI: tutorials/tool_pyclonevi.ipynb
           - Integrating scDNA and scRNA with clonealign: tutorials/tool_clonealign_R.ipynb
           - Calling copy number from scRNA with Numbat: tutorials/tool_numbat_R.ipynb
-          - Clonal trees from DNA: tutorials/tree_inference_dna.ipynb
           - Deconvolving Visium spots with RCTD: tutorials/tool_rctd_R.ipynb
-          - Tree reconstruction with SCITE: tutorials/tool_scite_trees.ipynb
           - Recovering progression constraints with TreeMHN: tutorials/tool_treemhn_R.ipynb
           - Progression constraints from cross-sectional data with MHN: tutorials/tool_mhn_bulk.ipynb
           - Integrating a patient cohort with scDEF: tutorials/tool_scdef_cohort.ipynb

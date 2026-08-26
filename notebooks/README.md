@@ -57,7 +57,9 @@ tool never sees. Two rules hold throughout:
   it, including the true clone phylogeny. The other notebooks reference it.
 - **`tool_clonealign_R.ipynb`** — clonealign: assign scRNA cells to scDNA copy-number clones.
 - **`tool_numbat_R.ipynb`** — Numbat: call copy number from scRNA with an allele layer.
-- **`tree_inference_dna.ipynb`** — clonal trees from bulk and single-cell DNA.
+- **`tool_hmmcopy_R.ipynb`** — HMMcopy: call copy number from single-cell read depth; feeds clonealign.
+- **`tool_scite_trees.ipynb`** — SCITE: reconstruct the mutation tree from single-cell genotypes.
+- **`tool_pyclonevi.ipynb`** — PyClone-VI: clonal clusters and cancer-cell fractions from bulk DNA.
 - **`tool_rctd_R.ipynb`** — RCTD: deconvolve Visium spots against an scRNA reference.
 - **`tool_treemhn_R.ipynb`** — TreeMHN: recover planted precedence constraints from mutation trees.
 - **`tool_mhn_bulk.ipynb`** — MHN: the same cohort read cross-sectionally, order discarded.

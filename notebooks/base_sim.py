@@ -132,7 +132,7 @@ def grow_base_tumor(seed=BASE_SEED, target_cancer=80000, cancer_params=None, exp
         regime the tutorials ship.
     coarsen : bool, optional
         Passenger coarsening (default on — required at cm-scale). Turn OFF for lineage-resolved SNVs
-        (``tree_inference_dna`` phylogenetics), which forces a smaller ``scale``/``target_cancer`` since
+        (single-cell phylogenetics), which forces a smaller ``scale``/``target_cancer`` since
         every SNV then spawns a genotype. See :func:`realistic_regime.grow_realistic`.
     """
     return RR.grow_realistic(
