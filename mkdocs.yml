@@ -127,7 +127,6 @@ nav:
           - Calling copy number from scRNA with Numbat: tutorials/tool_numbat_R.ipynb
           - Clonal trees from DNA: tutorials/tree_inference_dna.ipynb
           - Deconvolving Visium spots with RCTD: tutorials/tool_rctd_R.ipynb
-          - Gene-expression programs: tutorials/gene_programs.ipynb
           - Recovering progression constraints with TreeMHN: tutorials/tool_treemhn_R.ipynb
           - Integrating a patient cohort with scDEF: tutorials/tool_scdef_cohort.ipynb
   - API Reference:
