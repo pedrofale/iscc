@@ -108,31 +108,31 @@ nav:
   - Home: index.md
   - Overview: overview.md
   - Installation: installation.md
+  - iscc overview: tutorials/01_pipeline_walkthrough.ipynb
   - Tutorials:
-      - Getting started:
-          - Pipeline walkthrough: tutorials/01_pipeline_walkthrough.ipynb
-          - Tumor growth: tutorials/02_tumor_growth.ipynb
-          - Data overview: tutorials/03_data_overview.ipynb
-      - Assays:
+      - Tumor evolution:
+          - Exploring the tumor: tutorials/02_tumor_growth.ipynb
+          - The shared tumour: tutorials/base_simulation.ipynb
+          - Compartment selection — DCIS to IDC: tutorials/compartment_selection_confound.ipynb
+          - Treatment and the four escape modes: tutorials/treatment_escape_modes.ipynb
+          - Metastasis: tutorials/metastasis.ipynb
+      - Data generation:
           - Bulk & single-cell DNA: tutorials/assay_dna.ipynb
           - Single-cell RNA: tutorials/assay_scrna.ipynb
           - Spatial (Visium): tutorials/assay_spatial.ipynb
           - Sequencing reads: tutorials/reads.ipynb
-      - Examples:
-          - The shared tumour: tutorials/base_simulation.ipynb
-          - scDNA + scRNA integration: tutorials/combining_scdna_scrna.ipynb
+      - Data analysis examples:
+          - Combining scDNA and scRNA: tutorials/combining_scdna_scrna.ipynb
           - Integrating scDNA and scRNA with clonealign: tutorials/tool_clonealign_R.ipynb
-          - Gene programs: tutorials/gene_programs.ipynb
-          - WGD & allele-specific CNA: tutorials/wgd_allele_cna.ipynb
+          - Whole-genome doubling and the allele layer: tutorials/wgd_allele_cna.ipynb
           - Calling copy number from scRNA with Numbat: tutorials/tool_numbat_R.ipynb
-          - Phylogeny from DNA: tutorials/tree_inference_dna.ipynb
-          - scRNA + Visium integration: tutorials/scrna_visium_integration.ipynb
+          - Clonal trees from DNA: tutorials/tree_inference_dna.ipynb
+          - Integrating scRNA with Visium: tutorials/scrna_visium_integration.ipynb
           - Deconvolving Visium spots with RCTD: tutorials/tool_rctd_R.ipynb
-          - Compartment selection: tutorials/compartment_selection_confound.ipynb
-          - Cohort — recurrent drivers: tutorials/cohort_mhn_recurrence.ipynb
+          - Gene-expression programs: tutorials/gene_programs.ipynb
+          - Cohort DNA — recurrent mutations: tutorials/cohort_mhn_recurrence.ipynb
           - Recovering progression constraints with TreeMHN: tutorials/tool_treemhn_R.ipynb
-          - Cohort — shared programs: tutorials/cohort_shared_programs.ipynb
-          - Metastasis: tutorials/metastasis.ipynb
+          - Cohort integration — shared programs: tutorials/cohort_shared_programs.ipynb
   - API Reference:
       - reference/index.md
       - Tumor:
