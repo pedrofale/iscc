@@ -95,33 +95,45 @@ def grow_tumor(seed=1, steps=12000, mutation_rate=None, cnv_prob=None, amp_prob=
     return t
 
 
-def counts_anndata(tumor, seed=0, depth=20000, max_cells=600):
-    """iscc expression -> a raw-count AnnData, the input both tools expect.
+def counts_anndata(tumor, seed=0, max_cells=600, protocol="10x"):
+    """iscc expression -> a raw-count AnnData, through iscc's OWN scRNA assay.
 
-    Expression is a per-gene RATE; the tools want UMI counts, so draw Poisson at a fixed depth. This
-    deliberately keeps the read layer simple (no dropout model) — the benchmark is about whether the
-    PROGRAM structure survives, not about UMI realism, which the F3 assay layer covers separately.
+    Uses :class:`iscc.data.scRNA` rather than a hand-rolled draw, so the counts carry the assay
+    layer's variable library size, negative-binomial overdispersion, ambient soup and dropout — the
+    same path `clonealign`'s and RCTD's datasets take.
+
+    This used to normalise every cell's expression to a FIXED depth and draw Poisson, which made
+    library size effectively constant: measured on the shipped cohort, CV 0.69% and a 1.04x spread
+    between the smallest and largest cell, against 50-100% in real 10x data. The docstring justified
+    it as "the benchmark is about whether the PROGRAM structure survives, not about UMI realism" —
+    defensible for an internal script, not for a dataset a published notebook analyses, and
+    inconsistent with every other tool dataset. Program recovery is HARDER under a realistic read
+    layer, which is the point: the benchmark should run on the data iscc actually claims to produce.
     """
     import anndata as ad
+
+    from iscc.data import scRNA
+
     cd = tumor.cell_data
     is_cancer = np.array([tumor.genotypes[g].type == "cancer"
                           for g in cd["cell_type"]["cell_id"].values])
-    E = cd["cell_exp"].values[is_cancer]
+    cancer_cells = list(np.asarray(cd["cell_exp"].index)[is_cancer])
     rng = np.random.default_rng(seed)
-    if E.shape[0] > max_cells:
-        keep = rng.choice(E.shape[0], size=max_cells, replace=False)
-    else:
-        keep = np.arange(E.shape[0])
-    E = E[keep]
-    Z = cd["cell_program"].values[is_cancer][keep]
+    if len(cancer_cells) > max_cells:
+        pick = np.sort(rng.choice(len(cancer_cells), size=max_cells, replace=False))
+        cancer_cells = [cancer_cells[i] for i in pick]
 
-    tot = E.sum(axis=1, keepdims=True)
-    rate = np.divide(E, tot, out=np.zeros_like(E), where=tot > 0) * depth
-    X = rng.poisson(rate).astype(np.float32)
+    rna = scRNA(n_cells=len(cancer_cells), protocol=protocol, seed=seed).run(
+        cd, cell_subset=cancer_cells)
+    counts = rna.observed_counts
 
-    a = ad.AnnData(X)
-    a.var_names = list(cd["cell_exp"].columns)
-    a.obs_names = [f"C{i}" for i in range(X.shape[0])]
+    # Align the program ground truth to the cells the assay actually returned, by NAME -- the assay
+    # may drop or reorder cells, and a positional zip would silently mispair truth with counts.
+    Z = np.asarray(cd["cell_program"].reindex(counts.index).values, dtype=float)
+
+    a = ad.AnnData(counts.values.astype(np.float32))
+    a.var_names = list(counts.columns)
+    a.obs_names = [f"C{i}" for i in range(counts.shape[0])]
     a.layers["counts"] = a.X.copy()
     return a, Z
 
