@@ -643,6 +643,16 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   gate on whether the CNA-caller/Numbat results need GISTIC-peak resolution).
 
 ## Engine / inference follow-ups
+- **NEXT — the driver layout is uniform across arms, but `s_arm` is inferred against arm content
+  that is not.** `selection.py` draws driver roles with
+  `rng.choice([-1,0,1], p=[prop_driver/2, 1-prop_driver, prop_driver/2])` — the SAME rate on every
+  segment — so simulated per-arm oncogene/TSG counts are binomial noise around a constant. Real arms
+  are strongly uneven (17p TSG-rich, 8q oncogene-rich), and `inference/genome.py::GenomeSpec` already
+  carries those COSMIC/Davoli counts and uses them for the `s_arm` prior and the Charm comparison. So
+  the engine's driver layout contradicts the annotation the real-genome inference is scored against.
+  Found 2026-08-27 while assessing a (rejected) gene-naming layer; it is independent of naming and
+  matters for the flagship Charm/PCAWG figure. Decide whether `prop_driver` should become per-arm and
+  content-informed, or whether the arm-CN model's `prop_driver=0` scope already sidesteps it.
 - **LATER — M3b HPC rerun** — fewer, bigger tumors (~800 × 8000-cell, tau-leaped) for the canonical
   Charm/PCAWG figure; HPC-bound. The flagship real-genome figure. **When we target the spatial-scale /
   runtime issue, the apt comparison is Noble's `demon`** (deme-based spatial sim, `noble_spatial_2022`;
