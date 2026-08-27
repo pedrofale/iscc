@@ -247,30 +247,22 @@ class TestDatabase:
 
     def test_wired_ligand_and_receptor_carry_the_signal(self, on, off):
         # THE POINT OF THE FEATURE: an L-R tool scores a pair from the LIGAND's and RECEPTOR's own
-        # expression, so the channel has to mark those two genes or it is invisible. The ligand marks
-        # the SENDER type and the receptor the RECEIVER population, both by a flat 1 + strength — a
-        # between-group contrast, which is what these tools' differential-expression filters read.
+        # expression, so the channel must mark those two genes as a BETWEEN-GROUP contrast. What
+        # matters is the ORDERING, not a particular ratio: the sender must be the ligand-high group
+        # and the receiver population the receptor-high one. Asserting a fixed multiple instead would
+        # pass while the "marker" sat below another cell type's baseline — which is exactly what a
+        # plain multiplicative boost did before the sender was lifted above the AMBIENT level.
         t = on.microenv_truth
-        r = _ratio(on, off)
-        # `cell_type` holds the GENOTYPE ID (cancer cells appear under their clone id, not the
-        # string "cancer"), so map it through the genotypes to get the cell type.
+        e = on.cell_data["cell_exp"].values
         gids = on.cell_data["cell_type"].iloc[:, 0].values
         is_emitter = np.array([on.genotypes[g].type == t["cci_emitter_type"] for g in gids])
-        f = 1.0 + MP["cci"]["strength"]
-        targets = set(np.asarray(t["cci_target_genes"]).tolist())
-        for g, boosted in ((t["cci_ligand"], is_emitter), (t["cci_receptor"], ~is_emitter)):
-            if g in targets:
-                continue                                    # also a target -> carries both factors
-            sub = r[:, g]
-            m = ~np.isnan(sub)
-            # This fixture's tumour is pure cancer, so with emitter_type="cancer" only the SENDER
-            # side exists; guard each side so the test asserts what the fixture actually exercises.
-            # The receiver side is covered end-to-end by validation/validate_cci.py.
-            if (m & boosted).any():
-                assert np.allclose(sub[m & boosted], f, atol=1e-9)
-            if (m & ~boosted).any():
-                assert np.allclose(sub[m & ~boosted], 1.0, atol=1e-9)
-        assert is_emitter.any()                              # the sender side is exercised
+        assert is_emitter.any(), "fixture has no emitter-type cells"
+        lig, rec = int(t["cci_ligand"]), int(t["cci_receptor"])
+        if (~is_emitter).any():
+            assert e[is_emitter, lig].mean() > e[~is_emitter, lig].max()   # sender marks the ligand
+            assert e[is_emitter, rec].mean() < e[~is_emitter, rec].mean()  # and is not a receiver
+        # the ligand is a flat marker across the sender population
+        assert np.allclose(e[is_emitter, lig], e[is_emitter, lig][0], rtol=1e-6)
 
     def test_decoy_pairs_are_unmodified(self, on, off):
         # an unwired decoy gets NO boost — that is what makes the wired pair distinguishable

@@ -25,6 +25,8 @@ suppressMessages({library(CellChat); library(Matrix)})
 args <- commandArgs(trailingOnly = TRUE)
 work_dir <- args[1]
 out_csv  <- args[2]
+mode     <- if (length(args) >= 3 && nzchar(args[3])) args[3] else "spatial"   # "spatial" | "rna"
+circle_png <- if (length(args) >= 4 && nzchar(args[4])) args[4] else ""
 
 # ---- the iscc database ------------------------------------------------------------------------
 interaction <- read.csv(file.path(work_dir, "iscc_interaction_input.csv"), row.names = 1,
@@ -50,45 +52,62 @@ if (!setequal(present, expected)) {
 }
 cat(sprintf("DB OK: %d interactions over %d genes\n", nrow(interaction), length(present)))
 
-# ---- the Visium section -----------------------------------------------------------------------
-sp_counts <- read.csv(file.path(work_dir, "sp_counts.csv"), row.names = 1, check.names = FALSE)
-sp_counts <- as.matrix(sp_counts)                       # genes x spots
-coords    <- read.csv(file.path(work_dir, "sp_coords.csv"), row.names = 1, check.names = FALSE)
-meta      <- read.csv(file.path(work_dir, "sp_meta.csv"),  row.names = 1, check.names = FALSE)
+# ---- the sample: a Visium SECTION (spatial mode) or DISSOCIATED CELLS (rna mode) ---------------
+# CCI inference is overwhelmingly done on dissociated scRNA — CellPhoneDB/CellChat/NATMI/LIANA all
+# score cell TYPES from mean L/R expression with NO positions at all. Spatial mode is the newer
+# minority. iscc can run both from the SAME tumour and the same planted channel, which is what makes
+# the no-position assumption measurable rather than merely criticisable.
+if (mode == "rna") {
+  counts <- as.matrix(read.csv(file.path(work_dir, "sc_counts.csv"), row.names = 1,
+                               check.names = FALSE))            # genes x cells
+  meta <- read.csv(file.path(work_dir, "sc_meta.csv"), row.names = 1, check.names = FALSE)
+  meta$group <- factor(meta$group)
+  meta$samples <- factor("sample1")
+  rownames(meta) <- colnames(counts)
+  cat(sprintf("RNA mode: %d cells, %d genes, %d groups\n",
+              ncol(counts), nrow(counts), nlevels(meta$group)))
+  data.norm <- normalizeData(counts)
+  cc <- createCellChat(object = data.norm, meta = meta, group.by = "group")
+} else {
+  sp_counts <- as.matrix(read.csv(file.path(work_dir, "sp_counts.csv"), row.names = 1,
+                                  check.names = FALSE))         # genes x spots
+  coords <- read.csv(file.path(work_dir, "sp_coords.csv"), row.names = 1, check.names = FALSE)
+  meta   <- read.csv(file.path(work_dir, "sp_meta.csv"),  row.names = 1, check.names = FALSE)
+  coords <- as.matrix(coords[, 1:2])                    # spots x 2, already in um
+  meta$group <- factor(meta$group)
+  meta$samples <- factor("section1")                    # single section; must be a factor (§5)
+  rownames(meta) <- colnames(sp_counts)
 
-coords <- as.matrix(coords[, 1:2])                      # spots x 2, already in um
-meta$group <- factor(meta$group)
-meta$samples <- factor("section1")                      # single section; must be a factor (§5)
-rownames(meta) <- colnames(sp_counts)
+  # scale.distance from the geometry: min positive pairwise distance (a proxy for spot pitch).
+  dmat <- as.matrix(dist(coords)); diag(dmat) <- Inf
+  min_d <- min(dmat)
+  scale.distance <- 1.02 / min_d                        # guarantees min(scaled) >= 1 (§8.3)
+  spatial.factors <- data.frame(ratio = 1, tol = min_d / 2)     # ratio=1: coords are um (§5)
+  cat(sprintf("geometry: %d spots, min spot distance %.1f um, scale.distance %.4f\n",
+              nrow(coords), min_d, scale.distance))
+  # `normalizeData` takes the raw COUNT MATRIX (README §3). createCellChat with a plain matrix assumes
+  # it is ALREADY normalised (it fills @data, not @data.raw), so normalise FIRST — otherwise a later
+  # normalizeData(object) runs colSums on the empty @data.raw and dies on dimensions.
+  data.norm <- normalizeData(sp_counts)
+  cc <- createCellChat(object = data.norm, meta = meta, group.by = "group",
+                       datatype = "spatial", coordinates = coords,
+                       spatial.factors = spatial.factors)
+}
 
-# scale.distance from the geometry: min positive pairwise distance (a robust proxy for spot pitch).
-dmat <- as.matrix(dist(coords))
-diag(dmat) <- Inf
-min_d <- min(dmat)
-scale.distance <- 1.02 / min_d                          # guarantees min(scaled) >= 1 (§8.3)
-spot_size <- min_d                                      # ~one spot pitch in um
-spatial.factors <- data.frame(ratio = 1, tol = spot_size / 2)   # ratio=1: coords are um (§5)
-cat(sprintf("geometry: %d spots, min spot distance %.1f um, scale.distance %.4f\n",
-            nrow(coords), min_d, scale.distance))
-
-# `normalizeData` takes the raw COUNT MATRIX and returns log-library-normalised data (README §3).
-# createCellChat with a plain matrix assumes it is ALREADY normalised (it fills @data, not @data.raw),
-# so normalise the matrix FIRST and hand the object normalised data — otherwise a later
-# `normalizeData(object)` runs colSums on the empty @data.raw and dies with a dimension error.
-data.norm <- normalizeData(sp_counts)
-cc <- createCellChat(object = data.norm, meta = meta, group.by = "group",
-                     datatype = "spatial", coordinates = coords,
-                     spatial.factors = spatial.factors)
 cc@DB <- db.iscc
 cc <- subsetData(cc)
 cc <- identifyOverExpressedGenes(cc)
 cc <- identifyOverExpressedInteractions(cc)
 
-# Spatial communication probability. contact/interaction ranges in um, derived from the spot pitch so
-# neighbouring spots communicate. `contact.range` is mandatory in spatial mode (§8.2).
-cc <- computeCommunProb(cc, type = "triMean", distance.use = TRUE,
-                        interaction.range = 4 * min_d, scale.distance = scale.distance,
-                        contact.dependent = TRUE, contact.range = 1.5 * min_d, nboot = 100)
+if (mode == "rna") {
+  # No geometry: probability is group-mean ligand x group-mean receptor, proximity ASSUMED.
+  cc <- computeCommunProb(cc, type = "triMean", nboot = 100)
+} else {
+  # Spatial: contact/interaction ranges in um from the spot pitch. contact.range is mandatory (§8.2).
+  cc <- computeCommunProb(cc, type = "triMean", distance.use = TRUE,
+                          interaction.range = 4 * min_d, scale.distance = scale.distance,
+                          contact.dependent = TRUE, contact.range = 1.5 * min_d, nboot = 100)
+}
 cc <- filterCommunication(cc, min.cells = 5)
 
 net <- subsetCommunication(cc)                          # data.frame over OUR pairs
@@ -101,3 +120,25 @@ if (is.null(net) || nrow(net) == 0) {
 write.csv(net, out_csv, row.names = FALSE)
 cat(sprintf("CellChat done: %d communication edges over %d pairs -> %s\n",
             nrow(net), length(unique(net$interaction_name)), out_csv))
+
+# ---- the circle plot: CellChat's OWN aggregated-network view ------------------------------------
+# The most recognisable figure in this literature, drawn by CellChat's own plotting code rather than
+# a reimplementation. netVisual(..., layout="spatial") is BROKEN upstream in 2.2.0.9001 (it passes an
+# idents.use that is not one of its formals), so the aggregate circle view is what we render.
+if (nzchar(circle_png)) {
+  ok <- try({
+    cc <- aggregateNet(cc)
+    png(circle_png, width = 1500, height = 750, res = 150)
+    par(mfrow = c(1, 2), xpd = TRUE)
+    netVisual_circle(cc@net$count, weight.scale = TRUE, label.edge = FALSE,
+                     title.name = sprintf("interactions (n) - %s", mode))
+    netVisual_circle(cc@net$weight, weight.scale = TRUE, label.edge = FALSE,
+                     title.name = sprintf("interaction strength - %s", mode))
+    dev.off()
+  }, silent = TRUE)
+  if (inherits(ok, "try-error")) {
+    cat("circle plot failed:", conditionMessage(attr(ok, "condition")), "\n")
+  } else {
+    cat("circle plot ->", circle_png, "\n")
+  }
+}

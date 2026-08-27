@@ -2665,6 +2665,15 @@ class GenotypeTumor:
         receptor_level = {}
         cci_strength = float(cci.get("strength", 0.0))
         etype = cci.get("emitter_type", "immune")         # bound even when the channel is off
+        # AMBIENT level of the ligand gene: the highest baseline any cell type has for it. The sender
+        # is lifted ABOVE this rather than multiplied from its own baseline — otherwise whether the
+        # channel is visible depends on the drawn gene's luck. (Measured: a gene whose immune baseline
+        # was 7 and epithelial baseline 58 left the "sender" at 64 vs 58 after a 9x boost — no marker
+        # at all.) `strength` is the margin over ambient.
+        lig_ref = 1.0
+        if self._cci_ligand is not None and self.celltype_exps:
+            lig_ref = float(max(float(e[self._cci_ligand]) for e in self.celltype_exps.values()))
+            lig_ref = lig_ref if lig_ref > 0 else 1.0
         cci_on = (len(self._cci_target_genes) and cci_strength != 0.0
                   and self._cci_ligand is not None and exp_cache)
         if cci_on:
@@ -2699,7 +2708,7 @@ class GenotypeTumor:
             cci_wired_pair=(0 if len(self._cci_pairs) else -1),
             cci_ligand=self._cci_ligand, cci_receptor=self._cci_receptor,
             cci_strength=cci_strength, cci_receptor_level=receptor_level,
-            cci_emitter_type=etype)
+            cci_emitter_type=etype, cci_ligand_ref=lig_ref)
         return mod
 
     # --- materialisation: counts -> per-cell matrices ------------------------
@@ -3267,7 +3276,8 @@ class GenotypeTumor:
                 cci_apply = (_ct, _cs, self.microenv_truth["cci"], _rl,
                              int(self.microenv_truth["cci_ligand"]),
                              int(self.microenv_truth["cci_receptor"]),
-                             self.microenv_truth["cci_emitter_type"])
+                             self.microenv_truth["cci_emitter_type"],
+                             float(self.microenv_truth.get("cci_ligand_ref", 1.0)))
 
         # R13 route 3 — niche -> program: the F8 fields drive per-deme program activity, generalising
         # F8's hard-wired hypoxia/CCI gene sets (which still apply via `deme_mod`; the two routes
@@ -3309,7 +3319,7 @@ class GenotypeTumor:
                 # clone's own receptor level). `deme_mod` carries hypoxia; this carries CCI.
                 cci_f = None
                 if cci_apply is not None:
-                    _ct, _cs, _la, _rl, _lig, _rec, _etype = cci_apply
+                    _ct, _cs, _la, _rl, _lig, _rec, _etype, _lref = cci_apply
                     cci_f = 1.0 + _cs * float(_la[deme_idx]) * float(_rl.get(gid, 0.0))
                 if deme_mod is None:
                     exp_row = exp_cache[gid]
@@ -3338,7 +3348,8 @@ class GenotypeTumor:
                             # The RECEPTOR is up-regulated where signal ARRIVES, so it stays graded
                             # by the local field.
                             if self.genotypes[gid].type == _etype:
-                                exp_row[_lig] *= (1.0 + _cs)
+                                exp_row[_lig] = _lref * (1.0 + _cs)   # sender clears ambient by margin
+                                exp_row[_rec] /= (1.0 + _cs)          # and is not listening to itself
                             else:
                                 exp_row[_rec] *= (1.0 + _cs)
                         mod_exp_cache[(deme_idx, gid)] = exp_row
@@ -3351,7 +3362,9 @@ class GenotypeTumor:
                         # `rows_exp` is overwritten by `ep + em` below, so a boost written only into
                         # `exp_row` is silently discarded and the channel vanishes from the totals.
                         if self.genotypes[gid].type == _etype:
-                            ep_row[_lig] *= (1.0 + _cs); em_row[_lig] *= (1.0 + _cs)
+                            half = 0.5 * _lref * (1.0 + _cs)          # split across the two alleles
+                            ep_row[_lig] = em_row[_lig] = half
+                            ep_row[_rec] /= (1.0 + _cs); em_row[_rec] /= (1.0 + _cs)
                         else:
                             ep_row[_rec] *= (1.0 + _cs); em_row[_rec] *= (1.0 + _cs)
                     drive_row = drive_cache[gid]

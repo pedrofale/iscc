@@ -50,46 +50,71 @@ Built at **Visium resolution** (W2 deferred, W4 deferred to the next handoff). L
   from the layout stream, never `self.rng`); ligand/receptor are READ at materialisation and never
   feed fitness. Tests: `tests/test_microenvironment.py` (W0/W3 classes added).
 
-**Recoverability check — RESULT: the planted channel IS recovered at Visium.**
-`validation/validate_cci.py` runs the real CellChat (spatial pipeline, `iscc-cellchat` env) on a
-planted Visium section (4,945-cell tumour, 134 spots, 30-pair database, one wired) and ranks pairs BY
-`prob`. **Measured** (emitter `immune`, `strength=8`), across seeds:
+**Recoverability check — RESULT: the planted channel IS recovered, from dissociated scRNA.**
 
-| seed | wired rank | wired prob | top decoy |
-|------|-----------|-----------|-----------|
-| 2 | #2 / 12 | 0.288 | 0.289 |
-| 3 | #1 / 13 | 0.309 | 0.305 |
-| 4 | #1 / 12 | 0.333 | 0.317 |
+The question this answers is **amenability**: does iscc emit data in which a real CCI tool can find the
+channel we planted, using its own database format, pipeline and scoring? It is not a benchmark of
+CellChat, and a tool failing to recover something is not the result being sought — in practice it has
+meant the signal was not in the form the tool reads (all three failure modes below returned a clean
+null while the channel itself was working).
 
-The wired pair is consistently at the top — #1 in two of three seeds, a statistical tie for #1 in the
-third — and always beats the median decoy. It does not *dominate*: clone-driven decoys score close
-behind, which is the emergent confound W4 measures (candidate clone-correlation is median eta~1.0).
+**Which assay.** CCI inference is overwhelmingly done on DISSOCIATED scRNA — CellPhoneDB, CellChat's
+original mode, NATMI, SingleCellSignalR and LIANA all score cell TYPES from mean ligand/receptor
+expression, with no positions at all. So the inference arm is scRNA (F3 assay, oracle reference over
+the section's own cells). The Visium section is still built and supplies the GROUND-TRUTH panels — the
+channel drawn in real tissue — plus the cells the reference is drawn from.
 
-**What it took, and why the first attempt returned a null.** An L-R tool scores a pair from the
-LIGAND's and RECEPTOR's own expression. Three separate things had to be true before CellChat could
-see the channel, and each failed silently on its own:
+**Measured** (`validation/validate_cci.py`, real CellChat in the `iscc-cellchat` env), on the
+realistic breach-gated ductal field at the RCTD working point — **183,509 cells, a 2,542-spot Visium
+v1 section, 6,000 genes, a 250-pair candidate database**:
 
-1. **The pair must be marked at all.** Modulating only downstream TARGET genes leaves L/R statistically
-   identical to a decoy (measured: 41st/79th percentile among decoys). The channel must move the two
-   genes the tool actually reads.
+| | result |
+|---|---|
+| wired pair rank (by `prob`, over 249 scored) | **#1** |
+| direction | the wired pair's strongest edge is **immune -> epithelial**, which is the true edge |
+| sender identified | immune has the highest outgoing strength |
+
+So iscc's output is amenable: a real tool, handed iscc's own invented database, recovers both the
+planted pair and its direction out of a 250-pair screen.
+
+**Scale matters, and the earlier rig was degenerate.** An earlier version here used a ~5k-cell toy
+tumour with `spot_radius=0.9` at `spot_pitch=1.5` — 1.8 demes across on a 1.5-deme pitch, i.e.
+OVERLAPPING spots, which no Visium array can produce — and a deme anchored at 25 um, contradicting
+`VISIUM_V1` and making every micron coordinate handed to CellChat 2x wrong. `make_analysis_data.py`'s
+own density table calls that cell count degenerate (1.7 cells/spot, 0.98 purity), and CellChat duly
+dropped three of seven groups for too few cells. The calibrated working point (60k cancer cells,
+immune 0.12, Visium v1 at a 50 um deme) fixes all three.
+
+**THREE SILENT FAILURE MODES, each of which returns a clean null** while the channel is working. Every
+one was hit during this build:
+
+1. **The pair must be marked at all.** Modulating only downstream TARGET genes leaves the wired
+   ligand/receptor statistically identical to a decoy (measured: 41st/79th percentile among decoys).
+   Tools score L and R, so the channel must move those two genes.
 2. **The pair must be EXPRESSED.** Baseline expression is `beta(0.1, 1.0)` — CDF `x^0.1`, so the median
-   gene sits at ~1e-3 and is effectively silent, and a multiplicative boost on ~0 is still ~0.
-   Candidates are therefore drawn from genes above the genome-mean baseline (a designation rule, not a
-   parameter).
-3. **The mark must be a BETWEEN-GROUP contrast.** These tools filter genes by differential expression
-   between cell groups, so a spatially smooth, group-agnostic boost is invisible: it lifts every group
-   in the niche together. The ligand marks the SENDER type and the receptor the RECEIVER population,
-   both by a flat `1 + strength`. Scaling either by the local density instead washes the contrast out
-   and the pair is rejected on that gene.
+   gene sits at ~1e-3 and a multiplicative boost on ~0 is still ~0. Candidates are drawn from genes
+   above the genome-mean baseline (a designation rule, not a parameter).
+3. **The mark must be a BETWEEN-GROUP contrast, and robust to the drawn gene.** These tools filter by
+   differential expression between cell GROUPS, so a spatially smooth or majority-wide boost is
+   invisible (`emitter_type="cancer"` spans 4 of 7 groups and cannot produce contrast). Worse, a plain
+   multiplicative boost is seed-lucky: one draw left the "sender" at 64 CPM against another type's 58
+   after a 9x boost — no marker at all — and put the receptor's maximum on the SENDER. The sender is
+   therefore lifted above the tissue's AMBIENT level for that gene (`strength` is the margin) with its
+   own receptor suppressed, so "sender is ligand-high and not listening to itself" holds regardless of
+   which gene is drawn.
 
-Raising `strength` does NOT compensate: CellChat's Hill function saturates and library-size
-normalisation means inflating one gene shrinks the rest — `strength=20` scored *worse* than
-`strength=8`.
+Raising `strength` does NOT compensate for any of these: CellChat's Hill function saturates and
+library-size normalisation shrinks everything else — `strength=20` scored worse than `strength=8`.
 
-**A trap worth recording.** When the programs layer is on, materialisation overwrites the totals with
-`rows_exp = ep + em`, so a boost written only into `exp_row` is silently discarded. The L-R signal must
-be applied to the allele-resolved rows as well or the channel vanishes from the emitted data with no
-error anywhere. Figure `manuscript/figures/validation_cci.png`.
+**A trap worth recording.** With the programs layer on, materialisation overwrites the totals with
+`rows_exp = ep + em`, so an expression effect written only into `exp_row` is silently discarded. The
+L-R mark must be applied to the allele-resolved rows too, or the channel vanishes from the emitted data
+with no error anywhere.
+
+**Spatial CellChat is available (`--mode spatial/both`) but is not the default.** At true Visium pitch
+its filters left 4 of 250 pairs scored with probabilities ~1e-3. That is a question about the spatial
+pipeline's settings, not about iscc's output, and it is not the claim this validation makes. Figure:
+`manuscript/figures/validation_cci.png`.
 
 ## Decisions taken (2026-08-27)
 
