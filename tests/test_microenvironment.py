@@ -246,20 +246,31 @@ class TestDatabase:
         assert genes.isdisjoint(set(np.asarray(t["hypoxia_genes"]).tolist()))
 
     def test_wired_ligand_and_receptor_carry_the_signal(self, on, off):
-        # THE POINT OF THE FEATURE: the wired pair's ligand and receptor are up-regulated by the CCI
-        # field, so an L-R tool (which reads only these two genes) can see the channel. Their
-        # fold-change is exactly 1 + strength*field, and it tracks the field across cells.
+        # THE POINT OF THE FEATURE: an L-R tool scores a pair from the LIGAND's and RECEPTOR's own
+        # expression, so the channel has to mark those two genes or it is invisible. The ligand marks
+        # the SENDER type and the receptor the RECEIVER population, both by a flat 1 + strength — a
+        # between-group contrast, which is what these tools' differential-expression filters read.
         t = on.microenv_truth
         r = _ratio(on, off)
-        lvl = t["cci"][on.cell_data["cell_deme"]["deme_id"].values]     # per-cell ligand availability
-        expected = 1.0 + MP["cci"]["strength"] * lvl
-        for g in (t["cci_ligand"], t["cci_receptor"]):
-            if g in set(np.asarray(t["cci_target_genes"]).tolist()):
+        # `cell_type` holds the GENOTYPE ID (cancer cells appear under their clone id, not the
+        # string "cancer"), so map it through the genotypes to get the cell type.
+        gids = on.cell_data["cell_type"].iloc[:, 0].values
+        is_emitter = np.array([on.genotypes[g].type == t["cci_emitter_type"] for g in gids])
+        f = 1.0 + MP["cci"]["strength"]
+        targets = set(np.asarray(t["cci_target_genes"]).tolist())
+        for g, boosted in ((t["cci_ligand"], is_emitter), (t["cci_receptor"], ~is_emitter)):
+            if g in targets:
                 continue                                    # also a target -> carries both factors
             sub = r[:, g]
             m = ~np.isnan(sub)
-            assert np.allclose(sub[m], expected[m], atol=1e-9)
-        assert lvl.max() > lvl.min()                        # the field is not flat
+            # This fixture's tumour is pure cancer, so with emitter_type="cancer" only the SENDER
+            # side exists; guard each side so the test asserts what the fixture actually exercises.
+            # The receiver side is covered end-to-end by validation/validate_cci.py.
+            if (m & boosted).any():
+                assert np.allclose(sub[m & boosted], f, atol=1e-9)
+            if (m & ~boosted).any():
+                assert np.allclose(sub[m & ~boosted], 1.0, atol=1e-9)
+        assert is_emitter.any()                              # the sender side is exercised
 
     def test_decoy_pairs_are_unmodified(self, on, off):
         # an unwired decoy gets NO boost — that is what makes the wired pair distinguishable

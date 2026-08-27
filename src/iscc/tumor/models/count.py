@@ -2664,11 +2664,11 @@ class GenotypeTumor:
         cci_signal = np.zeros(n_demes)                    # per-deme ligand availability (normalised)
         receptor_level = {}
         cci_strength = float(cci.get("strength", 0.0))
+        etype = cci.get("emitter_type", "immune")         # bound even when the channel is off
         cci_on = (len(self._cci_target_genes) and cci_strength != 0.0
                   and self._cci_ligand is not None and exp_cache)
         if cci_on:
             lig, rec = self._cci_ligand, self._cci_receptor
-            etype = cci.get("emitter_type", "immune")
             lig_raw = {gid: float(exp_cache[gid][lig]) for gid in exp_cache}
             rec_raw = {gid: float(exp_cache[gid][rec]) for gid in exp_cache}
             # count-weighted population means over the FULL deme composition (unmaterialised
@@ -2688,16 +2688,6 @@ class GenotypeTumor:
             weight = {gid: lig_raw[gid] / mean_lig for gid in lig_raw}
             receptor_level = {gid: rec_raw[gid] / mean_rec for gid in rec_raw}
             cci_signal = self._cci_field(etype, float(cci.get("lengthscale", 2.0)), weight=weight)
-            # THE L-R SIGNAL ITSELF. The wired pair's ligand and receptor are up-regulated in the
-            # signalling niche — where emitters are dense, both the ligand and its receptor rise
-            # together. This is the whole point of the channel: every CCI tool (CellChat,
-            # CellPhoneDB, COMMOT) scores a pair from the LIGAND and RECEPTOR genes' own expression,
-            # so a channel that leaves them untouched is invisible no matter how strong its
-            # downstream effect. An unwired decoy gets no such boost, so "ligand-high cells sitting
-            # near receptor-high cells" is true of the wired pair and of nothing else.
-            # Per-DEME (field only, not receptor-gated) so it lives in this matrix; the receptor-gated
-            # part stays on the downstream TARGET genes at materialisation.
-            mod[:, [lig, rec]] *= (1.0 + cci_strength * cci_signal[:, None])
 
         self.microenv_truth = dict(
             hypoxia_genes=np.asarray(self._hypoxia_genes),
@@ -2708,7 +2698,8 @@ class GenotypeTumor:
             cci_pairs=np.asarray(self._cci_pairs, dtype=int),
             cci_wired_pair=(0 if len(self._cci_pairs) else -1),
             cci_ligand=self._cci_ligand, cci_receptor=self._cci_receptor,
-            cci_strength=cci_strength, cci_receptor_level=receptor_level)
+            cci_strength=cci_strength, cci_receptor_level=receptor_level,
+            cci_emitter_type=etype)
         return mod
 
     # --- materialisation: counts -> per-cell matrices ------------------------
@@ -3273,7 +3264,10 @@ class GenotypeTumor:
             _cs = float(self.microenv_truth["cci_strength"])
             _rl = self.microenv_truth["cci_receptor_level"]
             if _ct.size and _cs != 0.0 and _rl:
-                cci_apply = (_ct, _cs, self.microenv_truth["cci"], _rl)
+                cci_apply = (_ct, _cs, self.microenv_truth["cci"], _rl,
+                             int(self.microenv_truth["cci_ligand"]),
+                             int(self.microenv_truth["cci_receptor"]),
+                             self.microenv_truth["cci_emitter_type"])
 
         # R13 route 3 — niche -> program: the F8 fields drive per-deme program activity, generalising
         # F8's hard-wired hypoxia/CCI gene sets (which still apply via `deme_mod`; the two routes
@@ -3315,7 +3309,7 @@ class GenotypeTumor:
                 # clone's own receptor level). `deme_mod` carries hypoxia; this carries CCI.
                 cci_f = None
                 if cci_apply is not None:
-                    _ct, _cs, _la, _rl = cci_apply
+                    _ct, _cs, _la, _rl, _lig, _rec, _etype = cci_apply
                     cci_f = 1.0 + _cs * float(_la[deme_idx]) * float(_rl.get(gid, 0.0))
                 if deme_mod is None:
                     exp_row = exp_cache[gid]
@@ -3325,12 +3319,41 @@ class GenotypeTumor:
                         exp_row = exp_cache[gid] * deme_mod[deme_idx]     # fresh array (hypoxia)
                         if cci_f is not None:
                             exp_row[_ct] *= cci_f                          # receptor-dependent CCI
+                            # THE L-R SIGNAL ITSELF, split by WHO SENDS AND WHO RECEIVES. Every CCI
+                            # tool scores a pair from the ligand's and receptor's own expression, and
+                            # CellChat's gene filter is a DIFFERENTIAL-EXPRESSION test BETWEEN CELL
+                            # GROUPS — so a deme-wide boost is invisible to it (it lifts every group
+                            # in the niche together and leaves the group contrast flat). Put the
+                            # ligand on the EMITTER cells and the receptor on everyone else, both
+                            # scaled by the local field: that is the canonical "ligand-high group
+                            # adjacent to receptor-high group" pattern these tools are built to find,
+                            # and it is what a sender/receiver pair actually looks like in tissue.
+                            # The LIGAND is a marker of the SENDER TYPE: a sender expresses it
+                            # because of what it is, not because of how crowded its deme is (density
+                            # governs how much signal REACHES receivers, which is what `_la` already
+                            # does for the downstream targets). A flat elevation makes it a clean
+                            # cell-type marker, which is the between-group contrast the tools' DE
+                            # filter looks for; scaling it by the local density instead washes it out
+                            # to ~1.8x and the pair is rejected on the ligand.
+                            # The RECEPTOR is up-regulated where signal ARRIVES, so it stays graded
+                            # by the local field.
+                            if self.genotypes[gid].type == _etype:
+                                exp_row[_lig] *= (1.0 + _cs)
+                            else:
+                                exp_row[_rec] *= (1.0 + _cs)
                         mod_exp_cache[(deme_idx, gid)] = exp_row
                 if P is not None:
                     mod_row = 1.0 if deme_mod is None else deme_mod[deme_idx]
                     ep_row, em_row = exp_p_cache[gid] * mod_row, exp_m_cache[gid] * mod_row
                     if cci_f is not None:                                  # keep alleles in step (§L3200)
                         ep_row[_ct] *= cci_f; em_row[_ct] *= cci_f
+                        # The L-R signal must be applied HERE TOO. When the programs layer is on,
+                        # `rows_exp` is overwritten by `ep + em` below, so a boost written only into
+                        # `exp_row` is silently discarded and the channel vanishes from the totals.
+                        if self.genotypes[gid].type == _etype:
+                            ep_row[_lig] *= (1.0 + _cs); em_row[_lig] *= (1.0 + _cs)
+                        else:
+                            ep_row[_rec] *= (1.0 + _cs); em_row[_rec] *= (1.0 + _cs)
                     drive_row = drive_cache[gid]
                     if niche_drive is not None:
                         drive_row = drive_row + niche_drive[deme_idx]

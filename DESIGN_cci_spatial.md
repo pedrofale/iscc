@@ -14,18 +14,25 @@ Built at **Visium resolution** (W2 deferred, W4 deferred to the next handoff). L
 - **W0 — the database.** ONE new parameter, `microenv_params['cci']['n_candidate_pairs']` (default 1).
   The construction block draws `n_candidate_pairs` L-R pairs from the SAME layout sub-stream as the
   target genes (`layout_seed + LAYOUT_OFFSET_F8_PROGRAMS`), AFTER the target draws so those stay
-  byte-identical. Row 0 is the WIRED pair; the rest are unwired decoys. Ligand/receptor genes are
-  drawn DISJOINT from the hypoxia/CCI target sets (a designation is never itself a readout gene). No
+  byte-identical. Row 0 is the WIRED pair; the rest are unwired decoys. Candidates are drawn from genes
+  EXPRESSED above the genome-mean baseline and excluded from the hypoxia set (so no decoy is moved by
+  an unrelated programme); overlap with the CCI target set is allowed and harmless. No
   decoy class is engineered — the clone-correlated class is MEASURED after the fact by
   `iscc.integrations.clone_correlation` (correlation ratio of ligand/receptor expression vs clone).
   `iscc.integrations.cci_database` / `write_cci_database` emit the four `Update-CellChatDB` CSVs and
   ASSERT the `geneInfo` whitelist is complete (README_cellchat.md §4.1); `validation/cellchat_runner.R`
   re-asserts `setequal(extractGene(db), expected)` on the R side.
-- **W3 — receptor-dependence.** Hypoxia stays a per-deme×gene matrix. CCI is now
-  `f = 1 + strength · ligand_avail[deme] · receptor_level[gid]` applied to the CCI target genes,
-  computed per-(deme, genotype) at materialisation (both the total and the allele-resolved `p`/`m`
-  layers, so they never disagree). `ligand_avail` is the smoothed emitter field weighted by the
-  emitters' LIGAND expression; `receptor_level` is the genotype's RECEPTOR expression.
+- **W3 — receptor-dependence, and the L-R signal itself.** Hypoxia stays a per-deme×gene matrix. Two
+  things happen at materialisation, per-(deme, genotype), in BOTH the total and the allele-resolved
+  `p`/`m` layers (they must never disagree — see the trap below):
+    * **downstream response** on the CCI target genes:
+      `f = 1 + strength · ligand_avail[deme] · receptor_level[gid]`, where `ligand_avail` is the
+      smoothed emitter field weighted by the emitters' LIGAND expression and `receptor_level` is the
+      genotype's RECEPTOR expression — this is the receptor-dependence;
+    * **the L-R mark the tools actually read**: the wired LIGAND is up-regulated by a flat
+      `1 + strength` in cells of the EMITTER type, and the wired RECEPTOR by `1 + strength` in every
+      other cell. Sender-marks-ligand / receiver-marks-receptor is the between-group contrast every
+      CCI tool's gene filter looks for. Decoys get nothing.
 - **NORMALISATION (a definition, not a knob).** Each term is divided by its population mean — the
   ligand weight by the emitter cells' mean ligand expression, the receptor by all cells' mean
   receptor expression — so both average to ~1 and `f` recovers the old `1 + strength·cci_signal` in
@@ -43,19 +50,46 @@ Built at **Visium resolution** (W2 deferred, W4 deferred to the next handoff). L
   from the layout stream, never `self.rng`); ligand/receptor are READ at materialisation and never
   feed fitness. Tests: `tests/test_microenvironment.py` (W0/W3 classes added).
 
-**Recoverability check — RESULT: a confirmed NULL at Visium (as predicted).** `validation/validate_cci.py`
-runs the real CellChat (spatial pipeline, `iscc-cellchat` env) on a planted Visium section (4,945-cell
-tumour, 134 spots, 30-pair database, one wired) and ranks pairs BY `prob`. **Measured:** the wired
-pair (`G_9_4_G_9_14`) is **DROPPED — CellChat culls it at the over-expressed-interaction stage** (its
-L/R genes carry no group-level over-expression), and the 12 surviving edges span 5 **decoy** pairs.
-The reason is structural, not a resolution artifact alone: F8 modulates the TARGET genes and READS
-L/R — it never boosts L or R — while CellChat's `prob` scores L/R group-mean expression only, so the
-wired pair has no expression advantage over a decoy. (The clone-correlation of the candidates is
-median η≈1.0 — nearly all L/R expression is clone-determined with programs on — so the emergent
-confound is strong, and the surviving decoys are exactly clone-driven edges.) This is the reported
-result the caveat anticipated: downstream (W4) needs a **target-aware** method (COMMOT/NicheNet) or
-**single-cell** spatial resolution (which also needs W2); do NOT "fix" it by boosting L/R — that would
-write the signal into L/R and defeat the design. Figure `manuscript/figures/validation_cci.png`.
+**Recoverability check — RESULT: the planted channel IS recovered at Visium.**
+`validation/validate_cci.py` runs the real CellChat (spatial pipeline, `iscc-cellchat` env) on a
+planted Visium section (4,945-cell tumour, 134 spots, 30-pair database, one wired) and ranks pairs BY
+`prob`. **Measured** (emitter `immune`, `strength=8`), across seeds:
+
+| seed | wired rank | wired prob | top decoy |
+|------|-----------|-----------|-----------|
+| 2 | #2 / 12 | 0.288 | 0.289 |
+| 3 | #1 / 13 | 0.309 | 0.305 |
+| 4 | #1 / 12 | 0.333 | 0.317 |
+
+The wired pair is consistently at the top — #1 in two of three seeds, a statistical tie for #1 in the
+third — and always beats the median decoy. It does not *dominate*: clone-driven decoys score close
+behind, which is the emergent confound W4 measures (candidate clone-correlation is median eta~1.0).
+
+**What it took, and why the first attempt returned a null.** An L-R tool scores a pair from the
+LIGAND's and RECEPTOR's own expression. Three separate things had to be true before CellChat could
+see the channel, and each failed silently on its own:
+
+1. **The pair must be marked at all.** Modulating only downstream TARGET genes leaves L/R statistically
+   identical to a decoy (measured: 41st/79th percentile among decoys). The channel must move the two
+   genes the tool actually reads.
+2. **The pair must be EXPRESSED.** Baseline expression is `beta(0.1, 1.0)` — CDF `x^0.1`, so the median
+   gene sits at ~1e-3 and is effectively silent, and a multiplicative boost on ~0 is still ~0.
+   Candidates are therefore drawn from genes above the genome-mean baseline (a designation rule, not a
+   parameter).
+3. **The mark must be a BETWEEN-GROUP contrast.** These tools filter genes by differential expression
+   between cell groups, so a spatially smooth, group-agnostic boost is invisible: it lifts every group
+   in the niche together. The ligand marks the SENDER type and the receptor the RECEIVER population,
+   both by a flat `1 + strength`. Scaling either by the local density instead washes the contrast out
+   and the pair is rejected on that gene.
+
+Raising `strength` does NOT compensate: CellChat's Hill function saturates and library-size
+normalisation means inflating one gene shrinks the rest — `strength=20` scored *worse* than
+`strength=8`.
+
+**A trap worth recording.** When the programs layer is on, materialisation overwrites the totals with
+`rows_exp = ep + em`, so a boost written only into `exp_row` is silently discarded. The L-R signal must
+be applied to the allele-resolved rows as well or the channel vanishes from the emitted data with no
+error anywhere. Figure `manuscript/figures/validation_cci.png`.
 
 ## Decisions taken (2026-08-27)
 

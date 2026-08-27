@@ -56,11 +56,11 @@ def cellchat_available():
     return os.path.exists(CELLCHAT_RSCRIPT)
 
 
-def grow(seed, steps, n_candidate_pairs):
+def grow(seed, steps, n_candidate_pairs, strength=1.0, emitter="immune"):
     """Grow the shared four-type spatial tumour (deconv_common) with an F8 CCI channel active."""
     import deconv_common as D
     from iscc.tumor.models import GenotypeTumor
-    microenv = {"cci": {"strength": 1.0, "n_target_genes": 30, "emitter_type": "cancer",
+    microenv = {"cci": {"strength": float(strength), "n_target_genes": 30, "emitter_type": str(emitter),
                         "lengthscale": 3.0, "n_candidate_pairs": int(n_candidate_pairs)}}
     t = GenotypeTumor(seed=seed, genome_params=D.GENOME, selection_params=D.SELECTION,
                       cancer_cell_params=D.CANCER, deme_params=D.DEME, spatial_params=D.SPATIAL,
@@ -88,6 +88,8 @@ def main():
     ap.add_argument("--steps", type=int, default=1800)
     ap.add_argument("--seed", type=int, default=3)
     ap.add_argument("--pairs", type=int, default=30, help="n_candidate_pairs in the database")
+    ap.add_argument("--strength", type=float, default=8.0, help="CCI channel strength")
+    ap.add_argument("--emitter", default="immune", help="emitter cell type (the SENDER population)")
     ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_cci.png"))
     ap.add_argument("--workdir", default=os.path.join(REPO, "validation", "_cci_tmp"))
     args = ap.parse_args()
@@ -96,7 +98,7 @@ def main():
     from iscc.integrations import cci_database, write_cci_database, clone_correlation
 
     os.makedirs(args.workdir, exist_ok=True)
-    t = grow(args.seed, args.steps, args.pairs)
+    t = grow(args.seed, args.steps, args.pairs, args.strength, args.emitter)
     truth = t.microenv_truth
     pairs = truth["cci_pairs"]
     wired = int(truth["cci_wired_pair"])
