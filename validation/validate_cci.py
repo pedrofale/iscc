@@ -15,13 +15,18 @@ WHAT THIS SHOWS
      `prob`, not by p-value — on group-averaged expression every pair gets a "significant" edge, so a
      dense all-significant network is the expected background (README §8.7).
 
-CAVEAT WE EXPECT TO CONFIRM (DESIGN_cci_spatial.md, "Caveat if W3 ships alone"). At deme resolution the
-planted signal is piecewise-constant over ~20-25 um blocks; Visium spots are ~55 um, so it sits below
-the observation scale. Moreover F8 modulates the TARGET genes and READS the ligand/receptor — it never
-boosts L or R — while CellChat's `prob` scores L/R group-mean expression only. So the wired pair is not
-expected to separate from decoys HERE. That is a reported result, not a failure: everything downstream
-(W4) then depends on either a target-aware method (COMMOT/NicheNet) or single-cell spatial resolution
-(which also needs W2). We state it plainly.
+WHAT THE FIGURE SHOWS. Top row = GROUND TRUTH (the wired pair's L/R by group, the true
+sender x receiver matrix -- a single non-zero row, because only the emitter sends -- and the received
+signal in space). Bottom row = what CellChat INFERS: the measured clone-correlation over candidates,
+the field-standard bubble plot (L-R pair x sender->receiver, colour = prob, size = -log10 p), and the
+signalling-role scatter (outgoing vs incoming strength per group).
+
+READ THE BUBBLE PLOT AND THE ROLE SCATTER, NOT JUST THE RANK. Ranking the wired pair #1 says the PAIR
+was recovered; it says nothing about DIRECTION. Ground truth is "immune sends to everyone", and the
+role scatter shows CellChat naming epithelial the dominant sender instead -- because the ligand is
+only ~3x higher in immune than in epithelial, and `prob` multiplies the source's ligand by the
+target's receptor, so a group with moderate ligand AND high receptor scores well as a sender. Pair-
+level recovery and direction-level recovery are different claims.
 
 UNITS. iscc Visium coordinates are in DEME units; a deme anchors at ~25 um (memory: deme = 3D column
 physical scale). We author section coordinates in MICROMETRES (deme × DEME_MICRONS) so CellChat's
@@ -92,6 +97,8 @@ def main():
     ap.add_argument("--emitter", default="immune", help="emitter cell type (the SENDER population)")
     ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_cci.png"))
     ap.add_argument("--workdir", default=os.path.join(REPO, "validation", "_cci_tmp"))
+    ap.add_argument("--truth-only", action="store_true",
+                    help="render the GROUND-TRUTH row only; skip the CellChat run")
     args = ap.parse_args()
 
     import deconv_common as D
@@ -132,7 +139,9 @@ def main():
           f"{len(set(dom))} groups")
 
     net = None
-    if cellchat_available():
+    if args.truth_only:
+        print("truth-only: skipping CellChat.")
+    elif cellchat_available():
         pd.DataFrame(spot_counts.values.T, index=spot_counts.columns, columns=spot_names).to_csv(
             os.path.join(args.workdir, "sp_counts.csv"))            # genes x spots
         pd.DataFrame(coords_um, index=spot_names, columns=["x_um", "y_um"]).to_csv(
@@ -165,50 +174,123 @@ def main():
             print(f"CellChat: wired pair {wired_name} was DROPPED (its L/R genes were not "
                   f"over-expressed / not detected in any spot group). {n_pairs_seen} pairs survived.")
 
-    _figure(args.out, cc, wired, pair_prob, wired_name, t, section)
+    _figure(args.out, cc, wired, pair_prob, wired_name, t, section, net, dom,
+            spot_counts, truth, gene_names, args.emitter, args.truth_only)
 
 
-def _figure(out, cc, wired, pair_prob, wired_name, tumor, section):
+def _spot_group_means(spot_counts, dom, gene):
+    """Mean CPM of one gene (by NAME) per spot group — the quantity a CCI tool's gene filter reads."""
+    cpm = spot_counts.div(spot_counts.sum(1), axis=0) * 1e4
+    return pd.Series(cpm[gene].values).groupby(np.asarray(dom)).mean()
+
+
+def _figure(out, cc, wired, pair_prob, wired_name, tumor, section, net, dom,
+            spot_counts, truth, gene_names, emitter, truth_only):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    fig, ax = plt.subplots(1, 3, figsize=(16, 4.6))
+    nrow = 1 if truth_only else 2
+    fig, axes = plt.subplots(nrow, 3, figsize=(16.5, 4.8 * nrow), squeeze=False)
+    ax = axes[0]
+    lig_name = gene_names[int(truth["cci_ligand"])]
+    rec_name = gene_names[int(truth["cci_receptor"])]
+    groups = sorted(set(np.asarray(dom).tolist()))
 
-    # A. clone-correlation distribution over candidates, wired highlighted
+    # ---------------- ROW 1 — GROUND TRUTH -------------------------------------------------
+    # A. the mechanism: the wired ligand marks the SENDER type, the receptor the RECEIVERS.
+    lig_g = _spot_group_means(spot_counts, dom, lig_name).reindex(groups)
+    rec_g = _spot_group_means(spot_counts, dom, rec_name).reindex(groups)
+    x = np.arange(len(groups)); w = 0.38
+    ax[0].bar(x - w/2, lig_g.values, w, label=f"ligand {lig_name}", color="#d1495b")
+    ax[0].bar(x + w/2, rec_g.values, w, label=f"receptor {rec_name}", color="#2a9d8f")
+    ax[0].set_xticks(x); ax[0].set_xticklabels(groups, rotation=45, ha="right")
+    ax[0].legend(fontsize=8)
+    ax[0].set(ylabel="mean CPM per spot group",
+              title=f"A. GROUND TRUTH — the wired pair's L/R\n(ligand marks the sender '{emitter}';"
+                    " receptor marks receivers)")
+
+    # B. the ground-truth sender -> receiver matrix. Only the emitter type sends, and each receiver
+    #    group's weight is its mean RECEIVED signal (ligand availability x its own receptor level).
+    me = tumor.cell_data["cell_microenv"]["cci_level"]
+    idx = tumor.cell_data["cell_type"].index
+    lvl_by = pd.Series(me.values, index=idx)
+    members = section["members"]
+    spot_lvl = np.array([lvl_by.reindex(list(m)).mean() if len(m) else np.nan for m in members])
+    gt = pd.DataFrame(0.0, index=groups, columns=groups)
+    if emitter in gt.index:
+        for g in groups:
+            sel = (np.asarray(dom) == g)
+            gt.loc[emitter, g] = np.nanmean(spot_lvl[sel]) if sel.any() else 0.0
+    im = ax[1].imshow(gt.values, cmap="magma", aspect="auto")
+    ax[1].set_xticks(range(len(groups))); ax[1].set_xticklabels(groups, rotation=45, ha="right")
+    ax[1].set_yticks(range(len(groups))); ax[1].set_yticklabels(groups)
+    fig.colorbar(im, ax=ax[1], fraction=0.046)
+    ax[1].set(xlabel="receiver group", ylabel="sender group",
+              title="B. GROUND TRUTH — sender x receiver\n(only the emitter sends; weight = received signal)")
+
+    # C. the ground-truth received signal in space
+    coords = section["coords"]
+    sc = ax[2].scatter(coords[:, 1], coords[:, 0], c=spot_lvl, cmap="magma", s=28)
+    ax[2].invert_yaxis(); fig.colorbar(sc, ax=ax[2], fraction=0.046)
+    ax[2].set(title="C. GROUND TRUTH — received CCI signal per spot\n(ligand availability x receptor — W3)")
+
+    if truth_only:
+        fig.suptitle("W0+W3 GROUND TRUTH: the planted L-R channel in iscc's simulated Visium section",
+                     fontsize=12, y=1.02)
+        fig.tight_layout(); fig.savefig(out, dpi=150, bbox_inches="tight")
+        print("figure ->", out); return
+
+    # ---------------- ROW 2 — WHAT CELLCHAT INFERS -----------------------------------------
+    ax = axes[1]
+    # D. clone-correlation over candidates (the emergent confound), wired highlighted
     order = np.argsort(cc["eta_max"].values)
     colors = ["#d1495b" if cc["wired"].values[i] else "#6c8ebf" for i in order]
     ax[0].bar(range(len(order)), cc["eta_max"].values[order], color=colors)
     ax[0].set(xlabel="candidate pair (sorted)", ylabel="clone-correlation  eta_max",
-              title="A. MEASURED clone-correlation over candidates\n(red = the wired pair; emergent, not planted)")
+              title="D. MEASURED clone-correlation over candidates\n(red = wired; emergent, not planted)")
 
-    # B. CellChat per-pair communication probability, wired highlighted
-    if pair_prob is not None and len(pair_prob):
-        vals = pair_prob.values
-        names = list(pair_prob.index)
-        cols = ["#d1495b" if n == wired_name else "#6c8ebf" for n in names]
-        ax[1].bar(range(len(vals)), vals, color=cols)
-        rank = (names.index(wired_name) + 1) if wired_name in names else None
-        sub = f"wired ranks #{rank}/{len(vals)}" if rank else "wired pair DROPPED by CellChat"
-        ax[1].set(xlabel="L-R pair (sorted by prob)", ylabel="communication probability (max over group pairs)",
-                  title=f"B. CellChat recoverability at Visium\n{sub} — score by prob, not p-value")
+    # E. the field-standard BUBBLE PLOT: L-R pair x sender->receiver, colour = prob, size = -log10(p)
+    if net is not None and len(net):
+        top = list(pair_prob.index[:8])
+        sub = net[net["interaction_name"].isin(top)].copy()
+        sub["route"] = sub["source"].astype(str) + "\u2192" + sub["target"].astype(str)
+        routes = sorted(sub["route"].unique())
+        pv = sub["pval"] if "pval" in sub.columns else pd.Series(0.05, index=sub.index)
+        sizes = 18 + 90 * (-np.log10(np.clip(pv.values, 1e-4, 1.0)) / 4.0)
+        xs = [routes.index(r) for r in sub["route"]]
+        ys = [top.index(n) for n in sub["interaction_name"]]
+        sp = ax[1].scatter(xs, ys, c=sub["prob"].values, s=sizes, cmap="viridis")
+        fig.colorbar(sp, ax=ax[1], fraction=0.046, label="communication probability")
+        ax[1].set_xticks(range(len(routes)))
+        ax[1].set_xticklabels(routes, rotation=90, fontsize=6)
+        ax[1].set_yticks(range(len(top)))
+        ax[1].set_yticklabels([("* " + n) if n == wired_name else n for n in top], fontsize=7)
+        ax[1].set(title="E. CellChat bubble plot (top pairs)\n(* = the wired pair; size = -log10 p)")
     else:
-        ax[1].text(0.5, 0.5, "CellChat not run\n(iscc-cellchat env absent)", ha="center", va="center")
-        ax[1].set_title("B. CellChat recoverability at Visium")
+        ax[1].text(0.5, 0.5, "CellChat not run", ha="center", va="center")
 
-    # C. the ground-truth received signal over the section (per spot, mean of member cells)
-    me = tumor.cell_data["cell_microenv"]["cci_level"]
-    members = section["members"]
-    coords = section["coords"]
-    idx = tumor.cell_data["cell_type"].index
-    lvl_by = pd.Series(me.values, index=idx)
-    spot_lvl = np.array([lvl_by.reindex(list(m)).mean() if len(m) else np.nan for m in members])
-    sc = ax[2].scatter(coords[:, 1], coords[:, 0], c=spot_lvl, cmap="magma", s=28)
-    ax[2].invert_yaxis(); fig.colorbar(sc, ax=ax[2], fraction=0.046)
-    ax[2].set(title="C. ground-truth received CCI signal per spot\n(ligand availability × receptor — W3)")
+    # F. signalling ROLE scatter: outgoing vs incoming strength per group. The planted channel makes
+    #    the emitter a pure SENDER, so it should sit hard against the outgoing axis.
+    if net is not None and len(net):
+        out_s = net.groupby("source")["prob"].sum()
+        in_s = net.groupby("target")["prob"].sum()
+        gs = sorted(set(out_s.index) | set(in_s.index))
+        ox = out_s.reindex(gs).fillna(0.0).values
+        iy = in_s.reindex(gs).fillna(0.0).values
+        cols = ["#d1495b" if g == emitter else "#6c8ebf" for g in gs]
+        ax[2].scatter(ox, iy, c=cols, s=70)
+        for g, a, b in zip(gs, ox, iy):
+            ax[2].annotate(g, (a, b), fontsize=7, xytext=(3, 3), textcoords="offset points")
+        lim = max(ox.max(), iy.max()) * 1.15 + 1e-9
+        ax[2].plot([0, lim], [0, lim], ls="--", lw=0.8, c="0.6")
+        ax[2].set(xlabel="outgoing strength (sum prob)", ylabel="incoming strength (sum prob)",
+                  title=f"F. signalling roles\n(red = '{emitter}', the planted sender)")
+    else:
+        ax[2].text(0.5, 0.5, "CellChat not run", ha="center", va="center")
 
-    fig.suptitle("W0+W3: iscc's own L-R database + receptor-dependent CCI, through real CellChat at "
-                 "Visium resolution", fontsize=12, y=1.02)
+    fig.suptitle("W0+W3: iscc's planted L-R channel (top: GROUND TRUTH) vs real CellChat at Visium "
+                 "(bottom: INFERRED)", fontsize=12, y=1.01)
     fig.tight_layout()
     fig.savefig(out, dpi=150, bbox_inches="tight")
     print("figure ->", out)
