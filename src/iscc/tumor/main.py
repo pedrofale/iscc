@@ -79,9 +79,16 @@ def build_treatment(kind, tumor, adaptive, start, duration, max_tumor_size):
 )
 @click.option("--no-diagnose", is_flag=True,
               help="Skip the built-in operating-envelope QC that warns on degenerate tumors.")
+@click.option("--no-tables", is_flag=True,
+              help="With a `schedule:` block: write ONLY the compartment trajectory, skipping the "
+                   "per-clone count tables. `isccgif --compartment` reads the trajectory alone, so "
+                   "this is all a hero render needs -- and the tables dominate both runtime and "
+                   "disk (measured on configs/landing.yaml: 68 min / 5 GB with them, 21 min / "
+                   "317 MB without).")
 @click.option("-o", "--output-path", default="./sim_out", help="Output directory.")
 def main(sim_config, steps, random_seed, batch_size, treatment_kind, adaptive,
-         treatment_start, treatment_duration, max_tumor_size, log, no_diagnose, output_path):
+         treatment_start, treatment_duration, max_tumor_size, log, no_diagnose, no_tables,
+         output_path):
     logging.basicConfig(
         level={0: logging.CRITICAL, 1: logging.INFO, 2: logging.DEBUG}.get(log, logging.CRITICAL)
     )
@@ -106,6 +113,10 @@ def main(sim_config, steps, random_seed, batch_size, treatment_kind, adaptive,
     # (which stays the default, unchanged, when there is no schedule). Only the genotype (count) engine
     # drives the metastasis compartments.
     schedule = config.get("schedule")
+    if no_tables and schedule is None:
+        raise click.ClickException(
+            "--no-tables only makes sense with a `schedule:` block: without one the trajectory is "
+            "never built, so the run would write nothing at all.")
     if schedule is not None:
         if mode != "genotype":
             raise click.ClickException(
@@ -119,10 +130,15 @@ def main(sim_config, steps, random_seed, batch_size, treatment_kind, adaptive,
         trajectory = arc_mod.build_trajectory(tumor, frames, marks, min_freq)
         traj_path = arc_mod.write_trajectory(output_path, trajectory)
 
-        tumor.write(output_path)
-        logging.info("Saved tumor (size=%d) + trajectory to %s", tumor.get_tumor_size(), output_path)
+        if no_tables:
+            logging.info("Saved trajectory only (--no-tables) to %s", output_path)
+        else:
+            tumor.write(output_path)
+            logging.info("Saved tumor (size=%d) + trajectory to %s",
+                         tumor.get_tumor_size(), output_path)
         print(f"Simulation ({mode}) finished: {tumor.get_tumor_size()} cells -> {output_path} "
-              f"[schedule: {len(frames)} frames, {len(marks)} events -> {os.path.basename(traj_path)}]")
+              f"[schedule: {len(frames)} frames, {len(marks)} events -> {os.path.basename(traj_path)}"
+              f"{'; trajectory only' if no_tables else ''}]")
     else:
         logging.info("Building %s tumor from %s", mode, sim_config)
         tumor = TUMOR_MODELS[mode](config=sim_config, seed=random_seed)
