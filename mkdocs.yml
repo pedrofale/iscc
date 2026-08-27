@@ -71,6 +71,11 @@ extra_javascript:
   - javascripts/mathjax.js
   - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
 
+# Cross-notebook links are authored as `other.ipynb` (works in Jupyter); this rewrites them
+# to the site's directory URLs at build time. See hooks/notebook_links.py.
+hooks:
+  - hooks/notebook_links.py
+
 plugins:
   - search
   - mkdocs-jupyter:
