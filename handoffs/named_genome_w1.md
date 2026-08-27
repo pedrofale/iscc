@@ -1,5 +1,15 @@
 # Handoff prompt — W1: a named genome (naming layer)
 
+> **ON HOLD — DO NOT START (2026-08-27).** Naming the abstract genome imports a prior-knowledge
+> graph the engine does not satisfy. Roles are drawn UNIFORMLY at random across the genome
+> (`selection.py`: `rng.choice([-1,0,1], p=[prop_driver/2, 1-prop_driver, prop_driver/2])`, same rate
+> on every segment) with directional effects (mutated oncogene 2x expression, mutated TSG 0.5x),
+> whereas real arms have very uneven oncogene/TSG content — which `GenomeSpec` already records and
+> which the naming layer would be importing from the same object. A role-aware mapping fixes the
+> label but not the per-arm content contradiction, and `prop_driver` is user-set, so a named genome
+> at `prop_driver=0.5` would assert that half of all human genes are cancer drivers.
+> See `DESIGN_cci_spatial.md` W1 for the narrower replacement being considered.
+
 Saved 2026-08-27. Copy the block below as the opening message of a fresh session.
 Design reference: `DESIGN_cci_spatial.md` (section **W1**). Motivation: the sCCIgen/scSpatialSIM
 comparison — see the same doc's header and `BACKLOG.md`.
