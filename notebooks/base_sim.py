@@ -429,7 +429,7 @@ def normal_totals(t):
     return np.array(prim), np.array(met)
 
 
-def grow_metastasis_tumor(seed=BASE_SEED, met_target=None, primary_cap=None, max_chemo_gens=40,
+def grow_metastasis_tumor(seed=BASE_SEED, met_target=None, primary_cap=None, max_chemo_gens=60,
                           chemo_toxicity=None, verbose=False):
     """Grow the DCIS->IDC ductal field WITH a metastatic deposit and run the full clinical arc:
 
@@ -490,7 +490,12 @@ def grow_metastasis_tumor(seed=BASE_SEED, met_target=None, primary_cap=None, max
     marks["resection"] = len(t.traces)
     _snap("pre_resection")
     t.grow(6, seed=seed, treatment=Surgery(start=t.step, site="primary"))
-    # systemic chemo run until the SUSCEPTIBLE met clones are gone (or a generation cap / cure)
+    # Systemic chemo, run until the SUSCEPTIBLE met clones are gone (or a generation cap / cure).
+    # max_chemo_gens is 60 because the loop steps TWO generations at a time and the hero's course is
+    # 120: under the proliferation kill a sensitive clone declines at its death rate rather than
+    # crashing, so it takes ~120 steps to reach zero. A cap of 40 (=80 steps) stopped with a handful
+    # of sensitive cells still alive, and those out-relapse the cost-bearing resistant clone off drug
+    # -- a purple relapse instead of the red one the panels describe.
     marks["chemo_start"] = len(t.traces)
     _snap("pre_chemo")
     # The hero's dose, read off its schedule. Only the DURATION differs: the loop below stops once

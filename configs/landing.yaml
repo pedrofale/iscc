@@ -144,16 +144,30 @@ schedule:
     - {op: grow, until: {met_cancer: 60000, total_cancer: 250000},
        phase: growth, seeded_phase: metastatic seeding}
     - {op: surgery, site: primary, settle: 3, phase: resection}
-    # SELECTIVE chemo: clear the sensitive bulk so the relapse is the resistant (red) clone. The genotype
-    # engine's kill is ADDITIVE (count.py): added_death = dosage * effectiveness * (1 - tr) * kill_rate,
-    # i.e. kill_rate is an absolute death-rate/step, NOT a multiplier. A sensitive cell (tr 0) takes the
-    # full +kill_rate/step; a resistant cell (tr~0.64) only +0.36*kill_rate. The relapse is red ONLY if the
-    # sensitive bulk is cleared to ~0 -- any survivor out-relapses the cost-bearing resistant clone off-drug
-    # and comes back purple. So the course is LONG (36 steps): the sensitive bulk clears in ~20 steps, then
-    # the extra steps eradicate the last sensitive cells while the now-uncrowded resistant subclone RE-GROWS
-    # under the drug (it is only lightly hit), so chemo ends on an essentially pure-resistant met -> red relapse.
-    - {op: chemotherapy, steps: 36, duration: 36, kill_rate: 1.5, effectiveness: 1.0,
-       toxicity: 0.12, sites: both, phase: chemotherapy}
+    # SELECTIVE chemo: clear the sensitive bulk so the relapse is the resistant (red) clone. This is
+    # THE SAME DRUG the four-escape-modes analysis uses (validation/validate_escape_modes.py):
+    # kill_mode "proliferation", kill_rate 1.0, a 120-step course. It used to be the engine's
+    # "additive" default at kill_rate 1.5, and that mode cannot tell this story at any setting --
+    # count.py::_kill_amount says so directly: an absolute hazard "SELECTS for the fast clones and the
+    # deposit regrows mid-course", and "one absolute number cannot serve clones whose birth rates
+    # differ threefold". Measured on this arc, both ends of the range fail: at the old 1.5 the deposit
+    # is ERADICATED (no relapse at all, diagnose() reports [FAIL] extinct), and raising
+    # treatment_resistant_effects to 6.0 to compensate lets resistance expand DURING the course, so
+    # there is no nadir and the relapse decays to 58% resistant.
+    #
+    # Under "proliferation" the hazard scales with the clone's OWN division rate: net = b(1-kill_rate)
+    # - death. At kill_rate 1.0 a sensitive clone declines at exactly its death rate whatever its
+    # fitness, while a resistant one (tr ~ 0.64) keeps 0.64*b - death and grows. Dividing fast stops
+    # being an escape -- which is also the biology, since cytotoxic chemo damages cells as they
+    # replicate. The course is LONG (120 steps) because that decline is steady rather than abrupt: the
+    # relapse is red ONLY if the sensitive bulk reaches ~0, since any survivor out-relapses the
+    # cost-bearing resistant clone off-drug and comes back purple.
+    #
+    # Measured with the resistance parameters above UNCHANGED: sensitive 3,851 -> 14 over the course,
+    # resistant 9 -> 24,466, a nadir of ~244 cells (94% below the pre-chemo deposit), and a relapse of
+    # 210,295 cells at 93.7% resistant -- red, and still expanding at the last frame.
+    - {op: chemotherapy, steps: 120, duration: 120, kill_rate: 1.0, kill_mode: proliferation,
+       effectiveness: 1.0, toxicity: 0.12, sites: both, phase: chemotherapy}
     # long relapse: the resistant subclone (~tens of cells post-chemo) re-expands to REFILL and grow the
     # met deposit past its pre-chemo size, so the hero ends on a large, still-expanding RED relapse.
     - {op: grow, steps: 90, phase: relapse}
