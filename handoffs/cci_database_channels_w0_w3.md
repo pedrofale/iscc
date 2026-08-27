@@ -24,8 +24,9 @@ REPO & ENV
   between calls here and has already put a commit in the wrong repository once.
 - Commit on `dev`; `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`; keep the full suite green
   (908 passed, 1 skipped). ASK BEFORE RUNNING ANY SIMULATION, one at a time (16 GB machine).
-- No CCI env exists yet. Create `iscc-cellchat` (R + CellChat), one-env-per-tool as usual; write the
-  kernelspec by hand (`IRkernel::installspec` shells out to `jupyter`, absent from those envs' PATH).
+- `iscc-cellchat` ALREADY EXISTS — CellChat 2.2.0.9001 on R 4.5.3. Do NOT rebuild it; the install was
+  awkward and the route is recorded. READ `validation/README_cellchat.md` FIRST: it is the verified
+  round-trip report and it will save you hours.
 
 WHAT EXISTS (F8, `src/iscc/tumor/models/count.py`)
 - `microenv_params = {"hypoxia": {...}, "cci": {...}}`; OFF => bit-identical output.
@@ -103,13 +104,44 @@ The classes are therefore MEASURED, not specified:
                        ligand/receptor expression and clone identity. This is W4's analysis axis.
 Report that distribution once the data exists; do not tune it.
 
-EXPORTERS (verified; do not re-derive)
-- CellChat: `interaction_input` / `complex_input` / `cofactor_input` / `geneInfo` CSVs via its
-  documented `Update-CellChatDB` path.
-- CellPhoneDB: `gene_input` / `protein_input` / `complex_input` / `interaction_input`, plus
-  `--user-interactions-only` so no real pairs leak in.
+EXPORTERS — PROVEN END TO END, constraints below are measured, not guessed
+Full report: `validation/README_cellchat.md`. Headline: CellChat accepts a wholly invented database
+over iscc-style identifiers and runs BOTH the RNA and the SPATIAL pipeline, returning our pairs. There
+is no species validation anywhere once `object@DB` is replaced.
+
+- `updateCellChatDB()` needs only `ligand` + `receptor`; it auto-fills `pathway_name`,
+  `interaction_name`, `interaction_name_2` and the cofactor columns. `geneInfo` needs only `Symbol`.
+- **THE HARD CONSTRAINT, AND IT FAILS SILENTLY.** `extractGeneSubset()` does
+  `intersect(geneSet, geneInfo$Symbol)`. Any ligand or receptor NOT in `geneInfo$Symbol` is dropped
+  with NO error — the interaction row survives, the pair simply never appears in the output. iscc MUST
+  emit `geneInfo` listing every gene its database references, and the writer MUST assert
+  `setequal(extractGene(db), expected_genes)` immediately after building. That one assertion catches
+  the entire failure class, including the worse variant where passing `gene_info = NULL` substitutes
+  the human table and silently yields zero genes.
+- **NEVER write a single-column `complex` or `cofactor` table.** R drops a 1-column data.frame to a
+  vector on `[i, ]` and CellChat dies with `no applicable method for 'select'`. Use ZERO columns or
+  two or more. This bites precisely when writing a "minimal" cofactor CSV.
+- **`annotation` must be exactly one of four strings**: `Secreted Signaling`, `ECM-Receptor`,
+  `Non-protein Signaling`, `Cell-Cell Contact`. CellChat `factor()`s against those levels, so anything
+  else becomes NA and corrupts the diffusive-vs-contact split. It is NOT auto-added.
+- CellPhoneDB: `gene_input` / `protein_input` / `complex_input` / `interaction_input` plus
+  `--user-interactions-only`. Documented but NOT round-trip tested — do CellChat first.
 - COMMOT takes an L-R dataframe directly — ASSUMED, not verified.
 - Strict 1:1 pairs; empty complex/cofactor tables. No complexes in v1.
+
+SPATIAL MODE — WORKS, AND HAS ITS OWN DEMANDS
+Verified on a 440-spot Visium-like hex grid in micrometres. The geometry genuinely bites: two groups
+381 um apart scored exactly 0 against a 250 um contact range.
+- Inputs: a 2-column `coordinates` (renamed to `x_cent`/`y_cent`), `spatial.factors` with BOTH `ratio`
+  and `tol` (`ratio=1` if authoring in um, `tol=spot.size/2`), `meta$samples` as a FACTOR, and one of
+  `contact.range` / `contact.knn.k` — `computeCommunProb` errors on its own defaults otherwise.
+- **UNITS ARE A REAL DECISION FOR US.** `scale.distance` is coupled to the coordinate units and needs
+  the minimum scaled distance >= 1. iscc's Visium coordinates are in DEME units, not um. Either emit
+  micrometres (the project anchors a deme at ~20-25 um) or recompute `scale.distance` for deme units.
+  Decide it explicitly and write it down; it fails loudly and suggests a value, so it will not slip
+  through silently, but it will waste time.
+- `netVisual(..., layout="spatial")` is BROKEN upstream in 2.2.0.9001 (passes an `idents.use` that is
+  not one of its formals). Use `netVisual_aggregate(..., layout="spatial")`.
 
 GROUND TRUTH (extend `microenv_truth`)
 The candidate database, which pair is wired, per-cell received signal, and each cell's clone.
@@ -119,8 +151,12 @@ DONE
 - Receptor-dependence wired; F8 OFF still bit-identical, growth still byte-identical ON.
 - The measured clone-correlation distribution over candidates, reported.
 - A MINIMAL RECOVERABILITY CHECK, not the full benchmark: on a Visium dataset with one channel
-  planted, does CellChat rank the wired pair above the unwired ones at all? If not, STOP and report —
-  everything downstream depends on the signal being visible at spot resolution.
+  planted, does CellChat rank the wired pair above the unwired ones? SCORE BY `prob`, NOT by
+  significance — communication probability is computed on GROUP-AVERAGED expression, so any non-zero
+  expression floor gives every group pair a non-zero, "significant" edge. A dense, all-significant
+  network is the expected background here, and p-values will not discriminate. If the wired pair does
+  not outrank the unwired ones by probability, STOP and report: everything downstream depends on the
+  planted signal being visible at spot resolution.
 - Tests + a `validation/` script and figure in the existing style. Update DESIGN_cci_spatial.md and
   BACKLOG.md with what was actually built.
 
