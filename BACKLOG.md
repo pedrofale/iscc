@@ -666,6 +666,44 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   gate on whether the CNA-caller/Numbat results need GISTIC-peak resolution).
 
 ## Engine / inference follow-ups
+- **NEXT — origin_confinement's stated trigger and its actual trigger are different things, and the
+  DCIS->IDC cascade is over before the tumour is visible.** `configs/landing.yaml` describes the
+  biology as "a lumen founder is confined (DCIS) until a subclone evolves breach and invades the
+  permissive stroma (IDC), where stromal_survival is then selected". The engine does not do that:
+  `count.py::_origin_tick` is a pure CLOCK — fill the acinus to `established_at`, count
+  `generations` (1200), release. No genotype enters the decision. `breach_gated_invasion` is a
+  SEPARATE gate on duct->stroma crossing; a cell released by the clock can colonise other ducts via
+  `cross_gland_kappa` without ever carrying breach.
+  MEASURED on the hero arc: proliferation appears at trace 3, **stromal survival at 7, breach at 23**
+  — so the trait that is supposed to be selected in the stroma AFTER invasion arrives BEFORE the one
+  that permits invasion, and both arise inside a sealed ~50-cell acinus where neither can be under
+  selection. By trace 400 the primary is 100% stromal-staged and stays there; the animation starts at
+  trace 1663. 83.6% of the arc sits under 200 primary cells.
+  The costs are NOT the problem and cannot fix it. `proliferation_cost` charges
+  `1 - cost x level` everywhere with the benefit gated to the compartment, and one heterozygous
+  mutation gives the FULL effect (`trait = 1 - 1/effect**(2*n_mut/ploidy)`), so a single
+  stromal_survival hit costs 32.7% of division and a breach hit 38.6%. At Ne~50 that is s >> 1/Ne and
+  should be purged. It is not, because in an asexual bottleneck the unit of selection is the whole
+  genome: a trait only has to cost less than the driver it happens to sit beside, and 1200
+  generations at Ne~50 is many sequential total sweeps.
+  REDUCING THE TRAIT TARGET WAS TESTED AND DOES NOT WORK (2026-08-27). `prop_breach` /
+  `prop_stromal_survival` 0.02 -> 0.005 -> 0.0013 (120 -> 30 -> 7 genes each): a 15x cut moved
+  stromal fixation from ~generation 400 to ~600, out of 1200 — it changes how many carriers appear,
+  not whether one fixes. Worse, the 4x cut let a single treatment-resistance mutation hitchhike to
+  fixation and repaint the whole primary RED before any drug exists, because `stage_of` ranks
+  resistance highest. Suppressing one trait just hands the paint to another.
+  OPTIONS, none costed: (a) release the acinus on BREACH rather than a generation count, so the gate
+  does what the config says — but breach appears at trace 23, so a naive trigger deletes the DCIS
+  phase and the truncal layer with it; variants are release-on-established-frequency, require a
+  higher breach LEVEL (2+ mutations), or a conjunctive gate `max(trunk-building time, time-to-breach)`;
+  (b) shorten `generations` — same dial that builds the clonal trunk, so it trades against the clonal
+  VAF peak; (c) threshold `stage_of` on trait LEVEL rather than presence — a viz-only change that
+  targets the real mismatch (binary colour, continuous cost) but does nothing if the fixed population
+  is uniform.
+  MEASURE FIRST: with breach at ~0% in the 15x run the tumour still reached 60k, which suggests most
+  growth is duct-to-duct colonisation rather than stromal invasion — i.e. breach may not be gating
+  much today. The stroma-vs-duct split decides whether (a) changes the timeline or the tumour's whole
+  shape. Cheap probe. Held by user 2026-08-27.
 - **NOW — two chemotherapy laws are in use across the paper's figures.** `kill_mode="proliferation"`
   is set in exactly ONE place, `validation/validate_escape_modes.py:66` (with `kill_rate=1.0`,
   `chemo_steps=120`). Every other treatment in the repo takes the `"additive"` default:
