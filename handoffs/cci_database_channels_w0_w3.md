@@ -57,9 +57,30 @@ This is load-bearing: every tool in this space scores L-R pairs, so without rece
 are tested on a signal that is not in the data. It is also why Visium needs no W2 — per-cell response
 heterogeneity comes from the receptor term, not from cell positions.
 
-PLAN FOR ONE STRUCTURAL CONSEQUENCE: the ligand term stays per-deme but the receptor term is per-cell,
-so the effective modifier is per-cell x gene. Apply it in place against the existing cells x genes
-matrix; do NOT build a second full matrix.
+WHERE IT GOES (checked; this is a SMALL change, do not make it big)
+Materialisation already loops over (deme_idx, gid) at ~L3188-3200 and does
+`exp_row = exp_cache[gid] * deme_mod[deme_idx]`, caching the result in `mod_exp_cache[(deme_idx, gid)]`.
+Expression is cached PER GENOTYPE, so the receiver's receptor level is just `exp_cache[gid][receptor]`
+— already in scope in that loop. There is NO per-cell x gene matrix and none needs building.
+
+  keep hypoxia as a genuine per-deme row;
+  make the CCI factor a per-(deme, genotype) SCALAR:
+      f = 1 + strength * ligand_avail[deme_idx] * receptor_level[gid]
+      exp_row = exp_cache[gid] * hypoxia_mod[deme_idx]
+      exp_row[cci_targets] *= f
+`mod_exp_cache` already has exactly this granularity, so memory does not move.
+
+THE ONE THING THAT NEEDS CARE — NORMALISATION.
+`strength` is an ALREADY-CALIBRATED knob. Today `_cci_field` returns a smoothed density in [0,1] (a
+fraction of carrying capacity), which is what gives `strength` a stable meaning. Weighting by raw
+ligand expression and multiplying by raw receptor expression breaks that bound and SILENTLY RESCALES
+`strength`, so its existing validation no longer applies. Normalise both terms back to [0,1]-ish —
+dividing each by its mean across genotypes is the obvious choice — and state the choice in the
+docstring. This is a definition, not a new parameter, but getting it wrong invalidates calibration
+without any test failing.
+
+SECOND, SMALLER: the allele-resolved path at ~L3200 (`exp_p_cache` / `exp_m_cache` * `mod_row`) needs
+the same factor applied, or the allele layer and the total layer disagree whenever F8 is on.
 
 START WITH ONE WIRED CHANNEL. Multiple typed channels can wait until one is shown to work.
 
