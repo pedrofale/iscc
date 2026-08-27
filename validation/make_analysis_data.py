@@ -636,9 +636,29 @@ def _cohort(out_dir, seed, scale, n_clones):
     return meta
 
 
+def _escape_modes(out_dir, seed, scale, n_clones):
+    """The four Kane/Maley modes of therapeutic escape — one ``.npz`` per mode.
+
+    Each panel is a whole metastatic arc (grow → seed → dose → relapse) under a different resistance
+    genetics, so this is by far the most expensive dataset here. Panels already on disk are reused;
+    delete one to force it to re-run. The panel definitions live in ``validate_escape_modes.py`` —
+    this generator only redirects them into ``analysis_data`` so the notebook loads its input the
+    same way every other analysis notebook does.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import validate_escape_modes as VEM
+
+    for panel in VEM.PANELS:
+        VEM._load(panel, cache_dir=out_dir)
+    json.dump({"modes": [p["key"] for p in VEM.PANELS]},
+              open(os.path.join(out_dir, "meta.json"), "w"), indent=2)
+    return {"modes": len(VEM.PANELS)}
+
+
 DATASETS = {"clonealign": _clonealign, "numbat": _numbat,
             "rctd": _rctd, "treemhn": _treemhn, "mhn": _mhn, "cohort": _cohort,
-            "dna": _dna}
+            "dna": _dna, "escape_modes": _escape_modes}
 
 # Per-dataset seed overrides. These notebooks demonstrate that iscc's output is AMENABLE to the real
 # tools, so each dataset uses a tumour where the signal the tool reads is actually present. That is a

@@ -20,7 +20,6 @@ notebooks/example_out/
 # per-gene autocorrelation + clone/tree stats only, ~6 KB each; like the DNA dna_ref_*.npz).
 validation/data/_cache/
 validation/data/**/__pycache__/
-validation/.cache_escape_modes/
 
 # LaTeX build artifacts
 manuscript/*.aux

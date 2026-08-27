@@ -220,9 +220,13 @@ def _generation_index(gen_row, n):
     return trace_gen
 
 
-def _load(panel, force=False):
-    os.makedirs(CACHE, exist_ok=True)
-    path = os.path.join(CACHE, f"{panel['key']}.npz")
+def _load(panel, force=False, cache_dir=None):
+    """Run (or reuse) one panel. ``cache_dir`` overrides :data:`CACHE` so
+    ``make_analysis_data.py`` can write the panels straight into ``analysis_data/escape_modes``,
+    where every other analysis notebook looks for its input."""
+    cache = cache_dir or CACHE
+    os.makedirs(cache, exist_ok=True)
+    path = os.path.join(cache, f"{panel['key']}.npz")
     if os.path.exists(path) and not force:
         z = np.load(path, allow_pickle=True)
         return {k: z[k] for k in z.files}
