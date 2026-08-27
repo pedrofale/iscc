@@ -228,8 +228,8 @@ def test_compartment_render_produces_valid_gif(tmp_path, arc_run, splash):
 
 # --- CLI: isccsim schedule -> trajectory, then isccgif --compartment --------------------------
 @pytest.fixture(scope="module")
-def sim_out(tmp_path_factory):
-    """Run the isccsim schedule CLI once and return its output dir."""
+def landing_cfg_path(tmp_path_factory):
+    """The small arc config, written once — shared by the plain and --no-tables CLI runs."""
     cfg = {
         "mode": "genotype", "update_mode": "tau", "tau": 1.0, "snapshot_every": 1,
         "genome_params": GENOME_PARAMS, "selection_params": SEL,
@@ -239,6 +239,14 @@ def sim_out(tmp_path_factory):
     d = tmp_path_factory.mktemp("landing")
     cfg_path = str(d / "landing.yaml")
     yaml.safe_dump(cfg, open(cfg_path, "w"))
+    return cfg_path
+
+
+@pytest.fixture(scope="module")
+def sim_out(tmp_path_factory, landing_cfg_path):
+    """Run the isccsim schedule CLI once and return its output dir."""
+    cfg_path = landing_cfg_path
+    d = tmp_path_factory.mktemp("landing_out")
     out = str(d / "out")
     r = CliRunner().invoke(sim_main, ["--sim-config", cfg_path, "-o", out], catch_exceptions=False)
     assert r.exit_code == 0, r.output
@@ -251,6 +259,35 @@ def test_isccsim_schedule_writes_trajectory_and_layout(sim_out):
     # the canonical layout is still written so downstream isccsample/isccdata work
     assert {"cell_data", "gene_data", "parents.csv", "trace_counts.csv"} <= files
     assert "events.csv" in files          # the seeding/resection annotations
+
+
+def test_no_tables_keeps_the_trajectory_and_drops_the_count_tables(tmp_path, landing_cfg_path):
+    """--no-tables is what makes the hero reproducible in minutes rather than an hour: on
+    configs/landing.yaml the count tables are 47 of the 68 minutes and 4.7 of the 5 GB, and
+    `isccgif --compartment` never reads them."""
+    out = str(tmp_path / "out_no_tables")
+    r = CliRunner().invoke(sim_main, ["--sim-config", landing_cfg_path, "-o", out, "--no-tables"],
+                           catch_exceptions=False)
+    assert r.exit_code == 0, r.output
+    files = set(os.listdir(out))
+    assert arc.TRAJECTORY_FILE in files                      # what the renderer reads
+    assert not {"trace_counts.csv", "parents.csv"} & files   # what it does not
+    # and the trajectory is still renderable
+    traj = arc.read_trajectory(out)
+    assert traj["frames"] and traj["marks"]
+
+
+def test_no_tables_is_refused_without_a_schedule(tmp_path):
+    """Without a schedule there is no trajectory, so --no-tables would write nothing at all."""
+    cfg = {"mode": "genotype", "genome_params": GENOME_PARAMS,
+           "selection_params": SEL, "cell_params": {"cancer": CANCER_CELL_PARAMS},
+           "deme_params": DEME, "spatial_params": SPATIAL}
+    cfg_path = str(tmp_path / "no_schedule.yaml")
+    yaml.safe_dump(cfg, open(cfg_path, "w"))
+    r = CliRunner().invoke(sim_main, ["--sim-config", cfg_path, "-o", str(tmp_path / "o"),
+                                      "--no-tables", "-s", "2"])
+    assert r.exit_code != 0
+    assert "only makes sense with a `schedule:` block" in r.output
 
 
 @pytest.mark.parametrize("splash", [True, False])
