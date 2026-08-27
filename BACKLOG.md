@@ -686,6 +686,22 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   docstring predicts, at each end of the range.
   DECIDE which law each result should use. `cohort_common` and `validate_treatment` feed published
   figures, so this is not a mechanical find-and-replace. Found 2026-08-27 while re-rendering the hero.
+  RESOLVED FOR THE HERO 2026-08-27 (`fe6e498`): `configs/landing.yaml` adopts the escape-modes drug
+  wholesale, so the split is now 4-vs-2. `cohort_common`, `validate_treatment` and
+  `02_tumor_growth.ipynb` are still on additive.
+- **NOW — the "How treatment acts on cells" tutorial teaches the OTHER engine's formula.**
+  `notebooks/02_tumor_growth.ipynb` (cells 11-13) tells the reader that chemotherapy "raises a cancer
+  cell's death rate by a factor `rate_multiplier ** (1 - treatment_resistance)`" and plots that curve
+  with `rate_multiplier=5.0`. That is the CELL engine's law (`iscc/treatment/chemotherapy.py::_apply`).
+  Every tutorial in the docs runs `mode: genotype` (`notebooks/example_config.yaml:38`), and the count
+  engine never reads `rate_multiplier` at all — it uses `kill_rate` through `_kill_amount`, whose own
+  docstring says "the CELL engine is a THIRD model, not either of these ... The two engines therefore
+  do NOT agree under treatment."
+  So the one page that explains how treatment works explains a mechanism the reader's own simulations
+  do not use, and tunes a parameter they ignore. The notebook does not actually dose its tumour (cell
+  13 says so), which is why no output ever contradicted the text.
+  Fix depends on the decision above — teach whichever law the genotype engine is settled on — and
+  needs a re-execution. Found 2026-08-27 during the notebook consistency pass.
 - **NEXT — the driver layout is uniform across arms, but `s_arm` is inferred against arm content
   that is not.** `selection.py` draws driver roles with
   `rng.choice([-1,0,1], p=[prop_driver/2, 1-prop_driver, prop_driver/2])` — the SAME rate on every
