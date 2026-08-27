@@ -49,8 +49,9 @@ metastasis, and a resistant clone relapses after chemotherapy. It is reproducibl
 
 ```bash
 # 1. run the whole clinical arc (grow -> resect the primary -> chemo -> relapse) and write the
-#    compartment trajectory the renderer consumes
-isccsim --sim-config configs/landing.yaml -o out
+#    compartment trajectory the renderer consumes. --no-tables writes ONLY that trajectory, which
+#    is all the renderer reads; drop it if you also want to run isccsample / isccdata on the result.
+isccsim --sim-config configs/landing.yaml -o out --no-tables
 
 # 2. fully-labelled version (use --splash to drop the annotations as in the home page)
 isccgif out --compartment -o landing_full.gif
