@@ -495,10 +495,16 @@ def grow_metastasis_tumor(seed=BASE_SEED, met_target=None, primary_cap=None, max
     _snap("pre_chemo")
     # The hero's dose, read off its schedule. Only the DURATION differs: the loop below stops once
     # the susceptible clones are gone, where the hero runs a fixed course.
+    # kill_mode and mutagenicity are forwarded too, and their defaults are arc.py's, so a change to
+    # the hero schedule reaches this notebook. Forwarding only kill_rate/effectiveness/sites would
+    # have left the notebook silently on a different kill LAW from the animation it derives from --
+    # which is exactly the split BACKLOG records between the escape-modes figure and everything else.
     chemo = Chemotherapy(start=t.step, duration=10 ** 6,
                          kill_rate=RR.MET_CHEMO.get("kill_rate", 1.5),
-                         effectiveness=RR.MET_CHEMO.get("effectiveness", 1.0),
-                         toxicity=chemo_toxicity, sites=RR.MET_CHEMO.get("sites", "both"))
+                         effectiveness=RR.MET_CHEMO.get("effectiveness", 0.9),
+                         toxicity=chemo_toxicity, sites=RR.MET_CHEMO.get("sites", "both"),
+                         kill_mode=RR.MET_CHEMO.get("kill_mode", "additive"),
+                         mutagenicity=RR.MET_CHEMO.get("mutagenicity", 1.0))
     for k in range(max_chemo_gens):
         if met_cancer(t) == 0:
             break                                             # cured
