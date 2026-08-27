@@ -47,12 +47,33 @@ def cnmf_available():
 # program layer is ON with defaults that keep within-clone heterogeneity healthy (so `clone == state`
 # never trivialises the benchmark — see tumor.diagnose()'s `clone_is_state` check).
 GENOME = {"n_segments": 10, "segment_size": 40}          # 400 genes over 10 "chromosomes"
+# The resistance/dispersal props are NON-ZERO on purpose. Route 1 maps each evolved phenotype to a
+# program, but a phenotype that never varies drives nothing: with all three at 0 the only live route
+# was division_rate -> proliferation, and division rate is exactly what selection maximises in EVERY
+# patient, so program activity converged by construction and no program was patient-specific. With
+# them on, patients differ in WHICH traits their clones evolved, which is what makes some programs
+# shared and others patient-specific -- emergent from each patient's own evolution, not planted.
+# NOTE: GENOME / SELECTION / CANCER / DEME / SPATIAL below are the LEGACY toy rig. `grow_tumor` no
+# longer uses them — it grows the realistic ductal field. They are kept only for callers that still
+# reference them directly, and the invented prop_dispersal / prop_treatment_resistance values that
+# were briefly set here are reverted: the realistic field has both at 0.0 and gets its trait
+# diversity from breach / stromal_survival instead.
 SELECTION = {"prop_driver": 0.2, "prop_dispersal": 0.0, "prop_immune_resistance": 0.0,
              "prop_treatment_resistance": 0.0}
 DEME = {"carrying_capacity": 8, "initial_cancer_cells": 8}
 SPATIAL = {"grid_size": 16, "structure_radius": 0}       # cancer only: programs, not cell types
+# mutation_rate 0.05, not 1.0. At 1.0 mutation outran expansion: 879 cells over 741 genotypes, 86%
+# singletons, largest clone 0.6% of the tumour -- `diagnose()` reported n_subclones=0. Selection was
+# working (driver enrichment above 1), but a favoured GENOTYPE could not persist long enough to
+# expand, because its own offspring kept mutating away from it. Selection expands LINEAGES;
+# n_subclones counts GENOTYPES, and a high mutation rate decouples the two. At 0.05 the sweep lands:
+# top clone 26% of cells, top ten 43%, 18 subclones, diversity still healthy (shannon 4.25), and the
+# tumour grows LARGER (1,353 vs 879) because the mutation load was suppressing growth too.
 CANCER = {"division_rate": 0.6, "death_rate": 0.03, "max_birth_rate": 0.98,
-          "mutation_rate": 1.0, "dispersal_rate": 0.4}
+          "mutation_rate": 0.05, "dispersal_rate": 0.4}
+
+PROGRAM_TARGET_CANCER = 20_000   # cancer cells per patient on the ductal field
+MAX_CELLS = 4_000                # bounded materialised subsample per patient
 
 N_PROGRAMS = 6
 PROGRAM_PARAMS = {"n_programs": N_PROGRAMS, "n_genes_per_program": 25, "program_overlap": 0.1,
@@ -60,7 +81,17 @@ PROGRAM_PARAMS = {"n_programs": N_PROGRAMS, "n_genes_per_program": 25, "program_
                   "program_genomic_scatter": 1.0}
 ACTIVITY_PARAMS = {"n_active_programs_per_cell": 3, "activity_dist": "lognormal",
                    "activity_mean": 1.0, "activity_sd": 0.5, "activity_noise": 0.2}
-COUPLING_PARAMS = {"phenotype_program_strength": 0.5}
+# Route 3 (niche -> program) is HELD until the CCI work lands: switching F8 on drove the hypoxia
+# program hard (0.50 -> 1.25 activity) but EQUALLY in every patient (between-patient spread 0.056,
+# the smallest of the six), because identical growth parameters give every patient the same hypoxia
+# burden. It is not the lever for shared-vs-patient-specific expression. See DESIGN_cci_spatial.md.
+# 2.0, not the 0.5 default: at 0.5 the coupling was too weak to turn trait differences into program
+# differences (between-patient spread barely moved even with the props on). Measured over the
+# 5-patient cohort, mean spread across the six programs: 0.101 at 0.5 with no props, 0.244 at 2.0
+# with them. The opposite failure -- programs becoming a deterministic readout of clone, which
+# diagnose() flags as `clone_is_state` below a 0.05 within-clone variance share -- is nowhere near:
+# the share is 0.706 at 2.0 (and still 0.474 at 4.0), so cells within a clone stay heterogeneous.
+COUPLING_PARAMS = {"phenotype_program_strength": 2.0}
 
 
 def expression_params(scatter=1.0):
@@ -74,11 +105,24 @@ def expression_params(scatter=1.0):
                                   "snv_expression_effect": 0.5}}
 
 
-def grow_tumor(seed=1, steps=12000, mutation_rate=None, cnv_prob=None, amp_prob=None,
-               scatter=1.0, n_snvs_per_allele=None):
-    """Grow one tumour at a given SNV/CNA burden with the program layer on."""
-    from iscc.tumor.models import GenotypeTumor
-    cancer = dict(CANCER)
+def grow_tumor(seed=1, steps=None, mutation_rate=None, cnv_prob=None, amp_prob=None,
+               scatter=1.0, n_snvs_per_allele=None, scale="mid", target_cancer=None):
+    """Grow one REALISTIC breach-gated ductal-field tumour with the program layer on.
+
+    This used to grow a bespoke toy rig defined by this module's own GENOME / SPATIAL / DEME / CANCER
+    / SELECTION constants — a flat cancer-only mass, grid 16, 400 genes — while
+    `make_analysis_data.py` printed "regime=realistic" for it. That was the CLI argument, not the
+    substrate, and it made this the ONE tool dataset not on the calibrated field.
+
+    It matters beyond tidiness. The toy rig sets `structure_radius=0`, so it has no glands — and
+    without glands the `breach` / `stromal_survival` traits cannot exist. Those are precisely where
+    the realistic field's trait diversity lives (`prop_breach` 0.02 at effect 2.8 with cost 0.6, and
+    `prop_stromal_survival` 0.02 at 2.2/0.6 — a go-or-grow trade-off), and `breach -> emt` is already
+    in `DEFAULT_PHENOTYPE_PROGRAM_MAP`. So on the real field, patients differ in when and how far
+    they break out, and that reaches the programs through route 1 with nothing added.
+    """
+    import realistic_regime as RR
+    cancer = {}
     if mutation_rate is not None:
         cancer["mutation_rate"] = mutation_rate
     if n_snvs_per_allele is not None:
@@ -88,11 +132,11 @@ def grow_tumor(seed=1, steps=12000, mutation_rate=None, cnv_prob=None, amp_prob=
         cancer["snv_prob"] = 1.0 - cnv_prob
     if amp_prob is not None:
         cancer["amp_prob"] = amp_prob
-    t = GenotypeTumor(seed=seed, genome_params=GENOME, selection_params=SELECTION,
-                      cancer_cell_params=cancer, deme_params=DEME, spatial_params=SPATIAL,
-                      expression_params=expression_params(scatter))
-    t.grow(n_steps=steps, seed=seed)
-    return t
+    return RR.grow_realistic(seed=seed, scale=scale,
+                             target_cancer=target_cancer or PROGRAM_TARGET_CANCER,
+                             cancer=cancer or None,
+                             expression=expression_params(scatter),
+                             materialise=True, max_cells=MAX_CELLS)
 
 
 def counts_anndata(tumor, seed=0, max_cells=600, protocol="10x"):
