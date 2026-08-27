@@ -119,26 +119,30 @@ put W1 on hold arise.
   interactions, so no real pairs leak in. This is the flag that makes the substitution total.
 - **COMMOT** takes an L–R dataframe directly — **NOT verified**; treat as an assumption until checked.
 
-**The database is the instrument, and it needs decoys.** A database containing only the planted
-channels makes recovery trivial: there is nothing to discriminate. CellChatDB carries ~2,000 human
-interactions of which a handful are active in any given tissue, and a benchmark has to reproduce that
-selection problem. So the emitted database holds N candidate pairs of which only K are wired into F8,
-in three deliberate classes:
+**The database is the instrument, and it needs candidates — but the classes are MEASURED, not
+planted (revised 2026-08-27).** A database holding only the wired pair makes recovery trivial, so it
+must hold `n_candidate_pairs` of which few are wired. But an earlier draft of this section proposed
+*engineering* three classes, including "clone-confounded decoys" placed deliberately on clone-varying
+segments. That was wrong on two counts: it multiplied parameters that would each need justifying, and
+it would have written the confound INTO the generative model — the exact thing the paper's synthesis
+says iscc does not do ("a by-product ... not a term written into the generative model to be recovered
+later").
 
-1. **Active channels** — wired into F8; genuinely spatially driven signalling.
-2. **Neutral decoys** — ligand and receptor genes exist and are expressed comparably, but there is no
-   downstream effect. These measure the false-positive rate against expression alone.
-3. **Clone-confounded decoys** — ligand/receptor expression co-varies with CLONE, and therefore with
-   space (clones are territorial), but no signalling exists. **These are the traps.** A method blind
-   to clonal relatedness should call them.
+The confound is emergent and free. Draw candidate pairs at random from the gene pool: some land on
+segments whose copy number differs between clones, so their expression correlates between neighbouring
+cells purely because neighbours share a clone. No signalling, no planting. The classes then fall out
+as an OBSERVATION on the generated data:
 
-The W4 score is then: can the method separate class 1 from class 3? That is the confound benchmark,
-and this database structure is what makes it constructible. No CCI simulator without clones can build
-class 3 — which is precisely the gap against sCCIgen.
+- **active** — the pair(s) actually wired into F8. Known by construction.
+- **candidate** — everything else in the database. A neutral decoy needs no engineering; it is simply
+  an unwired pair.
+- **clone-correlated** — measured per candidate after the fact, as the correlation between its
+  ligand/receptor expression and clone identity. This is W4's analysis axis, not a knob.
 
-**Hard constraint.** Decoy ligand/receptor genes MUST be expressed comparably to the active ones. If
-they are silent or flat they are rejected on expression grounds rather than on communication
-evidence, and the benchmark measures nothing.
+**Parameter cost: one integer** (`n_candidate_pairs`). Everything else reuses F8's existing
+`emitter_type` / `lengthscale` / `strength` / `n_target_genes`, which are already justified. Start
+with ONE wired channel; multiple typed channels add discriminative richness and can wait until one is
+shown to work.
 
 **Caveat to state in the paper, not to discover in review.** Supplying our own database means we test
 the tools' statistical and spatial inference, NOT their curated prior knowledge (pathways, complexes,
