@@ -94,9 +94,14 @@ def EXPR():
     return e
 
 
-def _n_cancer(t):
+def n_cancer(t):
     """Number of live cancer cells across the genotype counts."""
     return int(sum(c for g, c in t.genotypes_counts.items() if c > 0 and t._is_cancer(g)))
+
+
+def cancer_clones(t):
+    """Number of distinct live CANCER genotypes — the clones an analysis would try to resolve."""
+    return int(sum(1 for g, c in t.genotypes_counts.items() if c > 0 and t._is_cancer(g)))
 
 
 def grow_base_tumor(seed=BASE_SEED, target_cancer=80000, cancer_params=None, expression=None,
@@ -223,6 +228,14 @@ def cell_epithelial_fraction(t):
 
 
 # ------------------------------------------------------------------ spatial-viz helpers (ductal field)
+def stage_palette(t):
+    """``(clone_colors, color_legend)`` keyed by stage-dominant driver — the SAME palette the
+    ``by_stage=True`` Muller plots use, so a clone keeps one colour across Mullers and grids."""
+    from iscc.tumor import viz
+    colors, present = t._stage_colors()
+    return colors, viz.stage_legend(present)
+
+
 def draw_glands(ax, t, color="k", ls="--", lw=0.8, alpha=0.5):
     """Overlay every gland's epithelial-ring circle (centre + ``gland_radius``) on a spatial axes."""
     if t.gland_centers is None:
@@ -373,22 +386,15 @@ def thin_section(t, per_deme_cap=8, seed=0):
 # axis, and runs the full clinical arc:  grow -> seed -> resect -> chemo -> relapse.
 # ==================================================================================================
 
-# On top of the base DCIS->IDC config: the met deposit + establishment axis, and RARE + STRONG
-# treatment resistance (one resistance mutation flips survival) so systemic chemo cleanly partitions
-# susceptible vs resistant clones instead of leaving a graded, half-resistant smear.
-MET_SELECTION = {"prop_met_survival": 0.06, "met_survival_effects": 2.5,
-                 "prop_treatment_resistance": 0.005, "treatment_resistant_effects": 4.0}
-# A LOWER mutation load for the arc (than the base >=10k config): resistance genes still exist in the
-# layout, but a clone rarely ACQUIRES one, so the met is mostly SUSCEPTIBLE before chemo — chemo then
-# crashes it to a rare resistant remnant that relapses (instead of a met that is already resistant).
-# It also keeps the clone count legible for the Muller.
-MET_CANCER = {"mutation_rate": 0.35, "n_snvs_per_allele": 0.15}
-# The arc is a legibility demo, so it grows a SMALLER field than the >=10k base config (fewer/smaller
-# glands, lower seeding rate for a cleaner founder read) — identical mechanism, just quicker.
-MET_SPATIAL = {"grid_size": 24, "structure_radius": 3, "gland_radius": 3, "min_gland_sep": 7,
-               "K_duct": 36, "K_stroma": 22,
-               "met_grid_size": 11, "K_met": 16, "host_fill_frac": 0.35,
-               "met_seed_kappa": 0.04, "met_hazard": 0.45, "met_transit_floor": 0.02}
+# The met deposit + establishment axis and the treatment-resistance axis, taken STRAIGHT from
+# ``configs/landing.yaml`` -- the clinical arc that renders the docs hero -- via
+# ``realistic_regime``, which derives them as a diff against the base config. The arc used to grow
+# its own small field (grid 24, a 11-deme deposit) with its own mutation load; it now runs the SAME
+# grid-170 breach-gated ductal field as every other science notebook, so the metastasis story and the
+# hero animation are the same simulation with the same numbers.
+MET_SELECTION = dict(RR.MET_SELECTION)
+MET_CANCER = dict(RR.MET_CANCER)          # empty: the arc uses the tutorial's cancer cell unchanged
+MET_SPATIAL = dict(RR.MET_SPATIAL)        # the second (met) grid only -- the primary stays grid 170
 
 
 def compartment_cancer(t):
@@ -423,24 +429,36 @@ def normal_totals(t):
     return np.array(prim), np.array(met)
 
 
-def grow_metastasis_tumor(seed=BASE_SEED, met_target=220, primary_cap=3200, max_chemo_gens=40,
-                          chemo_toxicity=0.1, verbose=False):
+def grow_metastasis_tumor(seed=BASE_SEED, met_target=2000, primary_cap=100000, max_chemo_gens=40,
+                          chemo_toxicity=0.12, verbose=False):
     """Grow the DCIS->IDC ductal field WITH a metastatic deposit and run the full clinical arc:
 
         grow (DCIS->IDC)  ->  seed the met  ->  resect the primary  ->  systemic chemo (which also
         kills off-target normal tissue) run UNTIL the susceptible clones are eliminated  ->  relapse of
         the surviving resistant clones.
 
-    Reuses the base GENOME / CANCER / DEME / SELECTION + the compartment axes, adding MET_SELECTION and
-    MET_SPATIAL. Returns ``(tumour, marks)`` with ``marks`` a dict of snapshot indices
+    Runs on the SAME grid-170 realistic field as every other science notebook, with the metastasis
+    and treatment axes of ``configs/landing.yaml`` (MET_SELECTION / MET_SPATIAL / MET_CANCER) — the
+    hero animation's arc. It differs from the hero in WHEN it stops, not in what it simulates: the
+    hero runs a fixed 36-step course to a fixed size, this stops adaptively once the susceptible
+    clones are gone, which keeps the notebook interactive and makes the response legible.
+
+    Returns ``(tumour, marks)`` with ``marks`` a dict of snapshot indices
     {seeding, resection, chemo_start, chemo_end} for annotating the Muller plots."""
     from iscc.tumor.models import GenotypeTumor
     from iscc.treatment import Surgery, Chemotherapy
     spatial = {**SPATIAL, **MET_SPATIAL}
     selection = {**SELECTION, **MET_SELECTION}
+    # max_cells=1 during the arc: grow() force-materialises cell_data at the end of EVERY call, so
+    # at grid 170 the old uncapped constructor rebuilt a full cell table on each of ~40 iterations.
+    # The real cap is restored for the single materialisation at the end (same trick as
+    # realistic_regime.grow_realistic). The per-deme snapshots below read t.demes, not cell_data,
+    # so they are unaffected.
     t = GenotypeTumor(seed=seed, genome_params=GENOME, selection_params=selection,
                       cancer_cell_params={**CANCER, **MET_CANCER}, deme_params=DEME,
-                      spatial_params=spatial, update_mode="tau", tau=1.0)
+                      spatial_params=spatial, update_mode="tau", tau=RR.TAU,
+                      coarsen_passengers=RR.COARSEN, max_cells=1,
+                      founder_mutations=RR.FOUNDER_MUTATIONS, germline_params=RR.GERMLINE)
     marks = {}
     # per-deme spatial snapshots at each stage of the arc (the traces only hold COUNTS, so the spatial
     # composition has to be captured as we go) -> attached as t.arc_snapshots for plot_clone_grid_series.
@@ -453,7 +471,10 @@ def grow_metastasis_tumor(seed=BASE_SEED, met_target=220, primary_cap=3200, max_
         p, m = compartment_cancer(t)
         if m >= met_target or p + m >= primary_cap:
             break
-        t.grow(2, seed=seed)
+        # Adaptive stepping, as in grow_realistic: coarse leaps while the field is far from full,
+        # single steps near the stop, so a grid-170 lesion gets there without a huge overshoot.
+        ratio = (p + m) / primary_cap
+        t.grow(8 if ratio < 0.15 else 3 if ratio < 0.6 else 2 if ratio < 0.9 else 1, seed=seed)
         if "seeding" not in marks and met_cancer(t) > 0:
             marks["seeding"] = len(t.traces)
             _snap("seeding")
@@ -465,7 +486,9 @@ def grow_metastasis_tumor(seed=BASE_SEED, met_target=220, primary_cap=3200, max_
     # systemic chemo run until the SUSCEPTIBLE met clones are gone (or a generation cap / cure)
     marks["chemo_start"] = len(t.traces)
     _snap("pre_chemo")
-    chemo = Chemotherapy(start=t.step, duration=10 ** 6, kill_rate=1.6, effectiveness=0.98,
+    # Same dose as the hero config (kill_rate 1.5, effectiveness 1.0, toxicity 0.12); only the
+    # duration differs, because the loop below decides when to stop rather than a fixed step count.
+    chemo = Chemotherapy(start=t.step, duration=10 ** 6, kill_rate=1.5, effectiveness=1.0,
                          toxicity=chemo_toxicity, sites="both")
     for k in range(max_chemo_gens):
         if met_cancer(t) == 0:
@@ -480,5 +503,6 @@ def grow_metastasis_tumor(seed=BASE_SEED, met_target=220, primary_cap=3200, max_
     t.grow(14, seed=seed)                                     # relapse of the surviving resistant clones
     _snap("end")
     t.arc_snapshots = snaps
-    t.make_cell_data()
+    t.max_cells = RR.MAX_CELLS
+    t.make_cell_data(max_cells=RR.MAX_CELLS)
     return t, marks

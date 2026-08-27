@@ -76,6 +76,37 @@ SCALES = {
 }
 
 
+# --------------------------------------------------------------------------------------------------
+# The metastasis + treatment axes, as a DIFF against the blocks above.
+#
+# ``configs/landing.yaml`` is the same tutorial tumour with a metastatic compartment and a clinical
+# arc bolted on, and it is what renders the docs hero. Deriving the extra axes by DIFFING it against
+# the base config -- rather than restating them -- means the metastasis notebook and the hero GIF can
+# never drift apart: change one number in landing.yaml and both follow.
+# --------------------------------------------------------------------------------------------------
+LANDING_PATH = os.path.join(REPO, "configs", "landing.yaml")
+_LANDING = load_config(LANDING_PATH)
+
+
+def _delta(base, over):
+    """The keys ``over`` changes or adds relative to ``base``."""
+    return {k: v for k, v in over.items() if k not in base or base[k] != v}
+
+
+MET_SELECTION = _delta(SELECTION, _LANDING["selection_params"])       # met establishment + resistance
+MET_SPATIAL = _delta(SPATIAL, _LANDING["spatial_params"])             # the second (met) grid
+MET_CANCER = _delta(CANCER, _LANDING["cell_params"]["cancer"])        # currently empty: same cell
+
+
+def met_config_for(scale="cm", **overrides):
+    """:func:`config_for` plus the metastasis + treatment axes -- the hero arc's parameters."""
+    cfg = config_for(scale, **overrides)
+    cfg["selection_params"] = {**cfg["selection_params"], **MET_SELECTION}
+    cfg["spatial_params"] = {**cfg["spatial_params"], **MET_SPATIAL}
+    cfg["cancer_cell_params"] = {**cfg["cancer_cell_params"], **MET_CANCER}
+    return cfg
+
+
 def config_for(scale="cm", genome=None, selection=None, cancer=None, deme=None, spatial=None):
     """The five nested-dict parameter blocks for a realistic tumour at ``scale``, with overrides
     merged on top. Returned as a dict of dicts so callers can inspect or hand them to
