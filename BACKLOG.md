@@ -666,6 +666,26 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   gate on whether the CNA-caller/Numbat results need GISTIC-peak resolution).
 
 ## Engine / inference follow-ups
+- **NOW — two chemotherapy laws are in use across the paper's figures.** `kill_mode="proliferation"`
+  is set in exactly ONE place, `validation/validate_escape_modes.py:66` (with `kill_rate=1.0`,
+  `chemo_steps=120`). Every other treatment in the repo takes the `"additive"` default:
+  `configs/landing.yaml` (the docs hero), `notebooks/base_sim.py` (the metastasis notebook),
+  `validation/cohort_common.py:165` (the personalized-medicine cohort),
+  `validation/validate_treatment.py`, and `notebooks/02_tumor_growth.ipynb`. So the four-escape-modes
+  figure models cytotoxic chemo under one law and every other treatment result under another.
+  They are not equivalent: `count.py::_kill_amount` states that the additive mode "SELECTS for the
+  fast clones and the deposit regrows mid-course" and that "one absolute number cannot serve clones
+  whose birth rates differ threefold" — the proliferation mode was written in `05cda0c` to fix exactly
+  that, then never propagated past the file it was written for.
+  MEASURED on the hero arc (seed 2, grow phase byte-identical across all three, so these are clean
+  A/Bs): additive 1.5 -> the deposit is ERADICATED, no relapse, `diagnose()` reports `[FAIL] extinct`;
+  additive 1.5 with `treatment_resistant_effects` raised to 6.0 -> resistance expands DURING the
+  course (70 -> 42,128), no nadir, and the relapse decays 98.9% -> 58.6% resistant; proliferation 1.0
+  -> a clean nadir (3,860 -> ~230) and a relapse, but only 10.9% resistant at 36 steps because ~82
+  sensitive survivors out-grow the cost-bearing resistant clone. Both additive failures are what the
+  docstring predicts, at each end of the range.
+  DECIDE which law each result should use. `cohort_common` and `validate_treatment` feed published
+  figures, so this is not a mechanical find-and-replace. Found 2026-08-27 while re-rendering the hero.
 - **NEXT — the driver layout is uniform across arms, but `s_arm` is inferred against arm content
   that is not.** `selection.py` draws driver roles with
   `rng.choice([-1,0,1], p=[prop_driver/2, 1-prop_driver, prop_driver/2])` — the SAME rate on every
