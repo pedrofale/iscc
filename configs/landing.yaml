@@ -3,8 +3,15 @@
 # through the clinical-arc `schedule`. The primary is the tutorial's tumour; it then seeds a met and is
 # treated. Reproduce:
 #   isccsim --sim-config configs/landing.yaml -o out --no-tables
-#   isccgif out --compartment --splash --scale 0.55 -o docs/assets/landing_hero.gif
-# (--scale lowers the render dpi so the grid-170 arc stays a ~2 MB web GIF.)
+#   isccgif out --compartment --splash --skip-confinement --scale 0.55 -o docs/assets/landing_hero.gif
+# (--scale lowers the render dpi so the grid-170 arc stays a web-friendly GIF.)
+# --skip-confinement is REQUIRED here, not optional. origin_confinement below seals the founding
+# acinus for 1200 generations, and measured on this arc that is 83.6% of the run at under 200 primary
+# cells -- the whole tumour, 208 -> 249,520, happens in the last 29%. Rendered from t=0 the animation
+# spends ~300 of its 545 frames on a duct where nothing moves, the Mullers are crushed into the right
+# fifth, and the 256-colour GIF palette -- stretched over twice the frames -- desaturates the red
+# relapse to a muddy RGB(131,117,104). With the flag: 244 frames, 5.5 MB, and the deposit renders at
+# RGB(239,61,71), the chemo-resistance red it is supposed to be.
 # --no-tables writes ONLY the compartment trajectory, which is all `isccgif --compartment` reads.
 # Measured on this config: 68 min / 5 GB with the per-clone count tables, 21 min / 317 MB without --
 # the arc itself is 21 minutes, and serialising two 1.9 GB CSVs is the other 47. Drop the flag if you

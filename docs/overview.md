@@ -53,8 +53,11 @@ metastasis, and a resistant clone relapses after chemotherapy. It is reproducibl
 #    is all the renderer reads; drop it if you also want to run isccsample / isccdata on the result.
 isccsim --sim-config configs/landing.yaml -o out --no-tables
 
-# 2. fully-labelled version (use --splash to drop the annotations as in the home page)
-isccgif out --compartment -o landing_full.gif
+# 2. fully-labelled version (use --splash to drop the annotations as in the home page).
+#    --skip-confinement starts the animation where the lesion first breaks out of its founding duct:
+#    the founder is sealed in one acinus for the first ~84% of the run, so without it most frames
+#    show a duct where nothing moves.
+isccgif out --compartment --skip-confinement -o landing_full.gif
 ```
 
 `configs/landing.yaml` holds the exact parameters (genome, selection, ductal-field, metastasis and
