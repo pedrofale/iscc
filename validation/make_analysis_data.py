@@ -36,6 +36,7 @@ Usage:  python validation/make_analysis_data.py [--out analysis_data] [--seed 3]
 """
 import argparse
 import json
+import warnings
 import os
 import sys
 import time
@@ -385,7 +386,20 @@ def _treemhn(out_dir, seed, scale, n_clones):
 # Measured at these values: both planted edges come out as the top two promoting off-diagonals of
 # twelve, and the no-DAG control recovers neither.
 DNA_N_CELLS = 200            # cells a single-cell DNA run would realistically sequence
-DNA_BINS_PER_SEGMENT = 20    # loci are aggregated into bins, as any real CNV pipeline does
+# Loci are aggregated into bins, as any real CNV pipeline does. The setting is a trade-off between
+# breakpoint resolution and reads per bin, and per-locus coverage is zero-inflated, so it was measured
+# rather than reasoned about (each rebuild is ~45s):
+#   bins/seg   bins   median reads/bin   empty bins
+#      250     3000          6             35.2%   <- too fine: bins empty, NaN consensus slices
+#      100     1200        108              8.7%   <- real DLP+ carries ~50-200 reads in a bin
+#       50      600        374               1.3%
+#       20      240       1248               0.0%  <- the old setting: 10-25x real depth per bin,
+#                                                     and only 20 bins per chromosome to segment
+# 100 puts per-bin depth in the range a real shallow-WGS single-cell run has, at 5x the breakpoint
+# resolution of the old setting. Note the MEAN is a poor guide here: at 240 bins mean and median
+# agreed (1500 vs 1248), which made coverage look even, but it is not — at 2 loci per bin the mean
+# still reads 120 while the median collapses to 6.
+DNA_BINS_PER_SEGMENT = 100
 DNA_N_NORMALS = 60           # diploid cells sequenced alongside: the ploidy anchor
 DNA_N_MUTATIONS = 20         # mutations carried into a tree; SCITE is O(n^2) per MCMC move
 DNA_N_BULK_MUTATIONS = 300   # loci carried into the bulk clustering
@@ -560,11 +574,21 @@ def _dna(out_dir, seed, scale, n_clones):
     cop = pd.read_csv(called.replace(".csv", "_copy.csv"), index_col=0)[list(reads.columns)]
     lin = np.power(2.0, cop.values)                                   # back to linear depth
     is_norm = dna_lab < 0
-    ref = np.nanmedian(lin[:, is_norm], axis=1, keepdims=True)
-    cn_abs = 2.0 * lin / np.where(ref > 0, ref, np.nan)
-    seg_called = pd.DataFrame(
-        {f"seg{s}": np.nanmedian(cn_abs[(bins["chr"] == f"chr{s}").values], axis=0)
-         for s in range(n_seg)}, index=list(reads.columns))
+    # A bin with no called depth in ANY diploid cell has no anchor, so its absolute copy number is
+    # undefined. At real per-bin depth a few such bins are expected (8.7% of bins carry zero reads in
+    # a given cell), and the per-segment medians below simply skip them -- but say how many rather
+    # than letting numpy raise an All-NaN warning and moving on.
+    unanchorable = int(np.all(np.isnan(lin[:, is_norm]), axis=1).sum())
+    if unanchorable:
+        print(f"    {unanchorable} of {lin.shape[0]} bins have no depth in any diploid cell and "
+              f"cannot be anchored; excluded from the per-segment medians")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)      # all-NaN slices are counted above
+        ref = np.nanmedian(lin[:, is_norm], axis=1, keepdims=True)
+        cn_abs = 2.0 * lin / np.where(ref > 0, ref, np.nan)
+        seg_called = pd.DataFrame(
+            {f"seg{s}": np.nanmedian(cn_abs[(bins["chr"] == f"chr{s}").values], axis=0)
+             for s in range(n_seg)}, index=list(reads.columns))
     clone_cn = np.stack([np.rint(np.nanmedian(seg_called.values[dna_lab == c], axis=0))
                          for c in range(consensus.shape[0])])
     pd.DataFrame(clone_cn.astype(int),

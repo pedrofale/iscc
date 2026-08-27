@@ -941,3 +941,40 @@ no-DAG control never reports it. `E0->E1` sits at the power limit (E1 in 6% of p
 notebook says so with a lambda-sensitivity table. Checked and rejected as fixes: more patients
 (makes E1 rarer), eight different network draws (none gives two common children), and dropping the
 1-SE rule (the control then produces false positives).
+
+## The gene-program cohort now carries the microenvironment — scDEF needs a GPU re-run (2026-08-27)
+
+`validation/programs_common.py` and the `cohort` builder changed, and the dataset has been rebuilt,
+but **`notebooks/tool_scdef_cohort.ipynb` has NOT been re-executed** — its committed outputs come
+from the previous, cancer-only cohort. Regenerating the dataset today gives different data from what
+that notebook shows. Re-running it is the outstanding step.
+
+What changed, and why:
+
+- **All cell types reach the matrix.** `counts_anndata` filtered to `type == "cancer"`, so a cohort
+  grown on the glandular field discarded the stroma, epithelium and immune cells it contains. Every
+  factor the benchmark could find was therefore ultimately genetic.
+- **The hypoxia FIELD drives the hypoxia PROGRAM** (route 3, `niche_program_map={"hypoxia":
+  "hypoxia"}`). The program was already in the seeded dictionary with nothing driving it, and the
+  engine route already existed — `base_sim` uses it for the emt confound — but was unconfigured here.
+  A niche factor cuts across clones by POSITION, so it is the one program a method cannot recover by
+  finding clone structure.
+- **`niche_program_strength` 1.5 -> 3.0.** At 1.5 the program tracked its own field at only r=+0.31;
+  a planted factor that faint makes a null uninterpretable. Measured +0.48 at 3.0.
+- **`max_cells` 300 -> 1200.** Keeping every cell type left only ~71 cancer cells per patient
+  proportionally, which would gut the clone/CNA question the benchmark exists to ask. At 1200 it is
+  ~253 cancer, composition still emergent (4,491 stromal / 1,136 cancer / 373 epithelial over 5
+  patients).
+- `cell_type` and `hypoxia_level` travel in `obs.csv`, held back from the model; programs keep their
+  real names, so a recovered factor can be named rather than numbered.
+
+**Why it is unrun: scDEF needs a GPU.** On CPU the 6,000-cell cohort ran past 50 minutes without
+finishing (394% CPU, so it was progressing, just far too slow); the previous 1,500-cell cancer-only
+cohort was tractable. Run it where a GPU is available.
+
+The notebook changes are written and were reverted rather than committed unexecuted (an unexecuted
+notebook renders blank — `mkdocs-jupyter` has `execute: false`). To redo them: colour scDEF's UMAP by
+`cell_type` and `hypoxia_level`, add `obs_scores` over `cell_type`, and add an `obs_scores` over a
+terciled `niche` column — all through scDEF's own API. NB `scdef 0.6.1` writes NO `obsm` factor
+scores, so per-cell factor correlations are not available that way; bin the continuous annotation and
+use `obs_scores`, which is what the categorical path already does.
