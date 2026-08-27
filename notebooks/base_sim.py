@@ -429,8 +429,8 @@ def normal_totals(t):
     return np.array(prim), np.array(met)
 
 
-def grow_metastasis_tumor(seed=BASE_SEED, met_target=2000, primary_cap=100000, max_chemo_gens=40,
-                          chemo_toxicity=0.12, verbose=False):
+def grow_metastasis_tumor(seed=BASE_SEED, met_target=None, primary_cap=None, max_chemo_gens=40,
+                          chemo_toxicity=None, verbose=False):
     """Grow the DCIS->IDC ductal field WITH a metastatic deposit and run the full clinical arc:
 
         grow (DCIS->IDC)  ->  seed the met  ->  resect the primary  ->  systemic chemo (which also
@@ -443,10 +443,17 @@ def grow_metastasis_tumor(seed=BASE_SEED, met_target=2000, primary_cap=100000, m
     hero runs a fixed 36-step course to a fixed size, this stops adaptively once the susceptible
     clones are gone, which keeps the notebook interactive and makes the response legible.
 
+    ``met_target`` / ``primary_cap`` / ``chemo_toxicity`` default to the hero schedule's own values
+    (``RR.MET_STOP`` / ``RR.MET_CHEMO``), so the notebook grows to the same point and doses the same
+    way; pass them to run a shorter arc.
+
     Returns ``(tumour, marks)`` with ``marks`` a dict of snapshot indices
     {seeding, resection, chemo_start, chemo_end} for annotating the Muller plots."""
     from iscc.tumor.models import GenotypeTumor
     from iscc.treatment import Surgery, Chemotherapy
+    met_target = RR.MET_STOP.get("met_cancer", 60000) if met_target is None else met_target
+    primary_cap = RR.MET_STOP.get("total_cancer", 250000) if primary_cap is None else primary_cap
+    chemo_toxicity = RR.MET_CHEMO.get("toxicity", 0.12) if chemo_toxicity is None else chemo_toxicity
     spatial = {**SPATIAL, **MET_SPATIAL}
     selection = {**SELECTION, **MET_SELECTION}
     # max_cells=1 during the arc: grow() force-materialises cell_data at the end of EVERY call, so
@@ -486,10 +493,12 @@ def grow_metastasis_tumor(seed=BASE_SEED, met_target=2000, primary_cap=100000, m
     # systemic chemo run until the SUSCEPTIBLE met clones are gone (or a generation cap / cure)
     marks["chemo_start"] = len(t.traces)
     _snap("pre_chemo")
-    # Same dose as the hero config (kill_rate 1.5, effectiveness 1.0, toxicity 0.12); only the
-    # duration differs, because the loop below decides when to stop rather than a fixed step count.
-    chemo = Chemotherapy(start=t.step, duration=10 ** 6, kill_rate=1.5, effectiveness=1.0,
-                         toxicity=chemo_toxicity, sites="both")
+    # The hero's dose, read off its schedule. Only the DURATION differs: the loop below stops once
+    # the susceptible clones are gone, where the hero runs a fixed course.
+    chemo = Chemotherapy(start=t.step, duration=10 ** 6,
+                         kill_rate=RR.MET_CHEMO.get("kill_rate", 1.5),
+                         effectiveness=RR.MET_CHEMO.get("effectiveness", 1.0),
+                         toxicity=chemo_toxicity, sites=RR.MET_CHEMO.get("sites", "both"))
     for k in range(max_chemo_gens):
         if met_cancer(t) == 0:
             break                                             # cured

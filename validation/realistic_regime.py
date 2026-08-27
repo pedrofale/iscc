@@ -102,6 +102,15 @@ MET_SPATIAL = _delta(SPATIAL, _LANDING["spatial_params"])             # the seco
 MET_CANCER = _delta(CANCER, _LANDING["cell_params"]["cancer"])        # currently empty: same cell
 
 
+# The hero arc's own stop condition and chemo dose, read off the schedule rather than restated, for
+# the same reason as the blocks above. A caller that runs the arc outside `isccsim` (the metastasis
+# notebook) then grows to the SAME point and doses the SAME way.
+_MET_PHASES = _LANDING.get("schedule", {}).get("phases", [])
+MET_STOP = next((p["until"] for p in _MET_PHASES if p.get("op", "grow") == "grow" and "until" in p), {})
+MET_CHEMO = next(({k: v for k, v in p.items() if k not in ("op", "phase")}
+                  for p in _MET_PHASES if p.get("op") == "chemotherapy"), {})
+
+
 def met_config_for(scale="cm", **overrides):
     """:func:`config_for` plus the metastasis + treatment axes -- the hero arc's parameters."""
     cfg = config_for(scale, **overrides)
@@ -127,7 +136,8 @@ def config_for(scale="cm", genome=None, selection=None, cancer=None, deme=None, 
 
 
 def grow_realistic(seed=2, target_cancer=150_000, scale="cm", genome=None, selection=None,
-                   cancer=None, deme=None, spatial=None, expression=None, max_cells=MAX_CELLS,
+                   cancer=None, deme=None, spatial=None, expression=None, microenv=None,
+                   max_cells=MAX_CELLS,
                    materialise=False, tau=TAU, coarsen=COARSEN,
                    founder_mutations=FOUNDER_MUTATIONS, germline=GERMLINE, verbose=False):
     """Grow one realistic breach-gated ductal-field tumour to ``target_cancer`` cancer cells.
@@ -173,8 +183,10 @@ def grow_realistic(seed=2, target_cancer=150_000, scale="cm", genome=None, selec
     from iscc.tumor.models import GenotypeTumor
     # Cap at 1 during the growth loop so grow()'s forced make_cell_data stays ~free; the real cap is
     # restored for the single materialisation at the end.
+    # `microenv` (F8: hypoxia / CCI) is READOUT-ONLY — it never touches growth — so passing it here
+    # leaves the trajectory byte-identical and simply makes the fields available at materialisation.
     t = GenotypeTumor(seed=seed, expression_params=expression, update_mode="tau", tau=tau,
-                      coarsen_passengers=coarsen, max_cells=1,
+                      coarsen_passengers=coarsen, max_cells=1, microenv_params=microenv,
                       founder_mutations=founder_mutations, germline_params=germline, **cfg)
     # Adaptive stepping: coarse leaps while far from the target, finer near it, so an invasive mass
     # (which grows fast once it breaches) lands close to `target_cancer` without a huge overshoot. Only
