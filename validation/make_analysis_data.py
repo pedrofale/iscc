@@ -157,6 +157,79 @@ RCTD_TARGET_CANCER = 60_000
 RCTD_IMMUNE_DENSITY = 0.12
 
 
+# The CCI channel. `emitter_type` must name a cell type that EXISTS: the ductal field ships without
+# an immune compartment, so the same immune density the deconvolution dataset adds is required here or
+# there is nobody to emit the ligand. `strength` is the margin by which the sender's ligand clears the
+# tissue's ambient level for that gene. `n_candidate_pairs` is the screen size — one wired pair plus
+# decoys, so "did the tool find it?" is a real question rather than a formality.
+CCI_MICROENV = {
+    "cci": {"strength": 8.0, "emitter_type": "immune", "n_target_genes": 40,
+            "lengthscale": 3.0, "n_candidate_pairs": 250},
+}
+
+
+def _cci(out_dir, seed, scale, n_clones):
+    """CellChat's inputs: a dissociated scRNA sample, its cell-type labels, and iscc's OWN
+    ligand-receptor database.
+
+    Cell-cell communication is inferred from DISSOCIATED scRNA in practice — CellPhoneDB, CellChat's
+    original mode, NATMI and LIANA all score cell TYPES from mean ligand/receptor expression, with no
+    positions at all. So this dataset is a dissociated sample, taken from the same field the
+    deconvolution dataset uses (the oracle reference over a Visium section's own cells) at the same
+    non-degenerate density.
+
+    The database is emitted BY the tumour over its own gene ids: one pair is wired into the channel,
+    the rest are unwired decoys. Nothing about the decoys is engineered — pairs drawn at random already
+    land on clone-varying regions by chance, which is the confound worth measuring, and
+    `clone_correlation` reports it rather than planting it.
+    """
+    import deconv_common as D
+    import integration_common as C
+    from iscc.integrations import cci_database, write_cci_database, clone_correlation
+
+    t = C.grow_tumor(seed=seed, regime="realistic", scale=scale,
+                     target_cancer=RCTD_TARGET_CANCER, max_cells=40_000,
+                     spatial={"immune_density": RCTD_IMMUNE_DENSITY},
+                     expression=D.expression_params(allele_specific=False),
+                     microenv=CCI_MICROENV)
+    section = D.build_section(t, **VISIUM_V1)
+    ref = D.build_reference(t, section, mode="oracle", label_by="population",
+                            n_cells=4_000, seed=11)
+    os.makedirs(out_dir, exist_ok=True)
+
+    # The sample CellChat reads: genes x cells, plus one label per cell.
+    sc = ref["counts"]                                        # cells x genes
+    pd.DataFrame(sc.values.T, index=sc.columns, columns=sc.index).to_csv(
+        os.path.join(out_dir, "sc_counts.csv"))
+    pd.DataFrame({"group": np.asarray(ref["labels"])}, index=sc.index).to_csv(
+        os.path.join(out_dir, "sc_meta.csv"))
+
+    # iscc's own L-R database, in the four tables updateCellChatDB() expects. The writer asserts the
+    # geneInfo whitelist is complete: a gene the database references but geneInfo omits is dropped
+    # SILENTLY, and the pair simply never appears in the output.
+    # `cci_database` returns the four Update-CellChatDB tables as a dict of DataFrames.
+    db = cci_database(t)
+    write_cci_database(db, out_dir)
+    inter = db["interaction"]
+
+    # Ground truth: which pair is wired, who emits, and how clone-determined each candidate is.
+    truth = t.microenv_truth
+    # `interaction_name` is BOTH the index and a column here, so reset_index() would collide. Take
+    # the column directly.
+    tp = inter[["interaction_name", "ligand", "receptor", "wired"]].copy()
+    tp["emitter"] = str(truth["cci_emitter_type"])
+    tp.to_csv(os.path.join(out_dir, "truth_pairs.csv"), index=False)
+
+    cc = clone_correlation(t.cell_data, truth["cci_pairs"])
+    cc["wired"] = [i == int(truth["cci_wired_pair"]) for i in range(len(cc))]
+    cc.to_csv(os.path.join(out_dir, "truth_clone_correlation.csv"), index=False)
+
+    wired_name = str(tp.loc[tp["wired"].astype(bool), "interaction_name"].iloc[0])
+    return {"cells": int(sc.shape[0]), "genes": int(sc.shape[1]), "pairs": int(len(inter)),
+            "wired_pair": wired_name, "emitter": str(truth["cci_emitter_type"]),
+            "groups": sorted(set(np.asarray(ref["labels"]).tolist()))}
+
+
 def _rctd(out_dir, seed, scale, n_clones):
     """RCTD's inputs: a spatial section (counts + coordinates) and a paired scRNA reference.
 
@@ -600,17 +673,30 @@ def _cohort(out_dir, seed, scale, n_clones):
 
     n_patients = 5
     Xs, obs_rows, loading, Z = [], [], None, []
+    prog_names = None
     for i in range(n_patients):
         t = PC.grow_tumor(seed=seed + i)
-        a, z = PC.counts_anndata(t, seed=seed + i, max_cells=300)
+        # 1200, not 300: the cohort now keeps every cell type, and at 300 a proportional sample left
+        # only ~71 cancer cells per patient (213 stromal / 71 cancer / 16 epithelial). The clone and
+        # copy-number structure this benchmark exists to measure would lose 4x its cells. Sampling
+        # more keeps the composition emergent AND the clone signal intact — real studies sequence
+        # thousands of cells per patient; 300 was a compute convenience.
+        a, z = PC.counts_anndata(t, seed=seed + i, max_cells=1200)
         Xs.append(np.asarray(a.X, dtype=np.float32))
         Z.append(np.asarray(z))
-        obs_rows += [(f"P{i}", f"batch{i}")] * a.n_obs
+        # Cell type and hypoxia travel with the counts: the cohort now includes non-cancer cells, and
+        # the hypoxia PROGRAM is driven by the hypoxia FIELD (route 3), so a factor can be checked
+        # against both — is it a clone, a cell type, or the niche?
+        ctype = list(a.obs["cell_type"]) if "cell_type" in a.obs else ["unknown"] * a.n_obs
+        hyp = (list(a.obs["hypoxia_level"]) if "hypoxia_level" in a.obs
+               else [float("nan")] * a.n_obs)
+        obs_rows += [(f"P{i}", f"batch{i}", ctype[j], hyp[j]) for j in range(a.n_obs)]
         if loading is None:
             # `program_truth` is where iscc records the planted dictionary: the loading matrix
             # (programs x genes) and the per-cell activities. It is the same object validate_programs
             # scores against.
             loading = np.asarray(t.program_truth["loading"])
+            prog_names = [str(n) for n in np.asarray(t.program_truth["program_names"])]
             var_names = list(a.var_names)
         del t
 
@@ -619,13 +705,16 @@ def _cohort(out_dir, seed, scale, n_clones):
     cells = [f"C{i}" for i in range(X.shape[0])]
     pd.DataFrame(X, index=cells, columns=var_names).to_csv(
         os.path.join(out_dir, "counts.csv.gz"))
-    pd.DataFrame(obs_rows, index=cells, columns=["patient", "batch"]).to_csv(
+    pd.DataFrame(obs_rows, index=cells,
+                 columns=["patient", "batch", "cell_type", "hypoxia_level"]).to_csv(
         os.path.join(out_dir, "obs.csv"))
-    # Ground truth: the shared program dictionary, and each cell's true program activities.
-    pd.DataFrame(loading, index=[f"program{k}" for k in range(loading.shape[0])],
+    # Ground truth: the shared program dictionary, and each cell's true program activities. Programs
+    # keep their REAL names ("hypoxia", "emt", ...) so a recovered factor can be named, not numbered.
+    names = prog_names or [f"program{k}" for k in range(loading.shape[0])]
+    pd.DataFrame(loading, index=names[:loading.shape[0]],
                  columns=var_names).to_csv(os.path.join(out_dir, "truth_loading.csv.gz"))
-    pd.DataFrame(np.vstack(Z), index=cells,
-                 columns=[f"program{k}" for k in range(np.vstack(Z).shape[1])]).to_csv(
+    Zc = np.vstack(Z)
+    pd.DataFrame(Zc, index=cells, columns=names[:Zc.shape[1]]).to_csv(
         os.path.join(out_dir, "truth_activity.csv.gz"))
 
     meta = dict(n_patients=int(n_patients), n_cells=int(X.shape[0]), n_genes=int(X.shape[1]),
@@ -657,7 +746,7 @@ def _escape_modes(out_dir, seed, scale, n_clones):
 
 
 DATASETS = {"clonealign": _clonealign, "numbat": _numbat,
-            "rctd": _rctd, "treemhn": _treemhn, "mhn": _mhn, "cohort": _cohort,
+            "rctd": _rctd, "cci": _cci, "treemhn": _treemhn, "mhn": _mhn, "cohort": _cohort,
             "dna": _dna, "escape_modes": _escape_modes}
 
 # Per-dataset seed overrides. These notebooks demonstrate that iscc's output is AMENABLE to the real

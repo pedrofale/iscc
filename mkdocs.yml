@@ -137,6 +137,7 @@ nav:
           - Recovering progression constraints with TreeMHN: tutorials/tool_treemhn_R.ipynb
           - Progression constraints from cross-sectional data with MHN: tutorials/tool_mhn_bulk.ipynb
           - Integrating a patient cohort with scDEF: tutorials/tool_scdef_cohort.ipynb
+          - Cell–cell communication with CellChat: tutorials/tool_cellchat_R.ipynb
   - API Reference:
       - reference/index.md
       - Tumor:

@@ -87,7 +87,8 @@ MIN_CLONE_FRAC = 0.02 if REGIME == "realistic" else 0.05
 
 
 def grow_tumor(seed=3, steps=750, genome=None, spatial=None, cancer=None, deme=None,
-               regime=None, scale="mid", target_cancer=None, max_cells=8_000, expression=None):
+               regime=None, scale="mid", target_cancer=None, max_cells=8_000, expression=None,
+               microenv=None):
     """Grow the shared multi-clone tumour (cancer + diploid normal compartment).
 
     ``regime="toy"`` (default) is the historical small rig. ``regime="realistic"`` grows the
@@ -106,7 +107,7 @@ def grow_tumor(seed=3, steps=750, genome=None, spatial=None, cancer=None, deme=N
             seed=seed, scale=scale,
             target_cancer=target_cancer or SCALE_TARGETS[scale],
             genome=genome, cancer=cancer, deme=deme, spatial=spatial,
-            expression=expression, materialise=True, max_cells=max_cells)
+            expression=expression, microenv=microenv, materialise=True, max_cells=max_cells)
     from iscc.tumor.models import GenotypeTumor
     t = GenotypeTumor(seed=seed,
                       genome_params=genome or GENOME, selection_params=SELECTION,

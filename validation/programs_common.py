@@ -91,7 +91,25 @@ ACTIVITY_PARAMS = {"n_active_programs_per_cell": 3, "activity_dist": "lognormal"
 # with them. The opposite failure -- programs becoming a deterministic readout of clone, which
 # diagnose() flags as `clone_is_state` below a 0.05 within-clone variance share -- is nowhere near:
 # the share is 0.706 at 2.0 (and still 0.474 at 4.0), so cells within a clone stay heterogeneous.
-COUPLING_PARAMS = {"phenotype_program_strength": 2.0}
+COUPLING_PARAMS = {
+    "phenotype_program_strength": 2.0,
+    # Route 3, niche -> program. "hypoxia" is already one of the seeded programs, but nothing drove
+    # it: program activity came only from each clone's evolved phenotypes, so every factor in this
+    # benchmark was ultimately GENETIC. The hypoxia FIELD cuts across clones by position, which makes
+    # it the one program a method cannot recover by finding clone structure -- the question worth
+    # asking of a factor model. Needs the microenvironment layer on (see MICROENV below).
+    "niche_program_map": {"hypoxia": "hypoxia"},
+    # 3.0, not 1.5: the niche arm competes with route-1 phenotype drive and with activity noise, and
+    # at 1.5 the hypoxia program tracked its own field at only r=+0.31. A planted factor that faint
+    # makes a negative result uninterpretable — "the method missed it" and "the signal was too weak"
+    # look identical. The point is to test recoverability, not to hide the signal.
+    "niche_program_strength": 3.0,
+}
+
+# The microenvironment the cohort is grown with. Hypoxia needs no anatomy -- oxygen diffuses in and is
+# consumed, so a dense mass starves its own middle -- and it is what feeds the niche arm above.
+MICROENV = {"hypoxia": {"strength": 0.9, "n_genes": 40,
+                        "o2_consumption": 1.5, "o2_supply": 0.3}}
 
 
 def expression_params(scatter=1.0):
@@ -99,7 +117,7 @@ def expression_params(scatter=1.0):
     # returned dict -- notebooks/base_sim.EXPR() does exactly that, adding the niche->emt arm and its
     # own phenotype_program_strength -- silently rewrote this module's constants for the rest of the
     # process. Any cohort grown after that call in the same process got the notebook's coupling
-    # instead of the calibrated one, including the niche arm this module deliberately holds.
+    # instead of the calibrated one, including its own niche arm and strengths.
     return {"program_params": dict(PROGRAM_PARAMS, program_genomic_scatter=scatter),
             "activity_params": dict(ACTIVITY_PARAMS),
             "coupling_params": dict(COUPLING_PARAMS),
@@ -139,6 +157,7 @@ def grow_tumor(seed=1, steps=None, mutation_rate=None, cnv_prob=None, amp_prob=N
         cancer["amp_prob"] = amp_prob
     return RR.grow_realistic(seed=seed, scale=scale,
                              target_cancer=target_cancer or PROGRAM_TARGET_CANCER,
+                             microenv=MICROENV,
                              cancer=cancer or None,
                              expression=expression_params(scatter),
                              materialise=True, max_cells=MAX_CELLS)
@@ -164,16 +183,18 @@ def counts_anndata(tumor, seed=0, max_cells=600, protocol="10x"):
     from iscc.data import scRNA
 
     cd = tumor.cell_data
-    is_cancer = np.array([tumor.genotypes[g].type == "cancer"
-                          for g in cd["cell_type"]["cell_id"].values])
-    cancer_cells = list(np.asarray(cd["cell_exp"].index)[is_cancer])
+    # EVERY cell type, not cancer alone. The cohort is grown on the glandular field, so it contains
+    # stroma, epithelium and immune cells — and a real factor model is handed all of them. Restricting
+    # to cancer removed cell-type identity as a program source and left clone structure as very nearly
+    # the only signal, which is not the problem these methods are actually solving.
+    keep_cells = list(np.asarray(cd["cell_exp"].index))
     rng = np.random.default_rng(seed)
-    if len(cancer_cells) > max_cells:
-        pick = np.sort(rng.choice(len(cancer_cells), size=max_cells, replace=False))
-        cancer_cells = [cancer_cells[i] for i in pick]
+    if len(keep_cells) > max_cells:
+        pick = np.sort(rng.choice(len(keep_cells), size=max_cells, replace=False))
+        keep_cells = [keep_cells[i] for i in pick]
 
-    rna = scRNA(n_cells=len(cancer_cells), protocol=protocol, seed=seed).run(
-        cd, cell_subset=cancer_cells)
+    rna = scRNA(n_cells=len(keep_cells), protocol=protocol, seed=seed).run(
+        cd, cell_subset=keep_cells)
     counts = rna.observed_counts
 
     # Align the program ground truth to the cells the assay actually returned, by NAME -- the assay
@@ -184,6 +205,14 @@ def counts_anndata(tumor, seed=0, max_cells=600, protocol="10x"):
     a.var_names = list(counts.columns)
     a.obs_names = [f"C{i}" for i in range(counts.shape[0])]
     a.layers["counts"] = a.X.copy()
+    # Cell type travels with the counts now that non-cancer cells are included: without it a factor
+    # sitting on stroma or immune cells is indistinguishable from one sitting on a clone.
+    gid_by = cd["cell_type"]["cell_id"].reindex(counts.index)
+    a.obs["cell_type"] = [tumor.genotypes[g].type if g in tumor.genotypes else "unknown"
+                          for g in gid_by.values]
+    # Per-cell hypoxia, when the microenvironment is on: the niche arm's ground truth.
+    if "cell_microenv" in cd and "hypoxia_level" in cd["cell_microenv"]:
+        a.obs["hypoxia_level"] = cd["cell_microenv"]["hypoxia_level"].reindex(counts.index).values
     return a, Z
 
 

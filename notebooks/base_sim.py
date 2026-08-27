@@ -105,7 +105,8 @@ def cancer_clones(t):
 
 
 def grow_base_tumor(seed=BASE_SEED, target_cancer=80000, cancer_params=None, expression=None,
-                    selection_params=None, spatial_params=None, max_cells=RR.MAX_CELLS,
+                    selection_params=None, spatial_params=None, microenv_params=None,
+                    max_cells=RR.MAX_CELLS,
                     scale="cm", coarsen=RR.COARSEN, verbose=False):
     """Grow one realistic ductal-field tumour to >= ``target_cancer`` cancer cells, then materialise a
     ``max_cells`` representative subsample (a biopsy of the one tissue).
@@ -130,6 +131,10 @@ def grow_base_tumor(seed=BASE_SEED, target_cancer=80000, cancer_params=None, exp
         (``cohort_mhn_recurrence``).
     expression : dict, optional
         Overrides the default ``EXPR()`` expression params.
+    microenv_params : dict, optional
+        Turns on the microenvironment layer — a hypoxia programme and/or a ligand-receptor
+        communication channel (``microenvironment_cci``). Read-only: it shapes the expression
+        readout and never feeds back into growth, so the tumour is unchanged with it on or off.
     max_cells : int, optional
         Cap on the materialised per-cell tables (the cm-scale tumour is far larger — sample it).
     scale : {"cm", "mid", "small"}, optional
@@ -144,7 +149,7 @@ def grow_base_tumor(seed=BASE_SEED, target_cancer=80000, cancer_params=None, exp
         seed=seed, target_cancer=target_cancer, scale=scale, coarsen=coarsen,
         selection=selection_params,
         cancer={"wgd_rate": 0.05, "cnv_prob": 0.15, **(cancer_params or {})},
-        spatial=spatial_params,
+        spatial=spatial_params, microenv=microenv_params,
         expression=(expression if expression is not None else EXPR()),
         max_cells=max_cells, materialise=True, verbose=verbose)
 
