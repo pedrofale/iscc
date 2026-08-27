@@ -435,7 +435,20 @@ class GenotypeTumor:
             # and blur the benchmark); overlap with the CCI target set is harmless and allowed.
             if float(cci.get("strength", 0.0)) != 0.0 and n_cci > 0:
                 n_pairs = max(1, int(cci.get("n_candidate_pairs", 1)))
-                pool = np.setdiff1d(np.arange(self.n_genes), self._hypoxia_genes)
+                # Candidates must be genes that are actually EXPRESSED. Baseline expression is
+                # beta(0.1, 1.0) per cell type — CDF x^0.1, so the median gene sits at ~1e-3 and is
+                # effectively silent. Drawing a ligand/receptor uniformly lands on a silent gene most
+                # of the time, and the field boost is MULTIPLICATIVE: 0 * (1 + strength*field) = 0, so
+                # the channel would be undetectable and the wired pair would be handicapped against
+                # decoys that happen to be well expressed. Restricting the pool to genes above the
+                # genome-mean baseline (~top 20%) fixes both. A designation rule, not a parameter.
+                base_expr = np.mean([self.celltype_exps[ct] for ct in self.celltype_exps], axis=0)
+                pool = np.setdiff1d(np.flatnonzero(base_expr > base_expr.mean()),
+                                    self._hypoxia_genes)
+                if len(pool) < 2 * n_pairs:                  # small genomes: take the best expressed
+                    ranked = np.argsort(base_expr)[::-1]
+                    ranked = ranked[~np.isin(ranked, self._hypoxia_genes)]
+                    pool = np.sort(ranked[:2 * n_pairs])
                 k = min(2 * n_pairs, len(pool) - (len(pool) % 2))     # even: 2 distinct genes/pair
                 if k >= 2:
                     picks = prog_rng.choice(pool, size=k, replace=False)
