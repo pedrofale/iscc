@@ -6,6 +6,52 @@ arrangement, and put real gene symbols on the abstract genome. Prompted by a com
 (point-pattern generator). Neither models time, clones or copy number; both beat iscc on spatial
 texture and count fidelity.
 
+## Implementation status — W0 + W3 SHIPPED (2026-08-27)
+
+Built at **Visium resolution** (W2 deferred, W4 deferred to the next handoff). Landed in
+`src/iscc/tumor/models/count.py` (engine) and `src/iscc/integrations/cci.py` (export seam).
+
+- **W0 — the database.** ONE new parameter, `microenv_params['cci']['n_candidate_pairs']` (default 1).
+  The construction block draws `n_candidate_pairs` L-R pairs from the SAME layout sub-stream as the
+  target genes (`layout_seed + LAYOUT_OFFSET_F8_PROGRAMS`), AFTER the target draws so those stay
+  byte-identical. Row 0 is the WIRED pair; the rest are unwired decoys. Ligand/receptor genes are
+  drawn DISJOINT from the hypoxia/CCI target sets (a designation is never itself a readout gene). No
+  decoy class is engineered — the clone-correlated class is MEASURED after the fact by
+  `iscc.integrations.clone_correlation` (correlation ratio of ligand/receptor expression vs clone).
+  `iscc.integrations.cci_database` / `write_cci_database` emit the four `Update-CellChatDB` CSVs and
+  ASSERT the `geneInfo` whitelist is complete (README_cellchat.md §4.1); `validation/cellchat_runner.R`
+  re-asserts `setequal(extractGene(db), expected)` on the R side.
+- **W3 — receptor-dependence.** Hypoxia stays a per-deme×gene matrix. CCI is now
+  `f = 1 + strength · ligand_avail[deme] · receptor_level[gid]` applied to the CCI target genes,
+  computed per-(deme, genotype) at materialisation (both the total and the allele-resolved `p`/`m`
+  layers, so they never disagree). `ligand_avail` is the smoothed emitter field weighted by the
+  emitters' LIGAND expression; `receptor_level` is the genotype's RECEPTOR expression.
+- **NORMALISATION (a definition, not a knob).** Each term is divided by its population mean — the
+  ligand weight by the emitter cells' mean ligand expression, the receptor by all cells' mean
+  receptor expression — so both average to ~1 and `f` recovers the old `1 + strength·cci_signal` in
+  magnitude when ligand/receptor are uniform. This keeps the ALREADY-CALIBRATED `strength` valid;
+  getting it wrong silently rescales `strength` with no test failing.
+- **UNITS.** iscc Visium coordinates are in DEME units; a deme anchors at ~25 µm. The validation
+  authors section coordinates in µm (`deme × DEME_MICRONS = 25`), so CellChat's `spatial.factors`
+  ratio=1 path applies, and `cellchat_runner.R` COMPUTES `scale.distance = 1.02 / min_spot_distance`
+  from the geometry so the `min(scaled) ≥ 1` constraint (README §8.3) holds by construction.
+- **Ground truth** (`microenv_truth`): `cci_pairs` (the candidate DB), `cci_wired_pair` (index 0),
+  `cci_ligand`/`cci_receptor`, `cci_strength`, `cci_receptor_level` (per genotype), and the per-cell
+  RECEIVED signal in `cell_data['cell_microenv']['cci_level']` = `ligand_avail[deme]·receptor[cell]`
+  (now varies cell-to-cell by clone within a deme). Each cell's clone is `cell_type`.
+- **Invariants preserved.** F8 OFF is bit-identical; growth is byte-identical ON vs OFF (the DB draws
+  from the layout stream, never `self.rng`); ligand/receptor are READ at materialisation and never
+  feed fitness. Tests: `tests/test_microenvironment.py` (W0/W3 classes added).
+
+**Recoverability check — the reported caveat.** `validation/validate_cci.py` runs the real CellChat
+(spatial pipeline, `iscc-cellchat` env) on a planted Visium section and ranks pairs BY `prob`. F8
+modulates the TARGET genes and READS L/R — it never boosts L or R — while CellChat's `prob` scores
+L/R group-mean expression only, and at deme resolution the signal is piecewise-constant over ~20–25 µm
+blocks below the ~55 µm spot scale. So the wired pair is **not expected to separate from decoys at
+Visium**; that is a reported result, and downstream (W4) then needs a target-aware method
+(COMMOT/NicheNet) or single-cell spatial resolution (which also needs W2). See the run report for the
+measured ranking. *(See `validation/validate_cci.py` header for the full statement.)*
+
 ## Decisions taken (2026-08-27)
 
 1. **F8 target = the clone-vs-interaction confound**, not parity with sCCIgen on planted-interaction

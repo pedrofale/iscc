@@ -131,6 +131,29 @@ full tumor-evolution / cancer-genomics task spectrum." Do NOT build GRN/scATAC (
   coupling (hypoxia slowing division) — deferred; v1 is expression-only. **Next (optional):** demo
   notebook; a manuscript niche/microenvironment paragraph + the figure.
 
+## CCI + spatial (DESIGN_cci_spatial.md) — W0 + W3 ✅ DONE (2026-08-27, Visium resolution)
+- **DONE — W0 the L-R database.** ONE new parameter `microenv_params['cci']['n_candidate_pairs']`
+  (default 1). iscc emits its OWN candidate ligand-receptor database over its own abstract gene ids:
+  row 0 wired, the rest unwired decoys, drawn from the layout stream (disjoint from the readout target
+  genes). The clone-correlated class is MEASURED (`iscc.integrations.clone_correlation`), not planted.
+  `cci_database` / `write_cci_database` emit the four `Update-CellChatDB` CSVs and assert the
+  `geneInfo` whitelist is complete; `validation/cellchat_runner.R` re-asserts it in R (round trip of
+  `validation/README_cellchat.md`).
+- **DONE — W3 receptor-dependence.** CCI effect is now
+  `1 + strength·ligand_avail[deme]·receptor[genotype]` on the target genes (per-(deme,genotype), both
+  total + allele layers). Ligand-weighted smoothed emitter field; per-cell received signal in
+  `cell_microenv['cci_level']`. NORMALISATION keeps the calibrated `strength` valid (each term ÷ its
+  population mean). OFF bit-identical; growth byte-identical ON. W0/W3 tests in
+  `tests/test_microenvironment.py`.
+- **DONE — recoverability check** `validation/validate_cci.py` (+ `cellchat_runner.R`, `iscc-cellchat`
+  env): runs real CellChat on a planted Visium section, ranks pairs by `prob`. CAVEAT (stated, not
+  discovered): F8 modulates TARGETS and reads L/R while CellChat scores L/R group means, and the
+  deme-scale signal sits below the ~55 µm spot — so the wired pair is not expected to separate at
+  Visium. See the run report + `manuscript/figures/validation_cci.png`.
+- **NEXT (separate handoff) — W4** the `dispersal_rate` confound sweep (interaction vs clonal
+  relatedness), and **W2** intra-deme layout for single-cell spatial resolution. Both scoped in
+  `DESIGN_cci_spatial.md`; W4 needs this landed, and needs a target-aware method or W2's resolution.
+
 ## F9 — single-cell spatial assay (imaging-based) ✅ DONE
 - **DONE** — `data/imaging.py` `scSpatial` (`ASSAYS["scspatial"]`): per-cell panel counts at
   `cell_crd`, NB/DM, transcriptome-coverage (`panel`/`n_panel_genes`) + data-distribution knobs
