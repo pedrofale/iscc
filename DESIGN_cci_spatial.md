@@ -20,15 +20,35 @@ texture and count fidelity.
 
 ## Ordering (this is a dependency chain, not three parallel tracks)
 
-    W2 intra-deme layout  ->  W3 L-R channels + database  ->  W4 the confound benchmark
+    W0 database  ->  W3 L-R channels  ->  W4 confound benchmark        (Visium-resolution: ships alone)
+    W2 intra-deme layout                                              (needed only for imaging resolution)
 
-**Superseded 2026-08-27.** The chain originally began with W1 (real gene symbols), because CellChat
-and CellPhoneDB resolve ligand–receptor pairs by gene symbol. W0 removes that dependency: iscc emits
-its own database over its own abstract gene identifiers, and the tools are pointed at it. W1 is on
-hold and no longer needed. Contact- and neighbourhood-based CCI still needs cell-level positions, so
-W3 still needs W2.
+**Ordering corrected 2026-08-27.** An earlier draft made W2 a prerequisite for W3. It is not, and the
+question that actually decides the order is **which assay the benchmark targets**.
 
----
+- **W3's load-bearing change does not need cell positions.** The effect is
+  `strength x ligand_available x the receiver's own receptor expression`. Ligand availability can stay
+  a per-deme field exactly as F8 computes it today, while the RECEPTOR term is already per-cell,
+  because expression varies cell to cell within a deme by clone and by programme activity. So W3
+  delivers genuine per-cell response heterogeneity at deme-resolution geometry.
+- **Visium geometry is exact.** `visium.py::_layout()` returns the fixed v1 slide (or a fixed
+  hex/square array); `_place_section` translates and rotates the tissue ONTO that lattice. Spot
+  coordinates — what a spatial CCI method reads — never depend on cell jitter. Jitter only shifts
+  which cells fall in a spot, and spot composition is 94% dominated by a single deme (measured, W2).
+- **W4's confound is a territory-scale phenomenon.** Clonal patches span tens of demes and are tuned
+  by `dispersal_rate`; the confound does not live below deme scale.
+- **W2 becomes a prerequisite only at single-cell spatial (imaging) resolution**, where co-deme cells
+  are currently emitted at identical coordinates (see W2), or for contact-range methods operating
+  below ~20-25 um.
+
+**Practical argument for starting with W0+W3.** F8 is optional and default-off, so W3 is additive and
+restates NOTHING. W2 restates the deconvolution results. And W0+W3+W4 is where the novelty sits — the
+decoy classes and the clone-vs-interaction confound — so doing it first de-risks the line: if the
+confound does not separate cleanly, that is learned before investing in layout infrastructure.
+
+**Caveat if W3 ships alone.** At deme resolution the planted signal is piecewise-constant over
+~20-25 um blocks. Visium spots are ~55 um, so that is below the observation scale and invisible to the
+benchmark. It would show at imaging resolution — which is the same condition that makes W2 required.
 
 ## W1 — a named genome — **REJECTED 2026-08-27**
 

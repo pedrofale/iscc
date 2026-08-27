@@ -3,8 +3,11 @@
 Saved 2026-08-27. Copy the block below as the opening message of a fresh session.
 Design reference: `DESIGN_cci_spatial.md` section **W2** (and **W0** for what it feeds).
 
-W2 is the first link of the live chain (`W2 -> W3 L-R channels + database -> W4 confound benchmark`).
-W1 (real gene symbols) is SUPERSEDED and must not be started.
+**Ordering corrected 2026-08-27: W2 is NOT a prerequisite for W3.** W3's receptor-dependence works at
+deme resolution (the receptor term is already per-cell), and Visium spot coordinates are exact and
+independent of cell jitter, so a Visium-resolution CCI benchmark ships without this. W2 is required
+only for a SINGLE-CELL SPATIAL (imaging) benchmark, where co-deme cells currently sit at identical
+coordinates. See `DESIGN_cci_spatial.md` for the corrected chain. W1 is SUPERSEDED — do not start it.
 
 ---
 
@@ -78,9 +81,10 @@ TESTS / DONE
 - Imaging output no longer has co-deme cells at identical coordinates.
 - Full suite green. Update `DESIGN_cci_spatial.md` W2 with what was built, and `BACKLOG.md`.
 
-WHY IT MATTERS DOWNSTREAM
-W3 plants ligand-receptor channels evaluated at CELL level (effect = strength x local ligand
-availability x the receiver's own receptor expression). That needs real cell positions, which is what
-this delivers. Without W2, F8 stays a per-deme field and every cell in a deme sees the identical
-signal, so contact-based CCI methods have nothing to read.
+WHY IT MATTERS DOWNSTREAM (corrected)
+This is what makes a SINGLE-CELL-RESOLUTION CCI benchmark possible. It is NOT required for a
+Visium-resolution one: W3's effect is `strength x ligand_available x receiver receptor expression`,
+and the receptor term is per-cell already, so per-cell response heterogeneity exists without per-cell
+positions. What W2 adds is geometry below the deme — which contact-range methods and any
+imaging-based analysis need, and which the imaging assay currently lacks entirely.
 ```
