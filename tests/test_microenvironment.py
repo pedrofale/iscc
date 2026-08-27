@@ -87,7 +87,11 @@ class TestInvariants:
 # --------------------------------------------------------------------- the modifier -----------
 class TestModifier:
     def test_control_genes_unmodified(self, on, off):
-        prog = np.union1d(on.microenv_truth["hypoxia_genes"], on.microenv_truth["cci_target_genes"])
+        # The modulated set is hypoxia genes + CCI target genes + the WIRED pair's ligand/receptor
+        # (which the field up-regulates so the channel is visible to an L-R tool).
+        t = on.microenv_truth
+        prog = np.union1d(t["hypoxia_genes"], t["cci_target_genes"])
+        prog = np.union1d(prog, [t["cci_ligand"], t["cci_receptor"]])
         ctrl = np.setdiff1d(np.arange(on.n_genes), prog)
         assert np.array_equal(on.cell_data["cell_exp"].values[:, ctrl],
                               off.cell_data["cell_exp"].values[:, ctrl])
@@ -102,7 +106,10 @@ class TestModifier:
 
     def test_cci_ratio_is_exact(self, on, off):
         r = _ratio(on, off)
-        cci_only = np.setdiff1d(on.microenv_truth["cci_target_genes"], on.microenv_truth["hypoxia_genes"])
+        t = on.microenv_truth
+        cci_only = np.setdiff1d(t["cci_target_genes"], t["hypoxia_genes"])
+        # the wired L/R carry the field boost too, so they are not pure target genes
+        cci_only = np.setdiff1d(cci_only, [t["cci_ligand"], t["cci_receptor"]])
         expected = (1.0 + MP["cci"]["strength"] * on.cell_data["cell_microenv"]["cci_level"].values)
         sub = r[:, cci_only]
         m = ~np.isnan(sub)
@@ -231,13 +238,38 @@ class TestDatabase:
         assert int(t["cci_pairs"][0, 0]) == t["cci_ligand"]
         assert int(t["cci_pairs"][0, 1]) == t["cci_receptor"]
 
-    def test_ligand_receptor_disjoint_from_targets(self, on):
-        # a designated ligand/receptor is never itself a modulated readout gene
+    def test_candidates_are_not_hypoxia_genes(self, on):
+        # candidates must not be moved by the unrelated hypoxia programme (that would boost a DECOY
+        # and blur the benchmark). Overlap with the CCI target set is allowed and harmless.
         t = on.microenv_truth
         genes = set(t["cci_pairs"].ravel().tolist())
-        targets = set(np.asarray(t["cci_target_genes"]).tolist())
-        assert genes.isdisjoint(targets)
         assert genes.isdisjoint(set(np.asarray(t["hypoxia_genes"]).tolist()))
+
+    def test_wired_ligand_and_receptor_carry_the_signal(self, on, off):
+        # THE POINT OF THE FEATURE: the wired pair's ligand and receptor are up-regulated by the CCI
+        # field, so an L-R tool (which reads only these two genes) can see the channel. Their
+        # fold-change is exactly 1 + strength*field, and it tracks the field across cells.
+        t = on.microenv_truth
+        r = _ratio(on, off)
+        lvl = t["cci"][on.cell_data["cell_deme"]["deme_id"].values]     # per-cell ligand availability
+        expected = 1.0 + MP["cci"]["strength"] * lvl
+        for g in (t["cci_ligand"], t["cci_receptor"]):
+            if g in set(np.asarray(t["cci_target_genes"]).tolist()):
+                continue                                    # also a target -> carries both factors
+            sub = r[:, g]
+            m = ~np.isnan(sub)
+            assert np.allclose(sub[m], expected[m], atol=1e-9)
+        assert lvl.max() > lvl.min()                        # the field is not flat
+
+    def test_decoy_pairs_are_unmodified(self, on, off):
+        # an unwired decoy gets NO boost — that is what makes the wired pair distinguishable
+        t = on.microenv_truth
+        r = _ratio(on, off)
+        prog = np.union1d(t["hypoxia_genes"], t["cci_target_genes"])
+        decoys = [g for g in t["cci_pairs"][1:].ravel().tolist() if g not in set(prog.tolist())]
+        assert decoys, "expected at least one decoy gene outside the modulated sets"
+        sub = r[:, decoys]
+        assert np.allclose(sub[~np.isnan(sub)], 1.0, atol=1e-9)
 
     def test_pairs_are_strict_1to1_distinct_genes(self, on):
         genes = on.microenv_truth["cci_pairs"].ravel()

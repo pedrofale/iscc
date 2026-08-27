@@ -426,14 +426,16 @@ class GenotypeTumor:
                                                          replace=False)
             # Draw the L-R database from the SAME layout sub-stream, AFTER the target-gene draws so
             # those stay byte-identical (the pooling of patients onto ONE landscape is only justified
-            # against a shared network — the epistasis-network argument). The ligand/receptor genes
-            # are drawn DISJOINT from the hypoxia/CCI target sets so a designated ligand or receptor
-            # is never itself a modulated readout gene. `n_candidate_pairs` is the ONE new parameter
-            # (default 1 -> a database holding only the wired pair).
+            # against a shared network — the epistasis-network argument). `n_candidate_pairs` is the
+            # ONE new parameter (default 1 -> a database holding only the wired pair).
+            # The WIRED pair's ligand and receptor are themselves MODULATED by the CCI field (see
+            # `_microenv_deme_mod`): that is what puts the L-R signal in the two genes every CCI tool
+            # actually reads. Only the hypoxia set is excluded from the pool, so a candidate's
+            # expression is never moved by the unrelated hypoxia programme (which would boost a DECOY
+            # and blur the benchmark); overlap with the CCI target set is harmless and allowed.
             if float(cci.get("strength", 0.0)) != 0.0 and n_cci > 0:
                 n_pairs = max(1, int(cci.get("n_candidate_pairs", 1)))
-                pool = np.setdiff1d(np.arange(self.n_genes),
-                                    np.union1d(self._hypoxia_genes, self._cci_target_genes))
+                pool = np.setdiff1d(np.arange(self.n_genes), self._hypoxia_genes)
                 k = min(2 * n_pairs, len(pool) - (len(pool) % 2))     # even: 2 distinct genes/pair
                 if k >= 2:
                     picks = prog_rng.choice(pool, size=k, replace=False)
@@ -2673,6 +2675,16 @@ class GenotypeTumor:
             weight = {gid: lig_raw[gid] / mean_lig for gid in lig_raw}
             receptor_level = {gid: rec_raw[gid] / mean_rec for gid in rec_raw}
             cci_signal = self._cci_field(etype, float(cci.get("lengthscale", 2.0)), weight=weight)
+            # THE L-R SIGNAL ITSELF. The wired pair's ligand and receptor are up-regulated in the
+            # signalling niche — where emitters are dense, both the ligand and its receptor rise
+            # together. This is the whole point of the channel: every CCI tool (CellChat,
+            # CellPhoneDB, COMMOT) scores a pair from the LIGAND and RECEPTOR genes' own expression,
+            # so a channel that leaves them untouched is invisible no matter how strong its
+            # downstream effect. An unwired decoy gets no such boost, so "ligand-high cells sitting
+            # near receptor-high cells" is true of the wired pair and of nothing else.
+            # Per-DEME (field only, not receptor-gated) so it lives in this matrix; the receptor-gated
+            # part stays on the downstream TARGET genes at materialisation.
+            mod[:, [lig, rec]] *= (1.0 + cci_strength * cci_signal[:, None])
 
         self.microenv_truth = dict(
             hypoxia_genes=np.asarray(self._hypoxia_genes),
