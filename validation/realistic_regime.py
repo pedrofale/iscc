@@ -134,8 +134,8 @@ def grow_realistic(seed=2, target_cancer=150_000, scale="cm", genome=None, selec
 
     ``GenotypeTumor.grow`` force-materialises ``cell_data`` at the end of EVERY call, so the growth
     loop here keeps the cap at 1 cell (a near-free materialisation) while stepping and only expands the
-    real ``max_cells`` sample once, at the end — otherwise a cm-scale run would rebuild a 50k-cell
-    table on each of ~20 iterations.
+    real ``max_cells`` sample once, at the end — otherwise a cm-scale run would rebuild the whole
+    cell table on each of ~20 iterations.
 
     Parameters
     ----------
@@ -153,7 +153,8 @@ def grow_realistic(seed=2, target_cancer=150_000, scale="cm", genome=None, selec
         Gene-program / dosage expression params (off by default — the tutorials don't need them; the
         program notebooks pass one).
     max_cells : int or None
-        Assay-memory cap used when ``materialise=True`` (defaults to the config's 50k).
+        Assay-memory cap used when ``materialise=True`` (defaults to the config's ``max_cells``,
+        currently 8,000 — memory goes as ``max_cells x n_genes``, and the genome is 6,000 genes).
     founder_mutations : dict or None
         The mutations the founder already carried when it transformed — the tumour's clonal (truncal)
         layer. Defaults to the shipped config's setting; pass ``None`` for a founder with an empty
