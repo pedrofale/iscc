@@ -71,11 +71,15 @@ spatial.factors <- data.frame(ratio = 1, tol = spot_size / 2)   # ratio=1: coord
 cat(sprintf("geometry: %d spots, min spot distance %.1f um, scale.distance %.4f\n",
             nrow(coords), min_d, scale.distance))
 
-cc <- createCellChat(object = sp_counts, meta = meta, group.by = "group",
+# `normalizeData` takes the raw COUNT MATRIX and returns log-library-normalised data (README §3).
+# createCellChat with a plain matrix assumes it is ALREADY normalised (it fills @data, not @data.raw),
+# so normalise the matrix FIRST and hand the object normalised data — otherwise a later
+# `normalizeData(object)` runs colSums on the empty @data.raw and dies with a dimension error.
+data.norm <- normalizeData(sp_counts)
+cc <- createCellChat(object = data.norm, meta = meta, group.by = "group",
                      datatype = "spatial", coordinates = coords,
                      spatial.factors = spatial.factors)
 cc@DB <- db.iscc
-cc <- normalizeData(cc)
 cc <- subsetData(cc)
 cc <- identifyOverExpressedGenes(cc)
 cc <- identifyOverExpressedInteractions(cc)

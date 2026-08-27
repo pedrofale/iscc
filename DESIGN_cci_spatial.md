@@ -43,14 +43,19 @@ Built at **Visium resolution** (W2 deferred, W4 deferred to the next handoff). L
   from the layout stream, never `self.rng`); ligand/receptor are READ at materialisation and never
   feed fitness. Tests: `tests/test_microenvironment.py` (W0/W3 classes added).
 
-**Recoverability check — the reported caveat.** `validation/validate_cci.py` runs the real CellChat
-(spatial pipeline, `iscc-cellchat` env) on a planted Visium section and ranks pairs BY `prob`. F8
-modulates the TARGET genes and READS L/R — it never boosts L or R — while CellChat's `prob` scores
-L/R group-mean expression only, and at deme resolution the signal is piecewise-constant over ~20–25 µm
-blocks below the ~55 µm spot scale. So the wired pair is **not expected to separate from decoys at
-Visium**; that is a reported result, and downstream (W4) then needs a target-aware method
-(COMMOT/NicheNet) or single-cell spatial resolution (which also needs W2). See the run report for the
-measured ranking. *(See `validation/validate_cci.py` header for the full statement.)*
+**Recoverability check — RESULT: a confirmed NULL at Visium (as predicted).** `validation/validate_cci.py`
+runs the real CellChat (spatial pipeline, `iscc-cellchat` env) on a planted Visium section (4,945-cell
+tumour, 134 spots, 30-pair database, one wired) and ranks pairs BY `prob`. **Measured:** the wired
+pair (`G_9_4_G_9_14`) is **DROPPED — CellChat culls it at the over-expressed-interaction stage** (its
+L/R genes carry no group-level over-expression), and the 12 surviving edges span 5 **decoy** pairs.
+The reason is structural, not a resolution artifact alone: F8 modulates the TARGET genes and READS
+L/R — it never boosts L or R — while CellChat's `prob` scores L/R group-mean expression only, so the
+wired pair has no expression advantage over a decoy. (The clone-correlation of the candidates is
+median η≈1.0 — nearly all L/R expression is clone-determined with programs on — so the emergent
+confound is strong, and the surviving decoys are exactly clone-driven edges.) This is the reported
+result the caveat anticipated: downstream (W4) needs a **target-aware** method (COMMOT/NicheNet) or
+**single-cell** spatial resolution (which also needs W2); do NOT "fix" it by boosting L/R — that would
+write the signal into L/R and defeat the design. Figure `manuscript/figures/validation_cci.png`.
 
 ## Decisions taken (2026-08-27)
 
