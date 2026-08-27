@@ -20,11 +20,13 @@ texture and count fidelity.
 
 ## Ordering (this is a dependency chain, not three parallel tracks)
 
-    W1 gene symbols  ->  W2 intra-deme layout  ->  W3 L-R channels  ->  W4 the confound benchmark
+    W2 intra-deme layout  ->  W3 L-R channels + database  ->  W4 the confound benchmark
 
-CellChat and CellPhoneDB look up ligand–receptor pairs **by gene symbol**, so without W1 they cannot
-be run at all and a planted channel has nothing to match against. Contact- and neighbourhood-based
-CCI needs cell-level positions, so W3 needs W2.
+**Superseded 2026-08-27.** The chain originally began with W1 (real gene symbols), because CellChat
+and CellPhoneDB resolve ligand–receptor pairs by gene symbol. W0 removes that dependency: iscc emits
+its own database over its own abstract gene identifiers, and the tools are pointed at it. W1 is on
+hold and no longer needed. Contact- and neighbourhood-based CCI still needs cell-level positions, so
+W3 still needs W2.
 
 ---
 
@@ -119,6 +121,57 @@ dart-throwing is O(n^2) per deme and n is carrying-capacity-sized.
 **Contract change, stated.** Composition stays exact; the layout is no longer cosmetic. Keep the
 uniform mode behind a flag so published numbers remain reproducible. **This restates the RCTD /
 deconvolution results** and needs a deliberate re-run.
+
+## W0 — iscc emits its OWN ligand–receptor database (decision, 2026-08-27)
+
+**Decision.** Rather than name genes so a curated database can match them, `iscc` **generates its own
+L–R database** and the analysis tools are pointed at it. This replaces W1 entirely: gene identifiers
+stay abstract, and no real cancer-gene annotation is imported — so none of the consistency debts that
+put W1 on hold arise.
+
+**Verified feasible for both primary tools.**
+- **CellChat** ships a documented `Update-CellChatDB` path taking `interaction_input`,
+  `complex_input`, `cofactor_input` and `geneInfo` CSVs.
+- **CellPhoneDB** generates custom databases from `gene_input` / `protein_input` / `complex_input` /
+  `interaction_input`, and **`--user-interactions-only`** makes it use ONLY the supplied
+  interactions, so no real pairs leak in. This is the flag that makes the substitution total.
+- **COMMOT** takes an L–R dataframe directly — **NOT verified**; treat as an assumption until checked.
+
+**The database is the instrument, and it needs decoys.** A database containing only the planted
+channels makes recovery trivial: there is nothing to discriminate. CellChatDB carries ~2,000 human
+interactions of which a handful are active in any given tissue, and a benchmark has to reproduce that
+selection problem. So the emitted database holds N candidate pairs of which only K are wired into F8,
+in three deliberate classes:
+
+1. **Active channels** — wired into F8; genuinely spatially driven signalling.
+2. **Neutral decoys** — ligand and receptor genes exist and are expressed comparably, but there is no
+   downstream effect. These measure the false-positive rate against expression alone.
+3. **Clone-confounded decoys** — ligand/receptor expression co-varies with CLONE, and therefore with
+   space (clones are territorial), but no signalling exists. **These are the traps.** A method blind
+   to clonal relatedness should call them.
+
+The W4 score is then: can the method separate class 1 from class 3? That is the confound benchmark,
+and this database structure is what makes it constructible. No CCI simulator without clones can build
+class 3 — which is precisely the gap against sCCIgen.
+
+**Hard constraint.** Decoy ligand/receptor genes MUST be expressed comparably to the active ones. If
+they are silent or flat they are rejected on expression grounds rather than on communication
+evidence, and the benchmark measures nothing.
+
+**Caveat to state in the paper, not to discover in review.** Supplying our own database means we test
+the tools' statistical and spatial inference, NOT their curated prior knowledge (pathways, complexes,
+cofactors). That is a legitimate and arguably the correct scoping — annotation quality is a separate
+axis, and holding it fixed is what isolates the inference — but it must be said plainly, or a
+reviewer can object that half of CellChat was switched off. CellPhoneDB's `--user-interactions-only`
+makes the scoping explicit and auditable.
+
+**Open question.** Multi-subunit receptor complexes: both tools support them. The simplest v1 is
+strict 1:1 pairs with empty complex/cofactor tables. Decide whether complexes are in scope before
+building.
+
+**Revised chain.** `W2 intra-deme layout -> W3 channels + database -> W4 confound benchmark`. The
+database and the F8 wiring are two outputs of ONE object and must be generated together — a pair is
+"active" precisely because F8 is wired to it.
 
 ## W3 — ligand–receptor channels in F8
 

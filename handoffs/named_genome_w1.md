@@ -1,6 +1,11 @@
 # Handoff prompt — W1: a named genome (naming layer)
 
-> **ON HOLD — DO NOT START (2026-08-27).** Naming the abstract genome imports a prior-knowledge
+> **SUPERSEDED — DO NOT START (2026-08-27).** Replaced by **W0** in
+> `DESIGN_cci_spatial.md`: iscc emits its own ligand–receptor database over its own abstract
+> gene identifiers, and the tools are pointed at it, so real gene symbols are not needed at all.
+> The original objection stands and is recorded below.
+>
+> **Original reason for holding.** Naming the abstract genome imports a prior-knowledge
 > graph the engine does not satisfy. Roles are drawn UNIFORMLY at random across the genome
 > (`selection.py`: `rng.choice([-1,0,1], p=[prop_driver/2, 1-prop_driver, prop_driver/2])`, same rate
 > on every segment) with directional effects (mutated oncogene 2x expression, mutated TSG 0.5x),
