@@ -95,9 +95,14 @@ COUPLING_PARAMS = {"phenotype_program_strength": 2.0}
 
 
 def expression_params(scatter=1.0):
+    # COPY every block. These used to be handed out by reference, so a caller that adjusted the
+    # returned dict -- notebooks/base_sim.EXPR() does exactly that, adding the niche->emt arm and its
+    # own phenotype_program_strength -- silently rewrote this module's constants for the rest of the
+    # process. Any cohort grown after that call in the same process got the notebook's coupling
+    # instead of the calibrated one, including the niche arm this module deliberately holds.
     return {"program_params": dict(PROGRAM_PARAMS, program_genomic_scatter=scatter),
-            "activity_params": ACTIVITY_PARAMS,
-            "coupling_params": COUPLING_PARAMS,
+            "activity_params": dict(ACTIVITY_PARAMS),
+            "coupling_params": dict(COUPLING_PARAMS),
             "dosage_params": {"dosage_sensitivity_mean": 0.7, "dosage_sensitivity_sd": 0.25,
                               "dosage_saturation": 8, "allele_specific": False},
             "snv_effect_params": {"p_lof": 0.1, "p_missense": 0.3, "p_splice": 0.05,
