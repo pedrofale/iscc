@@ -405,6 +405,13 @@ class GenotypeTumor:
         # source was wrong.)
         self._hypoxia_genes = np.array([], dtype=int)
         self._cci_target_genes = np.array([], dtype=int)
+        # W0 (DESIGN_cci_spatial.md): iscc's OWN ligand-receptor database. `_cci_pairs` is
+        # (n_candidate_pairs x 2) of gene indices (col 0 = ligand, col 1 = receptor); row 0 is the
+        # WIRED pair F8's CCI channel is driven by, every other row is an unwired decoy. Empty (and
+        # ligand/receptor None) unless a CCI channel is active, so an F8-off tumour is untouched.
+        self._cci_pairs = np.empty((0, 2), dtype=int)
+        self._cci_ligand = None
+        self._cci_receptor = None
         if self.microenv_params:
             prog_rng = np.random.default_rng(self.layout_seed + LAYOUT_OFFSET_F8_PROGRAMS)
             hyp = ((self.microenv_params.get("hypoxia") or {}) if isinstance(self.microenv_params, dict) else {})
@@ -417,6 +424,22 @@ class GenotypeTumor:
             if n_cci > 0:
                 self._cci_target_genes = prog_rng.choice(self.n_genes, size=min(n_cci, self.n_genes),
                                                          replace=False)
+            # Draw the L-R database from the SAME layout sub-stream, AFTER the target-gene draws so
+            # those stay byte-identical (the pooling of patients onto ONE landscape is only justified
+            # against a shared network — the epistasis-network argument). The ligand/receptor genes
+            # are drawn DISJOINT from the hypoxia/CCI target sets so a designated ligand or receptor
+            # is never itself a modulated readout gene. `n_candidate_pairs` is the ONE new parameter
+            # (default 1 -> a database holding only the wired pair).
+            if float(cci.get("strength", 0.0)) != 0.0 and n_cci > 0:
+                n_pairs = max(1, int(cci.get("n_candidate_pairs", 1)))
+                pool = np.setdiff1d(np.arange(self.n_genes),
+                                    np.union1d(self._hypoxia_genes, self._cci_target_genes))
+                k = min(2 * n_pairs, len(pool) - (len(pool) % 2))     # even: 2 distinct genes/pair
+                if k >= 2:
+                    picks = prog_rng.choice(pool, size=k, replace=False)
+                    self._cci_pairs = picks.reshape(-1, 2).astype(int)
+                    self._cci_ligand = int(self._cci_pairs[0, 0])
+                    self._cci_receptor = int(self._cci_pairs[0, 1])
 
         # genotype registry: id -> representative cell. Normals keyed by their type name.
         self.genotypes = {}
@@ -2518,13 +2541,21 @@ class GenotypeTumor:
         cc = self._cap
         return np.array([sum(d.values()) / cc for d in self.demes], dtype=float)
 
-    def _emitter_density(self, emitter_type):
-        """Per-deme density of a ligand-emitting cell type (e.g. immune)."""
+    def _emitter_density(self, emitter_type, weight=None):
+        """Per-deme density of a ligand-emitting cell type (e.g. immune).
+
+        ``weight`` (a ``gid -> per-cell level`` map) turns the bare count into per-deme LIGAND
+        availability: each emitter cell contributes its ligand EXPRESSION instead of 1 (W3,
+        DESIGN_cci_spatial.md). ``None`` keeps the original count fraction — the O2 perfusion source
+        and the field/emitter tests use it, so those stay byte-identical."""
         cc = self._cap
         out = np.zeros(len(self.demes))
         for i, deme in enumerate(self.demes):
-            out[i] = sum(c for gid, c in deme.items()
-                         if self.genotypes[gid].type == emitter_type) / cc
+            acc = 0.0
+            for gid, c in deme.items():
+                if self.genotypes[gid].type == emitter_type:
+                    acc += c * (1.0 if weight is None else float(weight.get(gid, 0.0)))
+            out[i] = acc / cc
         return out
 
     def _o2_field(self, D=1.0, k=1.0, s=0.2, source="uniform", n_iter=500, tol=1e-5):
@@ -2562,9 +2593,11 @@ class GenotypeTumor:
             O2 = new
         return np.clip(1.0 - O2.ravel(), 0.0, 1.0)
 
-    def _cci_field(self, emitter_type="immune", lengthscale=2.0):
-        """Per-deme ligand signal = neighbourhood-averaged emitter density (Gaussian `lengthscale`)."""
-        emit = self._emitter_density(emitter_type)
+    def _cci_field(self, emitter_type="immune", lengthscale=2.0, weight=None):
+        """Per-deme ligand signal = neighbourhood-averaged emitter LIGAND availability (Gaussian
+        `lengthscale`). ``weight`` (gid -> ligand level) weights each emitter by its ligand
+        expression rather than its bare density (W3); ``None`` -> the original density field."""
+        emit = self._emitter_density(emitter_type, weight=weight)
         coords = np.array(self.deme_coords, dtype=float)
         diff = coords[:, None, :] - coords[None, :, :]
         d2 = np.sum(diff * diff, axis=-1)
@@ -2573,11 +2606,29 @@ class GenotypeTumor:
         wsum = W.sum(axis=1)
         return np.divide(W @ emit, wsum, out=np.zeros_like(emit), where=wsum > 0)
 
-    def _microenv_deme_mod(self):
-        """The F8 per-deme x gene expression modifier (n_demes x n_genes), or None if disabled.
+    def _microenv_deme_mod(self, exp_cache=None):
+        """F8 expression modifier: the HYPOXIA per-deme x gene matrix (n_demes x n_genes), or None.
 
-        `mod[deme, hypoxia_genes] *= 1 + strength·hypoxia[deme]` and likewise for CCI target genes.
-        Stores the ground-truth programs + fields on `self.microenv_truth` for validation/benchmarks.
+        Hypoxia stays a genuine per-deme row: `mod[deme, hypoxia_genes] *= 1 + strength·hypoxia[deme]`.
+
+        CCI (W3, DESIGN_cci_spatial.md) is now RECEPTOR-DEPENDENT, so it is NOT folded into this
+        matrix — its multiplier is per-(deme, GENOTYPE) and is applied at materialisation. Here we
+        compute the two inputs that multiplier needs and stash them on `self.microenv_truth`:
+          * ``cci`` — ligand availability per deme: the smoothed emitter field, but each emitter
+            weighted by its LIGAND expression (the wired pair's ligand gene) instead of a bare count;
+          * ``cci_receptor_level`` — each genotype's expression of the wired RECEPTOR gene.
+        The received signal on cell c is ``cci[deme(c)]·receptor_level[gid(c)]`` and the CCI
+        multiplier on its target genes is ``1 + strength·received``.
+
+        NORMALISATION (a definition, not a knob — getting it wrong silently rescales the calibrated
+        ``strength``). ``_cci_field`` returned a density in [0,1] (a fraction of carrying capacity),
+        which is what gives ``strength`` a stable meaning; weighting by RAW ligand expression and
+        multiplying by RAW receptor expression breaks that bound. So each term is divided by its
+        population mean: the ligand weight by the emitter cells' mean ligand expression (so ``cci``
+        reduces EXACTLY to the old density field when ligand is uniform across genotypes), the
+        receptor by ALL cells' mean receptor expression (so ``receptor_level`` averages ~1). Both
+        then average to ~1 and ``1 + strength·received`` recovers the old ``1 + strength·cci_signal``
+        in magnitude, so the existing ``strength`` calibration still applies.
         """
         mp = self.microenv_params
         if not mp:
@@ -2587,20 +2638,52 @@ class GenotypeTumor:
         n_demes = len(self.demes)
         mod = np.ones((n_demes, self.n_genes))
         hypoxia = np.zeros(n_demes)
-        cci_signal = np.zeros(n_demes)
         if len(self._hypoxia_genes) and float(hyp.get("strength", 0.0)) != 0.0:
             hypoxia = self._o2_field(D=float(hyp.get("o2_diffusion", 1.0)),
                                      k=float(hyp.get("o2_consumption", 1.0)),
                                      s=float(hyp.get("o2_supply", 0.2)),
                                      source=hyp.get("o2_source", "uniform"))
             mod[:, self._hypoxia_genes] *= (1.0 + float(hyp["strength"]) * hypoxia[:, None])
-        if len(self._cci_target_genes) and float(cci.get("strength", 0.0)) != 0.0:
-            cci_signal = self._cci_field(cci.get("emitter_type", "immune"),
-                                         float(cci.get("lengthscale", 2.0)))
-            mod[:, self._cci_target_genes] *= (1.0 + float(cci["strength"]) * cci_signal[:, None])
+
+        # --- W3 CCI: receptor-dependent channel (the wired pair) ------------------------------
+        cci_signal = np.zeros(n_demes)                    # per-deme ligand availability (normalised)
+        receptor_level = {}
+        cci_strength = float(cci.get("strength", 0.0))
+        cci_on = (len(self._cci_target_genes) and cci_strength != 0.0
+                  and self._cci_ligand is not None and exp_cache)
+        if cci_on:
+            lig, rec = self._cci_ligand, self._cci_receptor
+            etype = cci.get("emitter_type", "immune")
+            lig_raw = {gid: float(exp_cache[gid][lig]) for gid in exp_cache}
+            rec_raw = {gid: float(exp_cache[gid][rec]) for gid in exp_cache}
+            # count-weighted population means over the FULL deme composition (unmaterialised
+            # emitters still shape the field; genotypes we hold no expression for are skipped).
+            lig_s = lig_n = rec_s = rec_n = 0.0
+            for deme in self.demes:
+                for gid, c in deme.items():
+                    if gid not in lig_raw:
+                        continue
+                    rec_s += c * rec_raw[gid]; rec_n += c
+                    if self.genotypes[gid].type == etype:
+                        lig_s += c * lig_raw[gid]; lig_n += c
+            mean_lig = (lig_s / lig_n) if lig_n > 0 else 1.0
+            mean_rec = (rec_s / rec_n) if rec_n > 0 else 1.0
+            mean_lig = mean_lig if mean_lig > 0 else 1.0
+            mean_rec = mean_rec if mean_rec > 0 else 1.0
+            weight = {gid: lig_raw[gid] / mean_lig for gid in lig_raw}
+            receptor_level = {gid: rec_raw[gid] / mean_rec for gid in rec_raw}
+            cci_signal = self._cci_field(etype, float(cci.get("lengthscale", 2.0)), weight=weight)
+
         self.microenv_truth = dict(
-            hypoxia_genes=np.asarray(self._hypoxia_genes), cci_target_genes=np.asarray(self._cci_target_genes),
-            hypoxia=hypoxia, cci=cci_signal)
+            hypoxia_genes=np.asarray(self._hypoxia_genes),
+            cci_target_genes=np.asarray(self._cci_target_genes),
+            hypoxia=hypoxia, cci=cci_signal,
+            # W0/W3 ground truth: the candidate L-R database, which pair is wired, and the
+            # per-genotype receptor level that (with `cci`) makes the received signal per cell.
+            cci_pairs=np.asarray(self._cci_pairs, dtype=int),
+            cci_wired_pair=(0 if len(self._cci_pairs) else -1),
+            cci_ligand=self._cci_ligand, cci_receptor=self._cci_receptor,
+            cci_strength=cci_strength, cci_receptor_level=receptor_level)
         return mod
 
     # --- materialisation: counts -> per-cell matrices ------------------------
@@ -3152,8 +3235,20 @@ class GenotypeTumor:
 
         # F8: per-deme expression modifier (None -> disabled -> exp is bit-identical to the base
         # engine). Cache the modified expression per (deme, genotype) since many cells share both.
-        deme_mod = self._microenv_deme_mod()
+        # `exp_cache` is passed so the CCI ligand/receptor levels (W3) can be read per genotype.
+        deme_mod = self._microenv_deme_mod(exp_cache)
         mod_exp_cache = {}
+        # W3 CCI is receptor-dependent, so its multiplier is per-(deme, genotype), not a column of
+        # `deme_mod` (which now carries hypoxia only). Extract the pieces the loop needs: the target
+        # genes, the calibrated strength, the per-deme ligand availability and the per-genotype
+        # receptor level. `None` when no CCI channel is wired -> the loop applies hypoxia alone.
+        cci_apply = None
+        if deme_mod is not None and self.microenv_truth.get("cci_ligand") is not None:
+            _ct = np.asarray(self.microenv_truth["cci_target_genes"], dtype=int)
+            _cs = float(self.microenv_truth["cci_strength"])
+            _rl = self.microenv_truth["cci_receptor_level"]
+            if _ct.size and _cs != 0.0 and _rl:
+                cci_apply = (_ct, _cs, self.microenv_truth["cci"], _rl)
 
         # R13 route 3 — niche -> program: the F8 fields drive per-deme program activity, generalising
         # F8's hard-wired hypoxia/CCI gene sets (which still apply via `deme_mod`; the two routes
@@ -3190,16 +3285,27 @@ class GenotypeTumor:
                 continue
             r, c = self.deme_coords[deme_idx]
             for gid in sorted(keep.keys(), key=lambda g: self.genotypes[g].ord):
+                # W3: the receptor-dependent CCI multiplier for this (deme, genotype) — the same
+                # scalar for every cell of the clone here (ligand availability at the deme × the
+                # clone's own receptor level). `deme_mod` carries hypoxia; this carries CCI.
+                cci_f = None
+                if cci_apply is not None:
+                    _ct, _cs, _la, _rl = cci_apply
+                    cci_f = 1.0 + _cs * float(_la[deme_idx]) * float(_rl.get(gid, 0.0))
                 if deme_mod is None:
                     exp_row = exp_cache[gid]
                 else:
                     exp_row = mod_exp_cache.get((deme_idx, gid))
                     if exp_row is None:
-                        exp_row = exp_cache[gid] * deme_mod[deme_idx]
+                        exp_row = exp_cache[gid] * deme_mod[deme_idx]     # fresh array (hypoxia)
+                        if cci_f is not None:
+                            exp_row[_ct] *= cci_f                          # receptor-dependent CCI
                         mod_exp_cache[(deme_idx, gid)] = exp_row
                 if P is not None:
                     mod_row = 1.0 if deme_mod is None else deme_mod[deme_idx]
                     ep_row, em_row = exp_p_cache[gid] * mod_row, exp_m_cache[gid] * mod_row
+                    if cci_f is not None:                                  # keep alleles in step (§L3200)
+                        ep_row[_ct] *= cci_f; em_row[_ct] *= cci_f
                     drive_row = drive_cache[gid]
                     if niche_drive is not None:
                         drive_row = drive_row + niche_drive[deme_idx]
@@ -3300,12 +3406,21 @@ class GenotypeTumor:
                                       for g in types]}, index=idx)
         # F8: surface the per-cell cell-extrinsic levels (ground truth for the intrinsic-vs-extrinsic
         # decomposition benchmark). Only added when F8 is enabled, so the base schema is unchanged.
+        # `cci_level` is now the per-cell RECEIVED signal (W3): ligand availability at the cell's
+        # deme × the cell's own receptor level — so it varies cell-to-cell by clone within a deme,
+        # not just deme-to-deme. It is exactly the quantity the CCI target-gene fold-change reads
+        # (fold = 1 + strength·cci_level), and the ground truth W4 scores a CCI method against.
         if deme_mod is not None:
             dcol = np.asarray(demes_col, dtype=int)
-            hyp, cci = self.microenv_truth["hypoxia"], self.microenv_truth["cci"]
+            hyp, lig = self.microenv_truth["hypoxia"], self.microenv_truth["cci"]
+            rl = self.microenv_truth.get("cci_receptor_level", {})
+            if dcol.size:
+                recv = lig[dcol] * np.array([float(rl.get(g, 0.0)) for g in types])
+            else:
+                recv = np.array([])
             self.cell_data["cell_microenv"] = pd.DataFrame(
                 {"hypoxia_level": hyp[dcol] if dcol.size else np.array([]),
-                 "cci_level": cci[dcol] if dcol.size else np.array([])}, index=idx)
+                 "cci_level": recv}, index=idx)
 
         # Ductal-field ground truth (DESIGN_ductal_field.md §2): the gland each cell sits in (-1 for
         # stroma). Only added when a gland field was seeded, so the base schema is unchanged otherwise.
