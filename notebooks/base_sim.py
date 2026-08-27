@@ -52,7 +52,7 @@ from iscc.tumor.models import GenotypeTumor  # noqa: E402
 
 BASE_SEED = 3
 COHORT_SEEDS = [3, 4, 5, 6, 7]  # 5 tumours sharing the landscape
-NORMALS = ("epithelial", "stromal", "immune")
+NORMALS = RR.NORMALS               # from the engine, via realistic_regime -- includes met "host"
 
 # The science notebooks now grow the SAME realistic, cm-scale, breach-gated DCIS→IDC ductal field the
 # tutorials ship (``notebooks/example_config.yaml`` via ``validation/realistic_regime.py``) — grid 170,

@@ -33,11 +33,15 @@ import os
 import numpy as np
 import yaml
 
+from iscc.constants import normal_names
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH = os.path.join(REPO, "notebooks", "example_config.yaml")
 
-# Coarse cell-type names that are NOT cancer (the mixed ductal-field microenvironment).
-NORMALS = ("epithelial", "stromal", "immune", "host")
+# Coarse cell-type names that are NOT cancer (the mixed ductal-field microenvironment). Taken from
+# the engine rather than restated: this list used to be written out here AND in notebooks/base_sim,
+# and the notebook copy had already lost "host" -- the met compartment's own normal tissue.
+NORMALS = tuple(normal_names)
 
 
 def load_config(path=CONFIG_PATH):
