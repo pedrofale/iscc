@@ -162,8 +162,28 @@ def pm_cohort(n_patients=14, steps=PM_STEPS):
 
 
 def _adjuvant_chemo():
+    # kill_mode "proliferation", matching validate_escape_modes.py and configs/landing.yaml. The
+    # engine's "additive" default adds the same absolute hazard to every clone, so survival is
+    # decided by division rate -- count.py::_kill_amount says an absolute number "cannot serve clones
+    # whose birth rates differ threefold".
+    #
+    # kill_rate is 1.5 here, NOT the 1.0 the hero and the escape modes use, and that is deliberate:
+    # under "proliferation" the hazard scales with the clone's OWN division rate, so the same number
+    # is a different drug in a different config. These patients divide at 0.6 (PM_CANCER) against the
+    # landing arc's ~1.0-1.7 with drivers. The mode transfers between configs; the rate does not.
+    #
+    # The cohort's premise is that the "sensitive" subgroup (treatment_resistant_effects 1.0 -> tr 0)
+    # responds and the "resistant" one (6.0 -> tr 0.833) does not. Net growth under drug,
+    # b=0.6 death=0.08 eff=0.95:
+    #     additive 1.8 (was)  sensitive -1.114   resistant +0.248
+    #     proliferation 1.0   sensitive -0.050   resistant +0.425   <- sensitive merely STALLS
+    #     proliferation 1.5   sensitive -0.335   resistant +0.378   <- kept: a clear split
+    # rate_multiplier=2.5 was also dropped. It is a CELL-engine parameter (Chemotherapy._apply);
+    # the count engine never reads it, so it was doing nothing while implying a 2.5x effect.
+    #
+    # NOTE: this changes the cohort's results. Anything derived from it must be regenerated.
     return Chemotherapy(start=PM_THERAPY_START, effectiveness=0.95, toxicity=0.01,
-                        kill_rate=1.8, rate_multiplier=2.5)
+                        kill_rate=1.5, kill_mode="proliferation")
 
 
 def _cancer_snv_of(tumor):
