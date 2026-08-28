@@ -39,7 +39,9 @@ theme:
     - navigation.indexes
     - navigation.footer
     - navigation.tracking
-    - navigation.sections
+    # NOT navigation.sections: that renders every group as a flat always-open header. Without it the
+    # tutorial groups (Getting started / Assays / Examples) are COLLAPSIBLE and only the group holding
+    # the current page is expanded.
     - navigation.top
     - toc.follow
     - toc.integrate      # fold the page TOC into the left sidebar → a single left nav (dynestyx-style)
@@ -58,8 +60,21 @@ markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.superfences
+  - pymdownx.arithmatex:
+      generic: true
   - toc:
       permalink: true
+
+# The DNA tutorial writes real equations (the relation between a read count, purity, copy number and
+# multiplicity). Without these the page shows raw LaTeX source.
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+# Cross-notebook links are authored as `other.ipynb` (works in Jupyter); this rewrites them
+# to the site's directory URLs at build time. See hooks/notebook_links.py.
+hooks:
+  - hooks/notebook_links.py
 
 plugins:
   - search
@@ -99,9 +114,30 @@ nav:
   - Overview: overview.md
   - Installation: installation.md
   - Tutorials:
-      - Pipeline walkthrough: tutorials/01_pipeline_walkthrough.ipynb
-      - Tumor growth: tutorials/02_tumor_growth.ipynb
-      - Data overview: tutorials/03_data_overview.ipynb
+      - iscc overview: tutorials/01_pipeline_walkthrough.ipynb
+      - Tumor evolution:
+          - Exploring the tumor: tutorials/02_tumor_growth.ipynb
+          - The shared tumour: tutorials/base_simulation.ipynb
+          - Compartment selection — DCIS to IDC: tutorials/compartment_selection_confound.ipynb
+          - Treatment and the four escape modes: tutorials/treatment_escape_modes.ipynb
+          - Metastasis: tutorials/metastasis.ipynb
+      - Data generation:
+          - Bulk & single-cell DNA: tutorials/assay_dna.ipynb
+          - Single-cell RNA: tutorials/assay_scrna.ipynb
+          - Spatial (Visium): tutorials/assay_spatial.ipynb
+          - Sequencing reads: tutorials/reads.ipynb
+      - Data analysis examples:
+          - The analysis dataset and its ground truth: tutorials/analysis_ground_truth.ipynb
+          - Calling copy number from single-cell DNA with HMMcopy: tutorials/tool_hmmcopy_R.ipynb
+          - Tree reconstruction from single-cell DNA with SCITE: tutorials/tool_scite_trees.ipynb
+          - Clone inference from bulk DNA with PyClone-VI: tutorials/tool_pyclonevi.ipynb
+          - Integrating scDNA and scRNA with clonealign: tutorials/tool_clonealign_R.ipynb
+          - Calling copy number from scRNA with Numbat: tutorials/tool_numbat_R.ipynb
+          - Deconvolving Visium spots with RCTD: tutorials/tool_rctd_R.ipynb
+          - Recovering progression constraints with TreeMHN: tutorials/tool_treemhn_R.ipynb
+          - Progression constraints from cross-sectional data with MHN: tutorials/tool_mhn_bulk.ipynb
+          - Integrating a patient cohort with scDEF: tutorials/tool_scdef_cohort.ipynb
+          - Cell–cell communication with CellChat: tutorials/tool_cellchat_R.ipynb
   - API Reference:
       - reference/index.md
       - Tumor:

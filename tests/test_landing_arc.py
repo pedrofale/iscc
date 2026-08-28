@@ -7,6 +7,7 @@ Reproduces the docs landing hero from the ordinary CLI:
     isccgif out --compartment --splash -o docs/assets/landing_hero.gif
 """
 import os
+from types import SimpleNamespace
 
 import numpy as np
 import yaml
@@ -104,6 +105,62 @@ def test_unknown_schedule_op_raises():
         arc.execute_schedule(t, {"seed": 3, "phases": [{"op": "radiotherapy"}]})
 
 
+# --- drug escape: the stage label must agree with the engine's protection -----------------------
+def _rep(**ep):
+    """A minimal cancer genotype stand-in: only what ``stage_of`` reads."""
+    ep.setdefault("division_rate", 1.0)
+    return SimpleNamespace(type="cancer", evolutionary_parameters=ep,
+                           baseline_rates={"division_rate": 1.0})
+
+
+@pytest.mark.parametrize("tr, dt, expect", [
+    (0.0, 1.0, "tolerance"),     # PURE PERSISTER: takes zero drug in the engine (max(tr, dt) = 1)
+    (0.3, 0.9, "tolerance"),     # tolerance is what keeps it alive -> it is the persister colour
+    (1.0, 0.0, "resistance"),
+    (0.9, 0.3, "resistance"),    # resistance already covers the drug; the persister state is idle
+    (1.0, 1.0, "resistance"),    # tie -> resistance, matching _apply_treatment's `dt > tr` cost test
+])
+def test_drug_escape_stage_matches_engine_protection(tr, dt, expect):
+    """A cell's drug-escape stage must follow the protection the ENGINE actually gives it, which is
+    ``max(treatment_resistance, drug_tolerance)`` (``_apply_treatment`` / ``_tx_death_add_for``) — not
+    ``treatment_resistance`` alone. The pure persister (tr=0, dt=1) is the case that matters: it takes
+    ZERO drug, so labelling it a drug-sensitive stage would paint the residual-disease floor as
+    sensitive in every stage/colour/Muller/GIF product.
+
+    Tolerance keeps its own stage rather than folding into resistance, so the two remain distinguishable
+    in figures: only resistance regrows under the drug, tolerance merely waits the dose out."""
+    assert arc.stage_of(_rep(treatment_resistance=tr, drug_tolerance=dt)) == expect
+    # the engine-side twin (plot_tissue(color="stage") / by_stage Mullers) indexes viz.STAGE_PALETTE;
+    # both readings must land on the SAME colour or the two product families disagree.
+    code = GenotypeTumor._stage_of(None, _rep(treatment_resistance=tr, drug_tolerance=dt))
+    assert tuple(viz.STAGE_PALETTE[code]) == tuple(arc.STAGE_COL[expect])
+
+
+def test_drug_escape_stage_ranks_above_the_cascade_and_tolerates_missing_key():
+    """Drug escape outranks the metastatic cascade (it is the last sweep of the arc), a clone with
+    neither drug trait still reads its cascade stage, and a genotype minted before the tolerance axis
+    existed (no ``drug_tolerance`` key at all) behaves exactly as it always did."""
+    assert arc.stage_of(_rep(treatment_resistance=0.0, drug_tolerance=0.8,
+                             met_survival=0.5, stromal_survival=0.3)) == "tolerance"
+    assert arc.stage_of(_rep(treatment_resistance=0.0, drug_tolerance=0.0, met_survival=0.5)) == "met"
+    assert arc.stage_of(_rep(treatment_resistance=0.5)) == "resistance"        # legacy rep, no dt key
+    assert arc.stage_of(_rep(breach=0.2)) == "breach"
+
+
+def test_stage_palettes_stay_index_aligned():
+    """``arc`` (string stages, the GIF) and ``viz``/``GenotypeTumor._stage_of`` (integer stages, the
+    engine plots) are two spellings of ONE scheme; a stage added to one must be added to the other, and
+    every stage needs its own colour or two stages become indistinguishable."""
+    assert len(viz.STAGE_NAMES) == len(viz.STAGE_PALETTE)
+    assert len({tuple(c) for c in viz.STAGE_PALETTE}) == len(viz.STAGE_PALETTE)
+    # STAGE_ORDER is the legend (every stage but "none"); the palette carries "none" at index 0.
+    assert len(arc.STAGE_ORDER) == len(viz.STAGE_PALETTE) - 1
+    assert set(arc.STAGE_ORDER) | {"none"} == set(arc.STAGE_COL) == set(arc.STAGE_LABEL) | {"none"}
+    # the integer stage of each string stage indexes the matching palette colour
+    for code, st in enumerate(["none"] + list(arc.STAGE_ORDER)):
+        assert tuple(viz.STAGE_PALETTE[code]) == tuple(arc.STAGE_COL[st])
+
+
 # --- shared clone colormap: grids and Mullers agree by construction ---------------------------
 def test_grid_and_muller_share_one_colormap(arc_run):
     """Grids and Mullers share ONE per-cell (founder-clone) colormap: the SAME ``colors`` dict, keyed by
@@ -171,8 +228,8 @@ def test_compartment_render_produces_valid_gif(tmp_path, arc_run, splash):
 
 # --- CLI: isccsim schedule -> trajectory, then isccgif --compartment --------------------------
 @pytest.fixture(scope="module")
-def sim_out(tmp_path_factory):
-    """Run the isccsim schedule CLI once and return its output dir."""
+def landing_cfg_path(tmp_path_factory):
+    """The small arc config, written once — shared by the plain and --no-tables CLI runs."""
     cfg = {
         "mode": "genotype", "update_mode": "tau", "tau": 1.0, "snapshot_every": 1,
         "genome_params": GENOME_PARAMS, "selection_params": SEL,
@@ -182,6 +239,14 @@ def sim_out(tmp_path_factory):
     d = tmp_path_factory.mktemp("landing")
     cfg_path = str(d / "landing.yaml")
     yaml.safe_dump(cfg, open(cfg_path, "w"))
+    return cfg_path
+
+
+@pytest.fixture(scope="module")
+def sim_out(tmp_path_factory, landing_cfg_path):
+    """Run the isccsim schedule CLI once and return its output dir."""
+    cfg_path = landing_cfg_path
+    d = tmp_path_factory.mktemp("landing_out")
     out = str(d / "out")
     r = CliRunner().invoke(sim_main, ["--sim-config", cfg_path, "-o", out], catch_exceptions=False)
     assert r.exit_code == 0, r.output
@@ -194,6 +259,35 @@ def test_isccsim_schedule_writes_trajectory_and_layout(sim_out):
     # the canonical layout is still written so downstream isccsample/isccdata work
     assert {"cell_data", "gene_data", "parents.csv", "trace_counts.csv"} <= files
     assert "events.csv" in files          # the seeding/resection annotations
+
+
+def test_no_tables_keeps_the_trajectory_and_drops_the_count_tables(tmp_path, landing_cfg_path):
+    """--no-tables is what makes the hero reproducible in minutes rather than an hour: on
+    configs/landing.yaml the count tables are 47 of the 68 minutes and 4.7 of the 5 GB, and
+    `isccgif --compartment` never reads them."""
+    out = str(tmp_path / "out_no_tables")
+    r = CliRunner().invoke(sim_main, ["--sim-config", landing_cfg_path, "-o", out, "--no-tables"],
+                           catch_exceptions=False)
+    assert r.exit_code == 0, r.output
+    files = set(os.listdir(out))
+    assert arc.TRAJECTORY_FILE in files                      # what the renderer reads
+    assert not {"trace_counts.csv", "parents.csv"} & files   # what it does not
+    # and the trajectory is still renderable
+    traj = arc.read_trajectory(out)
+    assert traj["frames"] and traj["marks"]
+
+
+def test_no_tables_is_refused_without_a_schedule(tmp_path):
+    """Without a schedule there is no trajectory, so --no-tables would write nothing at all."""
+    cfg = {"mode": "genotype", "genome_params": GENOME_PARAMS,
+           "selection_params": SEL, "cell_params": {"cancer": CANCER_CELL_PARAMS},
+           "deme_params": DEME, "spatial_params": SPATIAL}
+    cfg_path = str(tmp_path / "no_schedule.yaml")
+    yaml.safe_dump(cfg, open(cfg_path, "w"))
+    r = CliRunner().invoke(sim_main, ["--sim-config", cfg_path, "-o", str(tmp_path / "o"),
+                                      "--no-tables", "-s", "2"])
+    assert r.exit_code != 0
+    assert "only makes sense with a `schedule:` block" in r.output
 
 
 @pytest.mark.parametrize("splash", [True, False])

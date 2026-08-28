@@ -694,18 +694,23 @@ def _band_y_at(pop_df, anc, band_id, gen, smoothing_std):
 # Stage-dominant driver colouring (todo #14): a clone is coloured by the HIGHEST arc-stage driver it
 # carries, so the selection cascade reads as a few categories rather than a per-clone rainbow. Order:
 # proliferation (onc/TSG, in the ducts) -> invasion (breach/stromal_survival, in the stroma) ->
-# met survival (in the deposit) -> chemo resistance (under treatment). GenotypeTumor._stage_colors maps
-# each genotype to STAGE_PALETTE[stage]; here we only own the palette + drawing.
-# 6 stages, SAME colours as the landing hero (iscc.tumor.arc.STAGE_COL) so plot_tissue(color="stage")
+# met survival (in the deposit) -> drug tolerance -> chemo resistance (both under treatment).
+# GenotypeTumor._stage_colors maps each genotype to STAGE_PALETTE[stage]; here we only own the palette
+# + drawing.
+# 7 stages, SAME colours as the landing hero (iscc.tumor.arc.STAGE_COL) so plot_tissue(color="stage")
 # and the by_stage Muller read identically to the animation: breach (duct escape) is its OWN orange
-# stage, distinct from green stromal_survival, rather than folded into a combined "invasion".
+# stage, distinct from green stromal_survival, rather than folded into a combined "invasion", and drug
+# tolerance is its OWN rose stage, distinct from red resistance — the engine protects both from the
+# drug (max(treatment_resistance, drug_tolerance)) but only resistance can REGROW under it.
+# INDEX-COUPLED to GenotypeTumor._stage_of, which returns positions in these lists.
 STAGE_NAMES = ["no driver", "proliferation", "duct escape (breach)",
-               "stromal survival", "met survival", "chemo resistance"]
+               "stromal survival", "met survival", "drug tolerance", "chemo resistance"]
 STAGE_PALETTE = [(0.50, 0.53, 0.60, 1.0),   # none — grey
                  (0.23, 0.51, 0.84, 1.0),   # proliferation — blue
                  (0.98, 0.62, 0.09, 1.0),   # duct escape (breach) — orange
                  (0.18, 0.75, 0.44, 1.0),   # stromal survival — green
                  (0.68, 0.40, 0.86, 1.0),   # met survival — purple
+                 (0.98, 0.60, 0.65, 1.0),   # drug tolerance (persister) — rose
                  (0.94, 0.24, 0.28, 1.0)]   # chemo resistance — red
 
 
@@ -784,7 +789,7 @@ def plot_muller_compartments(traces, genotypes_parents, axes=None, colormap="gnu
                              normalize=False, smoothing_std=0.1, labels=("primary", "metastasis"),
                              mark_generations=None, driver_map=None, min_freq=None,
                              star_genotype=None, star_gen=None, clone_colors=None, color_legend=None,
-                             centered=False, primary_resection_gen=None):
+                             centered=False, primary_resection_gen=None, clone_colors_primary=None):
     """Two stacked Muller panels — primary (top) and metastasis (bottom) — that SHARE ONE colormap, so
     a clone keeps its colour across both bands (and matches plot_grid_compartments / plot_muller). The
     met founder therefore appears in the met band with the SAME colour as its — usually minor — parent
@@ -818,8 +823,12 @@ def plot_muller_compartments(traces, genotypes_parents, axes=None, colormap="gnu
     # explicit per-clone colours (e.g. stage-dominant driver): a band takes its founder gid's colour,
     # drawn via the manual panel drawer so a categorical palette maps exactly.
     band_colors = None
+    band_colors_primary = None
     if clone_colors is not None:
         band_colors = {str(b): clone_colors.get(str(b), (0.82, 0.82, 0.82, 1.0)) for b in basis_cols}
+        if clone_colors_primary is not None:
+            band_colors_primary = {str(b): clone_colors_primary.get(str(b), (0.82, 0.82, 0.82, 1.0))
+                                   for b in basis_cols}
         if star_band is not None:
             star_color = band_colors.get(str(star_band), star_color)
     elif star_band is not None:
@@ -842,7 +851,10 @@ def plot_muller_compartments(traces, genotypes_parents, axes=None, colormap="gnu
             # resection is a discrete removal of the PRIMARY only -> hard cliff on that panel; the met
             # panel (and its SMOOTHED chemo bottleneck) keeps the ordinary cross-time Gaussian.
             cutoff = primary_resection_gen if key == "primary_counts" else None
-            _draw_muller_panel(ax, pop_df, anc_full, band_colors, normalize, smoothing_std,
+            # the primary band reads its clones in the PRIMARY compartment when that map was supplied
+            bc = (band_colors_primary if (key == "primary_counts" and band_colors_primary is not None)
+                  else band_colors)
+            _draw_muller_panel(ax, pop_df, anc_full, bc, normalize, smoothing_std,
                                centered=centered, hard_cutoff_gen=cutoff)
         elif centered:
             _sym_stackplot(ax, pop_df, anc_full, color_by, colormap, normalize, smoothing_std)

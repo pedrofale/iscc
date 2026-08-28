@@ -121,6 +121,34 @@ class TestRunsOnRealisticData:
         assert "dropout_mid" not in est.fitted
         assert est.hypers.well_sigma > 0              # well-in-plate nesting kept active
 
+    def test_smartseq3_estimate_keeps_the_whole_plate_layout(self):
+        """A count matrix carries no plate map, so the layout is carried from the preset — but it
+        must be carried, not dropped: a fitted Smart-seq3 estimate that reports ``n_wells=0`` has
+        silently turned itself into a plate-less protocol."""
+        est = estimate_rna(self._realistic_adata("smartseq3"), protocol="smartseq3")
+        assert est.hypers.n_wells == 384              # 384-well plates, not "no plates"
+        assert est.hypers.n_plates == 0               # as many as the cells need
+        assert est.hypers.plate_sigma == 0.0          # preset default: layout is bookkeeping only
+        # ... and it says so, instead of implying the layout was measured
+        assert {"n_wells", "n_plates", "plate_sigma", "well_sigma"} <= set(est.carried)
+        assert not set(est.carried) & set(est.fitted)
+
+        a = scRNA(n_cells=50, **est.scrna_kwargs()).run(_cell_data(80, 400, seed=5))
+        assert a.plates is not None and a.plates.n_wells == 384
+
+    def test_droplet_estimate_has_no_plate_layer(self):
+        est = estimate_rna(self._realistic_adata("10x"), protocol="10x")
+        assert est.hypers.n_wells == 0 and est.hypers.plate_sigma == 0.0
+        assert est.hypers.well_sigma == 0.0
+        assert scRNA(n_cells=50, **est.scrna_kwargs()).run(
+            _cell_data(80, 400, seed=6)).plates is None
+
+    def test_single_batch_cross_batch_terms_are_reported_as_carried(self):
+        est = estimate_rna(self._realistic_adata("10x"), protocol="10x")
+        assert est.n_batches == 1
+        assert {"sigma_batch", "depth_batch_sigma"} <= set(est.carried)
+        assert {"mu_lib", "sigma_lib", "dispersion"} <= set(est.fitted)
+
     def test_dropout_fit_can_be_forced_off(self):
         adata = self._realistic_adata("10x")
         est = estimate_rna(adata, protocol="10x", fit_dropout=False)

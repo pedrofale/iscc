@@ -1,4 +1,4 @@
-"""F1 — solid + liquid biopsy: spatial region selection over the cell grid.
+"""Solid + liquid biopsy: spatial region selection over the cell grid.
 
 A `Biopsy` operates on a `cell_data` dict (the per-cell ground truth written by
 `isccsim`) and returns the *indices* of the sampled cells plus a per-cell
@@ -22,9 +22,13 @@ record it in ``sample_meta.yaml``.
 import numpy as np
 import pandas as pd
 
+from ...constants import normal_names
+
 # Non-cancer genotype ids are the literal biological types; everything else is a
-# cancer clone id (see Tumor.make_cell_data / Cell.set_genotype_id).
-NORMAL_TYPES = ("immune", "stromal", "epithelial")
+# cancer clone id (see Tumor.make_cell_data / Cell.set_genotype_id). Taken from the
+# shared list so a new normal type (host parenchyma, ...) is never miscounted as
+# tumour here — a hand-written copy of it went stale once already.
+NORMAL_TYPES = tuple(normal_names)
 
 # Per-cell dispersal / invasiveness signals in cell_evo, in order of preference.
 DISPERSAL_SIGNALS = ("n_mut_disp", "dispersal_rate")

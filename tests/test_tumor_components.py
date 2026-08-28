@@ -57,11 +57,15 @@ class TestSelection:
 
     def test_get_gene_data_keys(self, selection):
         gd = selection.get_gene_data()
-        assert set(gd.keys()) == {
+        required = {
             "driver_types", "dispersal_types",
             "treatment_resistance_types", "immune_resistance_types",
             "breach_types", "stromal_survival_types", "met_survival_types",
         }
+        # `germline_types` is optional: present only for a patient that carries germline variants
+        # (see tests/test_germline.py), absent for a plain gene-role layout like this one.
+        assert set(gd.keys()) - required <= {"germline_types"}
+        assert required <= set(gd.keys())
         for df in gd.values():
             assert len(df) == N_GENES
 

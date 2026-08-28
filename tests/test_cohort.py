@@ -71,6 +71,41 @@ def test_default_layout_seed_is_the_constant():
     assert list(a.selection.get_oncogenes()) == list(b.selection.get_oncogenes())
 
 
+# --------- layout_seed alone reproduces the layout, without an explicit layout rng ----------
+# The engines always hand Selection a seeded ``rng=layout_rng``, but probes/tests/notebooks build a
+# Selection directly to inspect the gene layout. Then ``layout_seed`` must be sufficient on its own:
+# an unseeded default generator silently re-drew the driver/dispersal/TR/IR loci on every call.
+def _bare_selection(**kw):
+    from iscc.tumor.components.selection import Selection
+    return Selection(n_segments=GENOME["n_segments"], segment_size=GENOME["segment_size"],
+                     **{**SELECTION, **kw})
+
+
+def _roles(sel):
+    return {name: list(getattr(sel, "get_" + name)())
+            for name in ("oncogenes", "tsgs", "dispersal_genes",
+                         "treatment_resistant", "immune_resistant")}
+
+
+def test_layout_seed_alone_reproduces_layout_without_rng():
+    """Same layout_seed, no explicit rng -> identical treatment-resistance and driver loci."""
+    a, b = _bare_selection(layout_seed=11), _bare_selection(layout_seed=11)
+    assert _roles(a) == _roles(b)
+    for seg in range(GENOME["n_segments"]):
+        assert np.array_equal(a.treatment_resistance[seg], b.treatment_resistance[seg])
+        assert np.array_equal(a.drivers[seg], b.drivers[seg])
+    # still a real function of the seed, not a layout frozen for every seed
+    assert _roles(_bare_selection(layout_seed=12)) != _roles(a)
+
+
+def test_bare_selection_matches_the_engine_layout():
+    """The default rng is the engine's own layout stream, so a directly-constructed Selection sees
+    exactly the loci the engine evolves — that is what makes such a probe trustworthy."""
+    probe = _bare_selection(layout_seed=DEFAULT_LAYOUT_SEED)
+    assert _roles(probe) == _roles(_bare_selection())                      # default == the constant
+    assert _roles(probe) == _roles(_tumor(seed=3).selection)               # == what the engine drew
+
+
 # ================================== the Cohort wrapper ==================================
 def _cohort(n=6, **kw):
     return Cohort(patient_seeds=list(range(1, n + 1)), genome_params=GENOME,

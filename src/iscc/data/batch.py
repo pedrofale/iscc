@@ -18,7 +18,10 @@ will fit from real data, so they are named for that purpose:
     doublet_rate      fraction of barcodes that are doublets (two cells merged)
     dropout_mid       logistic dropout midpoint in expected-count space (0 disables)
     dropout_shape     logistic dropout steepness
-    well_sigma        per-cell "well" (plate-position) LogNormal sd  (Smart-seq3 nesting)
+    well_sigma        per-well LogNormal sd  (plate protocols sort one cell per well)
+    n_wells           wells per plate (0 = not a plate protocol, e.g. droplet)
+    n_plates          plates the cells are spread over (0 = as many as they need)
+    plate_sigma       per-PLATE library LogNormal sd (cells on a plate share a depth offset)
     depth_batch_sigma per-batch depth-shift LogNormal sd (so batches differ in depth)
     kappa             Dirichlet concentration (only for the `dm` count model)
 
@@ -27,7 +30,156 @@ batch) is shared and only the final draw is swapped via ``COUNT_MODELS``.
 """
 from dataclasses import dataclass, asdict
 
+import math
+import warnings
+
 import numpy as np
+
+
+# --------------------------------------------------------------------------------------
+# Plate / well layout — the physical container of a plate-based protocol (Smart-seq3).
+#
+# Plate protocols index-sort ONE cell per well, so the well is the cell's address and the
+# plate is the batch-within-a-batch: every well on a plate goes through the same lysis /
+# RT / cDNA mix and the same library pooling, so its cells share a depth offset. That makes
+# depth PLATE-NESTED (plate effect x well effect), which is what `Batch.library_factors`
+# below draws. Layout here is purely deterministic bookkeeping (no RNG): where each cell
+# sits. Droplet protocols have no wells (`n_wells = 0`) and skip all of it.
+# --------------------------------------------------------------------------------------
+_PLATE_ASPECT = 1.5   # standard microplates are 2:3 — 96 = 8x12, 384 = 16x24, 1536 = 32x48
+
+
+def well_grid(n_wells):
+    """(n_rows, n_cols) of a microplate with `n_wells` wells, using the standard 2:3 aspect.
+
+    Reproduces every standard format (6, 12, 24, 48, 96, 384, 1536 wells). A non-standard
+    well count is rounded up to the smallest grid of that aspect that holds it, so the
+    trailing positions of the last row are simply unused.
+    """
+    n_wells = int(n_wells)
+    if n_wells <= 0:
+        return 0, 0
+    n_rows = max(1, int(round(math.sqrt(n_wells / _PLATE_ASPECT))))
+    n_cols = n_wells // n_rows
+    if n_rows * n_cols != n_wells:
+        n_cols = int(math.ceil(n_wells / n_rows))
+    return n_rows, n_cols
+
+
+def row_label(i):
+    """Plate row letter for 0-based row `i`: 0 -> "A", 25 -> "Z", 26 -> "AA" (1536-well)."""
+    i = int(i)
+    out = ""
+    while True:
+        out = chr(ord("A") + i % 26) + out
+        i = i // 26 - 1
+        if i < 0:
+            return out
+
+
+@dataclass
+class PlateLayout:
+    """Where each cell physically sits: its plate, its well, and the well's row/column.
+
+    Assignment is deterministic (no RNG): the cells are split as evenly as possible across
+    the plates, and within a plate the wells are filled in reading order (A01, A02, ... then
+    B01). Because one cell occupies one well, `n_plates * n_wells` is a hard capacity —
+    see [`assign_plates`][iscc.data.batch.assign_plates].
+
+    Attributes
+    ----------
+    n_cells : int
+        Number of cells laid out.
+    n_wells : int
+        Wells per plate.
+    n_plates : int
+        Number of plates actually used (may exceed the requested count — see `assign_plates`).
+    n_rows, n_cols : int
+        Well-grid shape of one plate (e.g. 16 x 24 for a 384-well plate).
+    plate : ndarray of int
+        0-based plate index per cell.
+    well : ndarray of int
+        0-based well index within that plate.
+    row, col : ndarray of int
+        0-based row / column of that well on the plate.
+    """
+    n_cells: int
+    n_wells: int
+    n_plates: int
+    n_rows: int
+    n_cols: int
+    plate: np.ndarray
+    well: np.ndarray
+    row: np.ndarray
+    col: np.ndarray
+
+    def well_ids(self):
+        """Human-readable well names ("A01" ... "P24")."""
+        return np.array([f"{row_label(r)}{c + 1:02d}" for r, c in zip(self.row, self.col)])
+
+    def plate_ids(self, label):
+        """Plate names qualified by the batch `label` ("batch0_P1").
+
+        Two batches are two physical plate runs, so qualifying keeps their plates distinct
+        when several batches are concatenated.
+        """
+        return np.array([f"{label}_P{p}" for p in self.plate])
+
+    def to_dict(self):
+        return dict(n_plates=int(self.n_plates), n_wells=int(self.n_wells),
+                    n_rows=int(self.n_rows), n_cols=int(self.n_cols))
+
+
+def assign_plates(n_cells, n_wells, n_plates=0):
+    """Lay `n_cells` cells out on plates of `n_wells` wells, one cell per well.
+
+    Parameters
+    ----------
+    n_cells : int
+        Cells to place.
+    n_wells : int
+        Wells per plate (e.g. 384). Must be positive.
+    n_plates : int, default 0
+        How many plates to spread the cells over; 0 means "as many as they need".
+
+    Returns
+    -------
+    PlateLayout
+        Deterministic per-cell plate / well placement.
+
+    Notes
+    -----
+    **Capacity.** One cell occupies one well, so at most `n_plates * n_wells` cells fit. If
+    more cells are requested the plate count is GROWN to the number actually needed (rather
+    than raising), with a warning naming the old and new counts — running more plates is what
+    a wet lab would do. The realized count is `PlateLayout.n_plates`.
+    """
+    n_cells = int(n_cells)
+    n_wells = int(n_wells)
+    requested = int(n_plates)
+    if n_wells <= 0:
+        raise ValueError(f"n_wells must be positive to lay cells out on plates, got {n_wells}")
+    if n_cells < 0:
+        raise ValueError(f"n_cells must be non-negative, got {n_cells}")
+    needed = int(math.ceil(n_cells / n_wells))
+    realized = max(requested, needed, 1)
+    if 0 < requested < needed:
+        warnings.warn(
+            f"{n_cells} cells do not fit on {requested} plate(s) of {n_wells} wells "
+            f"({requested * n_wells} wells, one cell per well); growing to {realized} plates.",
+            stacklevel=2,
+        )
+    # split the cells as evenly as possible over the plates, then fill wells in reading order
+    per_plate = np.full(realized, n_cells // realized, dtype=int)
+    per_plate[: n_cells % realized] += 1
+    plate = np.repeat(np.arange(realized), per_plate)
+    well = np.concatenate([np.arange(c, dtype=int) for c in per_plate])
+    n_rows, n_cols = well_grid(n_wells)
+    return PlateLayout(
+        n_cells=n_cells, n_wells=n_wells, n_plates=realized, n_rows=n_rows, n_cols=n_cols,
+        plate=plate.astype(int), well=well.astype(int),
+        row=(well // n_cols).astype(int), col=(well % n_cols).astype(int),
+    )
 
 
 # --------------------------------------------------------------------------------------
@@ -121,7 +273,18 @@ class RNABatchHyperParams:
     dropout_shape : float
         Logistic dropout steepness (active only when dropout_mid > 0).
     well_sigma : float
-        Per-cell "well" (plate-position) LogNormal sd (Smart-seq3 plate nesting).
+        Per-well library-size LogNormal sd. Plate protocols (Smart-seq3) sort one cell per
+        well, so this is both the per-well and the per-cell term; 0 disables it.
+    n_wells : int
+        Wells per plate (384 for Smart-seq3). 0 marks a protocol with no plates (droplet),
+        which turns the whole plate layer off.
+    n_plates : int
+        How many plates the assayed cells are spread over; 0 means "as many as they need".
+        Grown automatically if the cells do not fit (one cell per well).
+    plate_sigma : float
+        Per-PLATE library-size LogNormal sd: every cell on a plate shares one depth offset,
+        so depth is plate-nested (plate effect x well effect). 0 disables the plate effect
+        and leaves the layout as pure bookkeeping.
     depth_batch_sigma : float
         Per-batch depth-shift LogNormal sd (so batches differ in depth).
     kappa : float
@@ -142,6 +305,9 @@ class RNABatchHyperParams:
     dropout_mid: float = 0.0
     dropout_shape: float = 1.0
     well_sigma: float = 0.0
+    n_wells: int = 0            # 0 = no plates (droplet); Smart-seq3 uses 384
+    n_plates: int = 0           # 0 = as many plates as the cells need
+    plate_sigma: float = 0.0    # 0 = no shared plate depth offset (default: off)
     depth_batch_sigma: float = 0.05
     kappa: float = 50.0
 
@@ -165,6 +331,7 @@ class Batch:
         self.label = str(label) if label is not None else f"batch{self.seed}"
         self.rng = np.random.default_rng(self.seed)
         self._realized = False
+        self.plate_factor = None      # per-plate depth offsets, set by `library_factors`
 
     @property
     def dispersion(self):
@@ -187,16 +354,34 @@ class Batch:
         self._realized = True
         return self
 
-    def library_factors(self, n_cells):
+    def library_factors(self, n_cells, plates=None):
         """Per-cell library size ell_c ~ LogNormal(log mu_lib,b, sigma_lib^2).
 
-        For Smart-seq3 (`well_sigma>0`) an extra per-cell "well" multiplier nests a
-        plate-position effect inside the batch.
+        Plate protocols nest two further multipliers inside the batch:
+
+        * a per-WELL term (`well_sigma`) — one cell per well, so it is also per-cell;
+        * a per-PLATE term (`plate_sigma`), drawn ONCE per plate and shared by every cell on
+          it, so cells prepared together carry the same depth offset. It is mean-1, so
+          switching it on adds depth variance without moving the mean depth.
+
+        `plates` is the `PlateLayout` (or a per-cell plate-index array) placing the cells;
+        pass None for protocols without plates. With `plate_sigma = 0` nothing plate-related
+        is drawn, so the library stream is exactly the one a plate-free model produces.
         """
         mu_ln = np.log(self.mu_lib_b) - 0.5 * self.h.sigma_lib ** 2
         lib = self.rng.lognormal(mean=mu_ln, sigma=self.h.sigma_lib, size=n_cells)
         if self.h.well_sigma > 0:
             lib = lib * self.rng.lognormal(0.0, self.h.well_sigma, size=n_cells)
+        if self.h.plate_sigma > 0 and plates is not None and n_cells > 0:
+            if isinstance(plates, PlateLayout):
+                idx, n_plates = plates.plate, plates.n_plates
+            else:
+                idx = np.asarray(plates, dtype=int)
+                n_plates = int(idx.max()) + 1 if idx.size else 0
+            s = float(self.h.plate_sigma)
+            # mean-1 LogNormal: one draw per plate, indexed by the cell's plate
+            self.plate_factor = self.rng.lognormal(mean=-0.5 * s * s, sigma=s, size=n_plates)
+            lib = lib * self.plate_factor[np.asarray(idx, dtype=int)]
         return lib
 
     def composition(self, probs):

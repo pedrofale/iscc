@@ -1,8 +1,8 @@
 """Operating-envelope QC — read-only diagnosis of a grown tumour (DESIGN_operating_envelope.md).
 
 After growth, :func:`diagnose` computes phenotype metrics and flags each **degenerate regime**
-(extinct / monoclonal / hypermutated / well-mixed / no-microenvironment-gradient / CNA-runaway /
-trivial-genome) against an overridable threshold, with an ACTIONABLE hint pointing at the culprit
+(extinct / monoclonal / no-subclones / hypermutated / well-mixed / no-microenvironment-gradient /
+CNA-runaway / trivial-genome) against an overridable threshold, with an ACTIONABLE hint pointing at the culprit
 knob. It answers the user question "did my run produce a crappy tumour?" and protects the headline
 benchmarks: the *well-mixed* and *no-gradient* regimes silently break the PEtracer lineage–space
 confound and the multi-region-phylogeny demos, so those get their own flags.
@@ -23,6 +23,8 @@ DEFAULT_THRESHOLDS = {
     "min_realistic": 1000,   # < this many cancer cells -> advisory: grow to a realistic size
     "shannon_min": 0.5,      # clonal Shannon diversity below this -> monoclonal
     "subclone_freq": 0.01,   # a genotype counts as a "subclone" above this frequency
+    "min_subclones": 2,      # fewer resolvable subclones than this (at high diversity) -> a
+                             # mutation-saturated cloud with no clonal structure
     "tmb_min": 1.0,          # mean mutated sites/cell below this -> no-mutation monoclonal
     "tmb_frac_max": 0.5,     # fraction of the genome mutated/cell above this -> hypermutated mush
     "sweep_enrichment": 1.5, # driver-vs-passenger VAF ratio above this -> a selective sweep
@@ -425,6 +427,25 @@ def diagnose(tumor, thresholds=None, verbose=False):
                             "division_rate -- BREAKS the PEtracer & multi-region benchmarks"))
     else:
         checks.append(Check("well_mixed", True, confinement, th["confinement_min"], skipped=True))
+
+    # no resolvable subclones — the OPPOSITE degeneracy to `monoclonal`, and one that passes every
+    # other check. Diversity can be very high while NO genotype reaches `subclone_freq`, because
+    # mutation outruns expansion and each cell ends up its own genotype. Nothing clone-level or
+    # cohort-level can then be recovered: there are no clones to tell apart, no clone-specific CNAs
+    # at appreciable frequency, and patient-to-patient differences average away. Measured on the
+    # program cohort at mutation_rate=1.0: 879 cells, 741 genotypes, 86% singletons, largest clone
+    # 0.6% -- n_subclones=0, shannon 6.53, and diagnose() returned OK.
+    # Only meaningful at high diversity; a genuinely low-diversity tumour is monoclonal, which has
+    # its own flag and would otherwise trip this one too.
+    if shannon >= th["shannon_min"]:
+        checks.append(Check("no_subclones", n_subclones >= th["min_subclones"], n_subclones,
+                            th["min_subclones"],
+                            "no resolvable subclones (mutation outran expansion, so nearly every "
+                            "cell is its own genotype): lower mutation_rate / n_snvs_per_allele, or "
+                            "grow larger so clones expand -- BREAKS any clone-level or cohort "
+                            "analysis"))
+    else:
+        checks.append(Check("no_subclones", True, n_subclones, th["min_subclones"], skipped=True))
 
     checks.append(Check("cna_runaway", np.isnan(fga) or fga <= th["fga_max"], fga, th["fga_max"],
                         "CNA runaway / saturated genome: lower amp_prob / max_cn"))

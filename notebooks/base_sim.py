@@ -1,12 +1,14 @@
 """Shared spatial substrate for the iscc *science* showcase notebooks — the **ductal field**.
 
 Every science notebook in ``notebooks/`` imports this helper so they all analyse the **same**
-deterministic, spatially-structured tumour (and the same 5-tumour cohort). Nothing is cached to disk
-— the tumour re-grows in ~15-30 s, which keeps the notebooks self-contained and the ground truth
-exactly reproducible.
+deterministic, spatially-structured tumour (and the same 5-tumour cohort) — now the SAME realistic,
+cm-scale, breach-gated ductal field the tutorials ship (``notebooks/example_config.yaml`` via
+``validation/realistic_regime.py``), not a smaller stand-in. Nothing is cached to disk; the tumour
+re-grows from counts in a couple of minutes at cm-scale and only a ``max_cells`` subsample is ever
+materialised, which keeps the notebooks self-contained and the ground truth exactly reproducible.
 
-The substrate is a **multi-focal DCIS→IDC lesion on a ductal field** (``DESIGN_ductal_field.md`` +
-``DESIGN_phenotype_plasticity.md`` §2): a FIELD of many small epithelial-ring glands scattered in
+The substrate is a **multi-focal DCIS→IDC lesion on a ductal field**: a FIELD of many small
+epithelial-ring glands scattered in
 moderate-density stroma (a population-genetics *island model*), grown from ONE cancer founder. The
 design choices baked in here (see the per-notebook narratives for why they matter):
 
@@ -15,10 +17,11 @@ design choices baked in here (see the per-notebook narratives for why they matte
   epithelial + stromal), never a pre-filtered cancer-only matrix. A single founder colonises the
   other glands via low-rate **cross-gland (island) dispersal** (``cross_gland_kappa``), so a section
   shows several *clonally related* foci.
-* **Compartment-dependent selection (DCIS→IDC).** Two sequenceable heritable traits, ``breach`` and
-  ``stromal_survival``, attenuate two live-cell-fraction death hazards (``epithelial_barrier`` at the
-  gland wall, ``stromal_hazard`` in the stroma). A lumen founder is confined (DCIS) until a subclone
-  evolves the escape traits and invades the stroma (IDC).
+* **Compartment-dependent selection (DCIS→IDC), breach-GATED.** Crossing the basement membrane
+  (duct→stroma) REQUIRES the ``breach`` trait (``breach_gated_invasion``): a lumen founder is confined
+  (DCIS) until a subclone evolves ``breach`` and invades the permissive stroma (IDC), where
+  ``stromal_survival`` is then selected. This gate replaces the older leaky ``epithelial_barrier``
+  death-hazard; a go-or-grow cost keeps each trait net-favoured only in its own compartment.
 * **CINner-style selection** (``prop_driver``) drives clonal evolution; **WGD on** (``wgd_rate=0.05``,
   PCAWG-like); **allele-specific expression on** and the **gene-program layer on** (via the vetted
   ``validation/programs_common.expression_params``).
@@ -30,52 +33,44 @@ design choices baked in here (see the per-notebook narratives for why they matte
   seed falls back to ``DEFAULT_LAYOUT_SEED`` and shares the SAME gene roles, program dictionary,
   gland-field layout and epistasis landscape — the comparability guarantee the cohort notebooks recover.
 
-Parameters are scaled up from ``validation/validate_compartment_selection.py`` /
-``validate_ductal_field.py`` so the confined lesion still reaches **≥10 000 cancer cells** with the
-compartment barriers ON (a bigger field + more glands, not weaker barriers).
+The config blocks are the realistic regime (``realistic_regime.py``) with a few science-notebook
+overrides (WGD/CNV bumped for the copy-number demos; the ``EXPR()`` program layer on). The lesion
+grows to a confluent cm-scale IDC-with-DCIS (tens of thousands of cancer cells) with the breach gate
+ON — realistic scale AND structure, matching the shipped tutorials.
 """
 import os
 import sys
 
 import numpy as np
 
-# reuse the vetted expression_params() from the validation harness
+# reuse the vetted expression_params() from the validation harness + the SHARED realistic regime
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "validation"))
 import programs_common as PC  # noqa: E402
+import realistic_regime as RR  # noqa: E402  the one grid-170 breach-gated ductal-field regime
 
 from iscc.tumor.models import GenotypeTumor  # noqa: E402
 
 BASE_SEED = 3
 COHORT_SEEDS = [3, 4, 5, 6, 7]  # 5 tumours sharing the landscape
-NORMALS = ("epithelial", "stromal", "immune")
+NORMALS = RR.NORMALS               # from the engine, via realistic_regime -- includes met "host"
 
-GENOME = {"n_segments": 12, "segment_size": 50}
-# CINner selection on the ductal field. `prop_driver` gives clonal fitness variation; the two
-# compartment axes (`prop_breach`, `prop_stromal_survival`, with their `*_effects`) are the DCIS→IDC
-# escape traits. `prop_dispersal=0` (so cross-gland spread rate is a constant × dispersal_rate, and the
-# legacy dispersal→emt program route is inert); a small immune-resistance axis keeps the immune
-# microenvironment part of the data. Proportions × 600 genes all round to a non-empty gene set (verified
-# via t.selection.get_breach()/get_stromal_survival()).
-SELECTION = {"prop_driver": 0.04, "prop_dispersal": 0.0, "prop_immune_resistance": 0.02,
-             "prop_treatment_resistance": 0.02, "prop_breach": 0.03, "prop_stromal_survival": 0.03,
-             "breach_effects": 2.2, "stromal_survival_effects": 2.2}
-CANCER = {"division_rate": 0.7, "death_rate": 0.05, "max_birth_rate": 0.95,
-          "mutation_rate": 0.6, "dispersal_rate": 0.35, "cnv_prob": 0.15,
-          "wgd_rate": 0.05}  # WGD on (PCAWG-like)
-DEME = {"carrying_capacity": 20, "initial_cancer_cells": 8, "resident_pressure_ref": 0.2}
-# The ductal FIELD: 4 small epithelial-ring glands (radius 4) scattered ≥12 apart on a 40² grid, in
-# moderate-density stroma (stroma_fill_frac=0.3) — a legible multi-focal section (like
-# validate_ductal_field.py / validate_compartment_selection.py, 4 glands). K_duct/K_stroma are MODERATE
-# (a 2D deme stands for a 3D column through the duct/stroma depth, DESIGN_ductal_field.md §3); K_duct is
-# larger here so the 4 glands still hold enough of a confined DCIS mass to reach ≥10k cancer WITH the
-# barriers on (fewer glands ⇒ bigger ducts, not weaker barriers). cross_gland_kappa is the low
-# island-dispersal rate that seeds one gland's lumen from another's (multi-focal spread, no breach).
-# epithelial_barrier / stromal_hazard are the two compartment hazards ON (tuned so the lesion shows a
-# DCIS→IDC transition AND still reaches ≥10k cancer cells).
-SPATIAL = {"grid_size": 40, "structure_radius": 4, "n_glands": 4, "gland_radius": 4,
-           "min_gland_sep": 12, "K_duct": 60, "K_stroma": 40, "stroma_fill_frac": 0.3,
-           "cross_gland_kappa": 0.06, "cross_gland_lambda": None,
-           "epithelial_barrier": 1.2, "stromal_hazard": 0.7}
+# The science notebooks now grow the SAME realistic, cm-scale, breach-gated DCIS→IDC ductal field the
+# tutorials ship (``notebooks/example_config.yaml`` via ``validation/realistic_regime.py``) — grid 170,
+# 8 ducts, K_duct 60 / K_stroma 30, breach-gated invasion — instead of the old grid-40 mini-field. The
+# blocks below are that regime, with the few SCIENCE-notebook overrides these demos specifically need.
+GENOME = dict(RR.GENOME)                       # 12 × 500 = 6000 genes (same as the tutorials)
+# Realistic breach-gated selection (met/treatment axes OFF; MET_SELECTION turns them on for the arc).
+SELECTION = dict(RR.SELECTION)
+# WGD turned UP to PCAWG-like: the tutorial config keeps WGD rare for a clean single-clone story, but
+# the science notebooks (wgd_allele_cna especially) need frequent WGD + copy-number churn to have a
+# signal, so bump wgd_rate and cnv_prob above the tutorial defaults.
+CANCER = {**RR.CANCER, "wgd_rate": 0.05, "cnv_prob": 0.15}
+DEME = dict(RR.DEME)
+# The realistic cm-scale ductal field (grid 170, 8 breach-gated ducts, K_duct 60 / K_stroma 30). Same
+# structure and scale as the tutorials, so every science notebook analyses a cm-scale IDC-with-DCIS
+# section. ``cross_gland`` (intraductal spread) + the breach gate give the multi-focal → confluent
+# invasion; a deme's ``K`` stands for its 3-D column.
+SPATIAL = {**RR.SPATIAL, **RR.SCALES["cm"]}
 
 
 def EXPR():
@@ -99,67 +94,89 @@ def EXPR():
     return e
 
 
-def _n_cancer(t):
+def n_cancer(t):
     """Number of live cancer cells across the genotype counts."""
     return int(sum(c for g, c in t.genotypes_counts.items() if c > 0 and t._is_cancer(g)))
 
 
-def grow_base_tumor(seed=BASE_SEED, target_cancer=10000, cancer_params=None, expression=None,
-                    selection_params=None, spatial_params=None, verbose=False):
-    """Grow one ductal-field tumour to >= ``target_cancer`` cancer cells and materialise it.
+def cancer_clones(t):
+    """Number of distinct live CANCER genotypes — the clones an analysis would try to resolve."""
+    return int(sum(1 for g, c in t.genotypes_counts.items() if c > 0 and t._is_cancer(g)))
 
-    Never passes ``layout_seed`` -> defaults to ``DEFAULT_LAYOUT_SEED`` so every seed shares the SAME
-    gene roles / program dictionary / gland-field layout / epistasis landscape (the cohort-comparability
-    guarantee).
+
+def grow_base_tumor(seed=BASE_SEED, target_cancer=80000, cancer_params=None, expression=None,
+                    selection_params=None, spatial_params=None, microenv_params=None,
+                    max_cells=RR.MAX_CELLS,
+                    scale="cm", coarsen=RR.COARSEN, verbose=False):
+    """Grow one realistic ductal-field tumour to >= ``target_cancer`` cancer cells, then materialise a
+    ``max_cells`` representative subsample (a biopsy of the one tissue).
+
+    Delegates to :func:`realistic_regime.grow_realistic` (the shared, materialisation-efficient grower)
+    with the science-notebook overrides layered on: WGD/CNV bumped (``CANCER``) and the default
+    ``EXPR()`` program layer. Never passes ``layout_seed`` -> defaults to ``DEFAULT_LAYOUT_SEED`` so
+    every seed shares the SAME gene roles / program dictionary / gland-field layout / epistasis
+    landscape (the cohort-comparability guarantee).
 
     Parameters
     ----------
     seed : int
         Growth seed (also the cohort member id).
     target_cancer : int
-        Grow until at least this many cancer cells exist.
+        Grow until at least this many cancer cells exist (~1–2 min at cm-scale).
     cancer_params, selection_params, spatial_params : dict, optional
         Overrides merged into the base ``CANCER`` / ``SELECTION`` / ``SPATIAL`` configs. e.g.
         ``cancer_params={"wgd_rate": 0.0}`` (WGD-off contrast, ``wgd_allele_cna``),
-        ``spatial_params={"epithelial_barrier": 0.0, "stromal_hazard": 0.0}`` (the barrier-OFF DCIS→IDC
-        control, ``compartment_selection_confound``), or an ``epistasis_params`` network in
-        ``selection_params`` (``cohort_mhn_recurrence``).
+        ``spatial_params={"breach_gated_invasion": False}`` (the no-gate DCIS→IDC control,
+        ``compartment_selection_confound``), or an ``epistasis_params`` network in ``selection_params``
+        (``cohort_mhn_recurrence``).
     expression : dict, optional
         Overrides the default ``EXPR()`` expression params.
+    microenv_params : dict, optional
+        Turns on the microenvironment layer — a hypoxia programme and/or a ligand-receptor
+        communication channel (``microenvironment_cci``). Read-only: it shapes the expression
+        readout and never feeds back into growth, so the tumour is unchanged with it on or off.
+    max_cells : int, optional
+        Cap on the materialised per-cell tables (the cm-scale tumour is far larger — sample it).
+    scale : {"cm", "mid", "small"}, optional
+        Field-size preset (:data:`realistic_regime.SCALES`). ``cm`` (default) is the full grid-170
+        regime the tutorials ship.
+    coarsen : bool, optional
+        Passenger coarsening (default on — required at cm-scale). Turn OFF for lineage-resolved SNVs
+        (single-cell phylogenetics), which forces a smaller ``scale``/``target_cancer`` since
+        every SNV then spawns a genotype. See :func:`realistic_regime.grow_realistic`.
     """
-    cancer = dict(CANCER)
-    if cancer_params:
-        cancer.update(cancer_params)
-    selection = dict(SELECTION)
-    if selection_params:
-        selection.update(selection_params)
-    spatial = dict(SPATIAL)
-    if spatial_params:
-        spatial.update(spatial_params)
-    t = GenotypeTumor(seed=seed, genome_params=GENOME, selection_params=selection,
-                      cancer_cell_params=cancer, deme_params=DEME, spatial_params=spatial,
-                      expression_params=(expression if expression is not None else EXPR()),
-                      update_mode="tau", tau=1.0)
-    # Adaptive stepping: coarse while far from the target, fine near it, so the lesion lands close to
-    # `target_cancer` (an invasive mass grows fast, so a single coarse leap would overshoot badly).
-    while True:
-        ncan = _n_cancer(t)
-        if ncan >= target_cancer:
-            break
-        ratio = ncan / target_cancer
-        n_steps = 6 if ratio < 0.12 else (2 if ratio < 0.6 else 1)
-        t.grow(n_steps=n_steps, seed=seed)
-        if verbose:
-            print(f"  seed={seed}: {_n_cancer(t)} cancer cells", flush=True)
-    t.make_cell_data()
-    return t
+    return RR.grow_realistic(
+        seed=seed, target_cancer=target_cancer, scale=scale, coarsen=coarsen,
+        selection=selection_params,
+        cancer={"wgd_rate": 0.05, "cnv_prob": 0.15, **(cancer_params or {})},
+        spatial=spatial_params, microenv=microenv_params,
+        expression=(expression if expression is not None else EXPR()),
+        max_cells=max_cells, materialise=True, verbose=verbose)
 
 
-def grow_cohort(seeds=COHORT_SEEDS, target_cancer=10000, **kwargs):
+def new_tumor(seed=BASE_SEED, cancer_params=None, selection_params=None, spatial_params=None,
+              expression=None, max_cells=RR.MAX_CELLS):
+    """An UNGROWN, cm-safe realistic ductal-field tumour — same config as :func:`grow_base_tumor` but
+    NOT grown, for the notebooks that step it themselves to build a DCIS→IDC growth movie.
+
+    Carries ``coarsen_passengers`` + ``max_cells`` so it stays tractable at grid 170 (without them a
+    cm-scale tumour explodes the genotype count and materialises millions of cells). Call ``.grow(...)``
+    yourself; each ``grow`` materialises a ``max_cells`` subsample. ``spatial_params={"breach_gated_
+    invasion": False}`` gives the no-gate DCIS→IDC control (``compartment_selection_confound``)."""
+    cfg = RR.config_for("cm", selection=selection_params,
+                        cancer={"wgd_rate": 0.05, "cnv_prob": 0.15, **(cancer_params or {})},
+                        spatial=spatial_params)
+    return GenotypeTumor(seed=seed, update_mode="tau", tau=RR.TAU, coarsen_passengers=RR.COARSEN,
+                         max_cells=max_cells,
+                         expression_params=(expression if expression is not None else EXPR()), **cfg)
+
+
+def grow_cohort(seeds=COHORT_SEEDS, target_cancer=80000, **kwargs):
     """Generator over ``(seed, tumour)`` — grow one at a time so RAM never holds 5 full tumours.
 
-    Each materialised ductal-field tumour is ~1-3 GB; the cohort notebooks must assay each tumour to a
-    COMPACT matrix and drop the tumour before advancing (that is what makes this a generator).
+    Each cm-scale tumour is materialised only to a ``max_cells`` subsample, but the cohort notebooks
+    should still assay each to a COMPACT matrix and drop the tumour before advancing (that is what
+    makes this a generator).
     """
     for s in seeds:
         yield s, grow_base_tumor(seed=s, target_cancer=target_cancer, **kwargs)
@@ -216,6 +233,14 @@ def cell_epithelial_fraction(t):
 
 
 # ------------------------------------------------------------------ spatial-viz helpers (ductal field)
+def stage_palette(t):
+    """``(clone_colors, color_legend)`` keyed by stage-dominant driver — the SAME palette the
+    ``by_stage=True`` Muller plots use, so a clone keeps one colour across Mullers and grids."""
+    from iscc.tumor import viz
+    colors, present = t._stage_colors()
+    return colors, viz.stage_legend(present)
+
+
 def draw_glands(ax, t, color="k", ls="--", lw=0.8, alpha=0.5):
     """Overlay every gland's epithelial-ring circle (centre + ``gland_radius``) on a spatial axes."""
     if t.gland_centers is None:
@@ -336,7 +361,7 @@ def thin_section(t, per_deme_cap=8, seed=0):
     """A depth-subsampled ``cell_data`` view for the 2D-section spatial assay (Visium).
 
     iscc's ``Visium`` currently pools ALL cells within a spot's radius (the section-slice sampling of
-    ``DESIGN_ductal_field.md`` §3.1 is a pending ENGINE TODO, NOT built here), so with the moderate K a
+    is taken upstream with ``Resection.slice``), so with the moderate K a
     single spot over the duct over-fills far past a realistic per-spot count. As a stand-in we sample at
     most ``per_deme_cap`` cells per deme UNIFORMLY at random (uniform keeps the composition
     representative) and hand Visium that thinned section. This is a NOTEBOOK-side workaround, not an
@@ -361,27 +386,20 @@ def thin_section(t, per_deme_cap=8, seed=0):
 
 
 # ==================================================================================================
-# Metastasis module (R9) — OPT-IN. The 8 DCIS->IDC science notebooks use grow_base_tumor (no met) and
+# Metastasis module — OPT-IN. The 8 DCIS->IDC science notebooks use grow_base_tumor (no met) and
 # are unchanged; grow_metastasis_tumor() adds a second (met) grid, the heritable met-establishment
 # axis, and runs the full clinical arc:  grow -> seed -> resect -> chemo -> relapse.
 # ==================================================================================================
 
-# On top of the base DCIS->IDC config: the met deposit + establishment axis, and RARE + STRONG
-# treatment resistance (one resistance mutation flips survival) so systemic chemo cleanly partitions
-# susceptible vs resistant clones instead of leaving a graded, half-resistant smear.
-MET_SELECTION = {"prop_met_survival": 0.06, "met_survival_effects": 2.5,
-                 "prop_treatment_resistance": 0.005, "treatment_resistant_effects": 4.0}
-# A LOWER mutation load for the arc (than the base >=10k config): resistance genes still exist in the
-# layout, but a clone rarely ACQUIRES one, so the met is mostly SUSCEPTIBLE before chemo — chemo then
-# crashes it to a rare resistant remnant that relapses (instead of a met that is already resistant).
-# It also keeps the clone count legible for the Muller.
-MET_CANCER = {"mutation_rate": 0.35, "n_snvs_per_allele": 0.15}
-# The arc is a legibility demo, so it grows a SMALLER field than the >=10k base config (fewer/smaller
-# glands, lower seeding rate for a cleaner founder read) — identical mechanism, just quicker.
-MET_SPATIAL = {"grid_size": 24, "structure_radius": 3, "gland_radius": 3, "min_gland_sep": 7,
-               "K_duct": 36, "K_stroma": 22,
-               "met_grid_size": 11, "K_met": 16, "host_fill_frac": 0.35,
-               "met_seed_kappa": 0.04, "met_hazard": 0.45, "met_transit_floor": 0.02}
+# The met deposit + establishment axis and the treatment-resistance axis, taken STRAIGHT from
+# ``configs/landing.yaml`` -- the clinical arc that renders the docs hero -- via
+# ``realistic_regime``, which derives them as a diff against the base config. The arc used to grow
+# its own small field (grid 24, a 11-deme deposit) with its own mutation load; it now runs the SAME
+# grid-170 breach-gated ductal field as every other science notebook, so the metastasis story and the
+# hero animation are the same simulation with the same numbers.
+MET_SELECTION = dict(RR.MET_SELECTION)
+MET_CANCER = dict(RR.MET_CANCER)          # empty: the arc uses the tutorial's cancer cell unchanged
+MET_SPATIAL = dict(RR.MET_SPATIAL)        # the second (met) grid only -- the primary stays grid 170
 
 
 def compartment_cancer(t):
@@ -416,24 +434,43 @@ def normal_totals(t):
     return np.array(prim), np.array(met)
 
 
-def grow_metastasis_tumor(seed=BASE_SEED, met_target=220, primary_cap=3200, max_chemo_gens=40,
-                          chemo_toxicity=0.1, verbose=False):
+def grow_metastasis_tumor(seed=BASE_SEED, met_target=None, primary_cap=None, max_chemo_gens=60,
+                          chemo_toxicity=None, verbose=False):
     """Grow the DCIS->IDC ductal field WITH a metastatic deposit and run the full clinical arc:
 
         grow (DCIS->IDC)  ->  seed the met  ->  resect the primary  ->  systemic chemo (which also
         kills off-target normal tissue) run UNTIL the susceptible clones are eliminated  ->  relapse of
         the surviving resistant clones.
 
-    Reuses the base GENOME / CANCER / DEME / SELECTION + the compartment axes, adding MET_SELECTION and
-    MET_SPATIAL. Returns ``(tumour, marks)`` with ``marks`` a dict of snapshot indices
+    Runs on the SAME grid-170 realistic field as every other science notebook, with the metastasis
+    and treatment axes of ``configs/landing.yaml`` (MET_SELECTION / MET_SPATIAL / MET_CANCER) — the
+    hero animation's arc. It differs from the hero in WHEN it stops, not in what it simulates: the
+    hero runs a fixed 36-step course to a fixed size, this stops adaptively once the susceptible
+    clones are gone, which keeps the notebook interactive and makes the response legible.
+
+    ``met_target`` / ``primary_cap`` / ``chemo_toxicity`` default to the hero schedule's own values
+    (``RR.MET_STOP`` / ``RR.MET_CHEMO``), so the notebook grows to the same point and doses the same
+    way; pass them to run a shorter arc.
+
+    Returns ``(tumour, marks)`` with ``marks`` a dict of snapshot indices
     {seeding, resection, chemo_start, chemo_end} for annotating the Muller plots."""
     from iscc.tumor.models import GenotypeTumor
     from iscc.treatment import Surgery, Chemotherapy
+    met_target = RR.MET_STOP.get("met_cancer", 60000) if met_target is None else met_target
+    primary_cap = RR.MET_STOP.get("total_cancer", 250000) if primary_cap is None else primary_cap
+    chemo_toxicity = RR.MET_CHEMO.get("toxicity", 0.12) if chemo_toxicity is None else chemo_toxicity
     spatial = {**SPATIAL, **MET_SPATIAL}
     selection = {**SELECTION, **MET_SELECTION}
+    # max_cells=1 during the arc: grow() force-materialises cell_data at the end of EVERY call, so
+    # at grid 170 the old uncapped constructor rebuilt a full cell table on each of ~40 iterations.
+    # The real cap is restored for the single materialisation at the end (same trick as
+    # realistic_regime.grow_realistic). The per-deme snapshots below read t.demes, not cell_data,
+    # so they are unaffected.
     t = GenotypeTumor(seed=seed, genome_params=GENOME, selection_params=selection,
                       cancer_cell_params={**CANCER, **MET_CANCER}, deme_params=DEME,
-                      spatial_params=spatial, update_mode="tau", tau=1.0)
+                      spatial_params=spatial, update_mode="tau", tau=RR.TAU,
+                      coarsen_passengers=RR.COARSEN, max_cells=1,
+                      founder_mutations=RR.FOUNDER_MUTATIONS, germline_params=RR.GERMLINE)
     marks = {}
     # per-deme spatial snapshots at each stage of the arc (the traces only hold COUNTS, so the spatial
     # composition has to be captured as we go) -> attached as t.arc_snapshots for plot_clone_grid_series.
@@ -446,7 +483,10 @@ def grow_metastasis_tumor(seed=BASE_SEED, met_target=220, primary_cap=3200, max_
         p, m = compartment_cancer(t)
         if m >= met_target or p + m >= primary_cap:
             break
-        t.grow(2, seed=seed)
+        # Adaptive stepping, as in grow_realistic: coarse leaps while the field is far from full,
+        # single steps near the stop, so a grid-170 lesion gets there without a huge overshoot.
+        ratio = (p + m) / primary_cap
+        t.grow(8 if ratio < 0.15 else 3 if ratio < 0.6 else 2 if ratio < 0.9 else 1, seed=seed)
         if "seeding" not in marks and met_cancer(t) > 0:
             marks["seeding"] = len(t.traces)
             _snap("seeding")
@@ -455,11 +495,26 @@ def grow_metastasis_tumor(seed=BASE_SEED, met_target=220, primary_cap=3200, max_
     marks["resection"] = len(t.traces)
     _snap("pre_resection")
     t.grow(6, seed=seed, treatment=Surgery(start=t.step, site="primary"))
-    # systemic chemo run until the SUSCEPTIBLE met clones are gone (or a generation cap / cure)
+    # Systemic chemo, run until the SUSCEPTIBLE met clones are gone (or a generation cap / cure).
+    # max_chemo_gens is 60 because the loop steps TWO generations at a time and the hero's course is
+    # 120: under the proliferation kill a sensitive clone declines at its death rate rather than
+    # crashing, so it takes ~120 steps to reach zero. A cap of 40 (=80 steps) stopped with a handful
+    # of sensitive cells still alive, and those out-relapse the cost-bearing resistant clone off drug
+    # -- a purple relapse instead of the red one the panels describe.
     marks["chemo_start"] = len(t.traces)
     _snap("pre_chemo")
-    chemo = Chemotherapy(start=t.step, duration=10 ** 6, kill_rate=1.6, effectiveness=0.98,
-                         toxicity=chemo_toxicity, sites="both")
+    # The hero's dose, read off its schedule. Only the DURATION differs: the loop below stops once
+    # the susceptible clones are gone, where the hero runs a fixed course.
+    # kill_mode and mutagenicity are forwarded too, and their defaults are arc.py's, so a change to
+    # the hero schedule reaches this notebook. Forwarding only kill_rate/effectiveness/sites would
+    # have left the notebook silently on a different kill LAW from the animation it derives from --
+    # which is exactly the split BACKLOG records between the escape-modes figure and everything else.
+    chemo = Chemotherapy(start=t.step, duration=10 ** 6,
+                         kill_rate=RR.MET_CHEMO.get("kill_rate", 1.5),
+                         effectiveness=RR.MET_CHEMO.get("effectiveness", 0.9),
+                         toxicity=chemo_toxicity, sites=RR.MET_CHEMO.get("sites", "both"),
+                         kill_mode=RR.MET_CHEMO.get("kill_mode", "additive"),
+                         mutagenicity=RR.MET_CHEMO.get("mutagenicity", 1.0))
     for k in range(max_chemo_gens):
         if met_cancer(t) == 0:
             break                                             # cured
@@ -473,5 +528,6 @@ def grow_metastasis_tumor(seed=BASE_SEED, met_target=220, primary_cap=3200, max_
     t.grow(14, seed=seed)                                     # relapse of the surviving resistant clones
     _snap("end")
     t.arc_snapshots = snaps
-    t.make_cell_data()
+    t.max_cells = RR.MAX_CELLS
+    t.make_cell_data(max_cells=RR.MAX_CELLS)
     return t, marks

@@ -66,6 +66,32 @@ def test_monoclonal_low_mutation_flag():
     assert "mutation_rate" in hint
 
 
+def test_no_subclones_flag():
+    # The OPPOSITE degeneracy to monoclonal, and one that passed every other check until this flag
+    # existed: mutation outruns expansion, so nearly every cell is its own genotype. Diversity stays
+    # high, yet no genotype reaches the subclone frequency and there is nothing clone-level to find.
+    #
+    # `n_subclones` counts genotypes above `subclone_freq` of the tumour, so it is SIZE-DEPENDENT: in
+    # this rig's ~60-cell tumours 1% is less than one cell and every singleton would qualify. The
+    # threshold is raised here to put the same regime within reach of a small test tumour; on a
+    # realistically-sized one the default fires by itself (measured on the program cohort: 879 cells,
+    # 741 genotypes, largest clone 0.6% -> n_subclones = 0 at the default 1%).
+    diag = _grow(cancer={"mutation_rate": 0.3}).diagnose(thresholds={"subclone_freq": 0.15})
+    flags = _flags(diag)
+    assert "no_subclones" in flags
+    assert "monoclonal" not in flags        # diversity is high -- not the monoclonal failure
+    hint = [c.hint for c in diag.failures if c.name == "no_subclones"][0]
+    assert "mutation_rate" in hint          # actionable
+
+
+def test_no_subclones_skipped_when_monoclonal():
+    # A genuinely low-diversity tumour would trip the subclone count too; monoclonal owns that case,
+    # so this check stands down rather than double-reporting the same problem.
+    diag = _grow(cancer={"mutation_rate": 0.0005}).diagnose()
+    skipped = {c.name for c in diag.checks if c.skipped}
+    assert "no_subclones" in skipped
+
+
 def test_well_mixed_flag():
     # high dispersal relative to division -> clones smear across the whole lesion (no territories),
     # the regime that breaks the PEtracer & multi-region benchmarks. Needs enough mutation to have

@@ -19,9 +19,17 @@ from iscc.data import morans_i
 
 SPATIAL = {"grid_size": 18, "structure_radius": 0}
 NO_DEATH = {**CANCER_CELL_PARAMS, "death_rate": 0.0}     # deterministic fill for a density gradient
+# The conftest genome has 40 genes. Keep the hypoxia and CCI target sets SMALL and (mostly) disjoint
+# so there is a non-empty pool left for the L-R database — which also makes the control / hyp_only /
+# cci_only gene sets below non-empty, so the ratio and control tests actually bite (with a 40-gene
+# hypoxia + 40-gene CCI set they covered every gene and were vacuous).
 MP = {
-    "hypoxia": {"strength": 0.8, "n_genes": 40, "o2_consumption": 1.5, "o2_supply": 0.3},
-    "cci": {"strength": 0.6, "n_target_genes": 40, "emitter_type": "cancer", "lengthscale": 2.5},
+    "hypoxia": {"strength": 0.8, "n_genes": 10, "o2_consumption": 1.5, "o2_supply": 0.3},
+    # `n_candidate_pairs` is the ONE new W0 parameter: a database of 8 L-R pairs, of which row 0 is the
+    # wired channel and the other 7 are unwired decoys. The receptor-dependence (W3) is driven by the
+    # wired pair's ligand/receptor genes.
+    "cci": {"strength": 0.6, "n_target_genes": 10, "emitter_type": "cancer", "lengthscale": 2.5,
+            "n_candidate_pairs": 8},
 }
 # Real per-deme crowding (DESIGN_crowding.md) caps demes near K and makes a NO_DEATH tumour spread
 # by dispersal rather than pile up, so it needs more steps to occupy enough demes for the hypoxia
@@ -79,7 +87,11 @@ class TestInvariants:
 # --------------------------------------------------------------------- the modifier -----------
 class TestModifier:
     def test_control_genes_unmodified(self, on, off):
-        prog = np.union1d(on.microenv_truth["hypoxia_genes"], on.microenv_truth["cci_target_genes"])
+        # The modulated set is hypoxia genes + CCI target genes + the WIRED pair's ligand/receptor
+        # (which the field up-regulates so the channel is visible to an L-R tool).
+        t = on.microenv_truth
+        prog = np.union1d(t["hypoxia_genes"], t["cci_target_genes"])
+        prog = np.union1d(prog, [t["cci_ligand"], t["cci_receptor"]])
         ctrl = np.setdiff1d(np.arange(on.n_genes), prog)
         assert np.array_equal(on.cell_data["cell_exp"].values[:, ctrl],
                               off.cell_data["cell_exp"].values[:, ctrl])
@@ -94,7 +106,10 @@ class TestModifier:
 
     def test_cci_ratio_is_exact(self, on, off):
         r = _ratio(on, off)
-        cci_only = np.setdiff1d(on.microenv_truth["cci_target_genes"], on.microenv_truth["hypoxia_genes"])
+        t = on.microenv_truth
+        cci_only = np.setdiff1d(t["cci_target_genes"], t["hypoxia_genes"])
+        # the wired L/R carry the field boost too, so they are not pure target genes
+        cci_only = np.setdiff1d(cci_only, [t["cci_ligand"], t["cci_receptor"]])
         expected = (1.0 + MP["cci"]["strength"] * on.cell_data["cell_microenv"]["cci_level"].values)
         sub = r[:, cci_only]
         m = ~np.isnan(sub)
@@ -159,3 +174,132 @@ class TestGroundTruth:
         cci_only = np.setdiff1d(cci_genes, hyp_genes)
         sub = r[:, cci_only]
         assert np.allclose(sub[~np.isnan(sub)], 1.0, atol=1e-9)      # CCI off -> no change
+
+
+# ------------------------------------------------------------- W3 receptor-dependence ----------
+class TestReceptorDependence:
+    """W3 (DESIGN_cci_spatial.md): the CCI effect is `strength · ligand_avail[deme] · receptor[cell]`.
+
+    So the per-cell received signal (`cci_level`) is the ligand availability at the cell's deme times
+    the cell's OWN receptor level — it decomposes exactly that way, and it varies cell-to-cell by
+    clone WITHIN a deme (the per-cell heterogeneity that makes W2 unnecessary at Visium)."""
+
+    def test_cci_level_decomposes_into_ligand_avail_times_receptor(self, on):
+        t = on.microenv_truth
+        lig = t["cci"]                                    # per-deme ligand availability
+        rl = t["cci_receptor_level"]                      # gid -> normalised receptor level
+        cm = on.cell_data["cell_microenv"]
+        dcol = on.cell_data["cell_deme"]["deme_id"].values
+        gids = on.cell_data["cell_type"]["cell_id"].values
+        expected = lig[dcol] * np.array([rl.get(g, 0.0) for g in gids])
+        assert np.allclose(cm["cci_level"].values, expected, atol=1e-9)
+
+    def test_received_signal_varies_within_a_deme(self, on):
+        # WITHIN a single deme, cells of different clones get DIFFERENT received signal (the receptor
+        # term) — the deme-constant field alone could not produce this. Find a multi-clone deme.
+        df = on.cell_data
+        dcol = df["cell_deme"]["deme_id"].values
+        gids = df["cell_type"]["cell_id"].values
+        lvl = df["cell_microenv"]["cci_level"].values
+        import collections
+        by_deme = collections.defaultdict(set)
+        spread_found = False
+        for d, g, v in zip(dcol, gids, lvl):
+            by_deme[d].add(g)
+        for d, clones in by_deme.items():
+            if len(clones) >= 2:
+                vals = lvl[dcol == d]
+                if vals.max() - vals.min() > 1e-9:
+                    spread_found = True
+                    break
+        assert spread_found, "expected within-deme variation in the received signal across clones"
+
+    def test_receptor_level_averages_about_one(self, on):
+        # NORMALISATION: receptor level is divided by the population mean receptor expression, so the
+        # count-weighted mean over all materialised cells is ~1 (keeps `strength` calibrated).
+        rl = on.microenv_truth["cci_receptor_level"]
+        gids = on.cell_data["cell_type"]["cell_id"].values
+        vals = np.array([rl.get(g, 0.0) for g in gids])
+        assert 0.5 < vals.mean() < 1.5
+
+
+# ------------------------------------------------------------- W0 the L-R database --------------
+class TestDatabase:
+    """W0 (DESIGN_cci_spatial.md): iscc emits its own candidate ligand-receptor database over its own
+    abstract gene ids. One wired pair, the rest unwired decoys; the whitelist is complete."""
+
+    def test_database_has_n_candidate_pairs(self, on):
+        pairs = on.microenv_truth["cci_pairs"]
+        assert pairs.shape == (MP["cci"]["n_candidate_pairs"], 2)
+
+    def test_wired_pair_is_row_zero_and_matches_channel(self, on):
+        t = on.microenv_truth
+        assert t["cci_wired_pair"] == 0
+        assert int(t["cci_pairs"][0, 0]) == t["cci_ligand"]
+        assert int(t["cci_pairs"][0, 1]) == t["cci_receptor"]
+
+    def test_candidates_are_not_hypoxia_genes(self, on):
+        # candidates must not be moved by the unrelated hypoxia programme (that would boost a DECOY
+        # and blur the benchmark). Overlap with the CCI target set is allowed and harmless.
+        t = on.microenv_truth
+        genes = set(t["cci_pairs"].ravel().tolist())
+        assert genes.isdisjoint(set(np.asarray(t["hypoxia_genes"]).tolist()))
+
+    def test_wired_ligand_and_receptor_carry_the_signal(self, on, off):
+        # THE POINT OF THE FEATURE: an L-R tool scores a pair from the LIGAND's and RECEPTOR's own
+        # expression, so the channel must mark those two genes as a BETWEEN-GROUP contrast. What
+        # matters is the ORDERING, not a particular ratio: the sender must be the ligand-high group
+        # and the receiver population the receptor-high one. Asserting a fixed multiple instead would
+        # pass while the "marker" sat below another cell type's baseline — which is exactly what a
+        # plain multiplicative boost did before the sender was lifted above the AMBIENT level.
+        t = on.microenv_truth
+        e = on.cell_data["cell_exp"].values
+        gids = on.cell_data["cell_type"].iloc[:, 0].values
+        is_emitter = np.array([on.genotypes[g].type == t["cci_emitter_type"] for g in gids])
+        assert is_emitter.any(), "fixture has no emitter-type cells"
+        lig, rec = int(t["cci_ligand"]), int(t["cci_receptor"])
+        if (~is_emitter).any():
+            assert e[is_emitter, lig].mean() > e[~is_emitter, lig].max()   # sender marks the ligand
+            assert e[is_emitter, rec].mean() < e[~is_emitter, rec].mean()  # and is not a receiver
+        # the ligand is a flat marker across the sender population
+        assert np.allclose(e[is_emitter, lig], e[is_emitter, lig][0], rtol=1e-6)
+
+    def test_decoy_pairs_are_unmodified(self, on, off):
+        # an unwired decoy gets NO boost — that is what makes the wired pair distinguishable
+        t = on.microenv_truth
+        r = _ratio(on, off)
+        prog = np.union1d(t["hypoxia_genes"], t["cci_target_genes"])
+        decoys = [g for g in t["cci_pairs"][1:].ravel().tolist() if g not in set(prog.tolist())]
+        assert decoys, "expected at least one decoy gene outside the modulated sets"
+        sub = r[:, decoys]
+        assert np.allclose(sub[~np.isnan(sub)], 1.0, atol=1e-9)
+
+    def test_pairs_are_strict_1to1_distinct_genes(self, on):
+        genes = on.microenv_truth["cci_pairs"].ravel()
+        assert len(set(genes.tolist())) == len(genes)      # every ligand/receptor is a distinct gene
+
+    def test_cellchat_database_shape_and_whitelist(self, on):
+        from iscc.integrations import cci_database, referenced_genes
+        db = cci_database(on)
+        inter = db["interaction"]
+        assert len(inter) == MP["cci"]["n_candidate_pairs"]
+        assert set(inter["annotation"]) == {"Secreted Signaling"}
+        assert int(inter["wired"].sum()) == 1               # exactly one active pair
+        # geneInfo is the whitelist and MUST cover every referenced gene (CellChat §4.1)
+        assert referenced_genes(db) <= set(db["geneInfo"]["Symbol"])
+
+    def test_write_database_round_trips(self, on, tmp_path):
+        from iscc.integrations import write_cci_database
+        paths, expected = write_cci_database(on, str(tmp_path))
+        import pandas as pd
+        gi = pd.read_csv(paths["geneInfo"])
+        assert expected <= set(gi["Symbol"].astype(str))
+        # complex/cofactor written with >=2 columns (never 1 — CellChat §8.1)
+        cx = pd.read_csv(paths["complex"])
+        assert cx.shape[1] >= 2 and len(cx) == 0
+
+    def test_clone_correlation_reports_all_pairs(self, on):
+        from iscc.integrations import clone_correlation
+        cc = clone_correlation(on.cell_data, on.microenv_truth["cci_pairs"])
+        assert len(cc) == MP["cci"]["n_candidate_pairs"]
+        assert (cc["eta_ligand"].between(0, 1)).all() and (cc["eta_receptor"].between(0, 1)).all()

@@ -20,3 +20,18 @@ notebooks/example_out/
 # per-gene autocorrelation + clone/tree stats only, ~6 KB each; like the DNA dna_ref_*.npz).
 validation/data/_cache/
 validation/data/**/__pycache__/
+
+# LaTeX build artifacts
+manuscript/*.aux
+manuscript/*.log
+manuscript/*.blg
+manuscript/*.bbl
+manuscript/*.out
+manuscript/*.pdf
+
+# Generated analysis datasets (numbat alone is ~80 MB). Regenerate with:
+#   python validation/make_analysis_data.py
+analysis_data/
+
+# validation scratch dirs (DB CSVs, staged spot matrices, runner outputs)
+validation/_*_tmp/

@@ -44,11 +44,16 @@ STAGE_COL = {
     "breach":     (0.98, 0.62, 0.09, 1.0),   # orange — escape the duct (breach)
     "stromal":    (0.18, 0.75, 0.44, 1.0),   # green  — survive the stroma
     "met":        (0.68, 0.40, 0.86, 1.0),   # purple — establish the metastasis
+    # pale red, deliberately a LIGHTER shade of the resistance red rather than a new hue: tolerance is
+    # the other way of surviving the same drug, so the pair reads as one mechanism class, and the two
+    # stay apart under red-green CVD (where both desaturate) by lightness rather than by hue.
+    "tolerance":  (0.98, 0.60, 0.65, 1.0),   # rose   — wait out chemo (persister tolerance)
     "resistance": (0.94, 0.24, 0.28, 1.0),   # red    — escape chemo (resistance)
 }
-STAGE_ORDER = ["prolif", "breach", "stromal", "met", "resistance"]
+STAGE_ORDER = ["prolif", "breach", "stromal", "met", "tolerance", "resistance"]
 STAGE_LABEL = {"prolif": "proliferation", "breach": "duct escape", "stromal": "stromal survival",
-               "met": "met establishment", "resistance": "chemo resistance"}
+               "met": "met establishment", "tolerance": "drug tolerance",
+               "resistance": "chemo resistance"}
 # muted normal tissue: barely above the dark page colour so the cancer pops and the grids blend into
 # the splash background (no filled-square seam).
 NORMAL_MUTED = {"epithelial": (0.15, 0.29, 0.23, 1.0), "stromal": (0.18, 0.15, 0.18, 1.0),
@@ -66,23 +71,51 @@ PHASE_CAPTION = {
 TRAJECTORY_FILE = "compartment_trajectory.pkl"
 
 
-def stage_of(rep):
+def stage_of(rep, in_primary=False):
     """The cascade stage of a cancer clone: which trait MUTATIONS it carries, taken as the furthest
-    along the metastatic arc — resistance > met > stromal > breach > proliferation > none. ``None`` for
-    normal cells.
+    along the metastatic arc — resistance > tolerance > met > stromal > breach > proliferation > none.
+    ``None`` for normal cells.
 
     No value thresholds: a clone is at a stage iff it carries ≥1 mutation giving that trait (the trait
     value is >0 iff a gene for it is mutated). A cell that carries several trait mutations is coloured by
     the last one in the arc. (Because a clone can carry multiple traits at once — asexual linked
     selection means a sweeping clone hitchhikes them together — the same clone can be, e.g., both
-    met-survival and resistance; it then reads as the later stage, resistance.)"""
+    met-survival and resistance; it then reads as the later stage, resistance.)
+
+    The one place values are compared rather than merely thresholded is the DRUG-ESCAPE pair, because
+    the engine itself compares them: protection from a death-rate therapy is
+    ``max(treatment_resistance, drug_tolerance)`` (``_apply_treatment`` / ``_tx_death_add_for``), so a
+    pure persister — resistance 0, tolerance 1 — takes ZERO drug and must not read as a drug-sensitive
+    stage. Tolerance keeps its OWN stage instead of being folded into resistance: they are different
+    mechanisms with different dynamics (resistance regrows under the drug, tolerance only waits out the
+    dose and pays a division cost to do it), so collapsing them would make the residual-disease floor
+    and the relapsing clone the same colour in every figure. Which of the two claims a cell follows the
+    engine's own tie-break: tolerance only when it STRICTLY exceeds resistance, i.e. only while it is
+    what is actually keeping the cell alive (the same test that decides who pays the persister cost).
+
+    ``in_primary=True`` reads the clone AS IT STANDS IN THE PRIMARY, where met-survival is not a stage
+    a cell can be at: there is no host parenchyma to survive in the duct, and the trait's BENEFIT is
+    already gated to the met compartment in ``_death_rate``. Without this the stage is meaningless at
+    realistic mutation supply — with ``prop_met_survival`` 0.015 (90 of 6,000 genes) and mutation_rate
+    0.30 over ~1,800 generations, essentially EVERY lineage picks one up, so 99% of the in-situ primary
+    reads 'met' and the DCIS→IDC cascade it is supposed to show (breach, stromal) is painted over."""
     if getattr(rep, "type", None) != "cancer":
         return None
     ep = rep.evolutionary_parameters
     base_div = getattr(rep, "baseline_rates", {}).get("division_rate", ep["division_rate"])
-    if ep.get("treatment_resistance", 0) > 0:
+    tr = ep.get("treatment_resistance", 0)
+    dt = ep.get("drug_tolerance", 0.0)
+    # Drug-induced resistance STATE (DESIGN_phenotype_plasticity.md §3.3): a cell carrying the
+    # non-genetic resistance state reads as "resistance" — it escapes the drug via the carried state,
+    # which is precisely the mode-IV relapse the red wedge draws. Checked BEFORE the tr/dt tie-break so
+    # a state cell can never fall through to "tolerance" (which the mode-IV trace counts as SENSITIVE).
+    # This is the ground-truth reclassification that makes a revertant (allele deleted, state kept)
+    # count as resistant, not sensitive. Off -> the attribute is 0.0 -> skipped -> byte-identical.
+    if getattr(rep, "resistance_state", 0.0) > 0.0:
         return "resistance"
-    if ep.get("met_survival", 0) > 0:
+    if max(tr, dt) > 0:
+        return "tolerance" if dt > tr else "resistance"
+    if not in_primary and ep.get("met_survival", 0) > 0:
         return "met"
     if ep.get("stromal_survival", 0) > 0:
         return "stromal"
@@ -93,7 +126,7 @@ def stage_of(rep):
     return "none"
 
 
-def story_colors(t, min_freq=None):
+def story_colors(t, min_freq=None, in_primary=False):
     """{str(gid) -> rgba}: ONE shared clone colormap for the grids AND the Mullers.
 
     PER-CELL colouring: every cancer genotype takes the colour of ITS OWN cascade stage (``stage_of`` —
@@ -102,14 +135,18 @@ def story_colors(t, min_freq=None):
     Muller alike. This is the "colour cells/clones by whether they carry each trait's mutations" view: a
     small breach/stromal/… sub-clone keeps its own trait colour instead of being folded (band-dominant or
     by founder) into a bulk that is mostly stage 'none' and washed grey. ``min_freq`` is accepted for
-    call-site compatibility but unused (no band merging happens in the colour map). Normals stay muted."""
+    call-site compatibility but unused (no band merging happens in the colour map). Normals stay muted.
+
+    ``in_primary=True`` returns the PRIMARY-compartment reading of the same clones (see ``stage_of``):
+    identical except that met-survival no longer claims a clone, so the duct field shows the invasion
+    cascade it actually has instead of going uniformly purple."""
     out = {}
     for gid, rep in t.genotypes.items():
         sgid = str(gid)
         if getattr(rep, "type", None) != "cancer":
             out[sgid] = NORMAL_MUTED.get(getattr(rep, "type", None), (0.7, 0.7, 0.7, 1.0))
             continue
-        st = stage_of(rep)
+        st = stage_of(rep, in_primary=in_primary)
         out[sgid] = STAGE_COL["none" if st is None else st]
     for n in normal_names:
         out[n] = NORMAL_MUTED[n]
@@ -210,7 +247,11 @@ def execute_schedule(t, schedule):
                 kill_rate=float(spec.get("kill_rate", 1.5)),
                 effectiveness=float(spec.get("effectiveness", 0.9)),
                 toxicity=float(spec.get("toxicity", 0.1)),
-                sites=spec.get("sites", "both"))
+                sites=spec.get("sites", "both"),
+                mutagenicity=float(spec.get("mutagenicity", 1.0)),
+                kill_mode=str(spec.get("kill_mode", "additive")),
+                mutagenicity_mode=str(spec.get("mutagenicity_mode", "uniform")),
+                mutagenicity_target=str(spec.get("mutagenicity_target", "all")))
             for _ in range(n_steps):
                 t.grow(n_steps=1, seed=seed, treatment=chemo)
                 capture(label)
@@ -239,6 +280,10 @@ def build_trajectory(t, frames, marks, min_freq):
         deme_coords=[(int(r), int(c)) for r, c in t.deme_coords],
         gid_ord={str(g): int(rep.ord) for g, rep in t.genotypes.items()},
         colors={str(g): tuple(float(x) for x in c) for g, c in story_colors(t, min_freq).items()},
+        # the SAME clones read in the primary compartment, where met-survival is not a stage a cell
+        # can be at (see stage_of). The renderer uses this for the primary grid + primary Muller only.
+        colors_primary={str(g): tuple(float(x) for x in c)
+                        for g, c in story_colors(t, min_freq, in_primary=True).items()},
         driver_map={str(g): tuple(int(i) for i in v)
                     for g, v in t._functional_signatures().items()},
         min_freq=float(min_freq),
@@ -246,6 +291,42 @@ def build_trajectory(t, frames, marks, min_freq):
         stage_legend=[(STAGE_LABEL[s], STAGE_COL[s]) for s in STAGE_ORDER],
         phase_caption=dict(PHASE_CAPTION),
     )
+
+
+def trim_confinement(trajectory, min_demes=2):
+    """Drop the opening stretch where the lesion is still shut inside its founding deme.
+
+    Origin confinement holds the founder in one acinus for hundreds of generations — biologically the
+    point (it is where the clonal trunk is built), but visually nothing happens, and a uniform capture
+    cadence spends most of the animation on an unchanging duct. This trims the trajectory to start at
+    the moment the lesion FIRST disperses, i.e. the first captured frame occupying ``min_demes``
+    cancer demes.
+
+    Purely a render-time transform on the trajectory dict: frames before that point are dropped, and
+    the traces, per-frame cursors and event marks are all rebased so the Muller x-axis starts there
+    too (trimming frames alone would leave the Mullers drawing the flat confined stretch).
+
+    Returns a NEW trajectory; the original is untouched. A trajectory that never disperses, or one
+    that is already dispersed at frame 0, comes back unchanged.
+    """
+    frames = trajectory["frames"]
+    n_prim = int(trajectory["n_primary_demes"])
+
+    def cancer_demes(frame):
+        # cancer genotypes are the numeric ids; normal cell types are named (stromal/epithelial/host)
+        return sum(1 for d in frame["demes"][:n_prim]
+                   if any(str(g) not in normal_names for g in d))
+
+    start = next((i for i, f in enumerate(frames) if cancer_demes(f) >= min_demes), None)
+    if not start:                          # None (never disperses) or 0 (already dispersed)
+        return trajectory
+
+    k = int(frames[start]["cursor"])
+    out = dict(trajectory)
+    out["frames"] = [dict(f, cursor=int(f["cursor"]) - k) for f in frames[start:]]
+    out["traces"] = trajectory["traces"][k:]
+    out["marks"] = [(int(i) - k, l) for i, l in trajectory["marks"] if int(i) >= k]
+    return out
 
 
 def write_trajectory(output_path, trajectory):

@@ -29,6 +29,7 @@ class Cell(object):
         n_breach=0,
         n_ss=0,
         n_ms=0,
+        n_dt=0,
     ):
         self.n_segments = n_segments
         # Segments may have unequal sizes (real-genome mode: segment size proportional to
@@ -51,6 +52,7 @@ class Cell(object):
         self.n_breach = n_breach
         self.n_ss = n_ss
         self.n_ms = n_ms
+        self.n_dt = n_dt
         self.type = "healthy"
         self.parent = parent
         if parent is None:
@@ -77,6 +79,8 @@ class Cell(object):
                                     'n_mut_ss': 0,
                                     'n_wt_ms': n_ms * 2,
                                     'n_mut_ms': 0,
+                                    'n_wt_dt': n_dt * 2,
+                                    'n_mut_dt': 0,
                                     'ploidy': 2,
                                     'highest_cn': 2,
                                     'nullisomy_count': 0,
@@ -123,6 +127,17 @@ class Cell(object):
         # Monotone: a WGD is never "undone", so once True it stays True down the lineage.
         self.is_wgd = False if parent is None else parent.is_wgd
 
+        # Drug-induced resistance STATE level (DESIGN_phenotype_plasticity.md §3.3): a carried,
+        # heritable epistate in [0, 1] (binary 0/1 for now) that is INDEPENDENT of the genome — so a
+        # CNA that deletes the triggering resistance allele leaves the cell in the state. Kept as a
+        # PLAIN ATTRIBUTE (like is_wgd), never in genome_summary and never seeded into
+        # evolutionary_parameters here, so with the feature off it adds no cell_evo column and the base
+        # schema is unchanged. Propagated by value through the shallow copy() in divide() (a daughter
+        # inherits it, exactly like _tx_mutagenized) and through the parent branch above; the engine's
+        # update_evolutionary_parameters reads it (only when the feature is on) to fold the state into
+        # the drug-protection max() and to charge its proliferation cost.
+        self.resistance_state = 0.0 if parent is None else getattr(parent, "resistance_state", 0.0)
+
         self.evolutionary_parameters = dict()
         self.evolutionary_parameters['division_rate'] = division_rate
         self.evolutionary_parameters['death_rate'] = death_rate
@@ -132,6 +147,7 @@ class Cell(object):
         self.evolutionary_parameters['breach'] = 0.                # wild-type: cannot breach the epithelial ring
         self.evolutionary_parameters['stromal_survival'] = 0.      # wild-type: no stromal survival advantage
         self.evolutionary_parameters['met_survival'] = 0.          # wild-type: no metastatic-host survival advantage
+        self.evolutionary_parameters['drug_tolerance'] = 0.        # wild-type: no persister state
         self.evolutionary_parameters['viability'] = 1.
 
     def update_evolutionary_parameters(self, selection):
@@ -143,6 +159,16 @@ class Cell(object):
         blow-up of the raw multiplicative form for many-gene genomes.
         """
         gs = self.genome_summary
+        # Drug-induced resistance STATE — genetic entry (beta_bias, DESIGN_phenotype_plasticity.md §3.3).
+        # Acquiring >=1 mutated treatment-resistance copy SETS the carried state. This is a MONOTONE set
+        # (never an else that clears it): a later CNA that deletes the allele mints a child which inherits
+        # the state through divide(), and this clause — now seeing n_mut_tr==0 — does NOT clear it, so the
+        # cell stays in the state with the allele gone. That is the whole feature. Guarded on the genetic
+        # knob, so it is a no-op when the feature is off (byte-identical). Never runs on a would-be EXIT
+        # twin: the engine only builds exit twins from n_mut_tr==0 sources, so this cannot re-fire and
+        # silently defeat exit.
+        if selection.resistance_state_genetic and gs.get('n_mut_tr', 0) > 0:
+            self.resistance_state = 1.0
         self.evolutionary_parameters['viability'] = selection.update_viability(gs)
         self.evolutionary_parameters['division_rate'] = min(
             self.baseline_rates['division_rate'] * selection.update_division_rate(
@@ -157,19 +183,41 @@ class Cell(object):
             self.baseline_rates['dispersal_rate'] * selection.update_dispersal_rate(gs), 1.0)
         self.evolutionary_parameters['immune_resistance'] = max(
             0.0, 1.0 - 1.0 / selection.update_immune_resistance(gs))
-        self.evolutionary_parameters['treatment_resistance'] = max(
-            0.0, 1.0 - 1.0 / selection.update_treatment_resistance(gs))
+        # All-or-nothing resistance (Selection.treatment_resistance_binary): any mutated copy makes
+        # the cell FULLY resistant -- trait exactly 1.0, so the drug's (1 - trait) factor is exactly
+        # 0 and chemotherapy does not touch it, at any dose and any ploidy. Off by default.
+        self.evolutionary_parameters['treatment_resistance'] = (
+            1.0 if (getattr(selection, "treatment_resistance_binary", False)
+                    and gs.get('n_mut_tr', 0) > 0)
+            else max(0.0, 1.0 - 1.0 / selection.update_treatment_resistance(gs)))
+        # Drug tolerance (persister axis): same [0,1) mapping. It attenuates the drug the same way
+        # resistance does, but its go-or-grow cost is what makes it a WAITING state rather than a
+        # regrowing one -- see Selection.prop_drug_tolerance.
+        self.evolutionary_parameters['drug_tolerance'] = max(
+            0.0, 1.0 - 1.0 / selection.update_drug_tolerance(gs))
         # Compartment-selection traits (v1): heritable resistances that attenuate a matching
         # compartment hazard in _death_rate (breach <- epithelial barrier, stromal_survival <-
         # stromal hazard), mapped from a relative fitness >=1 into [0,1) exactly like immune
         # resistance. With prop_breach/prop_stromal_survival=0 (default) N_*=0 -> update_* returns
         # 1 -> trait 0, so this is a no-op and growth is byte-identical.
+        #
+        # WHAT the update_* below read off the genome is the selection model's ``trait_source``:
+        # "dosage" (default) uses the total copies of the axis's genes, so copy-number change moves
+        # the trait; "mutation" uses only the SNV-mutated copies, so the trait has to be earned by
+        # mutation. The 1 - 1/F map is the same either way, and so is the oncogene/TSG driver fitness
+        # in update_division_rate above, which always reads dosage.
         self.evolutionary_parameters['breach'] = max(
             0.0, 1.0 - 1.0 / selection.update_breach(gs))
         self.evolutionary_parameters['stromal_survival'] = max(
             0.0, 1.0 - 1.0 / selection.update_stromal_survival(gs))
         self.evolutionary_parameters['met_survival'] = max(
             0.0, 1.0 - 1.0 / selection.update_met_survival(gs))
+        # Drug-induced resistance STATE (§3.3): surface the carried state LEVEL into
+        # evolutionary_parameters so proliferation_cost can charge it (below) and the engine's
+        # protection term can read it. Injected ONLY when the feature is on, so with it off the
+        # evolutionary_parameters dict — and hence the cell_evo schema — is byte-identical.
+        if selection.resistance_state_on:
+            self.evolutionary_parameters['resistance_state'] = self.resistance_state
         # Go-or-grow trade-off (R15): the dissemination/niche traits cost proliferation everywhere,
         # while their benefits are compartment-gated in _death_rate, so each is net-favoured only in its
         # niche. Applied AFTER the traits are known; a no-op (x1.0) unless a *_cost is configured.
@@ -229,6 +277,10 @@ class Cell(object):
         self.genome_summary['n_mut_tr'] += n_new_tr
         self.genome_summary['n_wt_tr'] -= n_new_tr
 
+        n_new_dt = int(mut_bits[selection.drug_tolerance[seg]].sum())
+        self.genome_summary['n_mut_dt'] += n_new_dt
+        self.genome_summary['n_wt_dt'] -= n_new_dt
+
         n_new_breach = int(mut_bits[selection.breach[seg]].sum())
         self.genome_summary['n_mut_breach'] += n_new_breach
         self.genome_summary['n_wt_breach'] -= n_new_breach
@@ -259,6 +311,12 @@ class Cell(object):
         # allele's bitset; every driver position on it changes copy number by `sign`.
         # Wild-type copies that change = category positions in the segment minus the
         # mutated ones on this allele.
+        #
+        # Every category's wild-type count is maintained here whatever the selection model does with
+        # it: these counts are the genome's ground truth (and are read back by the assay/clone
+        # exports), not a fitness cache. Under ``trait_source="mutation"`` the n_wt_* of the four
+        # TRAIT axes simply stop feeding the trait value, so this bookkeeping is unchanged and only
+        # Selection's reading of it differs.
         n_mut_onc = int(allele_bits[selection.onc[seg]].sum())
         n_wt_onc = len(selection.onc[seg]) - n_mut_onc
         self.genome_summary['n_mut_onc'] += sign*n_mut_onc
@@ -283,6 +341,11 @@ class Cell(object):
         n_wt_tr = len(selection.treatment_resistance[seg]) - n_mut_tr
         self.genome_summary['n_mut_tr'] += sign*n_mut_tr
         self.genome_summary['n_wt_tr'] += sign*n_wt_tr
+
+        n_mut_dt = int(allele_bits[selection.drug_tolerance[seg]].sum())
+        n_wt_dt = len(selection.drug_tolerance[seg]) - n_mut_dt
+        self.genome_summary['n_mut_dt'] += sign*n_mut_dt
+        self.genome_summary['n_wt_dt'] += sign*n_wt_dt
 
         n_mut_breach = int(allele_bits[selection.breach[seg]].sum())
         n_wt_breach = len(selection.breach[seg]) - n_mut_breach
@@ -377,6 +440,28 @@ class Cell(object):
                 counts = np.sum(copies, axis=0)  # mutated-copy count per position
                 vafs[self._seg_offsets[seg]:self._seg_offsets[seg + 1]] = counts / cn
         return vafs
+
+    def get_snvs_alleles(self):
+        """Allele-resolved SNV VAFs: ``(vaf_p, vaf_m)`` whose sum is exactly :meth:`get_snvs`.
+
+        ``vaf_h[gene] = (mutated copies on homolog h) / seg_cn`` — the same VAF definition as
+        :meth:`get_snvs` but split by homolog, so a caller can see WHICH parental allele carries a
+        variant (the B-allele signal). This is the SNV analogue of :meth:`get_exp_alleles` and the
+        base layer the coalescent passenger overlay (``_reconstruct_passengers``) adds to.
+        """
+        vaf_p = np.zeros((self.n_genes,))
+        vaf_m = np.zeros((self.n_genes,))
+        for seg in range(self.n_segments):
+            cn = self.genome_summary['seg_cns'][seg]
+            if cn <= 0:
+                continue
+            lo, hi = self._seg_offsets[seg], self._seg_offsets[seg + 1]
+            cp, cm = self.genome[seg]['p'], self.genome[seg]['m']
+            if cp:
+                vaf_p[lo:hi] = np.sum(cp, axis=0) / cn
+            if cm:
+                vaf_m[lo:hi] = np.sum(cm, axis=0) / cn
+        return vaf_p, vaf_m
 
     def get_cnvs(self):
         cnvs = []
