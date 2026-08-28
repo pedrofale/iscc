@@ -285,8 +285,12 @@ def test_notebook_outputs_do_not_publish_dependency_warnings():
             for o in c.get("outputs", []):
                 if dep.search("".join(o.get("text", []))):
                     bad.append(f"{_name(p)} cell {i}")
-    assert not bad, ("dependency import warnings in published outputs (run "
-                     "scripts/clean_notebook_outputs.py):\n  " + "\n  ".join(sorted(set(bad))))
+    # NB: the hint names no path. This file is published to `main`, where scripts/ (an internal-only
+    # directory) does not exist — a pointer to it would be dangling for exactly the readers who hit
+    # this failure there.
+    assert not bad, ("dependency import warnings in published outputs; strip the warning blocks from "
+                     "the stored outputs (the repo's notebook-output cleaner does this):\n  "
+                     + "\n  ".join(sorted(set(bad))))
 
 
 def test_cross_notebook_references_are_links():
