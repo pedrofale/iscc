@@ -17,7 +17,7 @@ projection of the summary vector into parameter space (semi-automatic ABC), the 
 Python analogue of CINner's ABC-rf. A single reference table of simulations is reused across all
 ground-truth tumours.
 
-Produces manuscript/figures/validation_inference_recovery.png.
+Produces the paper repo's figures/validation_inference_recovery.png.
 Usage:  python validation/validate_inference_recovery.py [--n-ref N] [--n-truths K] [--quick]
 """
 import argparse
@@ -28,6 +28,7 @@ import numpy as np
 
 from iscc.inference.abc import ABC
 from iscc.inference.tumor import TumorSimulator, default_prior
+from _paths import figure_path
 
 warnings.filterwarnings("ignore")
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -136,7 +137,7 @@ def main():
         args.n_ref, args.n_truths = 120, 6
 
     res = run_recovery(n_ref=args.n_ref, n_truths=args.n_truths, n_workers=args.n_workers)
-    out = os.path.join(REPO, "manuscript/figures/validation_inference_recovery.png")
+    out = figure_path("validation_inference_recovery.png")
     coverage = make_figure(res, out)
 
     print("\n=== parameter recovery summary ===")

@@ -11,13 +11,14 @@ fitness). Shows the two cell-extrinsic fields and their effect:
      programme is exactly 1 + strength·hypoxia — a graded, spatially-coherent module that no
      amount of lineage structure explains (the cell-intrinsic-vs-extrinsic axis PEtracer measures).
 
-Writes manuscript/figures/validation_microenvironment.png.
+Writes the paper repo's figures/validation_microenvironment.png.
 Run:  python -u validation/validate_microenvironment.py
 """
 import argparse
 import os
 
 import numpy as np
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -41,7 +42,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--steps", type=int, default=550)
     ap.add_argument("--seed", type=int, default=3)
-    ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_microenvironment.png"))
+    ap.add_argument("--out", default=figure_path("validation_microenvironment.png"))
     args = ap.parse_args()
 
     from iscc.tumor.models import GenotypeTumor

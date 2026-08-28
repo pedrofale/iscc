@@ -16,7 +16,7 @@ on the *true* clone tree. Under the engine's per-allele infinite-sites model mos
 those single-origin loci are the clean substrate for scoring *spurious* parallelism (an inferred
 parallel origin for a mutation the lineage shows arose once — the direct admixture signature).
 
-The demonstration (figure manuscript/figures/validation_multiregion_phylo.png):
+The demonstration (figure the paper repo's figures/validation_multiregion_phylo.png):
   A. A spatial clone map with the multi-region biopsy overlaid — regions straddle clonal territories,
      so each pooled region is a clone mixture (the admixture).
   B. Naive region "sample tree" spurious-parallelism rate vs the true/deconvolved clone tree: the
@@ -43,6 +43,7 @@ import pandas as pd
 from iscc.tumor.models import GenotypeTumor
 from iscc.sample.biopsy.biopsy import Biopsy
 from iscc import integrations as ig
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -86,7 +87,7 @@ def region_admixture(cell_data, region_series, gid, min_major=5):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_multiregion_phylo.png"))
+    ap.add_argument("--out", default=figure_path("validation_multiregion_phylo.png"))
     ap.add_argument("--seeds", type=int, default=3)
     args = ap.parse_args()
 

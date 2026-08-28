@@ -29,7 +29,7 @@ THE FINDING — **the observable, not the cohort size, is what decides recovery.
     **accessibility** gating acts on the mutation process itself, survives into every observable, and
     is recovered perfectly; **fitness** gating leaves the same planted DAG with no trace (panel D).
 
-Panels (figure manuscript/figures/validation_epistasis.png):
+Panels (figure the paper repo's figures/validation_epistasis.png):
   A. The ANSWER KEY: the planted E matrix.
   B. THE MECHANISM: planted E vs the realised cancer-cell fraction of the clones carrying the pair —
      a large, monotone dose-response, against the flat binary-presence observable. The fitness clamp
@@ -56,6 +56,7 @@ import pandas as pd
 from iscc.cohort import Cohort
 from iscc.constants import DEFAULT_LAYOUT_SEED
 from iscc import integrations as ig
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -495,7 +496,7 @@ def make_figure(net, strength_df, thr_df, tool_df, order_df, gate_df, out):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_epistasis.png"))
+    ap.add_argument("--out", default=figure_path("validation_epistasis.png"))
     ap.add_argument("--strengths", type=float, nargs="+", default=[0.0, 0.5, 1.0, 1.5, 2.0, 3.0])
     ap.add_argument("--thresholds", type=float, nargs="+", default=[0.0, 0.02, 0.05, 0.10, 0.25])
     ap.add_argument("--n", type=int, default=40)

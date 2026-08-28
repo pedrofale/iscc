@@ -21,7 +21,7 @@ we then add (1) REGIONAL mismatch (reference from a different region), (2) DISSO
 consequence of the paper's "Biopsy and dissociation shape the sampled data" section — the same sampling
 biases, now with ground truth at both ends.
 
-Figure (manuscript/figures/validation_deconvolution.png):
+Figure (the paper repo's figures/validation_deconvolution.png):
   A. reference-mismatch decomposition (oracle -> +regional -> +dissociation -> +assay), both tools;
   B. accuracy vs cells-per-spot (spot size sweep);
   C. regional-mismatch sweep — accuracy AND the measured reference-composition error vs biopsy offset;
@@ -42,9 +42,10 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import deconv_common as D
+from _paths import figure_path
 
 REPO = D.REPO
-FIG = os.path.join(REPO, "manuscript", "figures", "validation_deconvolution.png")
+FIG = figure_path("validation_deconvolution.png")
 
 
 def _run_tool(tool, ref, section, work_dir, target="type", **kw):

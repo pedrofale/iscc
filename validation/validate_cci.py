@@ -39,7 +39,7 @@ Env: CellChat runs in the dedicated `iscc-cellchat` env (README_cellchat.md); th
 core `iscc` env and shells out to `cellchat_runner.R`. Without that env the CellChat panels are
 skipped and the ground-truth panels still render.
 
-Writes manuscript/figures/validation_cci.png.
+Writes the paper repo's figures/validation_cci.png.
 Run:  python -u validation/validate_cci.py
 """
 import argparse
@@ -49,6 +49,7 @@ import sys
 
 import numpy as np
 import pandas as pd
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "validation"))
@@ -119,7 +120,7 @@ def main():
     ap.add_argument("--pairs", type=int, default=30, help="n_candidate_pairs in the database")
     ap.add_argument("--strength", type=float, default=8.0, help="CCI channel strength")
     ap.add_argument("--emitter", default="immune", help="emitter cell type (the SENDER population)")
-    ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_cci.png"))
+    ap.add_argument("--out", default=figure_path("validation_cci.png"))
     ap.add_argument("--workdir", default=os.path.join(REPO, "validation", "_cci_tmp"))
     ap.add_argument("--sc-cells", type=int, default=4000,
                     help="cells in the dissociated scRNA arm")

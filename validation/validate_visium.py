@@ -21,7 +21,7 @@ fitted ``field_lengthscale`` is dimensionless (~N spots) and transfers to the gr
 runs the offline ground-truth round-trip instead (also the automatic fallback if the download fails).
 
 Usage:  python validation/validate_visium.py [--sample-id ID] [--synthetic]
-Produces manuscript/figures/validation_visium.png.
+Produces the paper repo's figures/validation_visium.png.
 """
 import argparse
 import os
@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 
 from iscc.data import Visium, morans_i, estimate_visium, estimate_visium_from_assay
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -180,7 +181,7 @@ def main():
     ap.add_argument("--synthetic", action="store_true",
                     help="Skip the real download; use the synthetic ground-truth round-trip.")
     ap.add_argument("--seed", type=int, default=3)
-    ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_visium.png"))
+    ap.add_argument("--out", default=figure_path("validation_visium.png"))
     args = ap.parse_args()
 
     adata = None if args.synthetic else load_real_visium(args.sample_id)

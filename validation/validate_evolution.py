@@ -15,7 +15,7 @@ the branchy phylogenies of well-mixed growth from the imbalanced, sweep-dominate
 recasts the earlier Shannon-diversity / spatial-assortment check onto Noble's (n, D, J1) indices
 while keeping the single (glandular) structure.
 
-Produces manuscript/figures/validation_evolution.png.
+Produces the paper repo's figures/validation_evolution.png.
 Usage:  python validation/validate_evolution.py
 """
 import os
@@ -26,6 +26,7 @@ import yaml
 
 from iscc.tumor.models import GenotypeTumor
 from iscc.inference import mode_indices
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DISPERSALS = [0.05, 0.15, 0.4, 1.0]
@@ -87,7 +88,7 @@ def main():
     fig.colorbar(sc, ax=axes[3], label="tree balance  J1")
     fig.suptitle("Cell dispersal governs the mode of tumor evolution (iscc, Noble n/D/J1 indices)")
     fig.tight_layout()
-    out = os.path.join(REPO, "manuscript/figures/validation_evolution.png")
+    out = figure_path("validation_evolution.png")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     fig.savefig(out, dpi=120, bbox_inches="tight")
     print(f"figure -> {out}")

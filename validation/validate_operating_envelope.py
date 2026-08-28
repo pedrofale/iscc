@@ -1,6 +1,6 @@
 """Layer 2 of the operating envelope (DESIGN_operating_envelope.md): the reported operating ranges.
 
-Produces ``manuscript/figures/validation_operating_envelope.png`` — the phase-diagram figure the
+Produces ``the paper repo's figures/validation_operating_envelope.png`` — the phase-diagram figure the
 supplementary "Operating regimes" section (the robustness/sensitivity analysis, in the spirit of
 scMultiSim and CINner) is built on. Panels:
 
@@ -26,8 +26,9 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "analysis"))
 import characterize_regimes as cr  # noqa: E402  (baseline builder + sweep)
 from iscc.tumor.diagnostics import diagnose, DEFAULT_THRESHOLDS  # noqa: E402
+from _paths import figure_path
 
-OUT = os.path.join(REPO, "manuscript/figures/validation_operating_envelope.png")
+OUT = figure_path("validation_operating_envelope.png")
 
 # Regime categories -> (label, colour). Priority order used when several flags fire.
 REGIMES = [

@@ -24,6 +24,7 @@ import yaml
 from iscc.tumor.models import GenotypeTumor
 from iscc.data import scRNA, estimate
 from iscc.validation import compare_plot
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -31,7 +32,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--real", default=None, help="Real reference .h5ad (default: scanpy PBMC3k)")
-    ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_scrna.png"))
+    ap.add_argument("--out", default=figure_path("validation_scrna.png"))
     ap.add_argument("--protocol", default="10x")
     ap.add_argument("--seed", type=int, default=2)
     args = ap.parse_args()

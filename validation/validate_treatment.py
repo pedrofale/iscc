@@ -11,7 +11,7 @@ the cancer-cell burden over time:
 Demonstrates that treatment is wired into the default genotype engine and that the
 corrected death model lets therapy actually regress a tumor.
 
-Produces manuscript/figures/validation_treatment.png.
+Produces the paper repo's figures/validation_treatment.png.
 Usage:  python validation/validate_treatment.py
 """
 import os
@@ -21,6 +21,7 @@ import numpy as np
 from iscc.tumor.models import GenotypeTumor
 from iscc.treatment.chemotherapy import Chemotherapy
 from iscc.constants import normal_names
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SEEDS = range(4)
@@ -103,7 +104,7 @@ def main():
 
     fig.suptitle("iscc treatment module: therapy response and adaptive dosing")
     fig.tight_layout()
-    out = os.path.join(REPO, "manuscript/figures/validation_treatment.png")
+    out = figure_path("validation_treatment.png")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     fig.savefig(out, dpi=120, bbox_inches="tight")
     print(f"figure -> {out}")

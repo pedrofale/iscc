@@ -6,7 +6,7 @@ cohort-level ground truth no simulator provides and no real cohort can ever give
 drivers, per-cell patient-of-origin, shared-vs-private cell states, and — coupled to the treatment
 module — per-patient subgroup + true therapy response.
 
-Figure (manuscript/figures/validation_cohort.png), the strongest first-pass benchmarks:
+Figure (the paper repo's figures/validation_cohort.png), the strongest first-pass benchmarks:
   A. RECURRENCE IS ONLY WELL-POSED UNDER A SHARED LANDSCAPE. Driver-gene identities are IDENTICAL
      across patients (mean pairwise Jaccard = 1.0) with the fix, versus ~0 without it (per-seed
      layouts) — so cross-patient recurrence / driver detection is meaningful only because of the fix.
@@ -43,13 +43,14 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 import cohort_common as cc
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_cohort.png"))
+    ap.add_argument("--out", default=figure_path("validation_cohort.png"))
     ap.add_argument("--recur-patients", type=int, default=20)
     ap.add_argument("--pm-patients", type=int, default=14)
     ap.add_argument("--int-patients", type=int, default=8)

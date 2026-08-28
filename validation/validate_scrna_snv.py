@@ -15,7 +15,7 @@ A "site" is a (cell, locus) with a true mutation (DNA-VAF > 0); it is "detected 
 gene is expressed there (UMI > 0) and carries >= `min_alt` alt UMIs.
 
 Usage:  python validation/validate_scrna_snv.py
-Produces manuscript/figures/validation_scrna_snv.png.
+Produces the paper repo's figures/validation_scrna_snv.png.
 """
 import argparse
 import os
@@ -24,6 +24,7 @@ import numpy as np
 
 from iscc.tumor.models import GenotypeTumor
 from iscc.data.reads import emit_scrna_reads
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -57,7 +58,7 @@ def detection_rate(res, min_alt=1):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", type=int, default=1)
-    ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_scrna_snv.png"))
+    ap.add_argument("--out", default=figure_path("validation_scrna_snv.png"))
     args = ap.parse_args()
 
     t = grow(seed=args.seed)

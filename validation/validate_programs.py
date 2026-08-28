@@ -30,7 +30,7 @@ expression effect is decoupled from fitness; and route 1 drives programs from th
 so clone identity leaks into expression through a NON-dosage channel. All four are confounders the
 tools' own assumptions do not contain.
 
-Panels (figure manuscript/figures/validation_programs.png):
+Panels (figure the paper repo's figures/validation_programs.png):
   A. The ANSWER KEY: the true loading matrix — scattered (default) vs the CNA-mimicking control
      (`program_genomic_scatter=0`).
   B. Recovery vs CNA burden (fraction-genome-altered): loading cosine + activity correlation.
@@ -52,6 +52,7 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import programs_common as pc
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOL_COLORS = {"scdef": "#4C72B0", "cnmf": "#DD8452"}
@@ -193,7 +194,7 @@ def make_figure(truth_scattered, truth_clustered, cna_res, snv_res, control_res,
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_programs.png"))
+    ap.add_argument("--out", default=figure_path("validation_programs.png"))
     ap.add_argument("--cnv-probs", type=float, nargs="+", default=[0.0, 0.25, 0.5, 0.75])
     ap.add_argument("--mutation-rates", type=float, nargs="+", default=[0.1, 0.5, 1.0, 2.0])
     ap.add_argument("--reps", type=int, default=2)

@@ -17,14 +17,14 @@ PHASE (each gene is one phased marker, GT="1|0"), the ALT count is the m-homolog
 depth, and iscc's segments are mapped onto Numbat's chromosomes with a custom gtf. iscc's homolog labels
 ARE the ground-truth phasing a real panel only approximates — the honest answer to the scoping question.
 
-Figure (manuscript/figures/validation_numbat.png):
+Figure (the paper repo's figures/validation_numbat.png):
   A. per-segment / clone-level CN correlation — Numbat vs inferCNV (does the allele layer sharpen CN?);
   B. malignant-vs-normal separation (AUC) — Numbat vs inferCNV;
   C. clone recovery — Numbat's clone-assignment ARI + clone-level CN correlation;
   D. the emergent allele signal — pooled segment BAF at copy-number-altered vs balanced segments,
      malignant vs normal (why the allele layer carries information at all).
 
-WGD AXIS (--wgd-rate > 0 -> manuscript/figures/validation_numbat_wgd.png). The total-CN head-to-head
+WGD AXIS (--wgd-rate > 0 -> the paper repo's figures/validation_numbat_wgd.png). The total-CN head-to-head
 above finds the allele layer only TIES inferCNV — because a pure whole-genome duplication (1+1 -> 2+2) is
 allelically balanced (BAF 0.5) and, being a uniform doubling, is invisible in relative expression too:
 absolute ploidy is genuinely unidentifiable from relative-expression + BAF, and iscc reproduces that
@@ -54,10 +54,11 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import integration_common as C
+from _paths import figure_path
 
 REPO = C.REPO
-FIG = os.path.join(REPO, "manuscript", "figures", "validation_numbat.png")
-FIG_WGD = os.path.join(REPO, "manuscript", "figures", "validation_numbat_wgd.png")
+FIG = figure_path("validation_numbat.png")
+FIG_WGD = figure_path("validation_numbat_wgd.png")
 
 
 def allele_signal(tumor, shared, numbat_in):
