@@ -21,7 +21,8 @@ The design documents (`DESIGN_*.md`), the backlog, the audit, the research quest
 Comments and docstrings in this repository still name them by their old filenames — `DESIGN_x.md`
 is `iscc-markdown/methods/design-x.md`, and the mapping is spelled out in that repository's
 `PROVENANCE.md`.
-Their history is still here: `git log --follow DESIGN_x.md` on `dev` works.
+Their history is still here: `git log --follow -- DESIGN_x.md` on `dev` works (the `--` is
+required now that the path is gone from the working tree).
 
 `PARAMETERS.md` and `SCHEMA.md` deliberately stayed: they are reference documentation for this
 code, symlinked into `docs/`, and they change with the code they describe.
