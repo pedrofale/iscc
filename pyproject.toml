@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "insilico-cancer-center"
-version = "0.2.0"
+version = "0.3.0"
 description = "Simulate tumor growth, treatment, and molecular data generation."
 license = "MIT"
 authors = ["pedrofale <pedro.miguel.ferreira.pf@gmail.com>"]
