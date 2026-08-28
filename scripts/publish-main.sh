@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # publish-main.sh — project dev's PUBLIC subset onto main (the curated public branch).
 #
-# dev is the single source of truth (code + public docs + internal design docs). main is a
+# dev is the single source of truth for the CODE (the design docs live in the iscc-markdown
+# repository and the manuscript in iscc-overleaf — see WORKSPACE.md). main is a
 # path-filtered projection of dev: dev's whole tree MINUS the internal-only paths below. Nothing is
 # ever committed to main by hand — run this instead, so main can never drift from dev.
 #
@@ -12,10 +13,14 @@ set -euo pipefail
 
 # --- internal-only paths (kept on dev for development, never published to public main) ---
 INTERNAL_FILES=(
-  DESIGN_*.md BACKLOG.md AUDIT.md RESEARCH_QUESTIONS.md PARAMETERS.md SCHEMA.md
-  docs/parameters.md docs/schema.md notebooks/TUTORIALS_PLAN.md
+  PARAMETERS.md SCHEMA.md docs/parameters.md docs/schema.md
+  notebooks/TUTORIALS_PLAN.md WORKSPACE.md
 )
-INTERNAL_DIRS=( handoffs analysis manuscript scripts .claude )
+INTERNAL_DIRS=( analysis scripts .claude )
+# NB: DESIGN_*.md, BACKLOG.md, AUDIT.md, RESEARCH_QUESTIONS.md, handoffs/ and manuscript/ left this
+# repository for iscc-markdown / iscc-overleaf. They are gone from dev, so stripping them is a
+# no-op — but the leak check below still names them, deliberately: if one is ever re-added here by
+# accident, publishing must fail rather than push it to the public branch.
 
 cd "$(git rev-parse --show-toplevel)"
 [ "$(git branch --show-current)" = "dev" ] || { echo "ERROR: run from the dev branch"; exit 1; }
@@ -37,7 +42,7 @@ git add -A
 
 # SAFETY: never publish if an internal path leaked into the staged tree
 LEAK=$(git diff --cached --name-only | grep -Ei \
-  '^(DESIGN_|BACKLOG|AUDIT|RESEARCH_QUESTIONS|PARAMETERS|SCHEMA|handoffs/|analysis/|manuscript/|scripts/|\.claude|notebooks/TUTORIALS_PLAN)|docs/(parameters|schema)\.md|\.DS_Store' || true)
+  '^(DESIGN_|BACKLOG|AUDIT|RESEARCH_QUESTIONS|PARAMETERS|SCHEMA|WORKSPACE|handoffs/|analysis/|manuscript/|scripts/|\.claude|notebooks/TUTORIALS_PLAN)|docs/(parameters|schema)\.md|\.DS_Store' || true)
 [ -z "$LEAK" ] || { echo "ABORT: internal paths would be published to main:"; echo "$LEAK"; \
   git reset -q --hard HEAD; git checkout -q dev; git branch -f main origin/main; exit 1; }
 

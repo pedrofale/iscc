@@ -19,7 +19,7 @@ What the benchmark shows:
   * single-cell per-segment CN correlation is real but modest (recovering copy number from expression
     at single-cell resolution is genuinely hard), and is strongest for the largest-amplitude events.
 
-Figure (manuscript/figures/validation_infercnv.png):
+Figure (the paper repo's figures/validation_infercnv.png):
   A. true vs inferred copy number, cells x segments (malignant cells sorted by clone);
   B. per-segment single-cell correlation + the denoised clone-level recovery;
   C. malignant-vs-normal separation by CNV magnitude.
@@ -38,6 +38,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import integration_common as C
+from _paths import figure_path
 
 REPO = C.REPO
 
@@ -51,7 +52,7 @@ def main():
     ap.add_argument("--protocol", default="10x")
     ap.add_argument("--window", type=int, default=20)
     ap.add_argument("--step", type=int, default=2)
-    ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_infercnv.png"))
+    ap.add_argument("--out", default=figure_path("validation_infercnv.png"))
     args = ap.parse_args()
 
     if not C.infercnv_available():

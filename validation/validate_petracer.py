@@ -16,7 +16,7 @@ lineage-space correlation, which iscc tunes via the cancer ``dispersal_rate``:
   * LOW dispersal  -> clonal territories -> lineage ≈ space -> hypoxia genes look heritable (confound);
   * HIGH dispersal -> intermixed clones  -> lineage ⊥ space -> confound resolved.
 
-Figure (manuscript/figures/validation_petracer.png):
+Figure (the paper repo's figures/validation_petracer.png):
   A. clone spatial map at LOW dispersal — early clades occupy contiguous territories (lineage≈space);
   B. per-gene spatial vs lineage autocorrelation at LOW dispersal, coloured by TRUE category — the
      extrinsic (hypoxia/CCI) genes ride HIGH on the lineage axis = the confound;
@@ -29,7 +29,7 @@ TIER 2 (real data, ``--real``): places iscc's dispersal sweep and the real PEtra
 ground-truth-free confound signature — corr(I_lineage, I_spatial) across genes — is +0.4–0.5 in the
 real TERRITORIAL trees and ~0 in the real INTERMIXED tree, and iscc's sweep brackets them: the
 confound iscc exposes with ground truth here is measurable in the real data. Falls back to a note
-when no reduced reference is cached. Figure: manuscript/figures/validation_petracer_real.png.
+when no reduced reference is cached. Figure: the paper repo's figures/validation_petracer_real.png.
 
 Run:  python -u validation/validate_petracer.py            # Tier 1
       python -u validation/validate_petracer.py --real     # + Tier 2 (needs built references)
@@ -39,6 +39,7 @@ import os
 
 import numpy as np
 import pandas as pd
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -108,7 +109,7 @@ def main():
     ap.add_argument("--high", type=float, default=0.6, help="high dispersal (intermixed clones)")
     ap.add_argument("--sweep", type=float, nargs="+", default=[0.05, 0.1, 0.2, 0.4, 0.6, 1.0])
     ap.add_argument("--seeds", type=int, default=3, help="replicate tumours per dispersal (averaged)")
-    ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_petracer.png"))
+    ap.add_argument("--out", default=figure_path("validation_petracer.png"))
     ap.add_argument("--real", nargs="*", default=None, metavar="NAME",
                     help="Tier 2: compare against cached real PEtracer tumour(s) "
                          "(petracer_ref_<NAME>.npz). Falls back to a note when absent.")
@@ -296,7 +297,7 @@ def _real_figure(args, iscc_pts, present):
     fig.suptitle("PEtracer (Tier 2): the lineage-space confound iscc exposed with ground truth is "
                  "measurable in REAL PEtracer tumours", fontsize=12, y=1.02)
     fig.tight_layout()
-    out = os.path.join(REPO, "manuscript/figures/validation_petracer_real.png")
+    out = figure_path("validation_petracer_real.png")
     fig.savefig(out, dpi=150, bbox_inches="tight")
     print("figure ->", out)
 

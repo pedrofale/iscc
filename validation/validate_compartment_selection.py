@@ -12,7 +12,7 @@ glands (lumen→lumen, no breach). The compartment is also an R13 niche field dr
 program — the genetic-vs-niche expression confound. Count engine only (the cell-engine mirror is
 deferred with the count-only substrate).
 
-Panels (manuscript/figures/validation_compartment.png):
+Panels (the paper repo's figures/validation_compartment.png):
   A. DCIS → IDC (mandatory grid growth series): with the barriers ON, cancer is confined to gland
      lumens (multi-focal DCIS) and only later invades the stroma (IDC) once escape traits evolve;
      the barrier-OFF control invades the stroma immediately.
@@ -27,6 +27,7 @@ import argparse
 import os
 
 import numpy as np
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -95,7 +96,7 @@ def main():
     ap.add_argument("--gens", type=int, default=36)
     ap.add_argument("--snaps", type=int, default=6)
     ap.add_argument("--seed", type=int, default=2)
-    ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_compartment.png"))
+    ap.add_argument("--out", default=figure_path("validation_compartment.png"))
     args = ap.parse_args()
 
     from iscc.tumor.models import GenotypeTumor

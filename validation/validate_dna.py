@@ -29,7 +29,7 @@ construction (the DNA analogue of the Visium coord-unit normalization). `--synth
 offline ground-truth round-trip instead (also the automatic fallback when a reference is absent).
 
 Usage:  python validation/validate_dna.py [--sc-source {dlp,tapestri}] [--synthetic]
-Produces manuscript/figures/validation_dna.png.
+Produces the paper repo's figures/validation_dna.png.
 """
 import argparse
 import os
@@ -44,6 +44,7 @@ from iscc.data import estimate_dna, estimate_dna_from_assay
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "validation", "data"))
 import build_dna_reference as B  # noqa: E402  (reducer + cache loader)
+from _paths import figure_path
 
 GENOME = {"n_segments": 24, "segment_size": 40}            # ~960 loci
 DEME = {"carrying_capacity": 8, "initial_cancer_cells": 5}
@@ -361,7 +362,7 @@ def main():
                     help="Skip the real references; run the synthetic ground-truth round-trip.")
     ap.add_argument("--seed", type=int, default=3)
     ap.add_argument("--n-cells", type=int, default=200)
-    ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_dna.png"))
+    ap.add_argument("--out", default=figure_path("validation_dna.png"))
     args = ap.parse_args()
 
     if args.synthetic:

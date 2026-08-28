@@ -19,7 +19,7 @@ copy-number-altered genes are assigned well; clones differing by a single segmen
 dosage-dependence panel makes this explicit — assignment quality rises with the fraction of genes
 carrying a clone-specific CN effect, which is exactly the signal clonealign is designed to exploit.
 
-Figure (manuscript/figures/validation_clonealign.png):
+Figure (the paper repo's figures/validation_clonealign.png):
   A. expression embedding coloured by TRUE clone vs by clonealign's ASSIGNED clone;
   B. per-clone assignment AUC (one-vs-rest) + overall accuracy vs the chance/majority baselines;
   C. dosage dependence — accuracy / AUC vs the fraction of genes with a clone-specific CN effect.
@@ -39,6 +39,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import integration_common as C
+from _paths import figure_path
 
 REPO = C.REPO
 
@@ -69,7 +70,7 @@ def main():
     ap.add_argument("--n-repeats", type=int, default=3)
     ap.add_argument("--dosage-fracs", type=float, nargs="+", default=[0.0, 0.1, 0.25, 0.5, 0.75, 1.0])
     ap.add_argument("--dosage-genes", type=int, default=250, help="genes per dosage-panel subset")
-    ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_clonealign.png"))
+    ap.add_argument("--out", default=figure_path("validation_clonealign.png"))
     args = ap.parse_args()
 
     if not C.clonealign_available():

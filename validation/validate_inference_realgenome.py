@@ -20,7 +20,7 @@ training example for one ``(gain, loss) -> s`` map. Reference sims are paralleli
 multiprocessing.
 
 External data: produced + cited by ``validation/data/build_realgenome_data.py`` (cytoBand, COSMIC
-CGC, Davoli Charm, PCAWG). Produces manuscript/figures/validation_inference_realgenome.png.
+CGC, Davoli Charm, PCAWG). Produces the paper repo's figures/validation_inference_realgenome.png.
 
 **Tau-leaping (DESIGN_scalability §7) makes the scaled fit feasible.** Each cohort tumour now grows
 with **tau-leaping** (``update_mode="tau"``, the default): the whole tumour is advanced one
@@ -57,6 +57,7 @@ from iscc.inference.genome import load_default, load_real_cna_profile
 from iscc.inference.realgenome import (
     RealGenomeSimulator, s_arm_prior, PerArmRegressor, matched_size_cohort_vector,
 )
+from _paths import figure_path
 
 warnings.filterwarnings("ignore")
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -308,7 +309,7 @@ def main():
                   cohort_size=args.cohort_size, valid_cohort=args.valid_cohort,
                   n_workers=args.n_workers, update_mode=args.update_mode)
     stats = _report(res)
-    out = os.path.join(REPO, "manuscript/figures/validation_inference_realgenome.png")
+    out = figure_path("validation_inference_realgenome.png")
     make_figure(res, stats, out, equiv=equiv)
 
     print("\n=== M3b fit-to-real + Charm summary (tau-leaped) ===")

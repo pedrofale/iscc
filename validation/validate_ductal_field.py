@@ -5,7 +5,7 @@ low cross-gland (island) dispersal rate abstracting intraductal spread through t
 tree. Shows multi-focal, clonally-related DCIS foci arising from a single origin — the ST-realistic
 layout (separate foci in stroma; connecting ducts out of plane, not drawn).
 
-Panels (manuscript/figures/validation_ductal_field.png):
+Panels (the paper repo's figures/validation_ductal_field.png):
   A. GROWTH TIME-SERIES (mandatory): a row of grid snapshots from seeding to final — the per-deme
      cancer fraction (top) and the SAME timepoints at CELL RESOLUTION (a 2D section: each deme
      expanded into a slice of its 3D-column cells, green epithelial wall / red cancer / pink stroma),
@@ -21,6 +21,7 @@ import argparse
 import os
 
 import numpy as np
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -78,7 +79,7 @@ def main():
     ap.add_argument("--gens", type=int, default=36)
     ap.add_argument("--snaps", type=int, default=6)
     ap.add_argument("--seed", type=int, default=3)
-    ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_ductal_field.png"))
+    ap.add_argument("--out", default=figure_path("validation_ductal_field.png"))
     args = ap.parse_args()
 
     from iscc.tumor.models import GenotypeTumor
