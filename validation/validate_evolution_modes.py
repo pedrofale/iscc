@@ -10,7 +10,7 @@ Keeping a single (glandular) spatial structure, this is a *coverage / best-fit* 
 iscc reproduce the region of index space where real solid tumours lie, and at what driver
 fitness (cf. Noble's best-fit ~0.2)? — not Noble's multi-structure discrimination claim.
 
-Produces manuscript/figures/validation_evolution_modes.png.
+Produces the paper repo's figures/validation_evolution_modes.png.
 Usage:  python validation/validate_evolution_modes.py
 """
 import os
@@ -20,6 +20,7 @@ import pandas as pd
 
 from iscc.tumor.models import GenotypeTumor
 from iscc.inference import mode_indices
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EMPIRICAL = os.path.join(REPO, "validation/data/noble_empirical_indices.csv")
@@ -127,7 +128,7 @@ def main():
     fig.suptitle("iscc vs real tumours in Noble (n, D, J1) index space "
                  "(single glandular structure; abstract genome)")
     fig.tight_layout()
-    out = os.path.join(REPO, "manuscript/figures/validation_evolution_modes.png")
+    out = figure_path("validation_evolution_modes.png")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     fig.savefig(out, dpi=120, bbox_inches="tight")
     print(f"figure -> {out}")

@@ -13,7 +13,7 @@ spatially constrained tumours away from the well-mixed 1/f expectation -- an exc
 low-frequency and depletion of intermediate-frequency variants (Sun et al. 2017;
 Chkhaidze et al. 2019).
 
-Produces manuscript/figures/validation_snv.png.
+Produces the paper repo's figures/validation_snv.png.
 Usage:  python validation/validate_snv.py
 """
 import os
@@ -24,6 +24,7 @@ import yaml
 
 from iscc.tumor.models import GenotypeTumor
 from iscc.validation import population_vaf, site_frequency_spectrum, neutral_sfs_rsq
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 F_MIN, F_MAX, N_BINS = 0.05, 0.45, 40
@@ -93,7 +94,7 @@ def main():
 
     fig.suptitle("iscc reproduces the neutral SNV site-frequency spectrum")
     fig.tight_layout()
-    out = os.path.join(REPO, "manuscript/figures/validation_snv.png")
+    out = figure_path("validation_snv.png")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     fig.savefig(out, dpi=120, bbox_inches="tight")
     print(f"figure -> {out}")

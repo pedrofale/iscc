@@ -18,13 +18,14 @@ on the compartment-on ductal field:
      gland walls (tracking the epithelial fraction — the genetic-vs-niche confound), while the
      proliferation program is GENOTYPE-driven and spatially flatter.
 
-Writes manuscript/figures/validation_spatial_diagnostic.png.
+Writes the paper repo's figures/validation_spatial_diagnostic.png.
 Run:  python -u validation/validate_spatial_diagnostic.py [--gen 22]
 """
 import argparse
 import os
 
 import numpy as np
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -113,7 +114,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--gen", type=int, default=22, help="generation to snapshot (before takeover)")
     ap.add_argument("--seed", type=int, default=3)
-    ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_spatial_diagnostic.png"))
+    ap.add_argument("--out", default=figure_path("validation_spatial_diagnostic.png"))
     args = ap.parse_args()
 
     lo = grow(LOW_DISP, args.gen, args.seed)

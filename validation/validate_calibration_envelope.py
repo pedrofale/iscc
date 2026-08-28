@@ -15,7 +15,7 @@ agree — *fitting lands you in the good region* — which is the guarantee that
      confirm the inferred point estimates (a) fall inside the reported good ranges and (b) regrow into
      NON-degenerate tumours (diagnose passes) — so inference does not drift into a degenerate corner.
 
-Produces manuscript/figures/validation_calibration_envelope.png.
+Produces the paper repo's figures/validation_calibration_envelope.png.
 Usage:  python validation/validate_calibration_envelope.py [--quick]
 """
 import argparse
@@ -31,8 +31,9 @@ sys.path.insert(0, os.path.join(REPO, "validation"))
 
 from iscc.inference.tumor import TumorSimulator, default_prior, default_base_config, PARAM_PATHS  # noqa: E402
 from iscc.inference.abc import ABC  # noqa: E402
+from _paths import figure_path
 
-OUT = os.path.join(REPO, "manuscript/figures/validation_calibration_envelope.png")
+OUT = figure_path("validation_calibration_envelope.png")
 # the good ranges reported by the operating-envelope sweep (DESIGN_operating_envelope.md tab:envelope)
 GOOD_RANGES = {"mutation_rate": (0.02, 4.0), "amp_prob": (0.1, 1.0),
                "dispersal_rate": (0.0, 1.0), "driver_effects": (1.0, 3.0)}

@@ -13,7 +13,7 @@ Three panels demonstrating that the sampling biases behave as designed:
       are enriched for high-dispersal clones vs a uniform sample.
 
 Usage:  python validation/validate_sampling.py
-Produces manuscript/figures/validation_sampling.png.
+Produces the paper repo's figures/validation_sampling.png.
 """
 import argparse
 import os
@@ -23,6 +23,7 @@ import numpy as np
 from iscc.tumor.models import GenotypeTumor
 from iscc.sample.biopsy.biopsy import Biopsy
 from iscc.sample.dissociation.dissociation import Dissociation, biological_type, DEFAULT_RECOVERY
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -70,7 +71,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--steps", type=int, default=800)
-    ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_sampling.png"))
+    ap.add_argument("--out", default=figure_path("validation_sampling.png"))
     args = ap.parse_args()
 
     import matplotlib

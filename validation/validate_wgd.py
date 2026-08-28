@@ -17,7 +17,7 @@ This validation shows the mechanism reproduces both facts:
 WGD is neutral here (no fitness/tolerance effect in v1, DESIGN_focal_cna.md sec 10), so the prevalence
 and ploidy come from the mechanism + viability interaction alone, not a fitted selective advantage.
 
-Produces manuscript/figures/validation_wgd.png. Prints headline numbers.
+Produces the paper repo's figures/validation_wgd.png. Prints headline numbers.
 Usage:  python -u validation/validate_wgd.py [--quick]
 """
 import argparse
@@ -26,9 +26,10 @@ import os
 import numpy as np
 
 from iscc.tumor.models import GenotypeTumor
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FIG = os.path.join(REPO, "manuscript", "figures", "validation_wgd.png")
+FIG = figure_path("validation_wgd.png")
 
 # A small, fast, well-mixed-ish spatial config grown with tau-leaping to ~1.5k cells per tumor. WGD is
 # neutral, so it drifts: a generous max_ploidy=6 lets the diploid->tetraploid doubling survive, and the

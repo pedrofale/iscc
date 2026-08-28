@@ -26,7 +26,7 @@ TWO ASYMMETRIES, both deliberate and both stated in the paper:
     standing resistance in the deposit bimodal rather than smoothly Poisson, so roughly one seed in
     six yields the mode. SEEDS below are selected, and the paper says so.
 
-Produces manuscript/figures/validation_escape_modes.png.
+Produces the paper repo's figures/validation_escape_modes.png.
 
 RUNTIME ~25-40 min for all four panels at the scale the published figure uses -- far heavier than the
 other validation scripts, because a de novo origin needs a deposit large enough to supply one. Each
@@ -46,6 +46,7 @@ import yaml
 
 from iscc.tumor.models import GenotypeTumor
 from iscc.tumor import arc as arc_mod
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG = os.path.join(REPO, "configs", "landing.yaml")
@@ -297,7 +298,7 @@ def main():
     np.atleast_1d(axes)[0].legend(loc="center left", fontsize=9, frameon=False)
 
     fig.tight_layout()
-    out = os.path.join(REPO, "manuscript/figures/validation_escape_modes.png")
+    out = figure_path("validation_escape_modes.png")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     fig.savefig(out, dpi=120, bbox_inches="tight")
     print(f"figure -> {out}")

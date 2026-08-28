@@ -11,7 +11,7 @@ number) pairs over replicates, and compare the relationship. The effect size is 
 copy-number events act per segment while drivers are distributed within segments (amplifying a
 segment helps its oncogenes but also its TSGs); the neutral-vs-selection contrast is the point.
 
-Produces manuscript/figures/validation_cna.png.
+Produces the paper repo's figures/validation_cna.png.
 Usage:  python validation/validate_cna.py
 """
 import os
@@ -20,6 +20,7 @@ import numpy as np
 
 from iscc.tumor.models import GenotypeTumor
 from iscc.validation import cna_amplification_signature
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SEEDS = range(8)
@@ -84,7 +85,7 @@ def main():
     axes[0].set_ylabel("population mean copy number")
     fig.suptitle("Copy number rises with oncogenic content under selection, not drift (iscc)")
     fig.tight_layout()
-    out = os.path.join(REPO, "manuscript/figures/validation_cna.png")
+    out = figure_path("validation_cna.png")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     fig.savefig(out, dpi=120, bbox_inches="tight")
     print(f"figure -> {out}")

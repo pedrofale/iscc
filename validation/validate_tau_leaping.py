@@ -8,7 +8,7 @@ compare them statistically: grow each to a common target SIZE over many seeds an
 clone-size distribution, clonal diversity, and surviving-clone counts. We also render the tau growth
 curve on a REAL-TIME axis plus its Muller plot, proving plot_muller/plot_grid still work.
 
-Writes manuscript/figures/validate_tau_leaping.png.
+Writes the paper repo's figures/validate_tau_leaping.png.
 Run:  python -u validation/validate_tau_leaping.py
 """
 import os
@@ -20,6 +20,7 @@ import numpy as np
 from scipy import stats
 
 from iscc.tumor.models import GenotypeTumor
+from _paths import figure_path
 
 GENOME = {"n_segments": 4, "segment_size": 50}
 SELECTION = {"prop_driver": 0.1, "prop_dispersal": 0.1,
@@ -134,8 +135,7 @@ def main():
     axes[3].set_title("(c) convergence to exact as τ → 0")
     axes[3].invert_xaxis()
 
-    os.makedirs("manuscript/figures", exist_ok=True)
-    out = "manuscript/figures/validate_tau_leaping.png"
+    out = figure_path("validate_tau_leaping.png")
     fig.tight_layout()
     fig.savefig(out, dpi=120)
     print("wrote", out)

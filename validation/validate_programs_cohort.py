@@ -42,6 +42,7 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import programs_common as pc
 from cohort_common import inverse_simpson_lisi
+from _paths import figure_path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -271,7 +272,7 @@ def make_figure(res, dl, cn_dev, seg_sizes, null_mean, null_p95, n_patients, out
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default=os.path.join(REPO, "manuscript/figures/validation_programs_cohort.png"))
+    ap.add_argument("--out", default=figure_path("validation_programs_cohort.png"))
     ap.add_argument("--patients", type=int, default=6)
     ap.add_argument("--steps", type=int, default=15000)
     ap.add_argument("--cells", type=int, default=150)
