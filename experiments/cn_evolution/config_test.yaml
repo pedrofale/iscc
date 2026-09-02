@@ -1,0 +1,94 @@
+# Smoke test: both scenarios, one seed, tiny grid. Runs in a couple of minutes on a laptop.
+#   snakemake -s Snakefile --configfile config_test.yaml --cores 4
+results_dir: results_test
+seeds: [1]
+n_clones_list: [8]
+clone_sampling: largest
+write_medicc2_input: false
+diversity_stride: 5
+landscape_stride: 5
+# The engine's own muller / clone-tree plots expand the whole GENOTYPE REGISTRY (every genotype
+# ever created, not the live clone count) and hang past a few thousand entries. A CNA-heavy run
+# mints a genotype per event and reaches 10^5. The seven questions' own figures are unaffected;
+# these are skipped above this registry size.
+max_clones_for_engine_plots: 2000
+
+defaults:
+  update_mode: tau
+  tau: 1.0
+  snapshot_every: 1
+  coarsen_passengers: true
+  max_cells: 5000
+  cell_params:
+    cancer:
+      division_rate: 0.4
+      death_rate: 0.05
+      mutation_rate: 0.6
+      dispersal_rate: 0.2
+      snv_prob: 0.3
+      cnv_prob: 0.7
+      amp_prob: 0.5
+
+scenario_grid:
+  unstructured:
+    spatial_params: {grid_size: 10, structure_radius: 0}
+    deme_params: {carrying_capacity: 8, initial_cancer_cells: 4}
+    _restrict:
+      pop_grid: [short]
+  structured:
+    selection_params: {prop_breach: 0.05, prop_stromal_survival: 0.05, prop_dispersal: 0.08}
+    cell_params: {cancer: {division_rate: 0.7, dispersal_rate: 0.35}}
+    deme_params: {carrying_capacity: 10, initial_cancer_cells: 6, resident_pressure_ref: 0.2}
+    spatial_params:
+      # grid 12 with min_gland_sep 5 only ever places ONE gland, which leaves the multi-focal
+      # metrics (between-focus divergence, the spread tree) undefined and silently unexercised.
+      grid_size: 16
+      structure_radius: 2
+      n_glands: 3
+      gland_radius: 2
+      min_gland_sep: 5
+      K_duct: 12
+      K_stroma: 10
+      stroma_fill_frac: 0.35
+      cross_gland_kappa: 0.04
+      breach_gated_invasion: true
+      stromal_hazard: 0.6
+    # Structured runs carry immortal resident cells AND mint a genotype per CNA, so they cost far
+    # more than unstructured ones at the same step count (~16 s and ~56k registry entries at
+    # grid 12 / 100 steps, vs under a second unstructured). Give them their own shorter pop tier.
+    _restrict:
+      pop_grid: [vshort]
+
+  structured_confined:
+    selection_params: {prop_breach: 0.05, prop_stromal_survival: 0.05, prop_dispersal: 0.08}
+    cell_params: {cancer: {division_rate: 0.7, dispersal_rate: 0.35}}
+    deme_params: {carrying_capacity: 10, initial_cancer_cells: 6, resident_pressure_ref: 0.2}
+    spatial_params:
+      grid_size: 14
+      structure_radius: 2
+      n_glands: 3
+      gland_radius: 2
+      min_gland_sep: 5
+      K_duct: 12
+      K_stroma: 10
+      stroma_fill_frac: 0.35
+      cross_gland_kappa: 0.04
+      breach_gated_invasion: true
+      stromal_hazard: 0.6
+      origin_confinement: {dispersal_factor: 0.0, established_at: 0.5, generations: 40}
+    _restrict:
+      pop_grid: [vshort]
+
+genome_grid:
+  seg16: {genome_params: {n_segments: 16, segment_size: 20}}
+
+selection_grid:
+  neutral: {selection_params: {prop_driver: 0.10, driver_effects: 1.0}}
+  strong:  {selection_params: {prop_driver: 0.10, driver_effects: 1.6}}
+
+evo_grid:
+  cna_high: {cell_params: {cancer: {mutation_rate: 0.6, cnv_prob: 0.7, wgd_rate: 0.0}}}
+
+pop_grid:
+  short:  {capacity_scale: 1.0, steps: 150}
+  vshort: {capacity_scale: 1.0, steps: 100}

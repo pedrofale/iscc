@@ -97,3 +97,24 @@ to a real reference dataset, so simulated data matches a target platform.
 | [`iscc.data.estimate_dna`](estimate_dna.md) | Calibrate the DNA assay from coverage / allele statistics. |
 | [`iscc.data.estimate_rna`](estimate_rna.md) | Calibrate the scRNA assay from a real count matrix. |
 | [`iscc.data.estimate_visium`](estimate_visium.md) | Calibrate the Visium assay from a real section. |
+
+## CN evolution analysis
+
+Analyse a **grown** tumor's copy-number evolution against its own ground truth. Seven co-equal
+questions, each with its own metric set — none is an input to another. `iscc.cnevo` reads
+`tumor.traces` (exact per-generation clone counts) and the genotype registry (which retains every
+genotype ever created), so ancestral copy number and the CNA event log are *recovered*, not inferred.
+
+Grow with `trace_occupancy=True` to make the r/K split and the colonisation curve measurable.
+
+| | |
+|---|---|
+| [`iscc.cnevo.sweep_metrics`](sweep_metrics.md) | Clonal dynamics: coalescent depth, sweeps, selection. |
+| [`iscc.cnevo.diversity_trajectory`](diversity_trajectory.md) | Diversity per generation — the path through Noble's `(n, D, J1)` mode space. |
+| [`iscc.cnevo.growth_phase`](growth_phase.md) | r- vs K-phase demography, from the crowding law. |
+| [`iscc.cnevo.cn_landscape`](cn_landscape.md) | FGA, ploidy, LOH, WGD and recurrence over time. |
+| [`iscc.cnevo.data_quality`](data_quality.md) | Is a sampled clone set a usable CN benchmark? |
+| [`iscc.cnevo.reconstruction_potential`](reconstruction_potential.md) | How recoverable is the true clone tree from CN alone? |
+| [`iscc.cnevo.spatial_structure`](spatial_structure.md) | Multi-focality and invasion (glandular runs only). |
+| [`iscc.cnevo.select_clones`](select_clones.md) | Sample clones — one representative cell each. |
+| [`iscc.cnevo.cna_event_table`](cna_event_table.md) | The derived, lossless CNA event log. |

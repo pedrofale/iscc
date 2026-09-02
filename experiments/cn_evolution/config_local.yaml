@@ -1,0 +1,86 @@
+# A small LOCAL experiment: one fixed configuration, replicated over 5 seeds.
+#
+# Everything except two axes is pinned, so this is one cell of the full grid run with enough
+# replication to say something:
+#   scenario  : unstructured vs structured_confined   (the trunk-burden contrast)
+#   selection : neutral vs strong                     (the selection-strength contrast)
+#   x 5 seeds = 20 tumours
+#
+# Pinned: one genome resolution (seg64), one mutation regime, one demographic tier, one sampled
+# clone-set size (K=10). iscc only -- no external CN callers or tree tools.
+#
+# CALIBRATED AGAINST `tumor.diagnose()`. The mutation settings are not arbitrary: at the engine
+# defaults these tumours fail the operating-envelope check with `hypermutated` + `no_subclones`,
+# whose hint is explicit that mutation outran expansion so nearly every cell is its own genotype,
+# which "BREAKS any clone-level or cohort analysis" -- i.e. exactly Q5/Q6. Every cell of this grid
+# now passes `diagnose()` in BOTH scenarios. The structured scenario needed the lower SNV load
+# specifically: its higher division_rate (0.7 vs 0.4) puts more mutations per generation into the
+# same genome, so settings that are fine unstructured tip it into `hypermutated`.
+#
+# SIZED TO RUN ON A LAPTOP. The engine mints a genotype per CNA and the registry retains every one,
+# each carrying a full genome, so memory tracks (mutation_rate x cnv_prob x steps x n_genes). A
+# first attempt at mutation_rate 0.6 / 120 steps / 512 genes exhausted RAM on the ductal-field runs.
+
+results_dir: results_local
+seeds: [1, 2, 3, 4, 5]
+n_clones_list: [10]
+clone_sampling: largest
+write_medicc2_input: false
+diversity_stride: 10
+landscape_stride: 10
+max_clones_for_engine_plots: 2000
+
+defaults:
+  update_mode: tau
+  tau: 1.0
+  snapshot_every: 1
+  coarsen_passengers: true
+  max_cells: 3000
+  cell_params:
+    cancer:
+      division_rate: 0.4
+      death_rate: 0.05
+      max_birth_rate: 0.9
+      mutation_rate: 0.05
+      n_snvs_per_allele: 0.10
+      dispersal_rate: 0.2
+      snv_prob: 0.20
+      cnv_prob: 0.80
+      amp_prob: 0.5
+
+scenario_grid:
+  unstructured:
+    spatial_params: {grid_size: 12, structure_radius: 0}
+    deme_params: {carrying_capacity: 10, initial_cancer_cells: 4}
+
+  structured_confined:
+    selection_params: {prop_breach: 0.05, prop_stromal_survival: 0.05, prop_dispersal: 0.08}
+    cell_params: {cancer: {division_rate: 0.7, dispersal_rate: 0.35}}
+    deme_params: {carrying_capacity: 10, initial_cancer_cells: 6, resident_pressure_ref: 0.2}
+    spatial_params:
+      grid_size: 12
+      structure_radius: 2
+      n_glands: 3
+      gland_radius: 2
+      min_gland_sep: 5
+      K_duct: 12
+      K_stroma: 10
+      stroma_fill_frac: 0.35
+      cross_gland_kappa: 0.04
+      breach_gated_invasion: true
+      stromal_hazard: 0.6
+      # ~half the run held in situ, so there is time for a truncal CN layer to fix before escape
+      origin_confinement: {dispersal_factor: 0.0, established_at: 0.5, generations: 120}
+
+genome_grid:
+  seg64: {genome_params: {n_segments: 64, segment_size: 5}}
+
+selection_grid:
+  neutral: {selection_params: {prop_driver: 0.10, driver_effects: 1.0}}
+  strong:  {selection_params: {prop_driver: 0.10, driver_effects: 1.6}}
+
+evo_grid:
+  cna_mid: {cell_params: {cancer: {cnv_prob: 0.80, wgd_rate: 0.0}}}
+
+pop_grid:
+  main: {capacity_scale: 1.0, steps: 250}

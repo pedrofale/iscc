@@ -1,0 +1,315 @@
+"""CN evolution analysis over iscc simulations.
+
+Seven co-equal questions over one grid of simulated tumours. None is an input to another: each has
+its own outputs, its own summary table and its own `*_only` target, so any one of them can be
+re-run or reworked over existing checkpoints without touching the rest.
+
+  Q1 clonal dynamics and sweeps        pop/sweep_metrics.json
+  Q2 clonal diversity over time        pop/diversity_trajectory.tsv
+  Q3 demography: r- vs K-phase         pop/growth_phase.json
+  Q4 copy-number landscape             pop/cn_landscape.{tsv,json}
+  Q5 CN data quality                   K{n}/sim/data_quality.json
+  Q6 tree-reconstruction potential     K{n}/sim/reconstruction_potential.json
+  Q7 spatial structure (glands only)   pop/spatial_structure.json
+
+Q1-Q4 and Q7 describe the whole run and are computed once per tumour, shared across every clone-set
+size. Q5-Q6 depend on the sampled clones.
+
+Both tissue scenarios -- unstructured (no glands) and a ductal field -- run side by side as the
+outermost path segment, so an architecture can be re-run or dropped with one glob and every summary
+table carries `scenario` as its first grouping key.
+
+Run:
+    snakemake -s Snakefile --configfile config_test.yaml --cores 4
+    snakemake -s Snakefile --configfile config.yaml --cores all
+    snakemake -s Snakefile --configfile config.yaml --cores 4 dynamics_only
+"""
+import itertools
+import os
+import sys
+
+SCRIPTS = os.path.join(workflow.basedir, "scripts")
+# Run the scripts under the SAME interpreter that is running Snakemake, so the workflow uses the
+# environment it was launched from. A bare `python` is not portable -- plenty of systems only have
+# `python3`, or have `python` pointing somewhere else -- and the failure mode (exit 127) surfaces
+# as an opaque "non-zero exit code" from every rule at once. Override with `--config python_bin=...`.
+PYTHON = config.get("python_bin", sys.executable or "python3")
+REPO = os.path.abspath(os.path.join(workflow.basedir, "..", ".."))
+R = config.get("results_dir", "results")
+
+shell.prefix(f"""
+set -eo pipefail
+export MPLBACKEND=Agg
+export PYTHONPATH="{REPO}/src:{SCRIPTS}:$PYTHONPATH"
+""")
+
+
+# ── The grid ───────────────────────────────────────────────────────────────────
+def _keys(name):
+    ks = list((config.get(name) or {}).keys())
+    if not ks:
+        raise ValueError(f"config: {name} must be a non-empty mapping")
+    return ks
+
+
+SCENARIOS = _keys("scenario_grid")
+EVOS      = _keys("evo_grid")
+SELS      = _keys("selection_grid")
+GENOMES   = _keys("genome_grid")
+POPS      = _keys("pop_grid")
+SEEDS     = [int(s) for s in (config.get("seeds") or [1])]
+NCLONES   = [int(n) for n in (config.get("n_clones_list") or [10])]
+
+# A scenario may restrict which axis values it uses -- the structured runs are more expensive
+# (immortal resident cells on top of the tumour), so the config can give them a reduced grid
+# rather than forcing the whole product on both architectures.
+def _allowed(scenario, axis, default):
+    r = ((config.get("scenario_grid") or {}).get(scenario) or {}).get("_restrict", {})
+    return [v for v in default if v in r[axis]] if axis in r else default
+
+
+RUNS = [
+    (sc, ev, se, ge, po, sd)
+    for sc in SCENARIOS
+    for ev in _allowed(sc, "evo_grid", EVOS)
+    for se in _allowed(sc, "selection_grid", SELS)
+    for ge in _allowed(sc, "genome_grid", GENOMES)
+    for po in _allowed(sc, "pop_grid", POPS)
+    for sd in SEEDS
+]
+RUN_DIRS = [f"{sc}/{ev}/{se}/{ge}/{po}/seed{sd}" for sc, ev, se, ge, po, sd in RUNS]
+SIM_DIRS = [f"{d}/K{n}" for d in RUN_DIRS for n in NCLONES]
+
+wildcard_constraints:
+    run  = r"[^/]+/[^/]+/[^/]+/[^/]+/[^/]+/seed[0-9]+",
+    k    = r"[0-9]+",
+
+
+def _p(run):
+    """Split a run directory back into its six axis values."""
+    sc, ev, se, ge, po, sd = run.split("/")
+    return dict(scenario=sc, evo=ev, selection=se, genome=ge, pop=po, seed=int(sd[4:]))
+
+
+SUMMARIES = {
+    "sweep":          (f"{R}/sweep_summary.tsv",          "*/*/*/*/*/seed*/pop/sweep_metrics.json"),
+    "growth_phase":   (f"{R}/growth_phase_summary.tsv",   "*/*/*/*/*/seed*/pop/growth_phase.json"),
+    "landscape":      (f"{R}/landscape_summary.tsv",      "*/*/*/*/*/seed*/pop/cn_landscape.json"),
+    "structure":      (f"{R}/structure_summary.tsv",      "*/*/*/*/*/seed*/pop/spatial_structure.json"),
+    "quality":        (f"{R}/quality_summary.tsv",        "*/*/*/*/*/seed*/K*/sim/data_quality.json"),
+    "reconstruction": (f"{R}/reconstruction_summary.tsv", "*/*/*/*/*/seed*/K*/sim/reconstruction_potential.json"),
+    "diversity":      (f"{R}/diversity_summary.tsv",      "*/*/*/*/*/seed*/pop/diversity_trajectory.tsv"),
+}
+
+
+# ── Targets ────────────────────────────────────────────────────────────────────
+rule all:
+    input:
+        [v[0] for v in SUMMARIES.values()],
+        expand(R + "/{run}/pop/figures/.done", run=RUN_DIRS),
+        expand(R + "/{sim}/sim/figures/.done", sim=SIM_DIRS),
+
+rule simulate_only:
+    input: expand(R + "/_pop/{run}/tumor.pkl", run=RUN_DIRS)
+
+rule dynamics_only:            # Q1 + Q2 + Q3
+    input: SUMMARIES["sweep"][0], SUMMARIES["growth_phase"][0], SUMMARIES["diversity"][0]
+
+rule landscape_only:           # Q4
+    input: SUMMARIES["landscape"][0]
+
+rule quality_only:             # Q5
+    input: SUMMARIES["quality"][0]
+
+rule reconstruction_only:      # Q6
+    input: SUMMARIES["reconstruction"][0]
+
+rule structure_only:           # Q7
+    input: SUMMARIES["structure"][0]
+
+
+# ── Stage 1: grow one tumour ───────────────────────────────────────────────────
+rule simulate_tumor:
+    output:
+        tumor  = R + "/_pop/{run}/tumor.pkl",
+        cfg    = R + "/_pop/{run}/config.yaml",
+        diag   = R + "/_pop/{run}/diagnosis.json",
+    params:
+        a       = lambda w: _p(w.run),
+        out_dir = R + "/_pop/{run}",
+        cfgfile = lambda w: workflow.configfiles[0],
+    benchmark: R + "/_pop/{run}/benchmark.tsv"
+    resources: mem_mb=8000, runtime=240
+    shell:
+        """
+        {PYTHON} {SCRIPTS}/simulate_tumor.py \
+            --config "{params.cfgfile}" \
+            --scenario {params.a[scenario]} --evo {params.a[evo]} \
+            --selection {params.a[selection]} --genome {params.a[genome]} \
+            --pop {params.a[pop]} --seed {params.a[seed]} \
+            --out-dir "{params.out_dir}"
+        """
+
+
+# ── Q1-Q3: clonal dynamics, diversity, demography ──────────────────────────────
+rule compute_dynamics:
+    input:  tumor = R + "/_pop/{run}/tumor.pkl"
+    output:
+        sweep     = R + "/{run}/pop/sweep_metrics.json",
+        diversity = R + "/{run}/pop/diversity_trajectory.tsv",
+        growth    = R + "/{run}/pop/growth_phase.json",
+    params: stride = config.get("diversity_stride", 1)
+    resources: mem_mb=4000, runtime=60
+    shell:
+        """
+        {PYTHON} {SCRIPTS}/compute_dynamics.py --tumor "{input.tumor}" \
+            --out-sweep "{output.sweep}" --out-diversity "{output.diversity}" \
+            --out-growth "{output.growth}" --stride {params.stride}
+        """
+
+
+# ── Q4: copy-number landscape ──────────────────────────────────────────────────
+rule compute_landscape:
+    input:  tumor = R + "/_pop/{run}/tumor.pkl"
+    output:
+        traj    = R + "/{run}/pop/cn_landscape.tsv",
+        summary = R + "/{run}/pop/cn_landscape.json",
+    params: stride = config.get("landscape_stride", 1)
+    resources: mem_mb=4000, runtime=60
+    shell:
+        """
+        {PYTHON} {SCRIPTS}/compute_landscape.py --tumor "{input.tumor}" \
+            --out-trajectory "{output.traj}" --out-summary "{output.summary}" \
+            --stride {params.stride}
+        """
+
+
+# ── Q7: spatial structure ──────────────────────────────────────────────────────
+rule compute_structure:
+    input:  tumor = R + "/_pop/{run}/tumor.pkl"
+    output: R + "/{run}/pop/spatial_structure.json"
+    resources: mem_mb=4000, runtime=30
+    shell:
+        """
+        {PYTHON} {SCRIPTS}/compute_structure.py --tumor "{input.tumor}" --output "{output}"
+        """
+
+
+# ── Sample clones and export the CN ground truth ───────────────────────────────
+rule export_cn_truth:
+    input:  tumor = R + "/_pop/{run}/tumor.pkl"
+    output:
+        clone_names = R + "/{run}/K{k}/sim/clone_names.json",
+        observed    = R + "/{run}/K{k}/sim/observed_CN.tsv",
+        events      = R + "/{run}/K{k}/sim/CNA_events.tsv",
+        nwk         = R + "/{run}/K{k}/sim/clone_tree.nwk",
+        segments    = R + "/{run}/K{k}/sim/segments.tsv",
+    params:
+        out_dir  = R + "/{run}/K{k}/sim",
+        strategy = config.get("clone_sampling", "largest"),
+        medicc2  = "--medicc2" if config.get("write_medicc2_input", False) else "",
+    resources: mem_mb=4000, runtime=30
+    shell:
+        """
+        {PYTHON} {SCRIPTS}/export_cn_truth.py --tumor "{input.tumor}" \
+            --n-clones {wildcards.k} --strategy {params.strategy} \
+            --out-dir "{params.out_dir}" {params.medicc2}
+        """
+
+
+# ── Q5 + Q6: data quality and reconstruction potential ─────────────────────────
+rule compute_phylo:
+    input:
+        tumor       = R + "/_pop/{run}/tumor.pkl",
+        clone_names = R + "/{run}/K{k}/sim/clone_names.json",
+    output:
+        quality = R + "/{run}/K{k}/sim/data_quality.json",
+        recon   = R + "/{run}/K{k}/sim/reconstruction_potential.json",
+    resources: mem_mb=4000, runtime=60
+    shell:
+        """
+        {PYTHON} {SCRIPTS}/compute_phylo.py --tumor "{input.tumor}" \
+            --clone-names "{input.clone_names}" \
+            --out-quality "{output.quality}" --out-reconstruction "{output.recon}"
+        """
+
+
+# ── Figures ────────────────────────────────────────────────────────────────────
+rule visualize_pop:
+    input:
+        tumor     = R + "/_pop/{run}/tumor.pkl",
+        diversity = R + "/{run}/pop/diversity_trajectory.tsv",
+        growth    = R + "/{run}/pop/growth_phase.json",
+        landscape = R + "/{run}/pop/cn_landscape.tsv",
+        lsummary  = R + "/{run}/pop/cn_landscape.json",
+    output: R + "/{run}/pop/figures/.done"
+    params:
+        out_dir    = R + "/{run}/pop/figures",
+        max_clones = config.get("max_clones_for_engine_plots", 500),
+    resources: mem_mb=4000, runtime=60
+    shell:
+        """
+        {PYTHON} {SCRIPTS}/visualize.py --stage pop --tumor "{input.tumor}" \
+            --diversity "{input.diversity}" --growth "{input.growth}" \
+            --landscape "{input.landscape}" --landscape-summary "{input.lsummary}" \
+            --max-clones {params.max_clones} \
+            --out-dir "{params.out_dir}" --done "{output}"
+        """
+
+
+rule visualize_sim:
+    input:
+        tumor       = R + "/_pop/{run}/tumor.pkl",
+        clone_names = R + "/{run}/K{k}/sim/clone_names.json",
+    output: R + "/{run}/K{k}/sim/figures/.done"
+    params: out_dir = R + "/{run}/K{k}/sim/figures"
+    resources: mem_mb=4000, runtime=60
+    shell:
+        """
+        {PYTHON} {SCRIPTS}/visualize.py --stage sim --tumor "{input.tumor}" \
+            --clone-names "{input.clone_names}" \
+            --out-dir "{params.out_dir}" --done "{output}"
+        """
+
+
+# ── Aggregation: one summary table per question ────────────────────────────────
+rule aggregate_json:
+    """One rule per question, parameterised by the summary name."""
+    input:
+        lambda w: (
+            expand(R + "/{run}/pop/" + {
+                "sweep": "sweep_metrics.json", "growth_phase": "growth_phase.json",
+                "landscape": "cn_landscape.json", "structure": "spatial_structure.json",
+            }[w.name], run=RUN_DIRS)
+            if w.name in ("sweep", "growth_phase", "landscape", "structure") else
+            expand(R + "/{sim}/sim/" + {
+                "quality": "data_quality.json",
+                "reconstruction": "reconstruction_potential.json",
+            }[w.name], sim=SIM_DIRS)
+        )
+    output: R + "/{name}_summary.tsv"
+    wildcard_constraints:
+        name = "sweep|growth_phase|landscape|structure|quality|reconstruction"
+    params:
+        pattern = lambda w: SUMMARIES[w.name][1],
+        results = R,
+    resources: mem_mb=4000, runtime=30
+    shell:
+        """
+        {PYTHON} {SCRIPTS}/aggregate.py --results-dir "{params.results}" \
+            --pattern "{params.pattern}" --output "{output}" --kind json
+        """
+
+
+rule aggregate_diversity:
+    """Q2 is a per-generation series, so the table carries its ENDPOINT row per run; the full
+    trajectory stays in each run's diversity_trajectory.tsv."""
+    input: expand(R + "/{run}/pop/diversity_trajectory.tsv", run=RUN_DIRS)
+    output: R + "/diversity_summary.tsv"
+    params: pattern = SUMMARIES["diversity"][1], results = R
+    resources: mem_mb=4000, runtime=30
+    shell:
+        """
+        {PYTHON} {SCRIPTS}/aggregate.py --results-dir "{params.results}" \
+            --pattern "{params.pattern}" --output "{output}" --kind tsv --tsv-summary last
+        """

@@ -149,6 +149,13 @@ class GenotypeTumor:
     snapshot_every : int, optional
         Under tau-leaping, record a full per-clone snapshot every ``k`` generations
         (default 1) so the Muller / grid plots keep working.
+    trace_occupancy : bool, optional
+        Also record per-deme occupancy in every trace snapshot (default ``False``). ``traces``
+        otherwise carries only global genotype counts, which cannot distinguish a tumour still
+        expanding into empty space from one that has filled the space available to it — the r- vs
+        K-phase question :func:`iscc.cnevo.growth_phase` answers. Adds a handful of scalars per
+        snapshot (see ``_occupancy_snapshot``), costs O(#occupied demes) and touches no rng, so it
+        is inert when off and does not change the simulation when on.
     microenv_params : dict, optional
         Microenvironment layer (hypoxia field + cell-cell communication). Off by
         default; a pure readout that never changes growth.
@@ -180,7 +187,8 @@ class GenotypeTumor:
                  genome_mode="abstract", genome_spec=None,
                  update_mode="exact", tau=1.0, snapshot_every=1, microenv_params=None,
                  layout_seed=None, expression_params=None, coarsen_passengers=False,
-                 max_cells=None, germline_params=None, founder_mutations=None):
+                 max_cells=None, germline_params=None, founder_mutations=None,
+                 trace_occupancy=False):
         self.seed = seed
         # EVOLUTION rng (per-run: spatial seeding; grow() draws its own fresh default_rng(seed+step)).
         self.rng = np.random.default_rng(seed)
@@ -204,6 +212,12 @@ class GenotypeTumor:
         self.update_mode = update_mode
         self.tau = tau
         self.snapshot_every = snapshot_every
+        # Occupancy tracing (opt-in). `traces` otherwise records only global genotype counts, which
+        # cannot say whether the tumour is still expanding freely or has filled the space available
+        # to it -- the r- vs K-phase question. When on, each snapshot also carries a few per-deme
+        # occupancy scalars (see `_occupancy_snapshot`). OFF by default so the trace schema, and
+        # every existing consumer of it, is untouched.
+        self.trace_occupancy = bool(trace_occupancy)
         self.time = 0.0
         self.trace_times = []
 
@@ -281,6 +295,7 @@ class GenotypeTumor:
             self.update_mode = cfg.get("update_mode", update_mode)
             self.tau = cfg.get("tau", tau)
             self.snapshot_every = cfg.get("snapshot_every", snapshot_every)
+            self.trace_occupancy = bool(cfg.get("trace_occupancy", self.trace_occupancy))
             self.coarsen_passengers = bool(cfg.get("coarsen_passengers", coarsen_passengers))
             self.max_cells = cfg.get("max_cells", max_cells)
             self.germline_params = cfg.get("germline_params", germline_params)
@@ -1663,7 +1678,62 @@ class GenotypeTumor:
         snap = dict(genotypes_counts=dict(self.genotypes_counts))
         if self._met_enabled:
             snap["primary_counts"], snap["met_counts"] = self._compartment_counts()
+        if self.trace_occupancy:
+            snap.update(self._occupancy_snapshot())
         return snap
+
+    def _occupancy_snapshot(self):
+        """Per-deme cancer occupancy scalars for one trace snapshot (opt-in, `trace_occupancy`).
+
+        Occupancy is measured as CANCER cells per deme against that deme's capacity, NOT total
+        cells. In a glandular substrate the duct demes are seeded full of immortal epithelium, so
+        total occupancy is already at K before any cancer arrives and a total-based saturation
+        fraction would read 1.0 from generation zero. Cancer-vs-capacity instead answers the
+        question the r/K split actually asks: has the tumour filled the space available to it?
+
+        Reads the incrementally-maintained `_deme_cancer_n` (cancer-occupied demes only), so the
+        cost is O(#occupied demes) per snapshot and no rng is touched.
+        """
+        occ = self._deme_cancer_n
+        if not occ:
+            return dict(n_occupied_demes=0, mean_occupancy=0.0, occupancy_ratio=0.0,
+                        crowding_index=0.0, saturated_deme_frac=0.0, saturated_cell_frac=0.0)
+        idx = np.fromiter(occ.keys(), dtype=int, count=len(occ))
+        cnt = np.fromiter(occ.values(), dtype=float, count=len(occ))
+        cap = (self._deme_capacity[idx] if self._deme_capacity is not None
+               else np.full(idx.shape, float(self._cap)))
+        full = cnt >= (1.0 - self.crowding_margin) * cap
+        tot = float(cnt.sum())
+        # CELL-weighted saturation is the load-bearing one. The deme-weighted fraction is dominated
+        # by the sparse invasion rim -- a solidly density-limited tumour still has a large ring of
+        # half-empty front demes -- so it stays low no matter how packed the core is. Weighting by
+        # cells asks the question that matters instead: what share of the population is actually
+        # living at carrying capacity? `crowding_index` is the continuous version of the same
+        # question -- the cell-weighted mean of a deme's fullness, i.e. how full the average cell's
+        # own deme is -- and separates an expanding tumour from a density-limited one far more
+        # sharply than any deme-weighted fraction.
+        out = dict(n_occupied_demes=int(idx.size),
+                   mean_occupancy=float(cnt.mean()),
+                   occupancy_ratio=float((cnt / np.maximum(cap, 1e-9)).mean()),
+                   crowding_index=float((cnt * (cnt / np.maximum(cap, 1e-9))).sum() / tot)
+                   if tot > 0 else 0.0,
+                   saturated_deme_frac=float(full.mean()),
+                   saturated_cell_frac=float(cnt[full].sum() / tot) if tot > 0 else 0.0)
+        if self.structure_radius > 0 and self.gland_id is not None:
+            gid = self.gland_id[idx]
+            duct, stroma = gid >= 0, gid < 0
+            for name, m in (("duct", duct), ("stroma", stroma)):
+                sub = float(cnt[m].sum())
+                out[f"crowding_index_{name}"] = (
+                    float((cnt[m] * (cnt[m] / np.maximum(cap[m], 1e-9))).sum() / sub)
+                    if sub > 0 else 0.0)
+                out[f"n_occupied_demes_{name}"] = int(m.sum())
+                out[f"mean_occupancy_{name}"] = float(cnt[m].mean()) if m.any() else 0.0
+                out[f"saturated_deme_frac_{name}"] = float(full[m].mean()) if m.any() else 0.0
+                out[f"saturated_cell_frac_{name}"] = (float(cnt[m & full].sum() / sub)
+                                                      if sub > 0 else 0.0)
+            out["n_glands_colonised"] = int(np.unique(gid[duct]).size) if duct.any() else 0
+        return out
 
     def update(self, rng):
         if self.is_extinct():

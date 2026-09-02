@@ -1,0 +1,138 @@
+# CN evolution analysis — full grid.
+#
+# Six axes, merged in the order defaults -> genome -> selection -> evo -> pop -> scenario
+# (scripts/_config.py). A dataset's parameters are recoverable from its path:
+#   results/{scenario}/{evo}/{selection}/{genome}/{pop}/seed{N}/
+#
+# TWO TRAPS the config layer exists to avoid, both of which silently disable an axis:
+#   * max_birth_rate must exceed division_rate. The engine default is 0.3, so raising
+#     division_rate without raising the cap clamps EVERY clone to the same rate and the
+#     selection axis does nothing. _config.py raises the cap automatically; do not fight it.
+#   * In a glandular scenario the per-deme capacity comes from K_duct / K_stroma, and a bare
+#     carrying_capacity is ignored. The pop axis is therefore a capacity_scale applied to
+#     whichever capacity keys the scenario actually uses.
+
+results_dir: results
+seeds: [1, 2, 3, 4, 5]
+n_clones_list: [10, 20, 50, 100]
+clone_sampling: largest       # one representative cell per clone (SISTEM's 'uniform-clone')
+write_medicc2_input: false    # MEDICC2 itself is out of scope; the TSV export is cheap if wanted
+diversity_stride: 5           # J1 per snapshot is the expensive part of Q2
+landscape_stride: 5
+# The engine's own muller / clone-tree plots expand the whole GENOTYPE REGISTRY (every genotype
+# ever created, not the live clone count) and hang past a few thousand entries. A CNA-heavy run
+# mints a genotype per event and reaches 10^5. The seven questions' own figures are unaffected;
+# these are skipped above this registry size.
+max_clones_for_engine_plots: 2000
+
+defaults:
+  update_mode: tau
+  tau: 1.0
+  snapshot_every: 1
+  coarsen_passengers: true
+  max_cells: 20000
+  cell_params:
+    cancer:
+      division_rate: 0.4
+      death_rate: 0.05
+      mutation_rate: 0.6
+      dispersal_rate: 0.2
+      snv_prob: 0.3
+      cnv_prob: 0.7
+      amp_prob: 0.5
+
+# ── Tissue architecture ────────────────────────────────────────────────────────
+# The outermost axis. Unstructured is the closest analogue to a non-spatial simulation;
+# structured founds the lesion inside a healthy gland, which is what produces a truncal CN
+# layer and multi-focal spread (Q7).
+scenario_grid:
+  unstructured:
+    spatial_params: {grid_size: 24, structure_radius: 0}
+    deme_params: {carrying_capacity: 10, initial_cancer_cells: 4}
+
+  structured:
+    # prop_breach / prop_stromal_survival live HERE, not in selection_grid: without them
+    # invasion is impossible and the lesion stays confined forever, but putting them on the
+    # selection axis would make that axis mean different things in the two scenarios.
+    selection_params: {prop_breach: 0.05, prop_stromal_survival: 0.05, prop_dispersal: 0.08}
+    cell_params:
+      cancer: {division_rate: 0.7, dispersal_rate: 0.35}
+    deme_params: {carrying_capacity: 10, initial_cancer_cells: 6, resident_pressure_ref: 0.2}
+    spatial_params:
+      grid_size: 24
+      structure_radius: 2
+      n_glands: 4
+      gland_radius: 2
+      min_gland_sep: 6
+      K_duct: 12
+      K_stroma: 10
+      stroma_fill_frac: 0.35
+      cross_gland_kappa: 0.04
+      breach_gated_invasion: true
+      stromal_hazard: 0.6
+    # Structured runs carry immortal resident cells on top of the tumour and cost more, so they
+    # take a reduced grid. Widen this only if the scenario contrast turns out to matter.
+    _restrict:
+      genome_grid: [seg16, seg64]
+      pop_grid: [cap_low_long, cap_high_long]
+
+  # A structured field whose founding acinus stays CLOSED until it is distended. This is not a
+  # cosmetic variant: measured on this engine, it is what produces a truncal copy-number layer at
+  # all. Without it the lesion breaches almost immediately (escape at generation ~6 of 80) and
+  # `data_quality.trunk_fraction` is 0.0 -- literally no alteration is shared by every sampled
+  # clone. With it, escape moves to ~44 and trunk_fraction rises to ~0.45. Since trunk burden is
+  # the mechanism behind non-reconstructable data, a structured scenario without confinement does
+  # NOT actually differ from an unstructured one on the axis that matters.
+  structured_confined:
+    selection_params: {prop_breach: 0.05, prop_stromal_survival: 0.05, prop_dispersal: 0.08}
+    cell_params:
+      cancer: {division_rate: 0.7, dispersal_rate: 0.35}
+    deme_params: {carrying_capacity: 10, initial_cancer_cells: 6, resident_pressure_ref: 0.2}
+    spatial_params:
+      grid_size: 24
+      structure_radius: 2
+      n_glands: 4
+      gland_radius: 2
+      min_gland_sep: 6
+      K_duct: 12
+      K_stroma: 10
+      stroma_fill_frac: 0.35
+      cross_gland_kappa: 0.04
+      breach_gated_invasion: true
+      stromal_hazard: 0.6
+      origin_confinement:
+        dispersal_factor: 0.0     # closed: while the acinus is intact, nothing leaves
+        established_at: 0.5       # the countdown starts once the patch is half full
+        generations: 400          # length of the in-situ phase (scale with pop_grid.steps)
+    _restrict:
+      genome_grid: [seg16, seg64]
+      pop_grid: [cap_low_long, cap_high_long]
+
+# ── CN grid resolution ─────────────────────────────────────────────────────────
+# Every iscc CNA is exactly one segment wide, so n_segments IS the CN bin resolution — the
+# analogue of SISTEM's region_len, and the lever it found mattered most.
+genome_grid:
+  seg16:  {genome_params: {n_segments: 16,  segment_size: 60}}
+  seg64:  {genome_params: {n_segments: 64,  segment_size: 15}}
+  seg256: {genome_params: {n_segments: 256, segment_size: 4}}
+
+# ── Selection strength ─────────────────────────────────────────────────────────
+# driver_effects 1.0 is exactly neutral: every clone keeps the founder's division rate.
+selection_grid:
+  neutral:  {selection_params: {prop_driver: 0.10, driver_effects: 1.0}}
+  weak:     {selection_params: {prop_driver: 0.10, driver_effects: 1.2}}
+  strong:   {selection_params: {prop_driver: 0.10, driver_effects: 1.6}}
+
+# ── Mutation regime (incl. WGD) ────────────────────────────────────────────────
+evo_grid:
+  cna_low:   {cell_params: {cancer: {mutation_rate: 0.3, cnv_prob: 0.7, wgd_rate: 0.0}}}
+  cna_high:  {cell_params: {cancer: {mutation_rate: 0.8, cnv_prob: 0.7, wgd_rate: 0.0}}}
+  wgd:       {cell_params: {cancer: {mutation_rate: 0.6, cnv_prob: 0.7, wgd_rate: 0.05}}}
+
+# ── Demography: how far into the K phase the run goes ──────────────────────────
+# r vs K is MEASURED per run (growth_phase.t_rK), not assumed from the tier name — these tiers
+# only set up runs that plausibly stop before, at, and well past saturation.
+pop_grid:
+  cap_low_short:  {capacity_scale: 1.0, steps: 200}
+  cap_low_long:   {capacity_scale: 1.0, steps: 1200}
+  cap_high_long:  {capacity_scale: 4.0, steps: 1200}

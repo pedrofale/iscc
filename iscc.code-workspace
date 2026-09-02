@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../iscc-markdown"
+		},
+		{
+			"path": "../../Cellmates-dev"
+		},
+		{
+			"path": "../iscc-overleaf"
+		}
+	],
+	"settings": {}
+}

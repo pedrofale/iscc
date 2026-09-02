@@ -173,6 +173,16 @@ nav:
           - ABC: reference/ABC.md
           - Prior: reference/Prior.md
           - Posterior: reference/Posterior.md
+      - CN evolution analysis:
+          - sweep_metrics: reference/sweep_metrics.md
+          - diversity_trajectory: reference/diversity_trajectory.md
+          - growth_phase: reference/growth_phase.md
+          - cn_landscape: reference/cn_landscape.md
+          - data_quality: reference/data_quality.md
+          - reconstruction_potential: reference/reconstruction_potential.md
+          - spatial_structure: reference/spatial_structure.md
+          - select_clones: reference/select_clones.md
+          - cna_event_table: reference/cna_event_table.md
       - Calibration:
           - estimate_dna: reference/estimate_dna.md
           - estimate_rna: reference/estimate_rna.md

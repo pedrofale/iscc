@@ -48,35 +48,52 @@ def _driver_combo(tumor, gid, driver_idx):
     return frozenset(driver_idx[snv[driver_idx] > 0].tolist())
 
 
-def driver_combination_counts(tumor):
+def driver_combination_counts(tumor, counts=None, combo_cache=None):
     """Map each cancer driver-mutation combination -> total cell count.
 
     A combination is the ``frozenset`` of mutated driver positions (oncogene + TSG flat genome
     indices with VAF > 0) carried by a genotype. Cancer genotypes are pooled by combination and
     weighted by their cell counts; normal cells are excluded.
+
+    ``counts`` overrides the live ``tumor.genotypes_counts`` with any ``{genotype_id: n_cells}``
+    mapping -- e.g. a historical snapshot from ``tumor.traces`` -- so the index can be evaluated at
+    any generation of the run, not only at its end. The genotype registry retains every genotype
+    ever created, so past snapshots resolve. Defaults to the current population.
+
+    ``combo_cache`` is an optional ``{genotype_id: frozenset}`` dict reused across calls. A
+    genotype's driver combination never changes, so scanning a whole run of snapshots costs one
+    pass over the distinct genotypes rather than one per snapshot.
     """
     driver_idx = _driver_indices(tumor)
+    counts = tumor.genotypes_counts if counts is None else counts
+    cache = {} if combo_cache is None else combo_cache
     combos = {}
-    for gid, cnt in tumor.genotypes_counts.items():
+    for gid, cnt in counts.items():
         if not tumor._is_cancer(gid):
             continue
-        mutated = _driver_combo(tumor, gid, driver_idx)
+        mutated = cache.get(gid)
+        if mutated is None:
+            mutated = cache[gid] = _driver_combo(tumor, gid, driver_idx)
         combos[mutated] = combos.get(mutated, 0) + cnt
     return combos
 
 
-def clonal_diversity(tumor):
-    """Noble's clonal diversity ``D`` = inverse-Simpson over driver-mutation combinations."""
-    return inverse_simpson(driver_combination_counts(tumor).values())
+def clonal_diversity(tumor, counts=None):
+    """Noble's clonal diversity ``D`` = inverse-Simpson over driver-mutation combinations.
+
+    ``counts`` optionally supplies a population snapshot; see :func:`driver_combination_counts`.
+    """
+    return inverse_simpson(driver_combination_counts(tumor, counts).values())
 
 
-def mean_drivers_per_cell(tumor):
+def mean_drivers_per_cell(tumor, counts=None):
     """Noble's ``n`` = count-weighted mean number of mutated driver positions per cancer cell.
 
     Equivalently ``Σ i·pᵢ`` where ``pᵢ`` is the frequency of the driver-mutation combination
     carrying ``i`` drivers (the tree-depth analogue). ``nan`` when there are no cancer cells.
+    ``counts`` optionally supplies a population snapshot; see :func:`driver_combination_counts`.
     """
-    combos = driver_combination_counts(tumor)
+    combos = driver_combination_counts(tumor, counts)
     total = sum(combos.values())
     if total == 0:
         return float("nan")
@@ -143,7 +160,7 @@ def tree_balance_j1(parents, sizes):
     return num / den if den > 0 else float("nan")
 
 
-def clone_tree(tumor):
+def clone_tree(tumor, counts=None, combo_cache=None):
     """Contract the genotype genealogy onto the driver-mutation *clone* phylogeny.
 
     Each clone node is a maximal connected block of genotypes sharing one driver combination
@@ -154,9 +171,14 @@ def clone_tree(tumor):
     whatever extant mass flows through them.
 
     Returns ``(parents, sizes)`` ready for :func:`tree_balance_j1`.
+
+    ``counts`` optionally supplies a population snapshot in place of the live
+    ``tumor.genotypes_counts``; see :func:`driver_combination_counts`, which also documents
+    ``combo_cache``.
     """
     driver_idx = _driver_indices(tumor)
-    combo_cache = {}
+    counts = tumor.genotypes_counts if counts is None else counts
+    combo_cache = {} if combo_cache is None else combo_cache
 
     def combo(gid):
         if gid not in combo_cache:
@@ -178,7 +200,7 @@ def clone_tree(tumor):
         return r
 
     sizes = {}
-    for gid, cnt in tumor.genotypes_counts.items():
+    for gid, cnt in counts.items():
         if not tumor._is_cancer(gid):
             continue
         r = clone_root(gid)
@@ -202,20 +224,23 @@ def clone_tree(tumor):
     return parents, sizes
 
 
-def tree_balance(tumor):
-    """Noble/Lemant ``J1`` tree-balance index of the tumour's driver-clone phylogeny."""
-    parents, sizes = clone_tree(tumor)
+def tree_balance(tumor, counts=None):
+    """Noble/Lemant ``J1`` tree-balance index of the tumour's driver-clone phylogeny.
+
+    ``counts`` optionally supplies a population snapshot; see :func:`driver_combination_counts`.
+    """
+    parents, sizes = clone_tree(tumor, counts)
     return tree_balance_j1(parents, sizes)
 
 
-def mode_indices(tumor):
+def mode_indices(tumor, counts=None):
     """Noble ``(n, D, J1)`` evolutionary-mode indices, plus the clone count, in one pass.
 
     Returns ``dict(n=..., D=..., J1=..., n_clones=...)`` over the tumour's *cancer* population.
     With no cancer cells everything is ``nan`` (``n_clones`` ``0``); ``J1`` is also ``nan`` when
     the clone phylogeny has no branching (a single clone), where tree balance is undefined.
     """
-    combos = driver_combination_counts(tumor)
+    combos = driver_combination_counts(tumor, counts)
     total = sum(combos.values())
     if total == 0:
         return dict(n=float("nan"), D=float("nan"), J1=float("nan"), n_clones=0)
@@ -223,6 +248,6 @@ def mode_indices(tumor):
     return dict(
         n=float(n),
         D=inverse_simpson(combos.values()),
-        J1=tree_balance(tumor),
+        J1=tree_balance(tumor, counts),
         n_clones=len(combos),
     )
