@@ -117,14 +117,16 @@ def test_tau_matches_exact_per_arm_summary_no_bias():
 
 
 def test_tau_recovers_selection_direction():
-    """A strongly amplification-favoured arm gains more than it loses under tau (and vice versa)."""
+    """A strongly amplification-favoured arm gains more than it loses under tau (and vice versa).
+
+    Pooled over a small cohort: a single tumour's direction is seed-noisy, and it can go extinct."""
     spec = _spec(6)
     s = np.where(np.arange(6) % 2 == 0, 1.6, 0.5)   # even arms amplify, odd arms delete
-    t = grow_to_size(spec, s, seed=2, target=600, mode="tau")
-    from iscc.inference.summaries import cna_summary
-    c = cna_summary(t)
-    assert c["gain_freq"][0] > c["loss_freq"][0]      # amplified arm
-    assert c["loss_freq"][1] > c["gain_freq"][1]      # deleted arm
+    vec, survivors = matched_size_cohort_vector(spec, s, "tau", seeds=range(6), target=600)
+    assert survivors >= 3
+    gain, loss = vec[:6], vec[6:]
+    assert gain[0] > loss[0]      # amplified arm
+    assert loss[1] > gain[1]      # deleted arm
 
 
 def test_tau_faster_than_exact_at_matched_size():
@@ -132,7 +134,10 @@ def test_tau_faster_than_exact_at_matched_size():
     grows with size (the per-event exact cost climbs with crowding/clone count faster than tau's
     per-generation cost). Loose factor so CI noise can't flip the sign."""
     spec = _spec(8)
-    th = {f"s{i}": 1.1 for i in range(spec.n_arms)}
+    # a UNIFORM s_arm is (near-)neutral under ploidy-relative arm fitness -- exactly neutral for
+    # equal-length arms -- and a neutral tumour plateaus below this grid's ~1150-cell capacity;
+    # alternate it so selection drives growth to size
+    th = {f"s{i}": 1.3 if i % 2 == 0 else 0.8 for i in range(spec.n_arms)}
     ex = RealGenomeSimulator(spec, cohort_size=4, update_mode="exact", target_size=1200, seed=5)
     ta = RealGenomeSimulator(spec, cohort_size=4, update_mode="tau", target_size=1200, seed=5)
     t0 = time.time(); ex(th); t_ex = time.time() - t0

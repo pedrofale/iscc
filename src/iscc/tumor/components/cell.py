@@ -364,7 +364,9 @@ class Cell(object):
 
         self.genome_summary['seg_cns'][seg] += sign
         seg_cns = self.genome_summary['seg_cns']
-        self.genome_summary['ploidy'] = np.mean(seg_cns)
+        # Genome-wide mean copy number weighted by segment length, as CINner and SISTEM average over
+        # bins; with equal segments (the abstract genome) this is exactly the plain mean.
+        self.genome_summary['ploidy'] = np.dot(seg_cns, self.segment_sizes) / self.n_genes
         self.genome_summary['highest_cn'] = np.max(seg_cns)
         # nullisomy = number of segments with zero copies, not the largest copy number.
         self.genome_summary['nullisomy_count'] = int(np.sum(np.asarray(seg_cns) == 0))
