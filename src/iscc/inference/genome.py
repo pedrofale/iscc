@@ -21,7 +21,8 @@ It is built from the derived CSVs under ``validation/data/`` (themselves produce
 
 **v1 scope (honest):** SNV drivers are off (``prop_driver=0``) — the arm-CN model is what fits
 PCAWG; per-arm oncogene/TSG counts inform the ``s_arm`` *prior* and the Charm comparison but do
-not place gene drivers in the engine (the arm-CN fitness reads only ``seg_cns``). Arm length sets
+not place gene drivers in the engine (the arm-CN fitness reads only ``seg_cns``, relative to the
+genome-wide mean ploidy, so a whole-genome doubling is fitness-neutral). Arm length sets
 the per-arm gene grid (``segment_sizes``), so genome-fraction summaries are arm-length-weighted.
 """
 import os

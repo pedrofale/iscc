@@ -172,8 +172,9 @@ def s_arm_prior(n_arms, low=0.5, high=1.6):
 class PerArmRegressor:
     """Infer the per-arm selection vector by a *pooled* per-arm regression (the M3b estimator).
 
-    The arm-CN fitness factorises over arms (``prod_seg s[seg]**(cn-2)``), so each arm's gain/loss
-    frequency is governed mainly by its own coefficient ``s[arm]``. Rather than learn a joint
+    The arm-CN fitness is a product over arms (``prod_seg s[seg]**(cn/ploidy - 1)``), coupled only
+    through the genome-wide ploidy, so each arm's gain/loss frequency is governed mainly by its own
+    coefficient ``s[arm]``. Rather than learn a joint
     ``2*n_arms -> n_arms`` map from the reference table (data-starved in ~39 dimensions, and forced
     to extrapolate at the real observation), we pool **every (reference-sim, arm) example** into a
     single 2-D -> 1-D regressor ``(gain[arm], loss[arm]) -> s[arm]``. This multiplies the training

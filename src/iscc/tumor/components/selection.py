@@ -18,7 +18,7 @@ class Selection(object):
                  resistance_state_genetic=False, resistance_state_effect=0.0,
                  resistance_state_cost=0.0, resistance_state_induction=0.0,
                  resistance_state_relax=0.0, resistance_state_noise=0.0,
-                 selection_mode="gene", s_arm=None, arm_baseline=2.0,
+                 selection_mode="gene", s_arm=None,
                  max_ploidy=6, max_cn=12, max_nullisomy=2, max_mut_drivers=1000, rng=None,
                  epistasis_params=None, dependency_params=None, layout_seed=None, ):
         # Seeded generator so the driver/resistance layout is reproducible. This ``rng`` is used
@@ -163,14 +163,16 @@ class Selection(object):
                 f"trait_source must be 'dosage' or 'mutation', got {trait_source!r}")
         self.trait_source = trait_source
 
-        # Selection model. "gene" (default) = the abstract CINner gene-driver model
+        # Selection model, drawing on three simulators. As in demon (Noble et al.), fitness
+        # multiplies the cell's own baseline division/dispersal rate, capped at max_birth_rate
+        # (Cell.update_evolutionary_parameters). "gene" (default) = CINner's driver-gene model
         # (oncogene/TSG mutation + copy-number fitness via n_wt/n_mut counts). "arm" = the
-        # real-genome per-arm copy-number model (CINner's arm model): division fitness is
-        # prod_seg s_arm[seg] ** (seg_cns[seg] - arm_baseline), read directly from the
-        # per-segment copy numbers iscc already maintains. s_arm[seg] > 1 -> amplifying that
+        # real-genome per-arm copy-number model shared by CINner and SISTEM: division fitness is
+        # prod_seg s_arm[seg] ** (seg_cns[seg] / ploidy - 1), read directly from the per-segment
+        # copy numbers iscc already maintains. Dosage is RELATIVE to ploidy, as in the gene model,
+        # so a whole-genome doubling leaves fitness unchanged. s_arm[seg] > 1 -> amplifying that
         # arm is beneficial (oncogene-dominated arm); s_arm[seg] < 1 -> deleting it is.
         self.selection_mode = selection_mode
-        self.arm_baseline = arm_baseline
         if s_arm is None:
             s_arm = np.ones(n_segments)
         self.s_arm = np.asarray(s_arm, dtype=float)
@@ -474,15 +476,21 @@ class Selection(object):
         return float(np.exp((2.0 * n_mut / ploidy) * np.log(effect)))
 
     def _arm_division_rate(self, genome_summary):
-        """CINner per-arm copy-number fitness: prod_seg s_arm[seg] ** (cn[seg] - baseline).
+        """Per-arm copy-number fitness: prod_seg s_arm[seg] ** (cn[seg] / ploidy - 1).
 
-        Reads the per-segment copy numbers iscc already maintains (``seg_cns``). Computed in
-        log space (sum of (cn - baseline) * log s_arm) so many-arm genomes don't overflow.
-        Relative to the all-diploid baseline (cn == baseline for every arm) this is 1.0, so
-        only copy-number deviations move the division rate.
+        CINner's and SISTEM's arm model is prod_seg s_arm[seg] ** (cn[seg] / ploidy); the ``- 1``
+        divides every genome by the same constant prod(s_arm), so the diploid genome maps to 1.0
+        and keeps the configured division rate (CINner and SISTEM instead divide by the
+        population's mean fitness, which cancels that constant). Reads the per-segment copy
+        numbers iscc already maintains (``seg_cns``) and the length-weighted genome-wide mean
+        ``ploidy``, so a whole-genome doubling is neutral and only changes in RELATIVE dosage move
+        the division rate. Computed in log space so many-arm genomes don't overflow.
         """
+        ploidy = genome_summary['ploidy']
+        if ploidy <= 0:
+            return 1.0
         cns = np.asarray(genome_summary['seg_cns'], dtype=float)
-        return float(np.exp(np.sum((cns - self.arm_baseline) * self._log_s_arm)))
+        return float(np.exp(np.sum((cns / ploidy - 1) * self._log_s_arm)))
 
     def _epistasis_multiplier(self, event_bits):
         """The planted network's contribution to division fitness (1.0 when off / no events).
