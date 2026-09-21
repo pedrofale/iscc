@@ -5,7 +5,8 @@ Stage 1 of the iscc pipeline: grow a tumor and write its ground-truth state
 (per-cell genotypes/CNVs/expression, clone trace, spatial grid). Downstream:
 `isccsample` (biopsy/dissociation) → `isccdata` (sequencing/spatial assay).
 
-Inspired by Noble et al, 2019; selection follows a CINner-style copy-number model.
+Inspired by Noble et al, 2019 (demon); selection follows CINner's copy-number model, with the
+per-arm variant CINner and SISTEM share in real-genome mode.
 """
 from .models.glandular import GlandularTumor
 from .models.mixed import MixedTumor

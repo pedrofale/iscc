@@ -62,23 +62,105 @@ def test_variable_sizes_snv_indexing():
 
 
 # --- per-arm selection mode -------------------------------------------------
+def _arm_gs(cns, sizes=None):
+    """A minimal arm-mode genome summary: per-arm copy numbers and their length-weighted ploidy."""
+    return {"seg_cns": list(cns), "ploidy": float(np.average(cns, weights=sizes))}
+
+
 def test_arm_fitness_neutral_baseline():
     sel = Selection(n_segments=3, segment_size=4, selection_mode="arm",
                     s_arm=[1.5, 0.5, 1.2], rng=np.random.default_rng(0))
-    gs = {"seg_cns": [2, 2, 2]}
-    assert sel.update_division_rate(gs) == pytest.approx(1.0)   # diploid baseline -> neutral
+    assert sel.update_division_rate(_arm_gs([2, 2, 2])) == pytest.approx(1.0)   # diploid -> neutral
 
 
 def test_arm_fitness_direction():
     sel = Selection(n_segments=2, segment_size=4, selection_mode="arm",
                     s_arm=[1.5, 0.5], rng=np.random.default_rng(0))
     # amplifying the s>1 arm is beneficial; amplifying the s<1 arm is deleterious
-    assert sel.update_division_rate({"seg_cns": [3, 2]}) > 1.0
-    assert sel.update_division_rate({"seg_cns": [2, 3]}) < 1.0
+    assert sel.update_division_rate(_arm_gs([3, 2])) > 1.0
+    assert sel.update_division_rate(_arm_gs([2, 3])) < 1.0
     # deleting the s<1 arm is beneficial
-    assert sel.update_division_rate({"seg_cns": [2, 1]}) > 1.0
-    # exact value: 1.5**(3-2) * 0.5**(2-2) = 1.5
-    assert sel.update_division_rate({"seg_cns": [3, 2]}) == pytest.approx(1.5)
+    assert sel.update_division_rate(_arm_gs([2, 1])) > 1.0
+    # exact value at ploidy 2.5: 1.5**(3/2.5 - 1) * 0.5**(2/2.5 - 1) = 1.5**0.2 * 0.5**-0.2
+    assert sel.update_division_rate(_arm_gs([3, 2])) == pytest.approx(3.0 ** 0.2)
+
+
+def test_arm_fitness_matches_cinner_sistem_up_to_a_constant():
+    """CINner's and SISTEM's arm fitness is prod s**(cn / ploidy); iscc divides it by the
+    genome-independent constant prod(s) so the diploid genome sits at 1. Ratios are identical."""
+    s = np.array([1.5, 0.5, 1.2, 0.8])
+    sizes = [4, 6, 8, 5]
+    sel = Selection(n_segments=4, segment_sizes=sizes, selection_mode="arm", s_arm=s,
+                    prop_driver=0.0, rng=np.random.default_rng(0))
+    for cns in ([2, 2, 2, 2], [3, 2, 1, 2], [4, 4, 2, 6]):
+        gs = _arm_gs(cns, sizes)
+        cinner_sistem = np.prod(s ** (np.asarray(cns) / gs["ploidy"]))
+        assert sel.update_division_rate(gs) == pytest.approx(cinner_sistem / np.prod(s))
+
+
+def test_ploidy_is_length_weighted():
+    """Ploidy is the mean copy number weighted by segment length (CINner/SISTEM average over bins)."""
+    sizes = [4, 12]
+    sel = Selection(n_segments=2, segment_sizes=sizes, prop_driver=0.0, rng=np.random.default_rng(0))
+    c = CancerCell(n_segments=2, segment_sizes=sizes)
+    c.update_genome_summary_cnv(sel, c.genome[1]["p"][0], 1, 1)      # gain one copy of the long arm
+    assert c.genome_summary["seg_cns"] == [2, 3]
+    assert c.genome_summary["ploidy"] == pytest.approx((2 * 4 + 3 * 12) / 16)   # 2.75, not 2.5
+
+
+def test_arm_fitness_wgd_neutral():
+    """A whole-genome doubling leaves arm fitness unchanged: dosage is relative to ploidy."""
+    s = [1.5, 0.5, 1.2, 0.8]
+    sizes = [4, 6, 8, 5]
+    sel = Selection(n_segments=4, segment_sizes=sizes, selection_mode="arm", s_arm=s,
+                    prop_driver=0.0, max_ploidy=8, max_cn=16, rng=np.random.default_rng(0))
+    rng = np.random.default_rng(0)
+    diploid = CancerCell(n_segments=4, segment_sizes=sizes)
+    doubled = diploid.divide()
+    assert doubled.mutate(rng, sel, wgd_rate=1.0) is True           # forced WGD through the engine seam
+    assert list(doubled.genome_summary["seg_cns"]) == [4, 4, 4, 4]
+    assert sel.update_division_rate(doubled.genome_summary) == pytest.approx(
+        sel.update_division_rate(diploid.genome_summary))           # == 1.0, not prod(s)**2
+
+    # an aneuploid parent keeps its (non-neutral) fitness through the doubling too
+    parent = _arm_gs([3, 2, 1, 2], sizes)
+    assert sel.update_division_rate(parent) != pytest.approx(1.0)
+    assert sel.update_division_rate(_arm_gs([6, 4, 2, 4], sizes)) == pytest.approx(
+        sel.update_division_rate(parent))
+
+
+@pytest.mark.parametrize("arm", range(4))
+def test_arm_fitness_single_gain_follows_s(arm):
+    """Gaining one arm of a diploid moves fitness in the direction of that arm's s_arm, even though
+    the gain also raises the ploidy every other arm is measured against."""
+    s = np.array([1.5, 0.5, 1.2, 0.8])
+    sel = Selection(n_segments=4, segment_size=4, selection_mode="arm", s_arm=s,
+                    rng=np.random.default_rng(0))
+    cns = [2, 2, 2, 2]
+    cns[arm] = 3
+    f = sel.update_division_rate(_arm_gs(cns))
+    assert (f > 1.0) if s[arm] > 1 else (f < 1.0)
+
+
+def test_real_genome_tumor_runs_with_wgd():
+    # arm mode with WGD on: doubled genomes arise and the per-arm fitness stays finite on them.
+    s = [2.0, 0.4, 1.0, 1.0]
+    spec = _toy_spec(4, s_arm=s)
+    t = GenotypeTumor(
+        seed=3, genome_mode="real", genome_spec=spec,
+        selection_params={"s_arm": s, "max_ploidy": 8, "max_cn": 16},
+        cancer_cell_params={"max_birth_rate": 0.95, "division_rate": 0.4, "death_rate": 0.02,
+                            "mutation_rate": 0.4, "dispersal_rate": 0.2,
+                            "snv_prob": 0.0, "cnv_prob": 1.0, "n_snvs_per_allele": 1, "amp_prob": 0.5,
+                            "wgd_rate": 0.1},
+        deme_params={"carrying_capacity": 8, "maximum_death_rate": 0.5},
+        spatial_params={"grid_size": 10, "structure_radius": 0, "immune_density": 0.0},
+    )
+    t.grow(n_steps=400, seed=3)
+    assert t.get_cancer_size() > 0
+    assert t.cell_data["cell_wgd"]["is_wgd"].any(), "expected some WGD cells at this wgd_rate"
+    rates = [t.selection.update_division_rate(g.genome_summary) for g in t.genotypes.values()]
+    assert np.all(np.isfinite(rates)) and np.all(np.asarray(rates) > 0)
 
 
 def test_s_arm_length_validation():
