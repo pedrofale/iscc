@@ -33,6 +33,7 @@ immune). See `src/iscc/tumor/tumorconfigs/glandular.yaml`.
 |---|---|
 | `trace_counts.csv` | genotype counts per step (Muller-plot input) |
 | `parents.csv` | genotype → parent genotype |
+| `genotype_births.csv` | genotype engine: when and where every cancer genotype arose — `parent`, `ord` (creation ordinal), `birth_trace` (first `trace_counts` row that can contain it), `birth_step` (exact-engine event or tau generation), `birth_time` (generations; empty under the exact engine), `birth_deme`, `compartment`, `row`, `col` (`-1` if never placed) |
 | `genotypes.csv` | genotype list |
 | `grid.csv` | most-frequent genotype per deme (spatial models) |
 | `genotype_counts_demes.csv` | per-deme genotype counts (spatial models) |
@@ -74,6 +75,14 @@ the two, and met cells' `cell_crd` are in the met grid's own coordinate space.
 |---|---|---|
 | `trace_counts_primary.csv`, `trace_counts_met.csv` | `met_grid_size > 0` | genotype counts per step, split by compartment |
 | `events.csv` | any discrete event occurred | seeding / resection / chemo-window annotations (`step`, `time`, `event`, …) |
+
+With `spatial_snapshot_every > 0` (genotype engine) the directory also holds the tumour's spatial
+history, long-format and gzipped. Join it on `genotype` with `genotype_births.csv` for where and when
+each clone arose.
+
+| Path | Written when | Contents |
+|---|---|---|
+| `spatial_history.csv.gz` | `spatial_snapshot_every > 0` | one row per (snapshot, deme, genotype) with a positive count: `snapshot`, `trace` (row of `trace_counts.csv`), `step`, `time`, `deme`, `compartment`, `row`, `col`, `genotype`, `cell_type`, `count` |
 
 ## Stage 2 — `isccsample` (biopsy / dissociation)
 
