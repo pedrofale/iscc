@@ -126,6 +126,8 @@ JOBS = {
 
 def _run(job):
     kind, task = job
+    from memguard import wait_for_memory
+    wait_for_memory(min_avail_gb=3.0, min_swap_free_gb=2.0, label=f"{kind}/{task}")
     sys.path.insert(0, os.path.dirname(HERE))
     fn = JOBS[kind][0]
     try:

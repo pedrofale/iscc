@@ -90,6 +90,13 @@ def summarise(run, task):
                assortment=float(same / pairs) if pairs else None,
                stroma_frac=float(stroma / max(tot, 1)), n_clones=len(cl.labels),
                coarsened=bool(t.coarsen_passengers))
+    if not t.coarsen_passengers:                 # exact passengers: the neutral spectrum is meaningful
+        from iscc.validation import neutral_sfs_rsq, population_vaf, site_frequency_spectrum
+        vaf = population_vaf(t)
+        r, _ = neutral_sfs_rsq(vaf, 0.12, 0.24, 12)
+        grid, M = site_frequency_spectrum(vaf[vaf > 0], 0.12, 0.24, 12)
+        rec.update(sfs_rsq=float(r), sfs_grid=np.asarray(grid, dtype=float).tolist(),
+                   sfs_M=np.asarray(M, dtype=float).tolist())
     os.makedirs(os.path.dirname(path(run, task)), exist_ok=True)
     with open(path(run, task), "w") as f:
         json.dump(rec, f)
@@ -98,6 +105,8 @@ def summarise(run, task):
 
 def _safe(job):
     r, t = job
+    from memguard import wait_for_memory
+    wait_for_memory(label=f"{r}/{t}")
     try:
         summarise(r, t)
         return r, t, None
@@ -119,7 +128,7 @@ def load(run):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("runs", nargs="?", default="all")
-    ap.add_argument("--jobs", type=int, default=2)
+    ap.add_argument("--jobs", type=int, default=1)
     ap.add_argument("--force", action="store_true")
     a = ap.parse_args()
     runs = list(REG.RUNS) if a.runs == "all" else a.runs.split(",")

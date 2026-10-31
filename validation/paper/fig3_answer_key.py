@@ -188,11 +188,9 @@ def panel_b(fig, y):
         S.despine(ax, False, False)
         ax.set_title(f"dispersal {d}", fontsize=6)
     ax = S.ax_mm(fig, 84, y + 8, 30, 26)
-    rows = []
-    for d in disps:
-        for s in SEEDS:
-            if have("R1", f"disp{d}_seed{s}"):
-                rows.append((d, assortment(REG.load("R1", f"disp{d}_seed{s}"))))
+    import summaries as SM                      # cached per tumour; never reload 25 tumours here
+    rows = [(float(r["task"].split("_")[0][4:]), r["assortment"]) for r in SM.load("R1")
+            if r.get("assortment") is not None]
     if rows:
         df = pd.DataFrame(rows, columns=["d", "a"])
         g = df.groupby("d")["a"]
@@ -209,8 +207,8 @@ def panel_b(fig, y):
 # --- c: genotype against niche --------------------------------------------------------------------
 def panel_c(fig, y):
     task = "barriers_seed1"
-    ax = S.ax_mm(fig, 128, y + 8, 28, 26)
-    axb = S.ax_mm(fig, 163, y + 8, 12, 26)
+    ax = S.ax_mm(fig, 126, y + 8, 26, 26)
+    axb = S.ax_mm(fig, 160, y + 8, 9, 26)
     if not have("R10", task):
         pending(ax)
         pending(axb, "")
@@ -239,8 +237,8 @@ def panel_c(fig, y):
     axb.set_xticks([])
     axb.set_ylim(0, 1)
     axb.set_ylabel("Variance explained")
-    axb.text(0.45, gen / 2, "genotype", fontsize=4.8, va="center")
-    axb.text(0.45, gen + nic / 2, "niche", fontsize=4.8, va="center")
+    axb.text(0.4, max(gen / 2, 0.04), f"genotype\n{gen:.0%}", fontsize=4.8, va="center")
+    axb.text(0.4, gen + nic / 2, f"niche\n{nic:.0%}", fontsize=4.8, va="center")
     return dict(genetic=gen, niche=nic, residual=1 - rb)
 
 
@@ -318,17 +316,17 @@ def panel_e(fig, y):
     ax.set_yticks(range(len(tasks)))
     ax.set_yticklabels([f"patient {i + 1}" for i in range(len(tasks))], fontsize=4.8)
     ax.set_xlabel("Segment")
-    ax.set_title("Copy number: private", fontsize=6)
+    ax.set_title("Copy number of the dominant clone", fontsize=6)
     H = pd.DataFrame(hits).fillna(False)
-    H = H.loc[:, H.any(0)]
-    H = H.loc[:, H.sum(0).sort_values(ascending=False).index]
+    H = H.loc[:, H.any(axis=0)]
+    H = H.loc[:, H.sum(axis=0).sort_values(ascending=False).index]
     ax2.imshow(H.values.astype(float), cmap="Greys", vmin=0, vmax=1.4, aspect="auto",
                interpolation="nearest")
     ax2.set_yticks([])
     ax2.set_xlabel("Driver genes hit (≥10% of cells)")
-    ax2.set_title("Driver landscape: shared", fontsize=6)
+    ax2.set_title("Driver genes hit, from one shared set", fontsize=6)
     ax2.set_xticks([])
-    return dict(n_patients=len(tasks), recurrent=int((H.sum(0) >= 2).sum()), hit=int(H.shape[1]))
+    return dict(n_patients=len(tasks), recurrent=int((H.sum(axis=0) >= 2).sum()), hit=int(H.shape[1]))
 
 
 # --- f: emergent against chained coupling ---------------------------------------------------------
@@ -407,7 +405,7 @@ def main():
     S.text_mm(fig, 6, 47.4, "Lineage shapes space", fontsize=7, va="top")
     panel_b(fig, 46)
     S.panel_letter(fig, "c", 121, 46)
-    S.text_mm(fig, 126, 47.4, "Genotype and niche both set state", fontsize=7, va="top")
+    S.text_mm(fig, 126, 47.4, "The key separates genotype from niche", fontsize=7, va="top")
     out["c"] = panel_c(fig, 46)
     S.panel_letter(fig, "d", 1, 92)
     S.text_mm(fig, 6, 93.4, "The answer key has a history", fontsize=7, va="top")

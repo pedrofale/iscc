@@ -45,35 +45,17 @@ def pending(ax, msg="pending: registry run not grown yet"):
     S.despine(ax, False, False)
 
 
-# --- a: evolutionary-mode space -------------------------------------------------------------------
-def mode_point(t, detection=0.0):
-    from iscc.inference.indices import driver_combination_counts, inverse_simpson
-    combos = driver_combination_counts(t)
-    total = sum(combos.values())
-    if not total:
-        return np.nan, np.nan
-    n = sum(len(k) * c for k, c in combos.items()) / total
-    if detection > 0:
-        kept = {k: c for k, c in combos.items() if c / total >= detection}
-        pooled = total - sum(kept.values())
-        counts = list(kept.values()) + ([pooled] if pooled else [])
-    else:
-        counts = list(combos.values())
-    return n, inverse_simpson(counts)
+# --- a-d read the cached per-tumour summaries (summaries.py), never the tumours themselves ---------
+import summaries as SM  # noqa: E402
 
 
 def panel_a(ax):
     from scipy.spatial import Delaunay
     emp = pd.read_csv(os.path.join(REPO, "validation", "data", "noble_empirical_indices.csv"))
-    rows = []
-    for run in ("R1", "R2", "R3", "R4"):
-        for task in REG.tasks(run):
-            if have(run, task):
-                t = REG.load(run, task)
-                rows.append((*mode_point(t, 0.0), *mode_point(t, DETECTION)))
-    if not rows:
+    rows = [r for run in ("R1", "R2", "R3", "R4") for r in SM.load(run)]
+    sim = pd.DataFrame(rows)[["n0", "D0", "n2", "D2"]].dropna() if rows else pd.DataFrame()
+    if sim.empty:
         return pending(ax)
-    sim = pd.DataFrame(rows, columns=["n0", "D0", "n2", "D2"]).dropna()
     e = emp[["n", "D"]].to_numpy()
     cov = {}
     for k, (nc, dc) in {"census": ("n0", "D0"), "2%": ("n2", "D2")}.items():
@@ -92,26 +74,16 @@ def panel_a(ax):
     ax.legend(fontsize=4.5, loc="upper left", title="real tumours inside\nthe iscc hull",
               title_fontsize=4.5)
     return dict(n_sim=len(sim), coverage=cov, D_median_2pct=float(sim.D2.median()),
-                D_median_real=float(emp.D.median()))
+                D_median_census=float(sim.D0.median()), D_median_real=float(emp.D.median()))
 
 
-# --- b: neutral spectrum --------------------------------------------------------------------------
 def panel_b(ax):
-    from iscc.validation import neutral_sfs_rsq, population_vaf, site_frequency_spectrum
-    tasks = [t for t in REG.tasks("R2") if t.startswith("neutral") and have("R2", t)]
-    if not tasks:
-        return pending(ax)
-    rsq, curves = [], []
-    for task in tasks:
-        t = REG.load("R2", task)
-        if t.coarsen_passengers:
-            return pending(ax, "pending: R2 must be regrown with\npassengers tracked exactly")
-        vaf = population_vaf(t)
-        r, _ = neutral_sfs_rsq(vaf, 0.12, 0.24, 12)
-        rsq.append(r)
-        curves.append(site_frequency_spectrum(vaf[vaf > 0], 0.12, 0.24, 12))
-    grid, M = curves[0]
-    x = 1.0 / grid
+    rows = [r for r in SM.load("R2") if r["task"].startswith("neutral") and "sfs_rsq" in r]
+    if not rows:
+        return pending(ax, "pending: R2 neutral tumours\n(exact passengers)")
+    rsq = [r["sfs_rsq"] for r in rows]
+    x = 1.0 / np.asarray(rows[0]["sfs_grid"])
+    M = np.asarray(rows[0]["sfs_M"])
     A = np.vstack([x, np.ones_like(x)]).T
     coef, *_ = np.linalg.lstsq(A, M, rcond=None)
     ax.plot(x, M, "o", ms=2.5, color=S.SOURCE["iscc"])
@@ -122,27 +94,16 @@ def panel_b(ax):
     return dict(rsq_mean=float(np.mean(rsq)), rsq_sd=float(np.std(rsq)), n=len(rsq))
 
 
-# --- c: copy number against oncogenic content -----------------------------------------------------
-def segment_table(t):
-    seg = t.selection.n_segments if hasattr(t.selection, "n_segments") else t.n_segments
-    size = t.n_genes // seg
-    onc = np.bincount(np.asarray(t.selection.get_oncogenes(), dtype=int) // size, minlength=seg)
-    tsg = np.bincount(np.asarray(t.selection.get_tsgs(), dtype=int) // size, minlength=seg)
-    counts = C.live_cancer_counts(t)
-    w = np.array(list(counts.values()), dtype=float)
-    cn = np.array([t.genotypes[g].genome_summary["seg_cns"] for g in counts], dtype=float)
-    return pd.DataFrame(dict(net=onc - tsg, cn=(cn * w[:, None]).sum(0) / w.sum()))
-
-
 def panel_c(ax):
     out = {}
     for name, col in (("neutral", S.SOURCE["real"]), ("selected", S.SOURCE["iscc"])):
-        tasks = [t for t in REG.tasks("R2") if t.startswith(name) and have("R2", t)]
-        if not tasks:
+        rows = [r for r in SM.load("R2") if r["task"].startswith(name)]
+        if not rows:
             return pending(ax)
-        df = pd.concat([segment_table(REG.load("R2", t)) for t in tasks])
-        r = float(np.corrcoef(df.net, df.cn)[0, 1])
-        ax.scatter(df.net + np.random.default_rng(0).uniform(-0.2, 0.2, len(df)), df.cn, s=2, color=col,
+        net = np.concatenate([r["seg_net"] for r in rows]).astype(float)
+        cn = np.concatenate([r["seg_cn"] for r in rows]).astype(float)
+        r = float(np.corrcoef(net, cn)[0, 1]) if np.std(net) > 0 and np.std(cn) > 0 else float("nan")
+        ax.scatter(net + np.random.default_rng(0).uniform(-0.2, 0.2, len(net)), cn, s=2, color=col,
                    alpha=0.7, label=f"{name} (r = {r:.2f})")
         out[name] = r
     ax.axhline(2, color=S.BG_CELLS, lw=0.5, zorder=0)
@@ -152,19 +113,11 @@ def panel_c(ax):
     return out
 
 
-# --- d: whole-genome duplication ------------------------------------------------------------------
 def panel_d(ax):
-    rows = []
-    for task in REG.tasks("R5"):
-        if have("R5", task):
-            t = REG.load("R5", task)
-            counts = C.live_cancer_counts(t)
-            tot = sum(counts.values())
-            frac = sum(c for g, c in counts.items() if getattr(t.genotypes[g], "is_wgd", False)) / max(tot, 1)
-            rows.append((float(task.split("_")[0][3:]), frac))
+    rows = SM.load("R5")
     if not rows:
         return pending(ax)
-    df = pd.DataFrame(rows, columns=["rate", "frac"])
+    df = pd.DataFrame([dict(rate=float(r["task"].split("_")[0][3:]), frac=r["wgd_frac"]) for r in rows])
     prev = df.assign(wgd=df.frac > 0.5).groupby("rate").wgd.mean()
     ax.axhspan(0.30, 0.50, color=S.PASTEL["yellow"], lw=0, zorder=0)
     ax.text(prev.index.max(), 0.40, "PCAWG", fontsize=4.8, ha="right", va="center", color=S.GREY)
@@ -175,50 +128,54 @@ def panel_d(ax):
     return dict(prevalence=prev.round(2).to_dict(), n_per_rate=int(df.groupby("rate").size().min()))
 
 
-# --- f: scRNA fit loop ----------------------------------------------------------------------------
-def panel_f(fig, x, y):
+# --- f, g, h: the data front's fit-and-resimulate loops ---------------------------------------------
+# Each is computed in its own process (``--part f|g|h``) and cached as small JSON (histograms, binned
+# curves, statistics), so no process holds a real reference and a tumour at once for longer than it
+# must, and the render step reads only the caches.
+import json  # noqa: E402
+import subprocess  # noqa: E402
+import scipy.sparse as sp  # noqa: E402
+
+PART_CACHE = os.path.join(C.DERIVED, "fig2")
+
+
+def _count_stats(X):
+    """Library sizes and binned mean-variance and dropout curves of a sparse cells x genes matrix."""
+    X = X.tocsr().astype(np.float64)
+    n = X.shape[0]
+    lib = np.asarray(X.sum(1)).ravel()
+    m = np.asarray(X.mean(0)).ravel()
+    v = np.asarray(X.multiply(X).mean(0)).ravel() - m ** 2
+    z = 1.0 - np.asarray((X > 0).sum(0)).ravel() / n
+    ok = m > 0
+    lm = np.log10(m[ok])
+    b = np.linspace(lm.min(), lm.max(), 20)
+    idx = np.digitize(lm, b)
+    keep = [i for i in range(1, 20) if (idx == i).sum() > 5]
+    return dict(loglib=np.log10(lib + 1).tolist(),
+                curve_m=[float(lm[idx == i].mean()) for i in keep],
+                curve_v=[float(np.median(np.log10(v[ok][idx == i] + 1e-9))) for i in keep],
+                curve_z=[float(np.median(z[ok][idx == i])) for i in keep],
+                cv_lib=float(lib.std() / lib.mean()))
+
+
+def compute_f():
     import anndata as ad
     from iscc.data import estimate_rna, scRNA
     real = ad.read_h5ad(os.path.join(REPO, "data", "pbmc3k_raw.h5ad"))
     est = estimate_rna(real)
+    real_stats = _count_stats(real.X if sp.issparse(real.X) else sp.csr_matrix(real.X))
+    del real
     t = REG.load("R0", "seed1")
     diss = RR.resect(t).dissociate(max_cells=3000)
+    del t
     cells = list(diss["cell_exp"].index)
     sim = scRNA(n_cells=len(cells), seed=5, **est.scrna_kwargs()).run(diss, cell_subset=cells)
-    R = np.asarray(real.X.todense() if hasattr(real.X, "todense") else real.X, dtype=float)
-    Ssim = sim.observed_counts.values.astype(float)
-    axes = [S.ax_mm(fig, x + i * 27, y, 21, 21) for i in range(3)]
-    lr, ls = np.log10(R.sum(1) + 1), np.log10(Ssim.sum(1) + 1)
-    bins = np.linspace(min(lr.min(), ls.min()), max(lr.max(), ls.max()), 30)
-    axes[0].hist(lr, bins=bins, density=True, color=S.SOURCE["real"], alpha=0.6, label="PBMC3k")
-    axes[0].hist(ls, bins=bins, density=True, color=S.SOURCE["iscc"], alpha=0.6, label="iscc")
-    axes[0].set_xlabel("log$_{10}$ UMIs per cell")
-    axes[0].set_ylabel("Density")
-    axes[0].legend(fontsize=4.5)
-    for X, col in ((R, S.SOURCE["real"]), (Ssim, S.SOURCE["iscc"])):
-        m, v = X.mean(0), X.var(0)
-        ok = m > 0
-        lm = np.log10(m[ok])
-        b = np.linspace(lm.min(), lm.max(), 20)
-        idx = np.digitize(lm, b)
-        mm = [lm[idx == i].mean() for i in range(1, 20) if (idx == i).sum() > 5]
-        vv = [np.median(np.log10(v[ok][idx == i] + 1e-9)) for i in range(1, 20) if (idx == i).sum() > 5]
-        zz = [np.median((X[:, ok][:, idx == i] == 0).mean(0)) for i in range(1, 20) if (idx == i).sum() > 5]
-        axes[1].plot(mm, vv, color=col, lw=0.9)
-        axes[2].plot(mm, zz, color=col, lw=0.9)
-    xs = np.linspace(-3, 2, 10)
-    axes[1].plot(xs, xs, color=S.BG_CELLS, lw=0.5, ls=":", zorder=0)
-    axes[1].set_xlabel("log$_{10}$ mean")
-    axes[1].set_ylabel("log$_{10}$ variance")
-    S.stat(axes[1], "dotted: Poisson", "lower right")
-    axes[2].set_xlabel("log$_{10}$ mean")
-    axes[2].set_ylabel("Zero fraction")
-    return dict(cv_lib_real=float(np.std(R.sum(1)) / np.mean(R.sum(1))),
-                cv_lib_iscc=float(np.std(Ssim.sum(1)) / np.mean(Ssim.sum(1))))
+    del diss
+    return dict(real=real_stats, iscc=_count_stats(sp.csr_matrix(sim.observed_counts.values)))
 
 
-# --- g: DNA fit loop ------------------------------------------------------------------------------
-def panel_g(ax):
+def compute_g():
     from iscc.data import bulkDNA, estimate_dna, scDNA
     sys.path.insert(0, os.path.join(REPO, "validation"))
     import validate_dna as VD
@@ -226,16 +183,14 @@ def panel_g(ax):
     diss = RR.resect(t).dissociate(max_cells=1500)
     gid = diss["cell_type"]["cell_id"].astype(str)
     cancer = [c for c, g in gid.items() if g in t.genotypes and t._is_cancer(g)][:200]
-    refs = [("HG002", "dna_ref_hg002_bulk_wgs", "bulk"), ("Tapestri", "dna_ref_tapestri_sc_panel", "sc"),
-            ("DLP+", "dna_ref_dlp_sc_wgs", "sc")]
     out = {}
-    for i, (name, f, mod) in enumerate(refs):
+    for name, f, mod in (("HG002", "dna_ref_hg002_bulk_wgs", "bulk"),
+                         ("Tapestri", "dna_ref_tapestri_sc_panel", "sc"), ("DLP+", "dna_ref_dlp_sc_wgs", "sc")):
         z = np.load(os.path.join(REPO, "validation", "data", f + ".npz"), allow_pickle=True)
         kw = dict(modality=mod)
-        if "het_mask" in z.files:
-            kw["het_mask"] = z["het_mask"]
-        if "variant_mask" in z.files:
-            kw["variant_mask"] = z["variant_mask"]
+        for k in ("het_mask", "variant_mask"):
+            if k in z.files:
+                kw[k] = z[k]
         est = estimate_dna(z["coverage"], z["alt"], z["cn"], **kw)
         if mod == "bulk":
             sim = bulkDNA(breadth=est.breadth, depth_model=est.depth_model, seed=11,
@@ -249,82 +204,125 @@ def panel_g(ax):
             cn_s = _sim_cn(t, diss, sim, cancer)
         obs_cv = VD._cov_cv_by_cn(np.atleast_2d(z["coverage"]), np.atleast_2d(z["cn"]))
         sim_cv = VD._cov_cv_by_cn(cov_s, cn_s)
-        common = sorted(set(obs_cv) & set(sim_cv))
-        for j, lvl in enumerate(common):
-            ax.plot([i - 0.15, i + 0.15], [obs_cv[lvl], sim_cv[lvl]], color=S.GREY, lw=0.4)
-            ax.scatter([i - 0.15], [obs_cv[lvl]], s=8, color=S.SOURCE["real"], zorder=3,
-                       label="real" if i == j == 0 else None)
-            ax.scatter([i + 0.15], [sim_cv[lvl]], s=8, color=S.SOURCE["iscc"], zorder=3,
-                       label="iscc, fitted" if i == j == 0 else None)
-        out[name] = {int(l): (round(obs_cv[l], 3), round(sim_cv[l], 3)) for l in common}
-    ax.set_xticks(range(len(refs)))
-    ax.set_xticklabels([r[0] for r in refs])
-    ax.set_ylabel("Coverage CV, per copy-number state")
-    ax.legend(fontsize=4.8)
+        out[name] = {str(int(l)): [float(obs_cv[l]), float(sim_cv[l])] for l in sorted(set(obs_cv) & set(sim_cv))}
     return out
 
 
 def _sim_cn(t, diss, sim, cells):
-    """True copy number aligned to a simulated DNA object's coverage (cells/pool x loci)."""
+    """True copy number aligned to a simulated single-cell DNA object's coverage (cells x loci)."""
     gid = diss["cell_type"]["cell_id"].astype(str)
     genes = list(sim.coverage.columns)
-    gidx = np.array([int(g.split("_")[1]) * (t.n_genes // t.n_segments) + int(g.split("_")[2]) for g in genes])
-    seg_size = t.n_genes // t.n_segments
+    size = t.n_genes // t.n_segments
+    seg = np.array([int(g.split("_")[1]) for g in genes])
 
     def cn_of(c):
         g = gid[c]
         sc = t.genotypes[g].genome_summary["seg_cns"] if g in t.genotypes else [2] * t.n_segments
-        return np.asarray(sc)[gidx // seg_size]
-    if cells is None:                                   # bulk: the pooled, count-weighted mean
-        allc = list(diss["cell_exp"].index)
-        return np.rint(np.mean([cn_of(c) for c in allc], axis=0))[None, :]
+        return np.asarray(sc)[seg]
     return np.stack([cn_of(c) for c in sim.coverage.index])
 
 
-# --- h: Visium fit loop ---------------------------------------------------------------------------
-def panel_h(fig, x, y):
+def compute_h():
     sys.path.insert(0, os.path.join(REPO, "validation"))
     import validate_visium as VV
-    from iscc.data import Visium, estimate_visium
-    from iscc.validation import morans_i
+    from iscc.data import Visium, estimate_visium, morans_i
     cwd = os.getcwd()
     os.chdir(REPO)                               # scanpy's dataset cache lives in ./data
     try:
         real = VV.load_real_visium()
     finally:
         os.chdir(cwd)
-    ax1, ax2 = S.ax_mm(fig, x, y, 21, 21), S.ax_mm(fig, x + 26, y, 9, 21)
     if real is None:
-        pending(ax1, "real Visium section unavailable")
         return None
-    counts = VV._to_dense(real)
     coords = np.asarray(real.obsm["spatial"], dtype=float) / VV._median_nn(real.obsm["spatial"])
+    tot = np.asarray(real.X.sum(1)).ravel()
+    occ = tot > 0
+    mi_o = float(morans_i(tot[occ], coords[occ]))
     est = estimate_visium(real, count_model="dm", coords=coords)
+    toto = np.log10(tot[occ]).tolist()
+    del real
     t = REG.load("R0", "seed1")
     sec = RR.resect(t).slice(depth_frac=0.5, max_cells=6000)
     kw = {**est.visium_kwargs(), "spot_pitch": 2.0, "spot_radius": 1.0}
-    if "field_lengthscale" in kw and kw["field_lengthscale"] is not None:
+    if kw.get("field_lengthscale") is not None:
         kw["field_lengthscale"] = 2.0 * kw["field_lengthscale"]      # spot units -> demes (pitch 2)
     sim = Visium(seed=11, count_model="dm", **kw).run(sec, grid_side=t.grid_size)
-    zo, co, toto = VV._lib_residual_raw(counts, coords)
     zs, cs, tots = VV._log_library_residual(sim)
-    mi_o, mi_s = morans_i(toto, co), morans_i(tots, cs)
-    lo, ls = np.log10(toto), np.log10(tots)
+    return dict(toto=toto, tots=np.log10(tots).tolist(), moran_real=mi_o, moran_iscc=float(morans_i(tots, cs)))
+
+
+def _cached(part):
+    p = os.path.join(PART_CACHE, f"{part}.json")
+    return json.load(open(p)) if os.path.exists(p) else None
+
+
+def render_f(fig, x, y):
+    d = _cached("f")
+    axes = [S.ax_mm(fig, x + i * 27, y, 21, 21) for i in range(3)]
+    if d is None:
+        for ax in axes:
+            pending(ax)
+        return None
+    lr, ls = np.asarray(d["real"]["loglib"]), np.asarray(d["iscc"]["loglib"])
+    bins = np.linspace(min(lr.min(), ls.min()), max(lr.max(), ls.max()), 30)
+    axes[0].hist(lr, bins=bins, density=True, color=S.SOURCE["real"], alpha=0.6, label="PBMC3k")
+    axes[0].hist(ls, bins=bins, density=True, color=S.SOURCE["iscc"], alpha=0.6, label="iscc")
+    axes[0].set_xlabel("log$_{10}$ UMIs per cell")
+    axes[0].set_ylabel("Density")
+    axes[0].legend(fontsize=4.5)
+    for key, col in (("real", S.SOURCE["real"]), ("iscc", S.SOURCE["iscc"])):
+        axes[1].plot(d[key]["curve_m"], d[key]["curve_v"], color=col, lw=0.9)
+        axes[2].plot(d[key]["curve_m"], d[key]["curve_z"], color=col, lw=0.9)
+    xs = np.linspace(-3, 2, 10)
+    axes[1].plot(xs, xs, color=S.BG_CELLS, lw=0.5, ls=":", zorder=0)
+    axes[1].set_xlabel("log$_{10}$ mean")
+    axes[1].set_ylabel("log$_{10}$ variance")
+    S.stat(axes[1], "dotted: Poisson", "lower right")
+    axes[2].set_xlabel("log$_{10}$ mean")
+    axes[2].set_ylabel("Zero fraction")
+    return dict(cv_lib_real=d["real"]["cv_lib"], cv_lib_iscc=d["iscc"]["cv_lib"])
+
+
+def render_g(ax):
+    d = _cached("g")
+    if d is None:
+        return pending(ax)
+    for i, (name, levels) in enumerate(d.items()):
+        for j, (lvl, (o, s_)) in enumerate(levels.items()):
+            ax.plot([i - 0.15, i + 0.15], [o, s_], color=S.GREY, lw=0.4)
+            ax.scatter([i - 0.15], [o], s=8, color=S.SOURCE["real"], zorder=3, label="real" if i == j == 0 else None)
+            ax.scatter([i + 0.15], [s_], s=8, color=S.SOURCE["iscc"], zorder=3,
+                       label="iscc, fitted" if i == j == 0 else None)
+    ax.set_xticks(range(len(d)))
+    ax.set_xticklabels(list(d))
+    ax.set_ylabel("Coverage CV, per copy-number state")
+    ax.legend(fontsize=4.8)
+    return d
+
+
+def render_h(fig, x, y):
+    d = _cached("h")
+    ax1, ax2 = S.ax_mm(fig, x, y, 21, 21), S.ax_mm(fig, x + 26, y, 9, 21)
+    if d is None:
+        pending(ax1)
+        pending(ax2, "")
+        return None
+    lo, ls = np.asarray(d["toto"]), np.asarray(d["tots"])
     bins = np.linspace(min(lo.min(), ls.min()), max(lo.max(), ls.max()), 30)
     ax1.hist(lo, bins=bins, density=True, color=S.SOURCE["real"], alpha=0.6, label="real section")
     ax1.hist(ls, bins=bins, density=True, color=S.SOURCE["iscc"], alpha=0.6, label="iscc")
     ax1.set_xlabel("log$_{10}$ UMIs per spot")
     ax1.set_ylabel("Density")
     ax1.legend(fontsize=4.5)
-    ax2.bar([0, 1], [mi_o, mi_s], color=[S.SOURCE["real"], S.SOURCE["iscc"]], width=0.7)
+    ax2.bar([0, 1], [d["moran_real"], d["moran_iscc"]], color=[S.SOURCE["real"], S.SOURCE["iscc"]], width=0.7)
     ax2.set_xticks([0, 1])
     ax2.set_xticklabels(["real", "iscc"], rotation=90)
     ax2.set_ylabel("Moran's I, spot depth")
     ax2.set_ylim(0, 1)
-    return dict(moran_real=float(mi_o), moran_iscc=float(mi_s))
+    return dict(moran_real=d["moran_real"], moran_iscc=d["moran_iscc"])
 
 
-def main():
+def render():
     S.setup()
     fig = S.figure("double", 112)
     out = {}
@@ -341,16 +339,37 @@ def main():
     S.text_mm(fig, 2, 57.5, "The data front's tests: fit to a real reference, re-simulate on the tumour",
               fontsize=7, va="top", fontweight="bold")
     S.panel_letter(fig, "f", 2, 63)
-    out["f"] = panel_f(fig, 10, 67)
+    out["f"] = render_f(fig, 10, 67)
     S.panel_letter(fig, "g", 92, 63)
-    ax = S.ax_mm(fig, 100, 67, 28, 21)
-    out["g"] = panel_g(ax)
+    out["g"] = render_g(S.ax_mm(fig, 100, 67, 28, 21))
     S.panel_letter(fig, "h", 137, 63)
-    out["h"] = panel_h(fig, 145, 67)
+    out["h"] = render_h(fig, 145, 67)
     path = S.save(fig, "fig2_realism")
     print("wrote", path)
     for k, v in out.items():
         print(k, v)
+
+
+def main():
+    import argparse
+    from memguard import wait_for_memory
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--part", choices=["f", "g", "h"], help="compute one data-front panel and cache it")
+    ap.add_argument("--all", action="store_true", help="compute f, g, h (one process each), then render")
+    a = ap.parse_args()
+    if a.part:
+        res = {"f": compute_f, "g": compute_g, "h": compute_h}[a.part]()
+        os.makedirs(PART_CACHE, exist_ok=True)
+        if res is not None:
+            json.dump(res, open(os.path.join(PART_CACHE, f"{a.part}.json"), "w"))
+        print(f"cached {a.part}: {res is not None}")
+        return
+    if a.all:
+        for part in "fgh":
+            if _cached(part) is None:
+                wait_for_memory(min_avail_gb=2.5, label=f"fig2/{part}")
+                subprocess.run([sys.executable, os.path.abspath(__file__), "--part", part], check=False)
+    render()
 
 
 if __name__ == "__main__":

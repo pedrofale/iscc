@@ -97,6 +97,8 @@ def _cpu_s():
 
 
 def _grow_task(run, task, kw):
+    from memguard import wait_for_memory
+    wait_for_memory(label=f"{run}/{task}")
     t0, c0 = time.time(), _cpu_s()
     t = RG.grow(**kw)
     wall, cpu = time.time() - t0, _cpu_s() - c0
@@ -129,7 +131,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["list", "run"])
     ap.add_argument("run", nargs="?", default="all")
-    ap.add_argument("--jobs", type=int, default=3)
+    ap.add_argument("--jobs", type=int, default=1)
     ap.add_argument("--force", action="store_true")
     a = ap.parse_args()
     names = list(RUNS) if a.run == "all" else a.run.split(",")

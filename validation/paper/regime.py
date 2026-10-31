@@ -74,13 +74,15 @@ def config(scale, selection=None, cancer=None, deme=None, spatial=None, genome=N
                          cancer=cancer, deme=deme, spatial=sp)
 
 
-def grow(seed, scale, target_cancer, spatial_snapshot_every=0, max_steps=20_000, chunk=20,
+def grow(seed, scale, target_cancer, spatial_snapshot_every=0, max_steps=3_000, chunk=20,
          expression_params="default", microenv_params="default", coarsen=RR.COARSEN, **overrides):
     """Grow one paper-regime tumour to ``target_cancer`` cancer cells (counts only).
 
     Returns the tumour without materialised cell data; sample it with :mod:`realistic_regime`'s
     ``resect`` / ``dissociated`` / ``section`` or ``t.make_cell_data(max_cells=...)``. Growth stops
-    early, with ``t.reached_target`` False, if the cancer dies out or ``max_steps`` pass."""
+    early, with ``t.reached_target`` False, if the cancer dies out or ``max_steps`` pass. 3,000 steps
+    is 1,500 generations: the acinus opens at 400 and invasion normally follows within ~50, so a
+    tumour still below target by then has stayed in situ, which the manifest records."""
     cfg = config(scale, **overrides)
     expr = expression() if expression_params == "default" else expression_params
     menv = copy.deepcopy(MICROENV) if microenv_params == "default" else microenv_params

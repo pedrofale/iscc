@@ -97,6 +97,8 @@ def analyse(task):
 
 
 def _safe(task):
+    from memguard import wait_for_memory
+    wait_for_memory(label=f"R1/{task}")
     try:
         return analyse(task), None
     except Exception as e:
