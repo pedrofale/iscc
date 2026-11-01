@@ -826,6 +826,9 @@ class GenotypeTumor:
         self.traces = []
         self.step = 0
         self.cell_data = None
+        # True once `grow(materialize=False)` has advanced the counts past `cell_data`; cleared by
+        # `make_cell_data`. Read with getattr so tumours pickled before the flag existed still load.
+        self._cell_data_stale = False
 
     # --- genotype registry ---------------------------------------------------
     def _is_viable(self, rep):
@@ -2112,13 +2115,13 @@ class GenotypeTumor:
             self._tx_treatment, self._tx_dosage = None, 0.0
             self.deme_rates = np.array([self._deme_rate(i) for i in range(len(self.demes))], dtype=float)
 
-    def grow(self, n_steps=1000, seed=None, treatment=None, **kwargs):
+    def grow(self, n_steps=1000, seed=None, treatment=None, materialize=True, **kwargs):
         """Advance the tumour by ``n_steps`` update steps and materialise the result.
 
         Runs the birth / death / mutation / dispersal process (exact Gillespie or
         tau-leaping, per ``update_mode``), appending a population snapshot to
         ``self.traces`` each step, and finally calls ``make_cell_data`` to build the
-        per-cell ground truth.
+        per-cell ground truth (unless ``materialize=False``).
 
         Parameters
         ----------
@@ -2132,6 +2135,13 @@ class GenotypeTumor:
             [`Immunotherapy`][iscc.treatment.Immunotherapy],
             [`Surgery`][iscc.treatment.Surgery]) whose dosing schedule and rate modifiers are
             applied each step; ``None`` (default) grows the tumour untreated.
+        materialize : bool, optional
+            Rebuild ``cell_data`` at the end of the call (default ``True``). ``False`` skips it
+            and marks the per-cell tables stale, for callers that step the tumour in a loop and
+            only need cells when they sample: call
+            [`ensure_cell_data`][iscc.tumor.GenotypeTumor.ensure_cell_data] before sampling.
+            Materialisation draws only from its own seeded generators and writes nothing the
+            dynamics read, so the trajectory is the same either way.
 
         Returns
         -------
@@ -2139,7 +2149,8 @@ class GenotypeTumor:
             ``self.traces`` — the list of per-step population snapshots.
         """
         if self.update_mode == "tau":
-            return self._grow_tau(n_steps=n_steps, seed=seed, treatment=treatment, **kwargs)
+            return self._grow_tau(n_steps=n_steps, seed=seed, treatment=treatment,
+                                  materialize=materialize, **kwargs)
         if seed is None:
             seed = self.seed
         self._clear_treatment_overrides()
@@ -2160,7 +2171,10 @@ class GenotypeTumor:
             self.update(rng)
             self.traces.append(self._trace_snapshot())
         self.step += n_steps
-        self.make_cell_data()
+        if materialize:
+            self.make_cell_data()
+        else:
+            self._cell_data_stale = True
         return self.traces
 
     # --- tau-leaping (generation-batched clonal update, DESIGN §7) -----------
@@ -2652,10 +2666,13 @@ class GenotypeTumor:
             self.traces.append(self._trace_snapshot())
             self.trace_times.append(self.time)
 
-    def _grow_tau(self, n_steps=1000, seed=None, treatment=None, tau=None, **kwargs):
+    def _grow_tau(self, n_steps=1000, seed=None, treatment=None, tau=None, materialize=True,
+                  **kwargs):
         """Tau-leaping growth: `n_steps` is the number of generations to advance. A full per-clone
         snapshot is recorded every `snapshot_every` generations, so plot_muller/plot_grid keep
-        working unchanged -- now on a REAL-TIME x-axis (self.trace_times, in generation units)."""
+        working unchanged -- now on a REAL-TIME x-axis (self.trace_times, in generation units).
+        `materialize=False` skips the closing `make_cell_data` and marks the tables stale (see
+        `grow`)."""
         if seed is None:
             seed = self.seed
         if tau is None:
@@ -2675,7 +2692,10 @@ class GenotypeTumor:
                 self._apply_treatment(treatment, dose)
                 prev_dose = dose
             self._tau_generation(rng, tau)
-        self.make_cell_data()
+        if materialize:
+            self.make_cell_data()
+        else:
+            self._cell_data_stale = True
         return self.traces
 
     # --- F8 microenvironment fields (DESIGN_features §H) ---------------------
@@ -3233,6 +3253,9 @@ class GenotypeTumor:
         """
         if self.cell_data is None:
             raise ValueError("cell_data is not materialised; call make_cell_data() first")
+        if getattr(self, "_cell_data_stale", False):
+            raise ValueError("cell_data is stale (grown with materialize=False); "
+                             "call ensure_cell_data() first")
         snv = self.cell_data["cell_snv"]
         gids = self.cell_data["cell_type"].iloc[:, 0]
         if cell_ids is not None:
@@ -3650,6 +3673,31 @@ class GenotypeTumor:
                 self.cell_data["cell_program"] = pd.DataFrame(
                     Z, index=idx, columns=list(P.dictionary.program_names))
             self.program_truth = P.truth()
+        self._cell_data_stale = False
+        return self.cell_data
+
+    def ensure_cell_data(self, **kwargs):
+        """Materialise ``cell_data`` only if it is missing or stale, and return it.
+
+        The counterpart of ``grow(materialize=False)``: step the tumour without rebuilding the
+        per-cell tables, then call this right before sampling. When the tables are current it
+        returns them as they are, without rebuilding.
+
+        Parameters
+        ----------
+        **kwargs
+            Passed to [`make_cell_data`][iscc.tumor.GenotypeTumor.make_cell_data] (``max_cells``,
+            ``region``, ``depth_frac``, ...) and used only when it materialises. To cut a
+            specific section of a tumour whose tables are current, call ``make_cell_data``
+            directly.
+
+        Returns
+        -------
+        dict
+            ``self.cell_data`` — the per-cell dataframes.
+        """
+        if self.cell_data is None or getattr(self, "_cell_data_stale", False):
+            self.make_cell_data(**kwargs)
         return self.cell_data
 
     # --- plotting (shared, engine-agnostic) ----------------------------------
@@ -4006,7 +4054,8 @@ class GenotypeTumor:
             The axes drawn into.
         """
         from .. import viz
-        if self.cell_data is None or self.cell_data["cell_type"].shape[0] != self.get_tumor_size():
+        if (self.cell_data is None or getattr(self, "_cell_data_stale", False)
+                or self.cell_data["cell_type"].shape[0] != self.get_tumor_size()):
             self.make_cell_data()
         # With the metastatic deposit enabled, `plot_grid()` shows BOTH grids (primary + met) side by
         # side with a shared clone colormap, so the same clone is the same colour across compartments.
@@ -4021,7 +4070,8 @@ class GenotypeTumor:
         colours by functional clone (matching the driver-collapsed 2-band Muller); ``by_stage`` colours
         by the stage-dominant driver; pass ``min_freq`` to also merge below-threshold clones."""
         from .. import viz
-        if self.cell_data is None or self.cell_data["cell_type"].shape[0] != self.get_tumor_size():
+        if (self.cell_data is None or getattr(self, "_cell_data_stale", False)
+                or self.cell_data["cell_type"].shape[0] != self.get_tumor_size()):
             self.make_cell_data()
         if by_stage:
             colors, present = self._stage_colors()
@@ -4181,8 +4231,7 @@ class GenotypeTumor:
         for mat in gene_data:
             pd.DataFrame(gene_data[mat]).to_csv(os.path.join(output_path, "gene_data", f"{mat}.csv"))
 
-        if self.cell_data is None:
-            self.make_cell_data()
+        self.ensure_cell_data()
         Path(os.path.join(output_path, "cell_data")).mkdir(parents=True, exist_ok=True)
         for mat in self.cell_data:
             self.cell_data[mat].to_csv(os.path.join(output_path, "cell_data", f"{mat}.csv"))
