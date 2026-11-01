@@ -6,6 +6,7 @@ import numpy as np
 from conftest import GENOME_PARAMS, SELECTION_PARAMS, CANCER_CELL_PARAMS, DEME_PARAMS
 from iscc.tumor.models import GenotypeTumor
 from iscc.inference import (
+    detect_combinations,
     inverse_simpson,
     driver_combination_counts,
     mean_drivers_per_cell,
@@ -202,3 +203,24 @@ def test_no_cancer_gives_nan_indices():
     idx = mode_indices(t)
     assert idx["n_clones"] == 0
     assert np.isnan(idx["n"]) and np.isnan(idx["D"]) and np.isnan(idx["J1"])
+
+
+def test_detection_removes_rare_drivers_and_merges_clones():
+    combos = {frozenset(): 50, frozenset({1}): 40, frozenset({1, 2}): 6, frozenset({3}): 4}
+    assert detect_combinations(combos, 0.0) == combos
+    # driver 3 (4%) is below 5%: its clone merges with the driverless parent
+    assert detect_combinations(combos, 0.05) == {frozenset(): 54, frozenset({1}): 40,
+                                                 frozenset({1, 2}): 6}
+    # at 10% driver 2 (6%) goes too, and {1,2} merges into {1}
+    assert detect_combinations(combos, 0.10) == {frozenset(): 54, frozenset({1}): 46}
+    assert sum(detect_combinations(combos, 0.10).values()) == sum(combos.values())
+
+
+def test_mode_indices_at_a_detection_limit():
+    t = _run(2)
+    full, det = mode_indices(t), mode_indices(t, detection=0.05)
+    assert mode_indices(t, detection=0.0) == full
+    assert det["n_clones"] <= full["n_clones"]
+    assert det["n"] <= full["n"] + 1e-12          # undetected drivers are invisible
+    assert det["D"] <= full["D"] + 1e-9
+    assert det["J1"] == full["J1"] or (math.isnan(det["J1"]) and math.isnan(full["J1"]))

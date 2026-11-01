@@ -67,9 +67,11 @@ selection_params:
   prop_treatment_resistance: 0.0
   # BREACH-GATED invasion (see spatial_params.breach_gated_invasion): crossing the basement membrane
   # (duct -> stroma) REQUIRES the breach trait. prop_breach must be high enough that breach genes
-  # actually exist — 0.001 x 600 genes ~= 0.6, i.e. often ZERO breach genes and no invasion gate at
-  # all; 0.02 -> ~12 breach genes. Once a clone breaches, the permissive stroma (low stromal_hazard)
-  # lets it invade; stromal_survival is then selected in the stroma.
+  # actually exist. These values were set for the 600-gene genome (0.02 -> ~12 breach genes); at
+  # today's 6,000 genes 0.02 gives ~120, and with breach_effects 2.8 one hit crosses the wall 64% of
+  # the time, so invasion follows release almost at once. The paper regime uses 0.002 and 1.01
+  # (validation/paper/regime.py). Once a clone breaches, the permissive stroma (low stromal_hazard)
+  # lets it invade; stromal_survival is meant to be selected there, but no setting tried shows it.
   prop_breach: 0.02
   breach_effects: 2.8
   prop_stromal_survival: 0.02
