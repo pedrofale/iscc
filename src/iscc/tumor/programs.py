@@ -506,6 +506,26 @@ class ProgramModel:
             z = z + rng.normal(0.0, noise, size=(n_cells, K))
         return z
 
+    def mean_z(self, drive):
+        """The clone's MEAN activity vector: E[`z`] for a clone with this per-clone `drive`.
+
+        `sample_z` draws each cell's `z` around this — the sparse random activation contributes its
+        expected baseline activity and the noise has mean zero. It is the genotype-level program
+        state, which is what a drug acting on expression reads during growth (the per-cell draw only
+        happens at materialisation).
+        """
+        drive = np.asarray(drive, dtype=float)
+        K = drive.shape[-1]
+        if K == 0:
+            return drive.copy()
+        ap = self.activity_params
+        n_active = ap.get("n_active_programs_per_cell")
+        frac = 1.0 if n_active is None or int(n_active) >= K else max(int(n_active), 0) / K
+        mean = float(ap.get("activity_mean", 1.0))
+        if ap.get("activity_dist", "lognormal") != "normal":
+            mean = max(mean, 0.0)                # lognormal / gamma draw nothing below zero
+        return frac * mean + drive
+
     def gene_multiplier(self, Z):
         """exp(Z · loading) — the program contribution to expression, (n_cells × n_genes)."""
         if self.dictionary is None or Z.shape[1] == 0:

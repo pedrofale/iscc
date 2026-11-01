@@ -16,7 +16,8 @@ class Immunotherapy(Treatment):
     ----------
     immune_checkpoints : list
         Checkpoint sites a cell must express to be targeted; empty = broad (every
-        cancer cell is a target).
+        cancer cell is a target). With ``response="mechanistic"`` a clone must instead carry
+        them, as for [`TargetedTherapy`][iscc.treatment.TargetedTherapy]'s ``targets``.
     **kwargs
         Forwarded to the [`Treatment`][iscc.treatment.Treatment] base. See
         [`Treatment`][iscc.treatment.Treatment] for the shared dosing / scheduling

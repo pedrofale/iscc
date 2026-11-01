@@ -281,6 +281,10 @@ class Tumor(object):
         list
             The per-step population snapshots recorded during this call.
         """
+        if treatment is not None and getattr(treatment, "response", "label") != "label":
+            # The per-cell engines apply a dose through Treatment.apply, which reads the resistance
+            # labels; only GenotypeTumor implements the mechanistic response.
+            raise NotImplementedError("response='mechanistic' is implemented for GenotypeTumor only")
         new_traces = [dict(genotypes_counts=deepcopy(self.genotypes_counts))]
 
         for local_step in tqdm(range(n_steps - 1)):
