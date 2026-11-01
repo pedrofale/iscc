@@ -107,6 +107,8 @@ def hamming_nj_tree(P):
     """
     P = np.asarray(P)
     n = P.shape[0]
+    if n <= 2:                       # neighbour joining makes no internal node: a star rooted at n
+        return {n: list(range(n))}, n
     D = np.zeros((n, n))
     for i in range(n):
         for j in range(i + 1, n):
