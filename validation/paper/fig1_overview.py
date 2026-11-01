@@ -62,7 +62,7 @@ def umap_coords(counts, seed=0):
 def main():
     S.setup()
     t = REG.load(RUN, TASK)
-    cl = C.Clones(t)
+    cl = C.Clones(t, min_frac=0.02)          # the overview shows finer clones than the sweeps
     A = C.assays(RUN, TASK)
     lab = {c: (cl.of(A["genotype"][c]) if A["is_cancer"][c] else A["cell_type"][c]) for c in A["cells"]}
     normal_colour = {"stromal": "#CDBFA8", "epithelial": S.COMPARTMENT["epithelium"], "immune": "#9E9E9E"}

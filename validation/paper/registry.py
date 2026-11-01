@@ -22,7 +22,7 @@ import pickle
 import resource
 import sys
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing as mp
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -66,8 +66,13 @@ def _runs():
     runs["R4"] = ([(f"cnv{c}_seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
                                             cancer={"cnv_prob": c}))
                    for c in (0.0, 0.05, 0.15, 0.3) for s in SEEDS]
+                  # The SNV-burden control varies SNV burden at the sweep's lowest copy-number rate, not
+                  # with copy number off: without copy-number change, invasion hangs on a rare breach
+                  # hit surviving in the ducts, and at higher SNV burden half the tumours never invade
+                  # (5 of 10 stayed in situ at ~8,000 cells for 1,500 generations). cnv0.0 is the
+                  # copy-number-off reference.
                   + [(f"snv{m}_seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
-                                              cancer={"cnv_prob": 0.0, "n_snvs_per_allele": m}))
+                                              cancer={"cnv_prob": 0.05, "n_snvs_per_allele": m}))
                      for m in (0.05, 0.2, 0.5) for s in SEEDS])
     # R5: whole-genome duplication, prevalence across rates.
     runs["R5"] = [(f"wgd{w}_seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
@@ -117,10 +122,25 @@ def _grow_task(run, task, kw):
     return rec
 
 
+def _grow_safe(job):
+    try:
+        return job, _grow_task(*job), None
+    except Exception as e:
+        return job, None, f"{type(e).__name__}: {e}"
+
+
 def load(run, task):
-    """The pickled tumour of one task."""
+    """The pickled tumour of one task, with the paper regime's current O2 field.
+
+    The microenvironment is readout-only (it picks its target genes once, at construction, and is
+    applied when cell data are materialised), so a stored tumour takes the regime's O2 settings
+    without regrowing."""
     with open(task_path(run, task), "rb") as f:
-        return pickle.load(f)
+        t = pickle.load(f)
+    hyp = (t.microenv_params or {}).get("hypoxia") if isinstance(t.microenv_params, dict) else None
+    if hyp is not None:
+        hyp.update(RG.O2)
+    return t
 
 
 def tasks(run):
@@ -142,16 +162,15 @@ def main():
     todo = [(n, task, kw) for n in names for task, kw in RUNS[n]
             if a.force or not os.path.exists(task_path(n, task))]
     print(f"{len(todo)} tasks to grow ({RG.TIER}, {a.jobs} parallel)", flush=True)
-    with ProcessPoolExecutor(max_workers=a.jobs) as ex:
-        futs = {ex.submit(_grow_task, *job): job for job in todo}
-        for fut in as_completed(futs):
-            n, task, _ = futs[fut]
-            try:
-                r = fut.result()
+    # a fresh process per tumour, so one large genotype registry is not carried into the next task
+    with mp.get_context("spawn").Pool(processes=a.jobs, maxtasksperchild=1) as pool:
+        for job, r, err in pool.imap_unordered(_grow_safe, todo):
+            n, task, _ = job
+            if err:                 # report and keep going: one failed seed must not hide the rest
+                print(f"  !! {n}/{task} FAILED: {err}", flush=True)
+            else:
                 print(f"  {n}/{task}: {r['cancer']} cells, {r['cpu_s']} s CPU, {r['peak_mb']} MB"
                       f"{'' if r['reached_target'] else '  (target not reached)'}", flush=True)
-            except Exception as e:  # report and keep going: one failed seed must not hide the rest
-                print(f"  !! {n}/{task} FAILED: {type(e).__name__}: {e}", flush=True)
 
 
 if __name__ == "__main__":

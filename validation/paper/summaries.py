@@ -7,8 +7,9 @@ table. ``python summaries.py [RUNS] [--jobs N]`` fills the cache, one short-live
 task so memory is returned between tumours.
 
 Statistics per tumour:
-  * ``n0, D0`` / ``n2, D2``: Noble's evolutionary-mode indices at the full census and at a 2%
-    detection limit (combinations below it pooled, not dropped).
+  * ``n0, D0`` / ``nd, Dd``: Noble's evolutionary-mode indices at the full census and at the 5%
+    detection limit of Noble et al.'s comparison with multi-region data (drivers below it removed,
+    so undetected clones merge with their parents; ``iscc.inference.mode_indices``).
   * ``seg_cn``, ``seg_net``: count-weighted mean copy number and net oncogenic content per segment.
   * ``wgd_frac``: fraction of cancer cells carrying a whole-genome duplication.
   * ``assortment``: fraction of neighbouring cancer demes sharing their dominant clone.
@@ -28,7 +29,7 @@ sys.path.insert(0, HERE)
 import registry as REG  # noqa: E402
 
 OUT = os.path.join(REG.OUT, "summaries")
-DETECTION = 0.02
+DETECTION = 0.05
 
 
 def path(run, task):
@@ -36,19 +37,28 @@ def path(run, task):
 
 
 def _mode(t, detection):
-    from iscc.inference.indices import driver_combination_counts, inverse_simpson
-    combos = driver_combination_counts(t)
-    total = sum(combos.values())
-    if not total:
-        return None, None
-    n = sum(len(k) * c for k, c in combos.items()) / total
-    if detection > 0:
-        kept = [c for c in combos.values() if c / total >= detection]
-        pooled = total - sum(kept)
-        counts = kept + ([pooled] if pooled else [])
-    else:
-        counts = list(combos.values())
-    return float(n), float(inverse_simpson(counts))
+    from iscc.inference import mode_indices
+    m = mode_indices(t, detection=detection)
+    return (None, None) if not m["n_clones"] else (float(m["n"]), float(m["D"]))
+
+
+def refresh_detection(job):
+    """Recompute only the detection-limit indices of an existing summary (one fresh process)."""
+    run, task = job
+    from memguard import wait_for_memory
+    wait_for_memory(label=f"{run}/{task}")
+    try:
+        with open(path(run, task)) as f:
+            rec = json.load(f)
+        t = REG.load(run, task)
+        rec.pop("n2", None), rec.pop("D2", None)
+        rec["nd"], rec["Dd"] = _mode(t, DETECTION)
+        rec["detection"] = DETECTION
+        with open(path(run, task), "w") as f:
+            json.dump(rec, f)
+        return run, task, None
+    except Exception as e:
+        return run, task, f"{type(e).__name__}: {e}"
 
 
 def summarise(run, task):
@@ -65,7 +75,7 @@ def summarise(run, task):
     seg_cn = ((cn * w[:, None]).sum(0) / w.sum()).tolist() if len(w) else [2.0] * seg
     wgd = sum(c for g, c in counts.items() if getattr(t.genotypes[g], "is_wgd", False)) / max(tot, 1)
     n0, D0 = _mode(t, 0.0)
-    n2, D2 = _mode(t, DETECTION)
+    nd, Dd = _mode(t, DETECTION)
     cl = C.Clones(t)
     G = t.grid_size
     dom, stroma = {}, 0
@@ -85,7 +95,7 @@ def summarise(run, task):
             if nb in dom and nb > di:
                 pairs += 1
                 same += dom[nb] == lab
-    rec = dict(run=run, task=task, cancer=int(tot), n0=n0, D0=D0, n2=n2, D2=D2, seg_cn=seg_cn,
+    rec = dict(run=run, task=task, cancer=int(tot), n0=n0, D0=D0, nd=nd, Dd=Dd, detection=DETECTION, seg_cn=seg_cn,
                seg_net=(onc - tsg).tolist(), wgd_frac=float(wgd),
                assortment=float(same / pairs) if pairs else None,
                stroma_frac=float(stroma / max(tot, 1)), n_clones=len(cl.labels),
@@ -130,8 +140,17 @@ def main():
     ap.add_argument("runs", nargs="?", default="all")
     ap.add_argument("--jobs", type=int, default=1)
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--detection-only", action="store_true",
+                    help="recompute only the detection-limit indices of existing summaries")
     a = ap.parse_args()
     runs = list(REG.RUNS) if a.runs == "all" else a.runs.split(",")
+    if a.detection_only:
+        todo = [(r, t) for r in runs for t in REG.tasks(r) if os.path.exists(path(r, t))]
+        print(f"{len(todo)} summaries to refresh at detection {DETECTION}", flush=True)
+        with mp.get_context("spawn").Pool(processes=a.jobs, maxtasksperchild=1) as pool:
+            for r, t, err in pool.imap_unordered(refresh_detection, todo):
+                print(f"  {r}/{t}: {err or 'ok'}", flush=True)
+        return
     todo = [(r, t) for r in runs for t in REG.tasks(r)
             if os.path.exists(REG.task_path(r, t)) and (a.force or not os.path.exists(path(r, t)))]
     print(f"{len(todo)} summaries to compute", flush=True)

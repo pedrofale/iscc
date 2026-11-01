@@ -57,7 +57,8 @@ class Clones:
         self.roots = roots
         self.label = {g: f"clone {i}" for i, g in enumerate(roots, start=1)}
         self.labels = [self.label[g] for g in roots]
-        palette = [fam[1] for fam in S.CLONE_FAMILIES[:-1]] + [fam[0] for fam in S.CLONE_FAMILIES[:-1]]
+        palette = ([fam[1] for fam in S.CLONE_FAMILIES[:-1]] + [fam[0] for fam in S.CLONE_FAMILIES[:-1]]
+                   + [fam[2] for fam in S.CLONE_FAMILIES[:-1]])          # 15 before any colour repeats
         self.colour = {lab: palette[i % len(palette)] for i, lab in enumerate(self.labels)}
         self.colour[ANCESTRAL] = S.CLONE_FAMILIES[-1][2]
         self.size = {self.label[g]: subtree[g] for g in roots}
@@ -106,7 +107,7 @@ def tissue_background(t):
     return rgb
 
 
-def tissue_map(t, clones, deme_counts=None, min_alpha=0.25):
+def tissue_map(t, clones, deme_counts=None, min_alpha=0.25, outline=True):
     """RGB map of the primary: each deme's dominant clone over the tissue, by cancer fraction.
 
     ``deme_counts`` is ``{deme: {gid: count}}`` (default: the live state); pass a snapshot from
@@ -130,6 +131,14 @@ def tissue_map(t, clones, deme_counts=None, min_alpha=0.25):
         a = min_alpha + (1 - min_alpha) * n / max(total, 1)
         r, c = t.deme_coords[di]
         rgb[r, c] = (1 - a) * rgb[r, c] + a * np.array(_hex(clones.colour[lab]))
+    if outline and t.gland_id is not None:
+        # the gland walls over the cancer, so the ducts stay visible once cancer fills them
+        gland = np.asarray(t.gland_id)[:G * G]
+        ink = np.array(_hex(S.INK))
+        for di in np.where(gland >= 0)[0]:
+            if any(nb < G * G and gland[nb] == -1 for nb in t._neighbors(int(di))):
+                r, c = t.deme_coords[di]
+                rgb[r, c] = 0.5 * rgb[r, c] + 0.5 * ink
     return rgb
 
 

@@ -1,22 +1,24 @@
 """Figure 4: space misleads lineage inference.
 
-Left, the lineage-space confound (R1 dispersal sweep, the PEtracer-style decomposition):
-  (a) territorial against intermixed growth;
-  (b) per-gene spatial against lineage autocorrelation at low dispersal, by true category;
-  (c) the fraction of extrinsic (hypoxia-driven) genes a tree-based method calls heritable, against
-      dispersal;
-  (d) the ground-truth-free signature against lineage-space coupling: iscc's sweep and three real
-      PEtracer lineages.
+Left, the lineage-space confound (R1, 25 tumours over five dispersal rates):
+  (a) one tumour's clones and its hypoxia field;
+  (b) the hypoxia field's spatial against lineage autocorrelation (Moran's I on the same cells, with
+      the spatial and the tree weights of the PEtracer-style decomposition), every tumour. The field
+      is environmental by construction, so any lineage autocorrelation it carries is the confound;
+  (c) that lineage share of the field, by dispersal;
+  (d) the ground-truth-free signature (correlation of per-gene lineage and spatial autocorrelation)
+      against lineage-space coupling, on MERFISH-measured expression (124-gene panel, normalised, as
+      the real references were reduced), with three real PEtracer lineages.
 Right, tissue architecture and copy-number evolution (Harald's benchmark):
   (e) confined against free growth (R3, paper regime);
   (f)-(h) truncal copy-number fraction, clonal diversity and reconstruction error by architecture and
       selection, from Harald's run 1 (vault experiments/data/cn-evolution-local-run-1.csv, 12x12 grid,
       5 seeds per cell), read as is.
 
-Gene categories: extrinsic = the hypoxia field's target genes; intrinsic = the 60 genes with the most
-between-genotype variance among the rest, excluding program genes a niche drives. (The published
-analysis took intrinsic genes from a twin grown with the microenvironment off; the microenvironment
-is readout-only, so the two differ only in which niche-free genes rank highest.)
+Why the field and not gene categories: in the paper regime copy-number dosage makes nearly every
+gene genuinely heritable, so per-gene "called heritable" rates say little about the environment, and
+on measured expression the environmental genes' calls sit at chance (issues note, B1). The field
+carries the environment's signal without dosage.
 
 Run:  python validation/paper/fig4_space_lineage.py [--jobs 1]
 """
@@ -39,7 +41,7 @@ import registry as REG  # noqa: E402
 import style as S  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(HERE))
-CACHE = os.path.join(C.DERIVED, "petracer")
+CACHE = os.path.join(C.DERIVED, "petracer_v2")
 DISPS = (0.1, 0.3, 0.9, 2.0, 4.0)
 VAULT = os.path.join(os.path.dirname(REPO), "iscc-markdown")
 HARALD_CSV = "experiments/data/cn-evolution-local-run-1.csv"
@@ -67,47 +69,67 @@ def categories(t):
     return {"extrinsic": ext, "intrinsic": intr, "neutral": neutral}
 
 
-def analyse(task):
-    """Decompose one R1 tumour; cache the summary (and per-gene values for seed 1)."""
+def measured(t, cells, n_panel=124, seed=3):
+    """Log-normalised MERFISH counts of ``cells`` over the top-``n_panel`` genes by mean expression:
+    the measurement the real PEtracer references were reduced from (124-gene panel, normalised)."""
+    from iscc.data import scSpatial
+    a = scSpatial(platform="merfish", n_panel_genes=n_panel, seed=seed).run(t.cell_data, cell_subset=cells)
+    X = a.observed_counts.values.astype(float)
+    lib = X.sum(1, keepdims=True)
+    return pd.DataFrame(np.log1p(X / np.maximum(lib, 1) * np.median(lib)),
+                        index=a.observed_counts.index, columns=a.observed_counts.columns)
+
+
+def _signature(dec):
+    m = np.isfinite(dec.I_lineage) & np.isfinite(dec.I_spatial)
+    return float(np.corrcoef(dec.I_lineage[m], dec.I_spatial[m])[0, 1])
+
+
+def analyse(key):
+    """One tumour (``key`` = "<run>/<task>", R1 or R3): the hypoxia field's lineage and spatial
+    autocorrelation (ground truth), the lineage-space coupling, and the confound signature on
+    MERFISH-measured expression."""
     from iscc.integrations import decompose_lineage_spatial
     sys.path.insert(0, os.path.join(REPO, "validation"))
     import validate_petracer as VP
-    t = REG.load("R1", task)
+    run, task = key.split("/")
+    t = REG.load(run, task)
     t.make_cell_data(max_cells=3000)
-    cats = categories(t)
     dec = decompose_lineage_spatial(t, max_cells=600, seed=0)
+    s = VP.iscc_summary(t, max_cells=600, seed=0)
+    meas = decompose_lineage_spatial(t, expression=measured(t, dec.cells), max_cells=600, seed=0)
+    cats = categories(t)
     conf = dec.confusion(cats)
-    rec = dict(task=task, disp=float(task.split("_")[0][4:]), misclass_ext=conf["extrinsic"],
-               misclass_intr=conf["intrinsic"], misclass_neu=conf["neutral"],
+    arch = "free" if task.startswith("free") else "ductal"
+    disp = float(task.split("_")[0][4:]) if run == "R1" else None
+    rec = dict(run=run, task=task, arch=arch, disp=disp,
                field_lin=dec.field_autocorr["hypoxia_level"]["lineage"],
-               field_sp=dec.field_autocorr["hypoxia_level"]["spatial"])
-    try:
-        s = VP.iscc_summary(t, max_cells=600, seed=0)
-        rec.update({k: float(v) for k, v in s.items() if np.isscalar(v)})
-    except Exception as e:
-        rec["summary_error"] = f"{type(e).__name__}: {e}"
-    if task.endswith("_seed1"):
-        rec["I_lin"] = np.asarray(dec.I_lineage, dtype=float).tolist()
-        rec["I_sp"] = np.asarray(dec.I_spatial, dtype=float).tolist()
-        rec["cats"] = {k: np.asarray(v, dtype=int).tolist() for k, v in cats.items()}
+               field_sp=dec.field_autocorr["hypoxia_level"]["spatial"],
+               coupling=float(s["coord_lineage_autocorr"]), territory_ratio=float(s["territory_ratio"]),
+               signature_true=_signature(dec), signature_merfish=_signature(meas),
+               median_I_lin_merfish=float(np.median(meas.I_lineage)),
+               median_I_sp_merfish=float(np.median(meas.I_spatial)),
+               # per-gene calls on the true expression, kept for the record (not plotted: copy-number
+               # dosage makes nearly every gene heritable in this regime, see the issues note B1)
+               called_ext=conf["extrinsic"], called_intr=conf["intrinsic"], called_neu=conf["neutral"])
     os.makedirs(CACHE, exist_ok=True)
-    with open(os.path.join(CACHE, f"{task}.json"), "w") as f:
+    with open(os.path.join(CACHE, f"{run}__{task}.json"), "w") as f:
         json.dump(rec, f)
-    return task
+    return key
 
 
-def _safe(task):
+def _safe(key):
     from memguard import wait_for_memory
-    wait_for_memory(label=f"R1/{task}")
+    wait_for_memory(label=key)
     try:
-        return analyse(task), None
+        return analyse(key), None
     except Exception as e:
-        return task, f"{type(e).__name__}: {e}"
+        return key, f"{type(e).__name__}: {e}"
 
 
 def compute(jobs):
-    todo = [k for k in REG.tasks("R1") if os.path.exists(REG.task_path("R1", k))
-            and not os.path.exists(os.path.join(CACHE, f"{k}.json"))]
+    todo = [f"{r}/{k}" for r in ("R1", "R3") for k in REG.tasks(r) if os.path.exists(REG.task_path(r, k))
+            and not os.path.exists(os.path.join(CACHE, f"{r}__{k}.json"))]
     print(f"{len(todo)} decompositions to compute", flush=True)
     with mp.get_context("spawn").Pool(processes=jobs, maxtasksperchild=1) as pool:
         for task, err in pool.imap_unordered(_safe, todo):
@@ -157,72 +179,85 @@ def main():
     rows = load_cache()
     fig = S.figure("double", 72)
     out = {}
-    S.text_mm(fig, 2, 2.5, "Clonal territories make the environment look heritable", fontsize=7,
+    S.text_mm(fig, 2, 2.5, "Glands make the environment look heritable", fontsize=7,
               va="top", fontweight="bold")
-    # (a) maps
+    df = pd.DataFrame(rows)
+    # (a) one tumour's clones and its hypoxia field
     S.panel_letter(fig, "a", 2, 7)
-    for i, d in enumerate((0.1, 4.0)):
-        ax = S.ax_mm(fig, 6 + i * 25, 11, 22, 22)
-        task = f"disp{d}_seed1"
-        if os.path.exists(REG.task_path("R1", task)):
-            t = REG.load("R1", task)
-            ax.imshow(C.tissue_map(t, C.Clones(t)), interpolation="nearest")
-            del t
+    task = "disp0.1_seed1"
+    if os.path.exists(REG.task_path("R1", task)):
+        t = REG.load("R1", task)
+        ax = S.ax_mm(fig, 6, 11, 22, 22)
+        ax.imshow(C.tissue_map(t, C.Clones(t)), interpolation="nearest")
         S.despine(ax, False, False)
-        ax.set_title(f"dispersal {d}", fontsize=5.5)
-    # (b) per-gene scatter at low dispersal
-    S.panel_letter(fig, "b", 2, 37)
-    ax = S.ax_mm(fig, 9, 41, 22, 22)
-    lo = next((r for r in rows if r["task"] == "disp0.1_seed1" and "I_lin" in r), None)
-    if lo:
-        Il, Is = np.asarray(lo["I_lin"]), np.asarray(lo["I_sp"])
-        for k, col in (("neutral", S.BG_CELLS), ("intrinsic", S.CLONE_FAMILIES[3][1]),
-                       ("extrinsic", S.MODALITY["spatial"])):
-            idx = np.asarray(lo["cats"][k], dtype=int)
-            ax.scatter(Is[idx], Il[idx], s=1.5 if k == "neutral" else 3, color=col, label=k,
-                       rasterized=True)
-        m = max(np.nanmax(Il), np.nanmax(Is))
-        ax.plot([0, m], [0, m], color=S.INK, lw=0.5, ls=":")
+        ax.set_title("clones", fontsize=5.5)
+        hyp = t.microenv_params["hypoxia"]
+        h = t._o2_field(D=hyp["o2_diffusion"], k=hyp["o2_consumption"], s=hyp["o2_supply"],
+                        source=hyp["o2_source"]).reshape(t.grid_size, t.grid_size)
+        ax = S.ax_mm(fig, 31, 11, 22, 22)
+        im = ax.imshow(h, cmap="YlOrRd", vmin=0, vmax=1, interpolation="nearest")
+        S.despine(ax, False, False)
+        ax.set_title("hypoxia field", fontsize=5.5)
+        cax = S.ax_mm(fig, 54, 11, 1.5, 22)
+        fig.colorbar(im, cax=cax).ax.tick_params(labelsize=4.5, length=1.5)
+        del t
+    ARCH = {"ductal": ("ductal field", S.CLONE_FAMILIES[0][1]), "free": ("free growth", S.CLONE_FAMILIES[2][1])}
+    if len(df):
+        df["share"] = df.field_lin / (df.field_lin + df.field_sp)
+        # (b) the field's autocorrelation on each axis, every tumour, by architecture
+        S.panel_letter(fig, "b", 2, 37)
+        ax = S.ax_mm(fig, 9, 41, 22, 22)
+        for arch, (lab, col) in ARCH.items():
+            sub = df[df.arch == arch]
+            ax.scatter(sub.field_sp, sub.field_lin, s=5, color=col, edgecolors=S.INK, lw=0.2,
+                       label=f"{lab} ({len(sub)})")
+        ax.plot([0, 1.1], [0, 1.1], color=S.INK, lw=0.5, ls=":")
+        ax.set_xlim(0, 1.1)
+        ax.set_ylim(0, 1.1)
         ax.set_xlabel("Spatial autocorrelation")
         ax.set_ylabel("Lineage autocorrelation")
-        ax.legend(fontsize=4.5, loc="lower right")
-        ax.set_title("dispersal 0.1", fontsize=5.5)
-    # (c) misclassification against dispersal
-    S.panel_letter(fig, "c", 34, 37)
-    ax = S.ax_mm(fig, 41, 41, 22, 22)
-    if rows:
-        df = pd.DataFrame(rows)
-        g = df.groupby("disp")
-        for col, name, c in (("misclass_ext", "extrinsic", S.MODALITY["spatial"]),
-                             ("misclass_intr", "intrinsic", S.CLONE_FAMILIES[3][1]),
-                             ("misclass_neu", "neutral (baseline)", S.GREY)):
-            ax.errorbar(g[col].mean().index, g[col].mean().values, yerr=g[col].std().values, color=c,
-                        marker="o", ms=2.3, lw=0.8, capsize=1.3, label=name)
-        ax.set_xscale("log")
-        ax.set_ylim(0, 1.05)
-        ax.set_xlabel("Dispersal rate")
-        ax.set_ylabel("Called heritable")
-        ax.legend(fontsize=4.5)
-        out["misclass_ext"] = g["misclass_ext"].mean().round(2).to_dict()
-        out["misclass_intr"] = g["misclass_intr"].mean().round(2).to_dict()
-        out["misclass_neu"] = g["misclass_neu"].mean().round(2).to_dict()
-        out["n_per_disp"] = int(g.size().min())
-    # (d) real PEtracer against iscc
-    S.panel_letter(fig, "d", 66, 7)
-    ax = S.ax_mm(fig, 73, 11, 26, 26)
-    if rows and "coord_lineage_autocorr" in rows[0]:
-        df = pd.DataFrame(rows)
-        sigcol = "confound_corr" if "confound_corr" in df else None
-        if sigcol:
-            ax.scatter(df.coord_lineage_autocorr, df[sigcol], s=4, c=np.log10(df.disp), cmap="cividis",
-                       label="iscc")
-            for name, x, y in real_points():
-                ax.scatter([x], [y], s=12, color=S.SOURCE["real"], edgecolors=S.INK, lw=0.4, zorder=3)
-                ax.annotate(name, (x, y), fontsize=4.2, xytext=(2, 2), textcoords="offset points")
-            ax.set_xlabel("Lineage-space coupling")
-            ax.set_ylabel("Confound signature")
-    else:
-        ax.text(0.5, 0.5, "pending", transform=ax.transAxes, ha="center", fontsize=5, color=S.GREY)
+        ax.set_title("hypoxia field", fontsize=5.5)
+        ax.legend(fontsize=4.5, loc="upper left")
+        # (c) the lineage share of the environment, by architecture and selection
+        S.panel_letter(fig, "c", 34, 37)
+        ax = S.ax_mm(fig, 41, 41, 22, 22)
+        groups = [("ductal", "R1"), ("ductal", "selected"), ("ductal", "neutral"),
+                  ("free", "selected"), ("free", "neutral")]
+        df["sel"] = df.task.str.extract(r"_(selected|neutral)_")[0].fillna("R1")
+        for k, (arch, sel) in enumerate(groups):
+            sub = df[(df.arch == arch) & (df.sel == sel)]
+            x = k + np.random.default_rng(k).uniform(-0.15, 0.15, len(sub))
+            ax.scatter(x, sub.share, s=4, color=ARCH[arch][1], alpha=0.9 if sel != "neutral" else 0.5)
+            ax.plot([k - 0.3, k + 0.3], [sub.share.mean()] * 2, color=S.INK, lw=0.8)
+        ax.set_xticks(range(len(groups)))
+        ax.set_xticklabels(["ductal\nsweep", "ductal\nsel.", "ductal\nneutral", "free\nsel.",
+                            "free\nneutral"], fontsize=4.3)
+        ax.set_ylim(0, 0.6)
+        ax.set_ylabel("Lineage share of the field")
+        g = df.groupby("arch").share
+        out["share"] = {a: dict(mean=round(float(v.mean()), 2), min=round(float(v.min()), 2),
+                                max=round(float(v.max()), 2), n=int(len(v))) for a, v in g}
+        r1 = df[df.run == "R1"]
+        out["share_by_disp"] = r1.groupby("disp").share.mean().round(2).to_dict()
+        from scipy.stats import mannwhitneyu
+        out["mwu_p"] = float(mannwhitneyu(df[df.arch == "ductal"].share, df[df.arch == "free"].share).pvalue)
+        # (d) the ground-truth-free signature, measured like the real data
+        S.panel_letter(fig, "d", 66, 7)
+        ax = S.ax_mm(fig, 73, 11, 26, 26)
+        for arch, (lab, col) in ARCH.items():
+            sub = df[df.arch == arch]
+            ax.scatter(sub.coupling, sub.signature_merfish, s=5, color=col, edgecolors=S.INK, lw=0.2)
+        for name, x, y in real_points():
+            ax.scatter([x], [y], s=14, color=S.SOURCE["real"], edgecolors=S.INK, lw=0.4, zorder=3)
+            ax.annotate(name.replace("M2-1_", "lineage "), (x, y), fontsize=4.2, xytext=(2, 2),
+                        textcoords="offset points")
+        ax.set_xlabel("Lineage-space coupling")
+        ax.set_ylabel("Confound signature")
+        ax.set_title("MERFISH-measured; gray: real", fontsize=5.5)
+        out["signature"] = {a: (round(float(v.min()), 2), round(float(v.max()), 2))
+                            for a, v in df.groupby("arch").signature_merfish}
+        out["coupling"] = {a: (round(float(v.min()), 2), round(float(v.max()), 2))
+                           for a, v in df.groupby("arch").coupling}
     # right half: architecture and copy-number evolution
     S.text_mm(fig, 108, 2.5, "Tissue architecture sets copy-number structure", fontsize=7, va="top",
               fontweight="bold")

@@ -2,8 +2,8 @@
 
 Top row, the evolution front's tests (registry tumours):
   (a) evolutionary-mode space (Noble's n, D) against real multi-region tumours, at the full census and
-      at the 2% detection limit real data has (combinations below it pooled, not dropped);
-  (b) the neutral 1/f site-frequency spectrum (R2 neutral, passengers tracked exactly);
+      at the 5% detection limit of Noble et al. (drivers below it removed, clones merged into parents);
+  (b) the 1/f fit of neutral and selected tumours (R2, passengers tracked exactly);
   (c) copy number follows oncogenic content under selection, not under neutrality (R2);
   (d) whole-genome-duplication prevalence across rates against the PCAWG range (R5);
   (e) the fit to the PCAWG breast-cancer arm landscape: pending its rerun under the corrected model.
@@ -53,45 +53,55 @@ def panel_a(ax):
     from scipy.spatial import Delaunay
     emp = pd.read_csv(os.path.join(REPO, "validation", "data", "noble_empirical_indices.csv"))
     rows = [r for run in ("R1", "R2", "R3", "R4") for r in SM.load(run)]
-    sim = pd.DataFrame(rows)[["n0", "D0", "n2", "D2"]].dropna() if rows else pd.DataFrame()
+    sim = pd.DataFrame(rows)[["n0", "D0", "nd", "Dd"]].dropna() if rows else pd.DataFrame()
     if sim.empty:
         return pending(ax)
     e = emp[["n", "D"]].to_numpy()
     cov = {}
-    for k, (nc, dc) in {"census": ("n0", "D0"), "2%": ("n2", "D2")}.items():
+    for k, (nc, dc) in {"census": ("n0", "D0"), "5%": ("nd", "Dd")}.items():
         try:
             cov[k] = float((Delaunay(sim[[nc, dc]].to_numpy()).find_simplex(e) >= 0).mean())
         except Exception:
             cov[k] = float("nan")
     ax.scatter(sim.n0, sim.D0, s=4, facecolors="none", edgecolors=S.SOURCE["iscc"], lw=0.3, alpha=0.5,
                label=f"iscc, full census ({cov['census']:.0%})")
-    ax.scatter(sim.n2, sim.D2, s=4, color=S.SOURCE["iscc"], alpha=0.8,
-               label=f"iscc, 2% detection ({cov['2%']:.0%})")
+    ax.scatter(sim.nd, sim.Dd, s=4, color=S.SOURCE["iscc"], alpha=0.8,
+               label=f"iscc, 5% detection ({cov['5%']:.0%})")
     ax.scatter(emp.n, emp.D, s=6, color=S.SOURCE["real"], edgecolors=S.INK, lw=0.3, label="real tumours")
     ax.set_yscale("log")
     ax.set_xlabel("Drivers per cell, n")
     ax.set_ylabel("Clonal diversity, D")
     ax.legend(fontsize=4.5, loc="upper left", title="real tumours inside\nthe iscc hull",
               title_fontsize=4.5)
-    return dict(n_sim=len(sim), coverage=cov, D_median_2pct=float(sim.D2.median()),
+    return dict(n_sim=len(sim), coverage=cov, D_median_detected=float(sim.Dd.median()), n_median_detected=float(sim.nd.median()),
                 D_median_census=float(sim.D0.median()), D_median_real=float(emp.D.median()))
 
 
 def panel_b(ax):
-    rows = [r for r in SM.load("R2") if r["task"].startswith("neutral") and "sfs_rsq" in r]
-    if not rows:
-        return pending(ax, "pending: R2 neutral tumours\n(exact passengers)")
-    rsq = [r["sfs_rsq"] for r in rows]
-    x = 1.0 / np.asarray(rows[0]["sfs_grid"])
-    M = np.asarray(rows[0]["sfs_M"])
-    A = np.vstack([x, np.ones_like(x)]).T
-    coef, *_ = np.linalg.lstsq(A, M, rcond=None)
-    ax.plot(x, M, "o", ms=2.5, color=S.SOURCE["iscc"])
-    ax.plot(x, A @ coef, color=S.INK, lw=0.8)
-    ax.set_xlabel("1 / f")
-    ax.set_ylabel("Cumulative mutations, M(f)")
-    S.stat(ax, f"R$^2$ = {np.mean(rsq):.2f} ± {np.std(rsq):.2f}\n(n = {len(rsq)})", "lower right")
-    return dict(rsq_mean=float(np.mean(rsq)), rsq_sd=float(np.std(rsq)), n=len(rsq))
+    """The 1/f fit of neutral and of selected tumours (both grown with exact passengers). Spatially
+    constrained growth bends the neutral spectrum (Chkhaidze et al. 2019), so the fit is not
+    expected to separate the two arms; Williams et al.'s neutrality threshold is drawn for reference."""
+    out = {}
+    for k, (name, col) in enumerate((("neutral", S.SOURCE["real"]), ("selected", S.SOURCE["iscc"]))):
+        rsq = [r["sfs_rsq"] for r in SM.load("R2") if r["task"].startswith(name) and "sfs_rsq" in r]
+        if not rsq:
+            return pending(ax, "pending: R2 tumours\n(exact passengers)")
+        x = k + np.random.default_rng(k).uniform(-0.12, 0.12, len(rsq))
+        ax.scatter(x, rsq, s=5, color=col, edgecolors=S.INK, lw=0.2)
+        ax.plot([k - 0.25, k + 0.25], [np.mean(rsq)] * 2, color=S.INK, lw=0.8)
+        out[name] = dict(mean=float(np.mean(rsq)), sd=float(np.std(rsq)), n=len(rsq))
+    ax.axhline(0.98, color=S.GREY, lw=0.5, ls="--")
+    ax.text(1.45, 0.985, "neutrality\nthreshold", fontsize=4.3, color=S.GREY, ha="right", va="bottom")
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels(["neutral", "selected"])
+    ax.set_xlim(-0.5, 1.5)
+    ax.set_ylim(0, 1.1)
+    ax.set_ylabel("$R^2$ of the $1/f$ fit")
+    from scipy.stats import mannwhitneyu
+    a = [r["sfs_rsq"] for r in SM.load("R2") if r["task"].startswith("neutral") and "sfs_rsq" in r]
+    b = [r["sfs_rsq"] for r in SM.load("R2") if r["task"].startswith("selected") and "sfs_rsq" in r]
+    out["mwu_p"] = float(mannwhitneyu(a, b).pvalue)
+    return out
 
 
 def panel_c(ax):
@@ -175,6 +185,24 @@ def compute_f():
     return dict(real=real_stats, iscc=_count_stats(sp.csr_matrix(sim.observed_counts.values)))
 
 
+def _cv_by_state(coverage, cn, min_frac=0.05, min_n=20):
+    """Within-cell coverage CV per copy-number state, median over cells (as estimate_dna fits it).
+
+    A state counts in a cell only if it holds at least ``min_frac`` of the cell's loci: a sliver
+    state (DLP+ one-copy calls hold ~30 of 5,787 bins per cell) is mostly calling error at segment
+    edges, not sequencing spread."""
+    coverage = np.atleast_2d(np.asarray(coverage, float))
+    cn = np.atleast_2d(np.rint(np.asarray(cn, float))).astype(int)
+    per = {}
+    for X, Cn in zip(coverage, cn):
+        for lvl in np.unique(Cn):
+            m = Cn == lvl
+            c = X[m & (X > 0)]
+            if m.sum() >= max(min_n, min_frac * len(Cn)) and c.size >= min_n:
+                per.setdefault(int(lvl), []).append(float(c.std() / c.mean()))
+    return {lvl: float(np.median(v)) for lvl, v in per.items()}
+
+
 def compute_g():
     from iscc.data import bulkDNA, estimate_dna, scDNA
     sys.path.insert(0, os.path.join(REPO, "validation"))
@@ -183,11 +211,13 @@ def compute_g():
     diss = RR.resect(t).dissociate(max_cells=1500)
     gid = diss["cell_type"]["cell_id"].astype(str)
     cancer = [c for c, g in gid.items() if g in t.genotypes and t._is_cancer(g)][:200]
-    out = {}
+    out, ado = {}, {}
     for name, f, mod in (("HG002", "dna_ref_hg002_bulk_wgs", "bulk"),
                          ("Tapestri", "dna_ref_tapestri_sc_panel", "sc"), ("DLP+", "dna_ref_dlp_sc_wgs", "sc")):
         z = np.load(os.path.join(REPO, "validation", "data", f + ".npz"), allow_pickle=True)
-        kw = dict(modality=mod)
+        # breadth and depth model are chosen, not estimated (estimate_dna defaults to WGS), so they
+        # come from the reference: Tapestri is a targeted panel
+        kw = dict(modality=mod, breadth=str(z["breadth"]), depth_model=str(z["depth_model"]))
         for k in ("het_mask", "variant_mask"):
             if k in z.files:
                 kw[k] = z[k]
@@ -198,28 +228,23 @@ def compute_g():
             cov_s = sim.observed_data["coverage"].values[None, :].astype(float)
             cn_s = np.rint(sim.observed_data["true_cn"].values)[None, :]
         else:
+            # a panel observes as many loci as the real panel has amplicons (iscc's default panel is
+            # 30 driver loci, too few to measure a spread per copy-number state)
+            tg = (z["coverage"].shape[1] / t.n_genes) if est.breadth == "panel" else "all"
             sim = scDNA(n_cells=len(cancer), breadth=est.breadth, depth_model=est.depth_model, seed=21,
-                        **est.dna_kwargs()).run(diss, cell_subset=cancer)
+                        target_genes=tg, **est.dna_kwargs()).run(diss, cell_subset=cancer)
             cov_s = sim.coverage.values.astype(float)
-            cn_s = _sim_cn(t, diss, sim, cancer)
-        obs_cv = VD._cov_cv_by_cn(np.atleast_2d(z["coverage"]), np.atleast_2d(z["cn"]))
-        sim_cv = VD._cov_cv_by_cn(cov_s, cn_s)
+            cn_s = sim.true_cn.values
+        obs_cv = _cv_by_state(np.atleast_2d(z["coverage"]), np.atleast_2d(z["cn"]))
+        sim_cv = _cv_by_state(cov_s, cn_s)
+        if mod == "sc" and "het_mask" in z.files and np.asarray(z["het_mask"]).any():
+            # allelic dropout at heterozygous sites, the single-cell allele layer's headline
+            baf_o = VD._baf_at_hets(z["alt"], z["coverage"], z["het_mask"])
+            baf_s = VD._baf_at_hets(sim.alt_counts.values, sim.coverage.values, VD._het_obs_assay_sc(sim))
+            ado[name] = [float(VD._ado_frac(baf_o)), float(VD._ado_frac(baf_s))]
         out[name] = {str(int(l)): [float(obs_cv[l]), float(sim_cv[l])] for l in sorted(set(obs_cv) & set(sim_cv))}
+    out["_ado"] = ado
     return out
-
-
-def _sim_cn(t, diss, sim, cells):
-    """True copy number aligned to a simulated single-cell DNA object's coverage (cells x loci)."""
-    gid = diss["cell_type"]["cell_id"].astype(str)
-    genes = list(sim.coverage.columns)
-    size = t.n_genes // t.n_segments
-    seg = np.array([int(g.split("_")[1]) for g in genes])
-
-    def cn_of(c):
-        g = gid[c]
-        sc = t.genotypes[g].genome_summary["seg_cns"] if g in t.genotypes else [2] * t.n_segments
-        return np.asarray(sc)[seg]
-    return np.stack([cn_of(c) for c in sim.coverage.index])
 
 
 def compute_h():
@@ -287,6 +312,7 @@ def render_g(ax):
     d = _cached("g")
     if d is None:
         return pending(ax)
+    ado = d.pop("_ado", {})
     for i, (name, levels) in enumerate(d.items()):
         for j, (lvl, (o, s_)) in enumerate(levels.items()):
             ax.plot([i - 0.15, i + 0.15], [o, s_], color=S.GREY, lw=0.4)
@@ -295,8 +321,12 @@ def render_g(ax):
                        label="iscc, fitted" if i == j == 0 else None)
     ax.set_xticks(range(len(d)))
     ax.set_xticklabels(list(d))
-    ax.set_ylabel("Coverage CV, per copy-number state")
-    ax.legend(fontsize=4.8)
+    ax.set_ylabel("Coverage CV")
+    ax.legend(fontsize=4.8, loc="upper left")
+    if "Tapestri" in ado:
+        o, s_ = ado["Tapestri"]
+        S.stat(ax, f"Tapestri allelic dropout:\nreal {o:.2f}, iscc {s_:.2f}", "lower left")
+    d["ado"] = ado
     return d
 
 

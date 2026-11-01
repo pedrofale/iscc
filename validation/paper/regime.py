@@ -53,7 +53,19 @@ SELECTION = {"prop_breach": 0.002, "prop_stromal_survival": 0.002, "breach_effec
 # truncal copy-number layer, short enough that the in-situ phase is not one deme for most of the run.
 ORIGIN_CONFINEMENT = dict(RR._CFG["spatial_params"]["origin_confinement"], generations=400)
 
+# Oxygen. The calibrated programs config supplies O2 uniformly at a rate (0.3) far below consumption
+# (1.5), so every dense deme, normal or cancer, sits near the same equilibrium and the hypoxia field
+# is flat: 90% of cancer cells between 0.78 and 0.93, and normal tissue at 0.6. A hypoxia gene then
+# varies by a few percent across the tumour, and there is no gradient for anything to follow. The
+# paper regime uses the perfused source instead: vessels live in the stroma, so O2 is supplied only
+# where there is no cancer and diffuses into cancer-filled ducts and invasive fronts. A deme is 50-60
+# um (the tutorial config's ~50 um; 1 cm over the 170-deme cm scale), and O2 penetrates 100-150 um of
+# tissue, so the diffusion length sqrt(D / k) is 2 demes (D 4, k 1); supply is ten times consumption so that normal tissue is
+# normoxic. Measured on the preview tumours: normal tissue at hypoxia 0.03, cancer cells 0.16-0.88
+# (5th-95th percentile). The field is readout-only, so registry.load applies it to stored tumours.
+O2 = {"o2_source": "perfused", "o2_supply": 10.0, "o2_consumption": 1.0, "o2_diffusion": 4.0}
 MICROENV = copy.deepcopy(PC.MICROENV)
+MICROENV["hypoxia"].update(O2)
 
 
 def expression():
