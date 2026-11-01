@@ -321,6 +321,162 @@ class TestPlateNestedDepth:
             "ca7778be26c8af4aed58c6d2333304e836c7faa3311613b70e80efa48dab202c", 2415897)
 
 
+class TestCallerPlateLayout:
+    """`plate_layout`: the caller decides which plate (and well) each cell is sorted into."""
+
+    N = 600
+
+    def _regions(self):
+        cd = _plain_cell_data(self.N)
+        cells = list(cd["cell_exp"].index)
+        region = {c: "A" if i < self.N // 2 else "B" for i, c in enumerate(cells)}
+        return cd, cells, region
+
+    def _region_and_plate_gaps(self, layout, seeds=range(20)):
+        """Per seed: the A - B gap in mean log depth, and the realized log plate-offset ratio."""
+        from iscc.data.rna import scRNA
+        cd, _, region = self._regions()
+        gaps, offsets = [], []
+        for seed in seeds:
+            a = scRNA(protocol="smartseq3", n_cells=self.N, plate_sigma=0.15,
+                      plate_layout=layout, seed=seed).run(cd)
+            y = np.log(a.obs["n_counts"].values)
+            in_a = np.array([region[c] == "A" for c in a.obs.index])
+            on_p1 = a.obs["plate"].values == f"batch{seed}_P1"
+            gaps.append((y[in_a].mean() - y[~in_a].mean(), y[on_p1].mean() - y[~on_p1].mean()))
+            offsets.append(np.log(a.batch.plate_factor[0] / a.batch.plate_factor[1]))
+        gaps = np.array(gaps)
+        return gaps[:, 0], gaps[:, 1], np.array(offsets)
+
+    def test_region_confounded_layout_puts_the_plate_effect_on_the_region(self):
+        _, cells, region = self._regions()
+        confounded = {c: 1 if region[c] == "A" else 2 for c in cells}
+        region_gap, _, offset = self._region_and_plate_gaps(confounded)
+        assert offset.std() > 0.1                          # the plates really differ in depth
+        # ... and the region gap IS the plate offset, seed by seed (cell noise SE ~0.04)
+        assert np.corrcoef(region_gap, offset)[0, 1] > 0.9
+        assert np.abs(region_gap - offset).max() < 0.15
+
+    def test_balanced_layout_keeps_the_plate_effect_off_the_region(self):
+        _, cells, region = self._regions()
+        balanced = {c: 1 + i % 2 for i, c in enumerate(cells)}   # each region half on each
+        region_gap, plate_gap, offset = self._region_and_plate_gaps(balanced)
+        assert offset.std() > 0.1
+        assert np.corrcoef(plate_gap, offset)[0, 1] > 0.9      # the plate effect is still there
+        assert np.abs(region_gap).max() < 0.15                  # but the regions do not see it
+        assert region_gap.std() < 0.3 * offset.std()
+
+    def test_a_map_of_the_default_layout_reproduces_the_default_counts(self):
+        """The map only replaces WHERE cells sit: same placement, same counts."""
+        from iscc.data.rna import scRNA
+        cd = _plain_cell_data(self.N)
+        kw = dict(protocol="smartseq3", n_cells=self.N, plate_sigma=0.15, seed=4)
+        default = scRNA(**kw).run(cd)
+        layout = dict(zip(default.obs.index, zip(default.obs["plate_index"], default.obs["well"])))
+        mapped = scRNA(plate_layout=layout, **kw).run(cd)
+        assert np.array_equal(default.observed_counts.values, mapped.observed_counts.values)
+        assert (default.obs["plate"] == mapped.obs["plate"]).all()
+        assert (default.obs["well"] == mapped.obs["well"]).all()
+
+    def test_pairs_put_each_cell_in_its_well(self, labelled_cell_data):
+        from iscc.data.rna import scRNA
+        cells = list(labelled_cell_data["cell_exp"].index)
+        layout = {c: ("plateA" if i % 2 else "plateB", i // 2) for i, c in enumerate(cells)}
+        layout[cells[0]] = ("plateB", "P24")                    # a well name, the last well
+        a = scRNA(protocol="smartseq3", n_cells=60, plate_layout=layout, batch_label="run",
+                  seed=1).run(labelled_cell_data)
+        assert a.obs.loc[cells[0], "plate"] == "run_plateB"
+        assert a.obs.loc[cells[0], "well"] == "P24"
+        assert a.obs.loc[cells[3], "plate"] == "run_plateA"
+        assert a.obs.loc[cells[3], "well"] == "A02"             # index 1
+        assert a.obs.loc[cells[3], "plate_index"] == 0          # labels index in sorted order
+        assert a.to_anndata().uns["plate_layout"]["plate_labels"] == ["plateA", "plateB"]
+
+    def test_labels_fill_wells_in_assay_order(self, labelled_cell_data):
+        from iscc.data.rna import scRNA
+        cells = list(labelled_cell_data["cell_exp"].index)
+        a = scRNA(protocol="smartseq3", n_cells=60,
+                  plate_layout={c: i % 3 for i, c in enumerate(cells)},
+                  batch_label="B", seed=1).run(labelled_cell_data)
+        assert sorted(set(a.obs["plate"])) == ["B_P0", "B_P1", "B_P2"]
+        for p in range(3):
+            on = a.obs[a.obs["plate_index"] == p]
+            assert list(on["well"]) == [f"A{k + 1:02d}" for k in range(20)]
+
+    def test_split_batches_each_sort_their_own_cells_by_the_map(self, labelled_cell_data):
+        from iscc.data.rna import run_scrna_batches, concat_batches
+        cells = list(labelled_cell_data["cell_exp"].index)
+        layout = {c: 1 if i < 30 else 2 for i, c in enumerate(cells)}
+        assays = run_scrna_batches(labelled_cell_data, n_batches=2, base_seed=12, design="split",
+                                   protocol="smartseq3", n_cells=30, plate_layout=layout,
+                                   plate_sigma=0.2)
+        for b, a in enumerate(assays):
+            expect = [f"batch{b}_P{layout[c]}" for c in a.obs.index]
+            assert list(a.obs["plate"]) == expect
+            assert a.plates.n_plates == 2                       # plate indices are run-wide
+        combined = concat_batches(assays)
+        assert len(set(zip(combined.obs["plate"].astype(str),
+                           combined.obs["well"].astype(str)))) == combined.n_obs
+
+    def test_custom_layout_survives_h5ad_roundtrip(self, labelled_cell_data, tmp_path):
+        import anndata as ad
+        from iscc.data.rna import scRNA
+        cells = list(labelled_cell_data["cell_exp"].index)
+        a = scRNA(protocol="smartseq3", n_cells=60, batch_label="run1",
+                  plate_layout={c: "left" if i < 25 else "right" for i, c in enumerate(cells)},
+                  seed=1).run(labelled_cell_data)
+        a.write(str(tmp_path))
+        back = ad.read_h5ad(str(tmp_path / "run1.h5ad"))
+        assert (back.obs["plate"].astype(str).values == a.obs["plate"].values).all()
+        assert list(back.uns["plate_layout"]["plate_labels"]) == ["left", "right"]
+
+    @pytest.mark.parametrize("layout,match", [
+        (lambda cells: {c: 1 for c in cells[:-1]}, "no plate for 1"),
+        (lambda cells: {c: (1, 0) for c in cells}, "share plate P1 well A01"),
+        (lambda cells: {c: (1, 384 + i) for i, c in enumerate(cells)}, "not on a 384-well"),
+        (lambda cells: {c: (1, "Q01" if i == 0 else i) for i, c in enumerate(cells)},
+         "not on a 384-well"),
+        (lambda cells: {c: (1, "A25") for c in cells}, "column 25"),
+        (lambda cells: {c: (1, "7A") for c in cells}, "neither a 0-based index"),
+        (lambda cells: {c: (1, i) if i else 1 for i, c in enumerate(cells)}, "mixes"),
+        (lambda cells: {c: None for c in cells}, "missing plate label"),
+        (lambda cells: {c: (1, i) if i < 30 else ("P1", i) for i, c in enumerate(cells)},
+         "collide"),
+    ])
+    def test_bad_layouts_are_rejected(self, labelled_cell_data, layout, match):
+        from iscc.data.rna import scRNA
+        cells = list(labelled_cell_data["cell_exp"].index)
+        with pytest.raises(ValueError, match=match):
+            scRNA(protocol="smartseq3", n_cells=60, plate_layout=layout(cells),
+                  seed=1).run(labelled_cell_data)
+
+    def test_a_plate_holds_at_most_n_wells_cells(self):
+        from iscc.data.rna import scRNA
+        cd = _plain_cell_data(200)
+        cells = list(cd["cell_exp"].index)
+        layout = {c: "big" if i < 120 else "small" for i, c in enumerate(cells)}
+        with pytest.raises(ValueError, match="plate big holds 120 .* 96 wells"):
+            scRNA(protocol="smartseq3", n_cells=200, n_wells=96, plate_layout=layout,
+                  seed=1).run(cd)
+        # the same map fits once the assayed cells do (capacity is about the cells sorted)
+        a = scRNA(protocol="smartseq3", n_wells=96, plate_layout=layout,
+                  seed=1).run(cd, cell_subset=cells[30:150])
+        assert np.bincount(a.plates.plate).tolist() == [90, 30]
+
+    def test_layout_needs_plates_and_a_consistent_plate_count(self, labelled_cell_data):
+        from iscc.data.rna import scRNA
+        cells = list(labelled_cell_data["cell_exp"].index)
+        layout = {c: i % 2 for i, c in enumerate(cells)}
+        with pytest.raises(ValueError, match="plate protocol"):
+            scRNA(protocol="10x", plate_layout=layout)
+        with pytest.raises(ValueError, match="n_plates=3 contradicts"):
+            scRNA(protocol="smartseq3", n_cells=60, n_plates=3, plate_layout=layout,
+                  seed=1).run(labelled_cell_data)
+        with pytest.raises(TypeError, match="dict or pandas Series"):
+            scRNA(protocol="smartseq3", n_cells=60, plate_layout=[0, 1] * 30,
+                  seed=1).run(labelled_cell_data)
+
+
 # --------------------------------------------------------------------------------------
 # Multi-batch generation (DESIGN_features §B.3)
 # --------------------------------------------------------------------------------------
