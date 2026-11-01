@@ -745,6 +745,9 @@ class GenotypeTumor:
         # Discrete-event annotation log (met seeding, resection, chemo windows) -> events.csv, used to
         # annotate the 2-band Muller. Each entry is a dict with at least step/time/event.
         self.events = []
+        # Ground truth of each PARTIAL resection (Surgery(region=...)): what was removed, the margin
+        # rim, and what was left behind. See `_resect_region`.
+        self.resections = []
         self._has_host = False
 
         n_demes = self.grid_size * self.grid_size
@@ -2081,18 +2084,25 @@ class GenotypeTumor:
                 base = rep.evolutionary_parameters["death_rate"]
                 self._tx_death_add[gid] = self._kill_amount(rep, intensity, treatment)
 
-    def _resect(self, site="primary"):
+    def _resect(self, site="primary", region=None, margin=0):
         """Surgical resection (R9): remove EVERY cell (cancer + immortal residents) from the target
         compartment's demes and refresh their rates to 0, so the shared-deme_rates Gillespie fires only
         the remaining compartment afterward (and primary->met seeding stops with no primary cancer
         left). Deterministic — no rng draw. The genealogy is NOT pruned, so a 2-band Muller still shows
-        the resected band cliff to 0. ``site`` is "primary" or "met"."""
+        the resected band cliff to 0. ``site`` is "primary" or "met".
+
+        With ``region`` only those demes are cleared and the ground truth of the cut is returned (see
+        ``_resect_region``). Either way the per-cell tables no longer describe the tumour, so they are
+        marked stale for ``ensure_cell_data``."""
         if site == "primary":
             lo, hi = 0, self.n_primary_demes
         elif site == "met":
             lo, hi = self.n_primary_demes, len(self.demes)
         else:
             raise ValueError(f"unknown resection site {site!r}")
+        self._cell_data_stale = True
+        if region is not None:
+            return self._resect_region(site, lo, hi, region, margin)
         removed = 0
         for di in range(lo, hi):
             deme = self.demes[di]
@@ -2103,6 +2113,81 @@ class GenotypeTumor:
         self.events.append(dict(step=self.step, time=self.time, event="resection",
                                 site=site, n=int(removed)))
         return removed
+
+    def _resect_region(self, site, lo, hi, region, margin):
+        """Partial resection: clear only the demes of ``region`` within the compartment ``[lo, hi)``
+        and return the ground truth of the cut, also appended to ``self.resections``.
+
+        ``region`` is global deme indices in the compartment, or a boolean mask over its demes (flat
+        or ``(side, side)``). Distances are in demes, centre to centre, to the nearest deme across the
+        cut: a region deme's distance to the nearest deme outside it (the rim is the region demes
+        within ``margin``), and an outside deme's distance to the nearest region deme (the residual's
+        ``distance``). Both come from an exact Euclidean distance transform on the compartment grid,
+        which treats the grid's edge as tissue's end rather than a cut. Cells of the OTHER compartment
+        are neither cut nor counted. Deterministic — no rng draw — and, like the whole-compartment
+        resection, it leaves the genealogy unpruned."""
+        from scipy.ndimage import distance_transform_edt
+
+        side = self.grid_size if site == "primary" else self.met_grid_size
+        n = hi - lo
+        arr = np.asarray(region)
+        if arr.dtype == bool:
+            if arr.size != n:
+                raise ValueError(f"a region mask must have one entry per {site} deme ({n}), "
+                                 f"got shape {arr.shape}")
+            mask = arr.reshape(-1).copy()
+        else:
+            idx = arr.reshape(-1).astype(int)
+            if idx.size and (idx.min() < lo or idx.max() >= hi):
+                raise ValueError(f"region has demes outside the {site} compartment "
+                                 f"(global indices {lo}..{hi - 1})")
+            mask = np.zeros(n, dtype=bool)
+            mask[idx - lo] = True
+        if not mask.any():
+            raise ValueError("region selects no deme")
+        grid = mask.reshape(side, side)
+        # inside: a region deme's distance to the nearest outside deme; outside: the reverse. A
+        # region covering the whole compartment has no cut, so nothing is in the rim.
+        inside = (distance_transform_edt(grid) if not grid.all()
+                  else np.full(grid.shape, np.inf)).reshape(-1)
+        outside = distance_transform_edt(~grid).reshape(-1)
+        rim = mask & (inside <= margin) if margin > 0 else np.zeros(n, dtype=bool)
+
+        removed, margin_cancer, residual = Counter(), Counter(), []
+        for k in range(n):
+            di = lo + k
+            for gid, c in self.demes[di].items():
+                if c <= 0 or not self._is_cancer(gid):
+                    continue
+                if mask[k]:
+                    removed[gid] += c
+                    if rim[k]:
+                        margin_cancer[gid] += c
+                else:
+                    r, col = self.deme_coords[di]
+                    residual.append((di, r, col, float(outside[k]), gid, int(c)))
+        n_cells = 0
+        for k in np.flatnonzero(mask):
+            di = lo + int(k)
+            deme = self.demes[di]
+            for gid in list(deme):
+                n_cells += deme[gid]
+                self._remove(di, gid, deme[gid])
+            self._refresh_rate(di)
+
+        record = dict(
+            step=self.step, time=self.time, site=site, region=np.flatnonzero(mask) + lo,
+            margin=margin, removed=dict(removed), margin_cancer=dict(margin_cancer),
+            margin_positive=bool(margin_cancer),
+            residual=pd.DataFrame(residual,
+                                  columns=["deme", "row", "col", "distance", "genotype", "n"]))
+        self.__dict__.setdefault("resections", []).append(record)
+        self.events.append(dict(step=self.step, time=self.time, event="resection", site=site,
+                                n=int(n_cells), n_cancer=int(sum(removed.values())),
+                                region_demes=int(mask.sum()), margin=margin,
+                                margin_cancer=int(sum(margin_cancer.values())),
+                                residual=int(sum(c for *_, c in residual))))
+        return record
 
     def _clear_treatment_overrides(self):
         """Drop any residual per-step treatment overrides left by a PRIOR treated grow, so a subsequent
