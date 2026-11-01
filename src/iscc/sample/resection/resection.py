@@ -27,10 +27,12 @@ class _CellDataGuard:
     ``make_cell_data`` both returns the sample AND installs it on the tumour. A sample is not the
     tumour, so :class:`Resection` runs it inside this guard: the returned tables are unaffected
     (``make_cell_data`` rebinds ``cell_data`` to a fresh dict rather than mutating the old one), and
-    the tumour keeps whatever it had before the cut.
+    the tumour keeps whatever it had before the cut. That includes the stale flag
+    ``grow(materialize=False)`` sets: ``make_cell_data`` clears it, and the restored tables are as
+    stale as they were.
     """
 
-    __slots__ = ("tumor", "_had", "_saved")
+    __slots__ = ("tumor", "_had", "_saved", "_stale")
 
     def __init__(self, tumor):
         self.tumor = tumor
@@ -38,9 +40,12 @@ class _CellDataGuard:
     def __enter__(self):
         self._had = hasattr(self.tumor, "cell_data")
         self._saved = getattr(self.tumor, "cell_data", None)
+        self._stale = getattr(self.tumor, "_cell_data_stale", None)
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        if self._stale is not None:
+            self.tumor._cell_data_stale = self._stale
         if self._had:
             self.tumor.cell_data = self._saved
         else:                                    # nothing was installed before: leave it that way
