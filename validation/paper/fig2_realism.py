@@ -3,15 +3,16 @@
 Top row, the evolution front's tests (registry tumours):
   (a) evolutionary-mode space (Noble's n, D) against real multi-region tumours, at the full census and
       at the 5% detection limit of Noble et al. (drivers below it removed, clones merged into parents);
-  (b) the 1/f fit of neutral and selected tumours (R2, passengers tracked exactly);
-  (c) copy number follows oncogenic content under selection, not under neutrality (R2);
-  (d) whole-genome-duplication prevalence across rates against the PCAWG range (R5);
-  (e) the fit to the PCAWG breast-cancer arm landscape: pending its rerun under the corrected model.
+  (b) copy number follows oncogenic content under selection, not under neutrality (R2);
+  (c) whole-genome-duplication prevalence across rates against the PCAWG range (R5);
+  (d) the fit to the PCAWG breast-cancer arm landscape: pending its rerun under the corrected model.
+No 1/f panel: the 6,000-gene genome saturates at tumour scale, so the infinite-sites test does not apply.
 Bottom row, the data front's tests, each fit on a real reference and re-simulated on the showcase
 tumour (R0):
-  (f) scRNA against PBMC3k: library size, mean-variance, dropout;
-  (g) DNA against GIAB HG002 (bulk), Tapestri and DLP+ (single cell): coverage dispersion by copy number;
-  (h) Visium against a real breast-cancer section: per-spot depth and its spatial autocorrelation.
+  (e) scRNA against PBMC3k: library size, mean-variance, zero fraction;
+  (f) DNA against GIAB HG002 (bulk), Tapestri and DLP+ (single cell): coverage dispersion by copy
+      number, and Tapestri allelic dropout;
+  (g) Visium against a real breast-cancer section: per-spot depth and its spatial autocorrelation.
 
 Run from the iscc repository root (scanpy's data cache is ./data):
     python validation/paper/fig2_realism.py
@@ -75,33 +76,6 @@ def panel_a(ax):
               title_fontsize=4.5)
     return dict(n_sim=len(sim), coverage=cov, D_median_detected=float(sim.Dd.median()), n_median_detected=float(sim.nd.median()),
                 D_median_census=float(sim.D0.median()), D_median_real=float(emp.D.median()))
-
-
-def panel_b(ax):
-    """The 1/f fit of neutral and of selected tumours (both grown with exact passengers). Spatially
-    constrained growth bends the neutral spectrum (Chkhaidze et al. 2019), so the fit is not
-    expected to separate the two arms; Williams et al.'s neutrality threshold is drawn for reference."""
-    out = {}
-    for k, (name, col) in enumerate((("neutral", S.SOURCE["real"]), ("selected", S.SOURCE["iscc"]))):
-        rsq = [r["sfs_rsq"] for r in SM.load("R2") if r["task"].startswith(name) and "sfs_rsq" in r]
-        if not rsq:
-            return pending(ax, "pending: R2 tumours\n(exact passengers)")
-        x = k + np.random.default_rng(k).uniform(-0.12, 0.12, len(rsq))
-        ax.scatter(x, rsq, s=5, color=col, edgecolors=S.INK, lw=0.2)
-        ax.plot([k - 0.25, k + 0.25], [np.mean(rsq)] * 2, color=S.INK, lw=0.8)
-        out[name] = dict(mean=float(np.mean(rsq)), sd=float(np.std(rsq)), n=len(rsq))
-    ax.axhline(0.98, color=S.GREY, lw=0.5, ls="--")
-    ax.text(1.45, 0.985, "neutrality\nthreshold", fontsize=4.3, color=S.GREY, ha="right", va="bottom")
-    ax.set_xticks([0, 1])
-    ax.set_xticklabels(["neutral", "selected"])
-    ax.set_xlim(-0.5, 1.5)
-    ax.set_ylim(0, 1.1)
-    ax.set_ylabel("$R^2$ of the $1/f$ fit")
-    from scipy.stats import mannwhitneyu
-    a = [r["sfs_rsq"] for r in SM.load("R2") if r["task"].startswith("neutral") and "sfs_rsq" in r]
-    b = [r["sfs_rsq"] for r in SM.load("R2") if r["task"].startswith("selected") and "sfs_rsq" in r]
-    out["mwu_p"] = float(mannwhitneyu(a, b).pvalue)
-    return out
 
 
 def panel_c(ax):
@@ -357,23 +331,26 @@ def render():
     fig = S.figure("double", 112)
     out = {}
     S.text_mm(fig, 2, 2.5, "The evolution front's tests", fontsize=7, va="top", fontweight="bold")
-    xs = [10, 47, 84, 121, 158]
-    for i, (L, fn) in enumerate(zip("abcde", (panel_a, panel_b, panel_c, panel_d, None))):
-        S.panel_letter(fig, L, xs[i] - 8, 8)
-        ax = S.ax_mm(fig, xs[i], 11, 27, 27 if i < 4 else 22)
+    # No site-frequency-spectrum (1/f) panel: passengers live on the 6,000-gene genome, which
+    # saturates at tumour scale (nearly every site is hit in some lineage), so the spectrum of sites
+    # is not a spectrum of mutations and the infinite-sites 1/f test does not apply (issues, B13).
+    xs = [12, 58, 104, 150]
+    for i, (L, fn) in enumerate(zip("abcd", (panel_a, panel_c, panel_d, None))):
+        S.panel_letter(fig, L, xs[i] - 9, 8)
+        ax = S.ax_mm(fig, xs[i], 11, 30, 27 if i < 3 else 22)
         if fn is None:
             pending(ax, "PCAWG arm-landscape fit:\npending rerun under the\nploidy-relative arm model")
-            out["e"] = "pending"
+            out[L] = "pending"
         else:
             out[L] = fn(ax)
     S.text_mm(fig, 2, 57.5, "The data front's tests: fit to a real reference, re-simulate on the tumour",
               fontsize=7, va="top", fontweight="bold")
-    S.panel_letter(fig, "f", 2, 63)
-    out["f"] = render_f(fig, 10, 67)
-    S.panel_letter(fig, "g", 92, 63)
-    out["g"] = render_g(S.ax_mm(fig, 100, 67, 28, 21))
-    S.panel_letter(fig, "h", 137, 63)
-    out["h"] = render_h(fig, 145, 67)
+    S.panel_letter(fig, "e", 2, 63)
+    out["e"] = render_f(fig, 10, 67)
+    S.panel_letter(fig, "f", 92, 63)
+    out["f"] = render_g(S.ax_mm(fig, 100, 67, 28, 21))
+    S.panel_letter(fig, "g", 137, 63)
+    out["g"] = render_h(fig, 145, 67)
     path = S.save(fig, "fig2_realism")
     print("wrote", path)
     for k, v in out.items():
