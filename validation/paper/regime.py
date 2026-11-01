@@ -49,8 +49,10 @@ T = TIERS[TIER]
 # an open modelling item, and the figures do not claim it.
 SELECTION = {"prop_breach": 0.002, "prop_stromal_survival": 0.002, "breach_effects": 1.01}
 
-# The founding acinus stays closed this many generations after it is half full: long enough for a
-# truncal copy-number layer, short enough that the in-situ phase is not one deme for most of the run.
+# The founding acinus stays closed for this many tau steps after it is half full (the tau engine ticks
+# the confinement clock once per step, so at tau 0.5 this is about 200 generations; issues note N8):
+# long enough for a truncal copy-number layer, short enough that the in-situ phase is not one deme for
+# most of the run.
 ORIGIN_CONFINEMENT = dict(RR._CFG["spatial_params"]["origin_confinement"], generations=400)
 
 # Oxygen. The calibrated programs config supplies O2 uniformly at a rate (0.3) far below consumption

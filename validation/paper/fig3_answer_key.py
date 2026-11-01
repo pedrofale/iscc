@@ -251,7 +251,7 @@ def niche_task(key):
         rec = dict(run=run, task=task, arch=task.split("_")[0], n_cells=int(cancer.sum()),
                    n_clones=int(clone.shape[1] + 1), genotype=float(0.5 * (rg + rb - rn)),
                    niche=float(0.5 * (rn + rb - rg)), residual=float(1 - rb))
-        if task == "barriers_seed1":
+        if task in ("barriers_seed1", "open_seed1"):           # Fig 3c and S3 Fig show these two
             rec.update(scatter_niche=niche.tolist(), scatter_emt=emt.tolist())
         os.makedirs(C_CACHE, exist_ok=True)
         with open(os.path.join(C_CACHE, f"{task}.json"), "w") as f:
