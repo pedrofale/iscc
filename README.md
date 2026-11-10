@@ -1,5 +1,8 @@
 <div align="left">
-  <img src="https://github.com/pedrofale/iscc/raw/main/docs/assets/logo_text.svg" width="340px">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/pedrofale/iscc/raw/main/docs/assets/logo_text_dark.svg">
+    <img src="https://github.com/pedrofale/iscc/raw/main/docs/assets/logo_text.svg" alt="in silico cancer center" width="340px">
+  </picture>
 </div>
 <p></p>
 
