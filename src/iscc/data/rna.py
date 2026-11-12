@@ -25,7 +25,7 @@ same biology, different technical signature (§B.3). `run_scrna_batches` builds 
 multi-batch benchmark (shared / balanced-split / confounded designs).
 """
 from .assay import Assay
-from .batch import Batch, RNABatchHyperParams, COUNT_MODELS, assign_plates
+from .batch import Batch, RNABatchHyperParams, COUNT_MODELS, assign_plates, assign_plates_from_map
 
 import os
 
@@ -164,6 +164,18 @@ class scRNA(Assay):
         ambient soup) and the sampled-cell selection; two instances with the same
         hyper-parameters and different seeds are two batches (same biology, different
         technical noise).
+    plate_layout : dict or pandas.Series, optional
+        Which plate (and well) each assayed cell is sorted into, replacing the default even,
+        sequential split over ``n_plates``. Keyed by cell id, covering every assayed cell (it
+        may hold more). Each value is either a ``(plate, well)`` pair, the well a 0-based
+        index in reading order (A01 = 0, A02 = 1, ...) or a name such as ``"A01"``, or a plate
+        label alone, in which case each plate's wells are filled in reading order in the order
+        the cells are assayed. A plate takes at most ``n_wells`` cells, one per well; a layout
+        that does not fit raises rather than growing the plate count. ``obs["plate"]`` names
+        the plates by their labels (an integer label ``n`` becomes ``"P<n>"``). Use it to
+        model how the cells were actually sorted, e.g. a design that confounds plate with
+        region. Needs a plate protocol (``n_wells > 0``), and ``n_plates`` must then be 0 or
+        the number of plates the map names. Default None -> the sequential layout.
     """
 
     def __init__(self, protocol="10x", n_cells=100, count_model="nb", batch_label=None,
@@ -172,7 +184,7 @@ class scRNA(Assay):
                  ambient_frac=None, doublet_rate=None, dropout_mid=None, dropout_shape=None,
                  well_sigma=None, n_wells=None, n_plates=None, plate_sigma=None,
                  depth_batch_sigma=None, kappa=None,
-                 seed=42):
+                 seed=42, plate_layout=None):
         super(scRNA, self).__init__(seed=seed, protocol=resolve_protocol(protocol))
         self.n_cells = int(n_cells)
         if count_model not in COUNT_MODELS:
@@ -204,6 +216,10 @@ class scRNA(Assay):
                              f"(got n_wells={params['n_wells']}, n_plates={params['n_plates']})")
 
         self.hypers = RNABatchHyperParams(**params)
+        if plate_layout is not None and self.hypers.n_wells == 0:
+            raise ValueError("plate_layout needs a plate protocol (n_wells > 0), "
+                             f"but protocol {self.protocol!r} has n_wells=0")
+        self.plate_layout = plate_layout
         # convenience mirror for callers that still read `.n_reads`
         self.n_reads = self.hypers.mu_lib
         # plate/well placement of the assayed cells; set by `run` (None without plates)
@@ -258,9 +274,15 @@ class scRNA(Assay):
         self.batch = Batch(self.hypers, seed=self.seed, label=label).realize(genes, base_profile)
 
         # plate protocols: place the cells one per well before drawing depth, so cells that
-        # share a plate share its depth offset (droplet protocols have n_wells = 0 -> None)
-        self.plates = (assign_plates(self.n_cells, self.hypers.n_wells, self.hypers.n_plates)
-                       if self.hypers.n_wells > 0 else None)
+        # share a plate share its depth offset (droplet protocols have n_wells = 0 -> None).
+        # A caller-given plate map replaces the default sequential split.
+        if self.hypers.n_wells <= 0:
+            self.plates = None
+        elif self.plate_layout is not None:
+            self.plates = assign_plates_from_map(target_cells, self.plate_layout,
+                                                 self.hypers.n_wells, self.hypers.n_plates)
+        else:
+            self.plates = assign_plates(self.n_cells, self.hypers.n_wells, self.hypers.n_plates)
 
         # biology -> library -> batch (shared), then the pluggable count draw
         lib = self.batch.library_factors(self.n_cells, plates=self.plates)
@@ -337,7 +359,8 @@ class scRNA(Assay):
 
 
 def run_scrna_batches(cell_data, n_batches=2, base_seed=42, design="shared",
-                      protocol="10x", n_cells=100, count_model="nb", **scrna_kwargs):
+                      protocol="10x", n_cells=100, count_model="nb", plate_layout=None,
+                      **scrna_kwargs):
     """Generate `n_batches` scRNA batches that share biology but differ technically (§B.3).
 
     designs:
@@ -351,6 +374,10 @@ def run_scrna_batches(cell_data, n_batches=2, base_seed=42, design="shared",
     Returns a list of run `scRNA` instances (one per batch), each with `.observed_counts`,
     `.obs`, `.batch`, and `.to_anndata()`. On a plate protocol each batch is its own plate
     run: its plate ids carry the batch label, so they stay distinct after `concat_batches`.
+
+    `plate_layout` (see `scRNA`) is one plate map for the whole run, passed to every batch:
+    each batch looks up its own cells in it, so under ``"split"`` a batch sorts only its share
+    of the cells and under ``"shared"`` every batch repeats the same sort as its own plate run.
     """
     cell_states = cell_data["cell_exp"]
     n_avail = len(cell_states.index)
@@ -374,7 +401,8 @@ def run_scrna_batches(cell_data, n_batches=2, base_seed=42, design="shared",
     for i, subset in enumerate(subsets):
         assay = scRNA(
             protocol=protocol, n_cells=len(subset), count_model=count_model,
-            batch_label=f"batch{i}", seed=base_seed + 1 + i, **scrna_kwargs,
+            batch_label=f"batch{i}", seed=base_seed + 1 + i, plate_layout=plate_layout,
+            **scrna_kwargs,
         )
         assay.run(cell_data, cell_subset=subset)
         assays.append(assay)

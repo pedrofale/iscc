@@ -31,9 +31,11 @@ batch) is shared and only the final draw is swapped via ``COUNT_MODELS``.
 from dataclasses import dataclass, asdict
 
 import math
+import re
 import warnings
 
 import numpy as np
+import pandas as pd
 
 
 # --------------------------------------------------------------------------------------
@@ -81,10 +83,11 @@ def row_label(i):
 class PlateLayout:
     """Where each cell physically sits: its plate, its well, and the well's row/column.
 
-    Assignment is deterministic (no RNG): the cells are split as evenly as possible across
-    the plates, and within a plate the wells are filled in reading order (A01, A02, ... then
-    B01). Because one cell occupies one well, `n_plates * n_wells` is a hard capacity —
-    see [`assign_plates`][iscc.data.batch.assign_plates].
+    Assignment is deterministic (no RNG). By default the cells are split as evenly as possible
+    across the plates, and within a plate the wells are filled in reading order (A01, A02, ...
+    then B01). Because one cell occupies one well, `n_plates * n_wells` is a hard capacity —
+    see [`assign_plates`][iscc.data.batch.assign_plates]. A caller-given plate map replaces
+    that split (`assign_plates_from_map`), and then the plates carry the map's own names.
 
     Attributes
     ----------
@@ -102,6 +105,9 @@ class PlateLayout:
         0-based well index within that plate.
     row, col : ndarray of int
         0-based row / column of that well on the plate.
+    labels : list of str, optional
+        Name of each plate, by plate index, when the layout came from a plate map; None for
+        the default split, whose plates are named by index ("P0", "P1", ...).
     """
     n_cells: int
     n_wells: int
@@ -112,6 +118,7 @@ class PlateLayout:
     well: np.ndarray
     row: np.ndarray
     col: np.ndarray
+    labels: list = None
 
     def well_ids(self):
         """Human-readable well names ("A01" ... "P24")."""
@@ -123,11 +130,16 @@ class PlateLayout:
         Two batches are two physical plate runs, so qualifying keeps their plates distinct
         when several batches are concatenated.
         """
+        if self.labels is not None:
+            return np.array([f"{label}_{self.labels[p]}" for p in self.plate])
         return np.array([f"{label}_P{p}" for p in self.plate])
 
     def to_dict(self):
-        return dict(n_plates=int(self.n_plates), n_wells=int(self.n_wells),
-                    n_rows=int(self.n_rows), n_cols=int(self.n_cols))
+        out = dict(n_plates=int(self.n_plates), n_wells=int(self.n_wells),
+                   n_rows=int(self.n_rows), n_cols=int(self.n_cols))
+        if self.labels is not None:
+            out["plate_labels"] = list(self.labels)
+        return out
 
 
 def assign_plates(n_cells, n_wells, n_plates=0):
@@ -179,6 +191,125 @@ def assign_plates(n_cells, n_wells, n_plates=0):
         n_cells=n_cells, n_wells=n_wells, n_plates=realized, n_rows=n_rows, n_cols=n_cols,
         plate=plate.astype(int), well=well.astype(int),
         row=(well // n_cols).astype(int), col=(well % n_cols).astype(int),
+    )
+
+
+_WELL_NAME = re.compile(r"^([A-Za-z]+)(\d+)$")
+
+
+def _plate_name(label):
+    """A plate label as a name: integers become "P<n>" (like the default plates), the rest str."""
+    if isinstance(label, (int, np.integer)) and not isinstance(label, bool):
+        return f"P{label}"
+    return str(label)
+
+
+def _well_index(well, n_cols):
+    """0-based well index from an int (already an index) or a well name ("A01", "P24")."""
+    if isinstance(well, (int, np.integer)) and not isinstance(well, bool):
+        return int(well)
+    m = _WELL_NAME.match(str(well))
+    if m is None:
+        raise ValueError(f"well {well!r} is neither a 0-based index nor a well name like 'A01'")
+    row = 0
+    for ch in m.group(1).upper():                # inverse of `row_label`: A -> 0, AA -> 26
+        row = row * 26 + ord(ch) - ord("A") + 1
+    col = int(m.group(2)) - 1
+    if not 0 <= col < n_cols:
+        raise ValueError(f"well {well!r}: column {col + 1} is not on a plate with {n_cols} columns")
+    return (row - 1) * n_cols + col
+
+
+def assign_plates_from_map(cells, plate_map, n_wells, n_plates=0):
+    """Lay `cells` out on plates by a caller-given plate map, one cell per well.
+
+    Parameters
+    ----------
+    cells : array-like
+        Ids of the cells to place, in assay order.
+    plate_map : dict or pandas.Series
+        Keyed by cell id; must cover every cell in `cells` and may hold more. Each value is
+        either a ``(plate, well)`` pair — the well an int (0-based, reading order: A01 = 0,
+        A02 = 1, ...) or a name such as ``"A01"`` — or a plate label alone, in which case the
+        wells of each plate are filled in reading order, in the order the cells come in
+        `cells`. All values take one of the two forms.
+    n_wells : int
+        Wells per plate. Must be positive.
+    n_plates : int, default 0
+        The map decides the plates, so this must be 0 or exactly the number of plates the map
+        names; any other count is an error.
+
+    Returns
+    -------
+    PlateLayout
+        The placement. Plates are indexed in sorted label order over the WHOLE map, so a plate
+        keeps its index in every batch that draws cells from the same map, and they are named
+        by their labels (an integer label ``n`` is named ``"P<n>"``).
+
+    Notes
+    -----
+    **Capacity.** One cell occupies one well, so a plate takes at most `n_wells` of the cells
+    being placed and no two of them may share a well. Unlike `assign_plates` this raises
+    rather than growing the plate count: the map names the plates, so there is none to add.
+    """
+    n_wells = int(n_wells)
+    if n_wells <= 0:
+        raise ValueError(f"n_wells must be positive to lay cells out on plates, got {n_wells}")
+    if isinstance(plate_map, pd.DataFrame) or not isinstance(plate_map, (dict, pd.Series)):
+        raise TypeError("plate_layout must be a dict or pandas Series keyed by cell id, got "
+                        f"{type(plate_map).__name__}")
+    pmap = pd.Series(plate_map, dtype=object)
+    if not pmap.index.is_unique:
+        raise ValueError("plate_layout lists a cell more than once")
+    paired = np.array([isinstance(v, (tuple, list)) for v in pmap.values], dtype=bool)
+    if paired.any() and not paired.all():
+        raise ValueError("plate_layout mixes (plate, well) pairs with bare plate labels; use one")
+    paired = bool(paired.size) and bool(paired.all())
+    if paired and any(len(v) != 2 for v in pmap.values):
+        raise ValueError("plate_layout pairs must be (plate, well)")
+    plate_labels = [v[0] for v in pmap.values] if paired else list(pmap.values)
+    codes, uniques = pd.factorize(pd.Series(plate_labels, dtype=object), sort=True)
+    if (codes < 0).any():
+        raise ValueError("plate_layout has a missing plate label")
+    labels = [_plate_name(u) for u in uniques]
+    if len(set(labels)) != len(labels):
+        raise ValueError(f"plate labels {list(uniques)} collide once named as {labels}")
+    if int(n_plates) not in (0, len(labels)):
+        raise ValueError(f"n_plates={int(n_plates)} contradicts plate_layout, which names "
+                         f"{len(labels)} plate(s)")
+
+    cells = np.asarray(cells)
+    missing = ~pd.Index(cells).isin(pmap.index)
+    if missing.any():
+        raise ValueError(f"plate_layout has no plate for {int(missing.sum())} assayed cell(s), "
+                         f"e.g. {list(cells[missing][:3])}")
+    pos = pmap.index.get_indexer(cells)
+    plate = codes[pos].astype(int)
+    n_rows, n_cols = well_grid(n_wells)
+    if paired:
+        well = np.array([_well_index(pmap.values[i][1], n_cols) for i in pos], dtype=int)
+        bad = (well < 0) | (well >= n_wells)
+        if bad.any():
+            i = int(np.flatnonzero(bad)[0])
+            raise ValueError(f"cell {cells[i]!r}: well {pmap.values[pos[i]][1]!r} is not on a "
+                             f"{n_wells}-well plate")
+        taken = pd.Series(list(zip(plate, well))).duplicated(keep=False).to_numpy()
+        if taken.any():
+            i = np.flatnonzero(taken)[:2]
+            w = int(well[i[0]])
+            raise ValueError(f"cells {list(cells[i])} share plate {labels[plate[i[0]]]} well "
+                             f"{row_label(w // n_cols)}{w % n_cols + 1:02d} (one cell per well)")
+    else:
+        sizes = np.bincount(plate, minlength=len(labels))
+        if sizes.max(initial=0) > n_wells:
+            p = int(sizes.argmax())
+            raise ValueError(f"plate {labels[p]} holds {int(sizes[p])} of the cells but has "
+                             f"{n_wells} wells (one cell per well)")
+        well = pd.Series(plate).groupby(plate).cumcount().to_numpy(dtype=int)
+    return PlateLayout(
+        n_cells=len(cells), n_wells=n_wells, n_plates=len(labels), n_rows=n_rows, n_cols=n_cols,
+        plate=plate, well=well, row=(well // n_cols).astype(int), col=(well % n_cols).astype(int),
+        labels=labels,
     )
 
 

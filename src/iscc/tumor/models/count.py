@@ -784,6 +784,9 @@ class GenotypeTumor:
         # Discrete-event annotation log (met seeding, resection, chemo windows) -> events.csv, used to
         # annotate the 2-band Muller. Each entry is a dict with at least step/time/event.
         self.events = []
+        # Ground truth of each PARTIAL resection (Surgery(region=...)): what was removed, the margin
+        # rim, and what was left behind. See `_resect_region`.
+        self.resections = []
         self._has_host = False
 
         n_demes = self.grid_size * self.grid_size
@@ -863,6 +866,9 @@ class GenotypeTumor:
 
         self.deme_rates = np.array([self._deme_rate(i) for i in range(len(self.demes))], dtype=float)
         self.cell_data = None
+        # True once `grow(materialize=False)` has advanced the counts past `cell_data`; cleared by
+        # `make_cell_data`. Read with getattr so tumours pickled before the flag existed still load.
+        self._cell_data_stale = False
 
     # --- genotype registry ---------------------------------------------------
     def _is_viable(self, rep):
@@ -1387,6 +1393,102 @@ class GenotypeTumor:
             return intensity * kill_rate * rep.evolutionary_parameters["division_rate"]
         return intensity * max(kill_rate - rep.evolutionary_parameters["death_rate"], 0.0)
 
+    # --- mechanistic drug response (Treatment.response == "mechanistic") ----------------------
+    @staticmethod
+    def _is_mechanistic(tx):
+        return getattr(tx, "response", "label") == "mechanistic"
+
+    @staticmethod
+    def _carries_target(rep, coord, amplification_threshold):
+        """Does this clone carry the target at ``coord = (segment, position)``? Yes if any copy of the
+        segment has the mutation there, or if the segment has more copies than
+        ``amplification_threshold``. Copy number is segment-granular (each copy is a whole-segment
+        SNV bitset), so a deletion of the mutated copy, or of copies down to the threshold, is what
+        makes a lineage lose the target."""
+        seg, pos = coord
+        copies = rep.genome[seg]["p"] + rep.genome[seg]["m"]
+        if any(c[pos] for c in copies):
+            return True
+        return amplification_threshold is not None and len(copies) > amplification_threshold
+
+    def _target_expression(self, gid, rep, table):
+        """The clone's mean expression of the drug's target genes, memoised per genotype.
+
+        The same law ``make_cell_data`` materialises, read at the genotype level: the dosage-driven
+        baseline (``get_exp`` with the program layer off, the allele-resolved ``get_exp_alleles``
+        with it on) times the program multiplier at the clone's MEAN activity (``ProgramModel.mean_z``
+        of its genotype drive). The per-cell activity draw and the per-deme niche are left out: one is
+        noise around this mean, the other a property of where a cell sits, not of the genotype. A
+        genotype's genome and phenotype never change once registered, so the memo never goes stale."""
+        level = table["levels"].get(gid)
+        if level is None:
+            rep.baseline_exp = self.celltype_exps["cancer"]     # what make_cell_data sets
+            P = self.programs
+            if P is None:
+                exp = rep.get_exp(self.selection.mut_effects)
+            else:
+                ep, em = rep.get_exp_alleles(dosage_sensitivity=P.dosage_sensitivity,
+                                             snv_exp_effect=P.snv_exp_effect,
+                                             dosage_saturation=P.dosage_saturation)
+                drive = (P.clone_drive(rep.evolutionary_parameters, rep.baseline_rates,
+                                       rep.get_snvs()) + P.celltype_bias("cancer"))
+                exp = (ep + em) * P.gene_multiplier(P.mean_z(drive)[None, :])[0]
+            level = float(np.mean(exp[table["genes"]]))
+            table["levels"][gid] = level
+        return level
+
+    def _target_table(self, tx):
+        """Per-tumour memo for an expression-targeted drug: its flat gene indices, the founding clone's
+        expression of them (the reference that sets the nominal dose), and the per-genotype levels.
+        Keyed by the gene list, so two drugs on the same genes share it. Created lazily, so a tumour
+        pickled before the mechanistic mode existed still loads."""
+        key = tuple(tx.target_genes)
+        cache = self.__dict__.setdefault("_mech_expr", {})
+        table = cache.get(key)
+        if table is None:
+            off = self.selection._seg_offsets
+            genes = []
+            for g in key:
+                if isinstance(g, tuple):
+                    seg, pos = g
+                    if not (0 <= seg < self.n_segments and 0 <= pos < off[seg + 1] - off[seg]):
+                        raise ValueError(f"target gene {g} is not on the genome")
+                    g = off[seg] + pos
+                if not 0 <= g < self.n_genes:
+                    raise ValueError(f"target gene {g} is not on the genome ({self.n_genes} genes)")
+                genes.append(int(g))
+            table = {"genes": np.array(genes, dtype=int), "levels": {}}
+            founder = self.genotypes[self.founder_id]
+            table["ref"] = self._target_expression(self.founder_id, founder, table)
+            if not table["ref"] > 0:
+                raise ValueError("the founding clone does not express the target genes, so there is "
+                                 "no reference level to scale the drug's dose by")
+            cache[key] = table
+        return table
+
+    def _mech_dose(self, tx, gid, rep):
+        """``(p, x)`` for a CANCER clone under ``response="mechanistic"``: the dose it takes is
+        ``dosage * p * x``, the mechanistic stand-in for the label model's ``p * (1 - protection)``.
+
+        No resistance label enters: ``treatment_resistance``, ``drug_tolerance`` and the carried
+        resistance state are all ignored. ``p`` is ``effectiveness`` when the clone carries every
+        target the drug names (or it names none) and ``toxicity`` otherwise, so the off-target effect
+        is unchanged. ``x`` is 1, except for an on-target clone of an expression-targeted drug, where
+        it is the clone's expression of the target genes relative to the founding clone's, and 0 --
+        no effect at all -- below ``expression_threshold``."""
+        targets = getattr(tx, "targets", None)
+        if targets:
+            amp = getattr(tx, "amplification_threshold", None)
+            if not all(self._carries_target(rep, t, amp) for t in targets):
+                return tx.toxicity, 1.0
+        if not getattr(tx, "target_genes", None):
+            return tx.effectiveness, 1.0
+        table = self._target_table(tx)
+        level = self._target_expression(gid, rep, table)
+        if level < tx.expression_threshold:
+            return tx.effectiveness, 0.0
+        return tx.effectiveness, level / table["ref"]
+
     def _tx_death_add_for(self, gid, rep=None):
         """The active treatment's extra death hazard for ``gid`` -- the value ``_apply_treatment``
         stored, or, for a genotype minted AFTER that step's rebuild, the same value computed on demand
@@ -1404,15 +1506,19 @@ class GenotypeTumor:
         if tx is None or getattr(tx, "affects", "death_rate") == "immune_resistance":
             return 0.0
         rep = rep if rep is not None else self.genotypes[gid]
-        if self._is_cancer(gid):
-            target = self._is_treatment_target(tx, rep)
-            tr = max(rep.evolutionary_parameters["treatment_resistance"],
-                     rep.evolutionary_parameters.get("drug_tolerance", 0.0),
-                     self._state_protection(rep))            # §3.3 carried resistance state
-            p = tx.effectiveness if target else tx.toxicity
+        if self._is_cancer(gid) and self._is_mechanistic(tx):
+            p, x = self._mech_dose(tx, gid, rep)
+            intensity = self._tx_dosage * p * x
         else:
-            tr, p = 0.0, tx.toxicity
-        intensity = self._tx_dosage * p * (1.0 - min(max(tr, 0.0), 1.0))
+            if self._is_cancer(gid):
+                target = self._is_treatment_target(tx, rep)
+                tr = max(rep.evolutionary_parameters["treatment_resistance"],
+                         rep.evolutionary_parameters.get("drug_tolerance", 0.0),
+                         self._state_protection(rep))            # §3.3 carried resistance state
+                p = tx.effectiveness if target else tx.toxicity
+            else:
+                tr, p = 0.0, tx.toxicity
+            intensity = self._tx_dosage * p * (1.0 - min(max(tr, 0.0), 1.0))
         if intensity <= 0:
             return 0.0                          # matches _apply_treatment's `continue` (no entry)
         val = self._kill_amount(rep, intensity, tx)
@@ -1432,13 +1538,21 @@ class GenotypeTumor:
         if (tx is None or getattr(tx, "affects", "death_rate") != "immune_resistance"
                 or not self._is_cancer(gid)):
             return base_ir
-        target = self._is_treatment_target(tx, rep)
-        tr = rep.evolutionary_parameters["treatment_resistance"]
-        p = tx.effectiveness if target else tx.toxicity
-        intensity = self._tx_dosage * p * (1.0 - min(max(tr, 0.0), 1.0))
+        mech = self._is_mechanistic(tx)
+        if mech:
+            p, x = self._mech_dose(tx, gid, rep)
+            intensity = self._tx_dosage * p * x
+        else:
+            target = self._is_treatment_target(tx, rep)
+            tr = rep.evolutionary_parameters["treatment_resistance"]
+            p = tx.effectiveness if target else tx.toxicity
+            intensity = self._tx_dosage * p * (1.0 - min(max(tr, 0.0), 1.0))
         if intensity <= 0:
             return base_ir                      # matches _apply_treatment's `continue` (no entry)
-        val = rep.evolutionary_parameters["immune_resistance"] * (1.0 - intensity)
+        # A mechanistic dose can exceed 1 (a clone making twice the founder's target), and stripping
+        # more than all of the resistance would make it negative.
+        strip = max(0.0, 1.0 - intensity) if mech else 1.0 - intensity
+        val = rep.evolutionary_parameters["immune_resistance"] * strip
         self._tx_immune_resist[gid] = val       # memoise: read identically on every later step
         return val
 
@@ -2001,6 +2115,9 @@ class GenotypeTumor:
         self._tx_treatment, self._tx_dosage = treatment, dosage
         affects = getattr(treatment, "affects", "death_rate")
         kill_rate = getattr(treatment, "kill_rate", 0.8)
+        # response="mechanistic": every cancer-clone dose below comes from `_mech_dose` (genotype and
+        # expression) instead of the resistance labels; normal tissue is unchanged.
+        mech = self._is_mechanistic(treatment)
         # Persister cost, charged only for the duration of the dose (see Selection.proliferation_cost
         # for why it cannot be baked into division_rate). 0.0 by default -> dict stays empty.
         dt_cost = float(getattr(self.selection, "drug_tolerance_cost", 0.0) or 0.0)
@@ -2036,7 +2153,12 @@ class GenotypeTumor:
                 if getattr(rep, "_tx_mutagenized", False):
                     continue
                 factor = mutagenicity
-                if dose_scaled:
+                if dose_scaled and mech:
+                    # Mechanistic: the exposure `x` stands in for (1 - protection) -- the drug that
+                    # reaches the clone, by its target expression -- capped at the full multiplier.
+                    _, x = self._mech_dose(treatment, gid, rep)
+                    factor = 1.0 + (mutagenicity - 1.0) * min(max(x, 0.0), 1.0)
+                elif dose_scaled:
                     tr = max(rep.evolutionary_parameters["treatment_resistance"],
                              rep.evolutionary_parameters.get("drug_tolerance", 0.0),
                              self._state_protection(rep))    # §3.3 carried resistance state
@@ -2070,14 +2192,19 @@ class GenotypeTumor:
                 # immunotherapy strips a clone's immune resistance -- only meaningful for cancer.
                 if not is_cancer:
                     continue
-                target = self._is_treatment_target(treatment, rep)
-                tr = rep.evolutionary_parameters["treatment_resistance"]
-                p = treatment.effectiveness if target else treatment.toxicity
-                intensity = dosage * p * (1.0 - min(max(tr, 0.0), 1.0))
+                if mech:
+                    p, x = self._mech_dose(treatment, gid, rep)
+                    intensity = dosage * p * x
+                else:
+                    target = self._is_treatment_target(treatment, rep)
+                    tr = rep.evolutionary_parameters["treatment_resistance"]
+                    p = treatment.effectiveness if target else treatment.toxicity
+                    intensity = dosage * p * (1.0 - min(max(tr, 0.0), 1.0))
                 if intensity <= 0:
                     continue
                 ir = rep.evolutionary_parameters["immune_resistance"]
-                self._tx_immune_resist[gid] = ir * (1.0 - intensity)
+                strip = max(0.0, 1.0 - intensity) if mech else 1.0 - intensity  # as _tx_immune_resist_for
+                self._tx_immune_resist[gid] = ir * strip
             else:
                 # Death-rate therapy (chemo / targeted). Cancer TARGET cells take `effectiveness`;
                 # everything OFF-TARGET -- non-target cancer clones AND normal/host tissue -- takes
@@ -2085,6 +2212,13 @@ class GenotypeTumor:
                 # resistance; giving them a `_tx_death_add` is what makes chemo's systemic toxicity kill
                 # normal tissue (they become death-only participants in the dynamics -- see _deme_rate /
                 # update / _tau_substep). Cancer entries are unchanged, so the cancer path is byte-identical.
+                if is_cancer and mech:
+                    # No labels, so no persister cost either: drug tolerance is not consulted.
+                    p, x = self._mech_dose(treatment, gid, rep)
+                    intensity = dosage * p * x
+                    if intensity > 0:
+                        self._tx_death_add[gid] = self._kill_amount(rep, intensity, treatment)
+                    continue
                 if is_cancer:
                     target = self._is_treatment_target(treatment, rep)
                     tr = max(rep.evolutionary_parameters["treatment_resistance"],
@@ -2116,18 +2250,25 @@ class GenotypeTumor:
                 base = rep.evolutionary_parameters["death_rate"]
                 self._tx_death_add[gid] = self._kill_amount(rep, intensity, treatment)
 
-    def _resect(self, site="primary"):
+    def _resect(self, site="primary", region=None, margin=0):
         """Surgical resection (R9): remove EVERY cell (cancer + immortal residents) from the target
         compartment's demes and refresh their rates to 0, so the shared-deme_rates Gillespie fires only
         the remaining compartment afterward (and primary->met seeding stops with no primary cancer
         left). Deterministic — no rng draw. The genealogy is NOT pruned, so a 2-band Muller still shows
-        the resected band cliff to 0. ``site`` is "primary" or "met"."""
+        the resected band cliff to 0. ``site`` is "primary" or "met".
+
+        With ``region`` only those demes are cleared and the ground truth of the cut is returned (see
+        ``_resect_region``). Either way the per-cell tables no longer describe the tumour, so they are
+        marked stale for ``ensure_cell_data``."""
         if site == "primary":
             lo, hi = 0, self.n_primary_demes
         elif site == "met":
             lo, hi = self.n_primary_demes, len(self.demes)
         else:
             raise ValueError(f"unknown resection site {site!r}")
+        self._cell_data_stale = True
+        if region is not None:
+            return self._resect_region(site, lo, hi, region, margin)
         removed = 0
         for di in range(lo, hi):
             deme = self.demes[di]
@@ -2138,6 +2279,81 @@ class GenotypeTumor:
         self.events.append(dict(step=self.step, time=self.time, event="resection",
                                 site=site, n=int(removed)))
         return removed
+
+    def _resect_region(self, site, lo, hi, region, margin):
+        """Partial resection: clear only the demes of ``region`` within the compartment ``[lo, hi)``
+        and return the ground truth of the cut, also appended to ``self.resections``.
+
+        ``region`` is global deme indices in the compartment, or a boolean mask over its demes (flat
+        or ``(side, side)``). Distances are in demes, centre to centre, to the nearest deme across the
+        cut: a region deme's distance to the nearest deme outside it (the rim is the region demes
+        within ``margin``), and an outside deme's distance to the nearest region deme (the residual's
+        ``distance``). Both come from an exact Euclidean distance transform on the compartment grid,
+        which treats the grid's edge as tissue's end rather than a cut. Cells of the OTHER compartment
+        are neither cut nor counted. Deterministic — no rng draw — and, like the whole-compartment
+        resection, it leaves the genealogy unpruned."""
+        from scipy.ndimage import distance_transform_edt
+
+        side = self.grid_size if site == "primary" else self.met_grid_size
+        n = hi - lo
+        arr = np.asarray(region)
+        if arr.dtype == bool:
+            if arr.size != n:
+                raise ValueError(f"a region mask must have one entry per {site} deme ({n}), "
+                                 f"got shape {arr.shape}")
+            mask = arr.reshape(-1).copy()
+        else:
+            idx = arr.reshape(-1).astype(int)
+            if idx.size and (idx.min() < lo or idx.max() >= hi):
+                raise ValueError(f"region has demes outside the {site} compartment "
+                                 f"(global indices {lo}..{hi - 1})")
+            mask = np.zeros(n, dtype=bool)
+            mask[idx - lo] = True
+        if not mask.any():
+            raise ValueError("region selects no deme")
+        grid = mask.reshape(side, side)
+        # inside: a region deme's distance to the nearest outside deme; outside: the reverse. A
+        # region covering the whole compartment has no cut, so nothing is in the rim.
+        inside = (distance_transform_edt(grid) if not grid.all()
+                  else np.full(grid.shape, np.inf)).reshape(-1)
+        outside = distance_transform_edt(~grid).reshape(-1)
+        rim = mask & (inside <= margin) if margin > 0 else np.zeros(n, dtype=bool)
+
+        removed, margin_cancer, residual = Counter(), Counter(), []
+        for k in range(n):
+            di = lo + k
+            for gid, c in self.demes[di].items():
+                if c <= 0 or not self._is_cancer(gid):
+                    continue
+                if mask[k]:
+                    removed[gid] += c
+                    if rim[k]:
+                        margin_cancer[gid] += c
+                else:
+                    r, col = self.deme_coords[di]
+                    residual.append((di, r, col, float(outside[k]), gid, int(c)))
+        n_cells = 0
+        for k in np.flatnonzero(mask):
+            di = lo + int(k)
+            deme = self.demes[di]
+            for gid in list(deme):
+                n_cells += deme[gid]
+                self._remove(di, gid, deme[gid])
+            self._refresh_rate(di)
+
+        record = dict(
+            step=self.step, time=self.time, site=site, region=np.flatnonzero(mask) + lo,
+            margin=margin, removed=dict(removed), margin_cancer=dict(margin_cancer),
+            margin_positive=bool(margin_cancer),
+            residual=pd.DataFrame(residual,
+                                  columns=["deme", "row", "col", "distance", "genotype", "n"]))
+        self.__dict__.setdefault("resections", []).append(record)
+        self.events.append(dict(step=self.step, time=self.time, event="resection", site=site,
+                                n=int(n_cells), n_cancer=int(sum(removed.values())),
+                                region_demes=int(mask.sum()), margin=margin,
+                                margin_cancer=int(sum(margin_cancer.values())),
+                                residual=int(sum(c for *_, c in residual))))
+        return record
 
     def _clear_treatment_overrides(self):
         """Drop any residual per-step treatment overrides left by a PRIOR treated grow, so a subsequent
@@ -2150,13 +2366,13 @@ class GenotypeTumor:
             self._tx_treatment, self._tx_dosage = None, 0.0
             self.deme_rates = np.array([self._deme_rate(i) for i in range(len(self.demes))], dtype=float)
 
-    def grow(self, n_steps=1000, seed=None, treatment=None, **kwargs):
+    def grow(self, n_steps=1000, seed=None, treatment=None, materialize=True, **kwargs):
         """Advance the tumour by ``n_steps`` update steps and materialise the result.
 
         Runs the birth / death / mutation / dispersal process (exact Gillespie or
         tau-leaping, per ``update_mode``), appending a population snapshot to
         ``self.traces`` each step, and finally calls ``make_cell_data`` to build the
-        per-cell ground truth.
+        per-cell ground truth (unless ``materialize=False``).
 
         Parameters
         ----------
@@ -2170,6 +2386,13 @@ class GenotypeTumor:
             [`Immunotherapy`][iscc.treatment.Immunotherapy],
             [`Surgery`][iscc.treatment.Surgery]) whose dosing schedule and rate modifiers are
             applied each step; ``None`` (default) grows the tumour untreated.
+        materialize : bool, optional
+            Rebuild ``cell_data`` at the end of the call (default ``True``). ``False`` skips it
+            and marks the per-cell tables stale, for callers that step the tumour in a loop and
+            only need cells when they sample: call
+            [`ensure_cell_data`][iscc.tumor.GenotypeTumor.ensure_cell_data] before sampling.
+            Materialisation draws only from its own seeded generators and writes nothing the
+            dynamics read, so the trajectory is the same either way.
 
         Returns
         -------
@@ -2177,7 +2400,8 @@ class GenotypeTumor:
             ``self.traces`` — the list of per-step population snapshots.
         """
         if self.update_mode == "tau":
-            return self._grow_tau(n_steps=n_steps, seed=seed, treatment=treatment, **kwargs)
+            return self._grow_tau(n_steps=n_steps, seed=seed, treatment=treatment,
+                                  materialize=materialize, **kwargs)
         if seed is None:
             seed = self.seed
         self._clear_treatment_overrides()
@@ -2202,7 +2426,10 @@ class GenotypeTumor:
             self._spatial_snapshot()
         self.step += n_steps
         self._clock = self.step
-        self.make_cell_data()
+        if materialize:
+            self.make_cell_data()
+        else:
+            self._cell_data_stale = True
         return self.traces
 
     # --- tau-leaping (generation-batched clonal update, DESIGN §7) -----------
@@ -2627,7 +2854,11 @@ class GenotypeTumor:
                     # ENTRY: a sensitive cell is reprogrammed only where the drug actually reaches it
                     # (plus env-independent noise), scaled by the dose it receives.
                     p_in = noise
-                    if treated and induction > 0.0:
+                    if treated and induction > 0.0 and self._is_mechanistic(tx):
+                        # the dose the clone takes by its genotype and expression, not its labels
+                        p_eff, x = self._mech_dose(tx, gid, rep)
+                        p_in += induction * self._tx_dosage * p_eff * x
+                    elif treated and induction > 0.0:
                         target = self._is_treatment_target(tx, rep)
                         prot = max(rep.evolutionary_parameters["treatment_resistance"],
                                    rep.evolutionary_parameters.get("drug_tolerance", 0.0),
@@ -2693,10 +2924,13 @@ class GenotypeTumor:
             self.trace_times.append(self.time)
             self._spatial_snapshot()
 
-    def _grow_tau(self, n_steps=1000, seed=None, treatment=None, tau=None, **kwargs):
+    def _grow_tau(self, n_steps=1000, seed=None, treatment=None, tau=None, materialize=True,
+                  **kwargs):
         """Tau-leaping growth: `n_steps` is the number of generations to advance. A full per-clone
         snapshot is recorded every `snapshot_every` generations, so plot_muller/plot_grid keep
-        working unchanged -- now on a REAL-TIME x-axis (self.trace_times, in generation units)."""
+        working unchanged -- now on a REAL-TIME x-axis (self.trace_times, in generation units).
+        `materialize=False` skips the closing `make_cell_data` and marks the tables stale (see
+        `grow`)."""
         if seed is None:
             seed = self.seed
         if tau is None:
@@ -2717,7 +2951,10 @@ class GenotypeTumor:
                 self._apply_treatment(treatment, dose)
                 prev_dose = dose
             self._tau_generation(rng, tau)
-        self.make_cell_data()
+        if materialize:
+            self.make_cell_data()
+        else:
+            self._cell_data_stale = True
         return self.traces
 
     # --- F8 microenvironment fields (DESIGN_features §H) ---------------------
@@ -3275,6 +3512,9 @@ class GenotypeTumor:
         """
         if self.cell_data is None:
             raise ValueError("cell_data is not materialised; call make_cell_data() first")
+        if getattr(self, "_cell_data_stale", False):
+            raise ValueError("cell_data is stale (grown with materialize=False); "
+                             "call ensure_cell_data() first")
         snv = self.cell_data["cell_snv"]
         gids = self.cell_data["cell_type"].iloc[:, 0]
         if cell_ids is not None:
@@ -3692,6 +3932,31 @@ class GenotypeTumor:
                 self.cell_data["cell_program"] = pd.DataFrame(
                     Z, index=idx, columns=list(P.dictionary.program_names))
             self.program_truth = P.truth()
+        self._cell_data_stale = False
+        return self.cell_data
+
+    def ensure_cell_data(self, **kwargs):
+        """Materialise ``cell_data`` only if it is missing or stale, and return it.
+
+        The counterpart of ``grow(materialize=False)``: step the tumour without rebuilding the
+        per-cell tables, then call this right before sampling. When the tables are current it
+        returns them as they are, without rebuilding.
+
+        Parameters
+        ----------
+        **kwargs
+            Passed to [`make_cell_data`][iscc.tumor.GenotypeTumor.make_cell_data] (``max_cells``,
+            ``region``, ``depth_frac``, ...) and used only when it materialises. To cut a
+            specific section of a tumour whose tables are current, call ``make_cell_data``
+            directly.
+
+        Returns
+        -------
+        dict
+            ``self.cell_data`` — the per-cell dataframes.
+        """
+        if self.cell_data is None or getattr(self, "_cell_data_stale", False):
+            self.make_cell_data(**kwargs)
         return self.cell_data
 
     # --- plotting (shared, engine-agnostic) ----------------------------------
@@ -4048,7 +4313,8 @@ class GenotypeTumor:
             The axes drawn into.
         """
         from .. import viz
-        if self.cell_data is None or self.cell_data["cell_type"].shape[0] != self.get_tumor_size():
+        if (self.cell_data is None or getattr(self, "_cell_data_stale", False)
+                or self.cell_data["cell_type"].shape[0] != self.get_tumor_size()):
             self.make_cell_data()
         # With the metastatic deposit enabled, `plot_grid()` shows BOTH grids (primary + met) side by
         # side with a shared clone colormap, so the same clone is the same colour across compartments.
@@ -4063,7 +4329,8 @@ class GenotypeTumor:
         colours by functional clone (matching the driver-collapsed 2-band Muller); ``by_stage`` colours
         by the stage-dominant driver; pass ``min_freq`` to also merge below-threshold clones."""
         from .. import viz
-        if self.cell_data is None or self.cell_data["cell_type"].shape[0] != self.get_tumor_size():
+        if (self.cell_data is None or getattr(self, "_cell_data_stale", False)
+                or self.cell_data["cell_type"].shape[0] != self.get_tumor_size()):
             self.make_cell_data()
         if by_stage:
             colors, present = self._stage_colors()
@@ -4229,8 +4496,7 @@ class GenotypeTumor:
         for mat in gene_data:
             pd.DataFrame(gene_data[mat]).to_csv(os.path.join(output_path, "gene_data", f"{mat}.csv"))
 
-        if self.cell_data is None:
-            self.make_cell_data()
+        self.ensure_cell_data()
         Path(os.path.join(output_path, "cell_data")).mkdir(parents=True, exist_ok=True)
         for mat in self.cell_data:
             self.cell_data[mat].to_csv(os.path.join(output_path, "cell_data", f"{mat}.csv"))
