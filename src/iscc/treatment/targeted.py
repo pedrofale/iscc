@@ -12,7 +12,10 @@ class TargetedTherapy(Treatment):
     Parameters
     ----------
     targets : list
-        Genome coordinates (mutated driver sites) a cell must express to be targeted.
+        Genome coordinates (mutated driver sites) a cell must express to be targeted. With
+        ``response="mechanistic"`` a clone is targeted only if it CARRIES every target: a copy
+        of the segment with the mutation at that site, or more copies of the segment than
+        ``amplification_threshold``. A lineage that loses the target by CNA stops responding.
     **kwargs
         Forwarded to the [`Treatment`][iscc.treatment.Treatment] base. See
         [`Treatment`][iscc.treatment.Treatment] for the shared dosing / scheduling

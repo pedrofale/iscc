@@ -1342,6 +1342,102 @@ class GenotypeTumor:
             return intensity * kill_rate * rep.evolutionary_parameters["division_rate"]
         return intensity * max(kill_rate - rep.evolutionary_parameters["death_rate"], 0.0)
 
+    # --- mechanistic drug response (Treatment.response == "mechanistic") ----------------------
+    @staticmethod
+    def _is_mechanistic(tx):
+        return getattr(tx, "response", "label") == "mechanistic"
+
+    @staticmethod
+    def _carries_target(rep, coord, amplification_threshold):
+        """Does this clone carry the target at ``coord = (segment, position)``? Yes if any copy of the
+        segment has the mutation there, or if the segment has more copies than
+        ``amplification_threshold``. Copy number is segment-granular (each copy is a whole-segment
+        SNV bitset), so a deletion of the mutated copy, or of copies down to the threshold, is what
+        makes a lineage lose the target."""
+        seg, pos = coord
+        copies = rep.genome[seg]["p"] + rep.genome[seg]["m"]
+        if any(c[pos] for c in copies):
+            return True
+        return amplification_threshold is not None and len(copies) > amplification_threshold
+
+    def _target_expression(self, gid, rep, table):
+        """The clone's mean expression of the drug's target genes, memoised per genotype.
+
+        The same law ``make_cell_data`` materialises, read at the genotype level: the dosage-driven
+        baseline (``get_exp`` with the program layer off, the allele-resolved ``get_exp_alleles``
+        with it on) times the program multiplier at the clone's MEAN activity (``ProgramModel.mean_z``
+        of its genotype drive). The per-cell activity draw and the per-deme niche are left out: one is
+        noise around this mean, the other a property of where a cell sits, not of the genotype. A
+        genotype's genome and phenotype never change once registered, so the memo never goes stale."""
+        level = table["levels"].get(gid)
+        if level is None:
+            rep.baseline_exp = self.celltype_exps["cancer"]     # what make_cell_data sets
+            P = self.programs
+            if P is None:
+                exp = rep.get_exp(self.selection.mut_effects)
+            else:
+                ep, em = rep.get_exp_alleles(dosage_sensitivity=P.dosage_sensitivity,
+                                             snv_exp_effect=P.snv_exp_effect,
+                                             dosage_saturation=P.dosage_saturation)
+                drive = (P.clone_drive(rep.evolutionary_parameters, rep.baseline_rates,
+                                       rep.get_snvs()) + P.celltype_bias("cancer"))
+                exp = (ep + em) * P.gene_multiplier(P.mean_z(drive)[None, :])[0]
+            level = float(np.mean(exp[table["genes"]]))
+            table["levels"][gid] = level
+        return level
+
+    def _target_table(self, tx):
+        """Per-tumour memo for an expression-targeted drug: its flat gene indices, the founding clone's
+        expression of them (the reference that sets the nominal dose), and the per-genotype levels.
+        Keyed by the gene list, so two drugs on the same genes share it. Created lazily, so a tumour
+        pickled before the mechanistic mode existed still loads."""
+        key = tuple(tx.target_genes)
+        cache = self.__dict__.setdefault("_mech_expr", {})
+        table = cache.get(key)
+        if table is None:
+            off = self.selection._seg_offsets
+            genes = []
+            for g in key:
+                if isinstance(g, tuple):
+                    seg, pos = g
+                    if not (0 <= seg < self.n_segments and 0 <= pos < off[seg + 1] - off[seg]):
+                        raise ValueError(f"target gene {g} is not on the genome")
+                    g = off[seg] + pos
+                if not 0 <= g < self.n_genes:
+                    raise ValueError(f"target gene {g} is not on the genome ({self.n_genes} genes)")
+                genes.append(int(g))
+            table = {"genes": np.array(genes, dtype=int), "levels": {}}
+            founder = self.genotypes[self.founder_id]
+            table["ref"] = self._target_expression(self.founder_id, founder, table)
+            if not table["ref"] > 0:
+                raise ValueError("the founding clone does not express the target genes, so there is "
+                                 "no reference level to scale the drug's dose by")
+            cache[key] = table
+        return table
+
+    def _mech_dose(self, tx, gid, rep):
+        """``(p, x)`` for a CANCER clone under ``response="mechanistic"``: the dose it takes is
+        ``dosage * p * x``, the mechanistic stand-in for the label model's ``p * (1 - protection)``.
+
+        No resistance label enters: ``treatment_resistance``, ``drug_tolerance`` and the carried
+        resistance state are all ignored. ``p`` is ``effectiveness`` when the clone carries every
+        target the drug names (or it names none) and ``toxicity`` otherwise, so the off-target effect
+        is unchanged. ``x`` is 1, except for an on-target clone of an expression-targeted drug, where
+        it is the clone's expression of the target genes relative to the founding clone's, and 0 --
+        no effect at all -- below ``expression_threshold``."""
+        targets = getattr(tx, "targets", None)
+        if targets:
+            amp = getattr(tx, "amplification_threshold", None)
+            if not all(self._carries_target(rep, t, amp) for t in targets):
+                return tx.toxicity, 1.0
+        if not getattr(tx, "target_genes", None):
+            return tx.effectiveness, 1.0
+        table = self._target_table(tx)
+        level = self._target_expression(gid, rep, table)
+        if level < tx.expression_threshold:
+            return tx.effectiveness, 0.0
+        return tx.effectiveness, level / table["ref"]
+
     def _tx_death_add_for(self, gid, rep=None):
         """The active treatment's extra death hazard for ``gid`` -- the value ``_apply_treatment``
         stored, or, for a genotype minted AFTER that step's rebuild, the same value computed on demand
@@ -1359,15 +1455,19 @@ class GenotypeTumor:
         if tx is None or getattr(tx, "affects", "death_rate") == "immune_resistance":
             return 0.0
         rep = rep if rep is not None else self.genotypes[gid]
-        if self._is_cancer(gid):
-            target = self._is_treatment_target(tx, rep)
-            tr = max(rep.evolutionary_parameters["treatment_resistance"],
-                     rep.evolutionary_parameters.get("drug_tolerance", 0.0),
-                     self._state_protection(rep))            # §3.3 carried resistance state
-            p = tx.effectiveness if target else tx.toxicity
+        if self._is_cancer(gid) and self._is_mechanistic(tx):
+            p, x = self._mech_dose(tx, gid, rep)
+            intensity = self._tx_dosage * p * x
         else:
-            tr, p = 0.0, tx.toxicity
-        intensity = self._tx_dosage * p * (1.0 - min(max(tr, 0.0), 1.0))
+            if self._is_cancer(gid):
+                target = self._is_treatment_target(tx, rep)
+                tr = max(rep.evolutionary_parameters["treatment_resistance"],
+                         rep.evolutionary_parameters.get("drug_tolerance", 0.0),
+                         self._state_protection(rep))            # §3.3 carried resistance state
+                p = tx.effectiveness if target else tx.toxicity
+            else:
+                tr, p = 0.0, tx.toxicity
+            intensity = self._tx_dosage * p * (1.0 - min(max(tr, 0.0), 1.0))
         if intensity <= 0:
             return 0.0                          # matches _apply_treatment's `continue` (no entry)
         val = self._kill_amount(rep, intensity, tx)
@@ -1387,13 +1487,21 @@ class GenotypeTumor:
         if (tx is None or getattr(tx, "affects", "death_rate") != "immune_resistance"
                 or not self._is_cancer(gid)):
             return base_ir
-        target = self._is_treatment_target(tx, rep)
-        tr = rep.evolutionary_parameters["treatment_resistance"]
-        p = tx.effectiveness if target else tx.toxicity
-        intensity = self._tx_dosage * p * (1.0 - min(max(tr, 0.0), 1.0))
+        mech = self._is_mechanistic(tx)
+        if mech:
+            p, x = self._mech_dose(tx, gid, rep)
+            intensity = self._tx_dosage * p * x
+        else:
+            target = self._is_treatment_target(tx, rep)
+            tr = rep.evolutionary_parameters["treatment_resistance"]
+            p = tx.effectiveness if target else tx.toxicity
+            intensity = self._tx_dosage * p * (1.0 - min(max(tr, 0.0), 1.0))
         if intensity <= 0:
             return base_ir                      # matches _apply_treatment's `continue` (no entry)
-        val = rep.evolutionary_parameters["immune_resistance"] * (1.0 - intensity)
+        # A mechanistic dose can exceed 1 (a clone making twice the founder's target), and stripping
+        # more than all of the resistance would make it negative.
+        strip = max(0.0, 1.0 - intensity) if mech else 1.0 - intensity
+        val = rep.evolutionary_parameters["immune_resistance"] * strip
         self._tx_immune_resist[gid] = val       # memoise: read identically on every later step
         return val
 
@@ -1838,6 +1946,9 @@ class GenotypeTumor:
         self._tx_treatment, self._tx_dosage = treatment, dosage
         affects = getattr(treatment, "affects", "death_rate")
         kill_rate = getattr(treatment, "kill_rate", 0.8)
+        # response="mechanistic": every cancer-clone dose below comes from `_mech_dose` (genotype and
+        # expression) instead of the resistance labels; normal tissue is unchanged.
+        mech = self._is_mechanistic(treatment)
         # Persister cost, charged only for the duration of the dose (see Selection.proliferation_cost
         # for why it cannot be baked into division_rate). 0.0 by default -> dict stays empty.
         dt_cost = float(getattr(self.selection, "drug_tolerance_cost", 0.0) or 0.0)
@@ -1873,7 +1984,12 @@ class GenotypeTumor:
                 if getattr(rep, "_tx_mutagenized", False):
                     continue
                 factor = mutagenicity
-                if dose_scaled:
+                if dose_scaled and mech:
+                    # Mechanistic: the exposure `x` stands in for (1 - protection) -- the drug that
+                    # reaches the clone, by its target expression -- capped at the full multiplier.
+                    _, x = self._mech_dose(treatment, gid, rep)
+                    factor = 1.0 + (mutagenicity - 1.0) * min(max(x, 0.0), 1.0)
+                elif dose_scaled:
                     tr = max(rep.evolutionary_parameters["treatment_resistance"],
                              rep.evolutionary_parameters.get("drug_tolerance", 0.0),
                              self._state_protection(rep))    # §3.3 carried resistance state
@@ -1907,14 +2023,19 @@ class GenotypeTumor:
                 # immunotherapy strips a clone's immune resistance -- only meaningful for cancer.
                 if not is_cancer:
                     continue
-                target = self._is_treatment_target(treatment, rep)
-                tr = rep.evolutionary_parameters["treatment_resistance"]
-                p = treatment.effectiveness if target else treatment.toxicity
-                intensity = dosage * p * (1.0 - min(max(tr, 0.0), 1.0))
+                if mech:
+                    p, x = self._mech_dose(treatment, gid, rep)
+                    intensity = dosage * p * x
+                else:
+                    target = self._is_treatment_target(treatment, rep)
+                    tr = rep.evolutionary_parameters["treatment_resistance"]
+                    p = treatment.effectiveness if target else treatment.toxicity
+                    intensity = dosage * p * (1.0 - min(max(tr, 0.0), 1.0))
                 if intensity <= 0:
                     continue
                 ir = rep.evolutionary_parameters["immune_resistance"]
-                self._tx_immune_resist[gid] = ir * (1.0 - intensity)
+                strip = max(0.0, 1.0 - intensity) if mech else 1.0 - intensity  # as _tx_immune_resist_for
+                self._tx_immune_resist[gid] = ir * strip
             else:
                 # Death-rate therapy (chemo / targeted). Cancer TARGET cells take `effectiveness`;
                 # everything OFF-TARGET -- non-target cancer clones AND normal/host tissue -- takes
@@ -1922,6 +2043,13 @@ class GenotypeTumor:
                 # resistance; giving them a `_tx_death_add` is what makes chemo's systemic toxicity kill
                 # normal tissue (they become death-only participants in the dynamics -- see _deme_rate /
                 # update / _tau_substep). Cancer entries are unchanged, so the cancer path is byte-identical.
+                if is_cancer and mech:
+                    # No labels, so no persister cost either: drug tolerance is not consulted.
+                    p, x = self._mech_dose(treatment, gid, rep)
+                    intensity = dosage * p * x
+                    if intensity > 0:
+                        self._tx_death_add[gid] = self._kill_amount(rep, intensity, treatment)
+                    continue
                 if is_cancer:
                     target = self._is_treatment_target(treatment, rep)
                     tr = max(rep.evolutionary_parameters["treatment_resistance"],
@@ -2471,7 +2599,11 @@ class GenotypeTumor:
                     # ENTRY: a sensitive cell is reprogrammed only where the drug actually reaches it
                     # (plus env-independent noise), scaled by the dose it receives.
                     p_in = noise
-                    if treated and induction > 0.0:
+                    if treated and induction > 0.0 and self._is_mechanistic(tx):
+                        # the dose the clone takes by its genotype and expression, not its labels
+                        p_eff, x = self._mech_dose(tx, gid, rep)
+                        p_in += induction * self._tx_dosage * p_eff * x
+                    elif treated and induction > 0.0:
                         target = self._is_treatment_target(tx, rep)
                         prot = max(rep.evolutionary_parameters["treatment_resistance"],
                                    rep.evolutionary_parameters.get("drug_tolerance", 0.0),

@@ -39,6 +39,44 @@ class Treatment(object):
     sites : {"both", "primary", "met"}, optional
         Compartment(s) the therapy acts on (default ``"both"`` = systemic): ``"primary"``
         (neoadjuvant / local) or ``"met"`` (adjuvant after primary resection).
+    mutagenicity : float, optional
+        Therapy-induced mutator: an exposed cancer clone's mutation rate is multiplied by this
+        once, on first exposure, and its descendants inherit it (default 1.0 = off).
+    kill_mode : {"additive", "proliferation"}, optional
+        How the kill scales with the clone in the genotype engine. ``"additive"`` (default) adds
+        the same death hazard to every clone; ``"proliferation"`` scales it by the clone's
+        division rate, as cytotoxic chemotherapy kills cells as they replicate.
+    mutagenicity_mode : {"uniform", "dose"}, optional
+        Who gets the mutator: every exposed cancer clone (``"uniform"``, default), or a share
+        scaled by the dose the clone receives (``"dose"``).
+    mutagenicity_target : {"all", "snv"}, optional
+        What the mutator accelerates: every mutation (``"all"``, default) or point mutations
+        only (``"snv"``), leaving the copy-number rate where it was.
+    response : {"label", "mechanistic"}, optional
+        How the genotype engine decides a cancer clone's response. ``"label"`` (default): by its
+        resistance labels, so ``treatment_resistance``, ``drug_tolerance`` and the carried
+        resistance state scale down the dose it takes. ``"mechanistic"``: the labels are
+        ignored and the response comes from the genotype and its expression alone. A clone is
+        on target only if it carries the therapy's targets (see
+        [`TargetedTherapy`][iscc.treatment.TargetedTherapy]); off-target clones take
+        ``toxicity`` as before. With ``target_genes`` its dose also scales with its expression
+        of those genes, and with ``kill_mode="proliferation"`` a broad drug kills in proportion
+        to division rate. Under ``mutagenicity_mode="dose"`` the mutator follows the same
+        expression scaling instead of ``1 - treatment_resistance``. The per-cell engine
+        ([`GlandularTumor`][iscc.tumor.GlandularTumor]) implements only ``"label"``.
+    target_genes : list, optional
+        Mechanistic mode only: genes the drug acts through, as ``(segment, position)``
+        coordinates or flat gene indices. An on-target clone's dose is multiplied by its mean
+        expression of these genes relative to the founding clone's, so a clone at the founder's
+        level takes the nominal dose and one at twice the level twice the dose. Expression is
+        the clone's dosage-driven baseline times its mean program activity (the same law
+        ``make_cell_data`` uses, without the per-cell noise and the niche).
+    expression_threshold : float, optional
+        Mechanistic mode only, with ``target_genes``: the expression below which the drug has
+        no effect on a clone at all (default 0).
+    amplification_threshold : int, optional
+        Mechanistic mode only: a clone also carries a target when the target's segment has more
+        copies than this. Default None: only a copy with the mutation counts.
     """
 
     # Which evolutionary parameter the therapy modifies. Death-rate therapies
@@ -51,7 +89,9 @@ class Treatment(object):
                  rate_multiplier=2., toxicity=0.1, effectiveness=0.9,
                  kill_rate=1.5, max_tumor_size=100_000, sites="both",
                  mutagenicity=1.0, kill_mode="additive",
-                 mutagenicity_mode="uniform", mutagenicity_target="all"):
+                 mutagenicity_mode="uniform", mutagenicity_target="all",
+                 response="label", target_genes=None, expression_threshold=None,
+                 amplification_threshold=None):
         self.adaptive = adaptive
         self.start = start
         self.duration = duration
@@ -117,6 +157,27 @@ class Treatment(object):
         # is mechanistically distinct from inducing chromosome missegregation.
         # Default "all" -> both scale together -> byte-identical to before.
         self.mutagenicity_target = str(mutagenicity_target)
+        # HOW a cancer clone's response is decided (genotype engine). "label" (default) reads the
+        # resistance labels, as above; the escape-mode studies are built on it. "mechanistic" ignores
+        # them and derives the response from the genotype (does it carry the target?) and its
+        # expression (how much target does it make?). The knobs below only mean something there.
+        if response not in ("label", "mechanistic"):
+            raise ValueError(f"response must be 'label' or 'mechanistic', got {response!r}")
+        self.response = response
+        given = [name for name, set_ in (("target_genes", bool(target_genes)),
+                                         ("expression_threshold", expression_threshold is not None),
+                                         ("amplification_threshold",
+                                          amplification_threshold is not None)) if set_]
+        if given and response != "mechanistic":
+            raise ValueError(f"{', '.join(given)} only apply with response='mechanistic'")
+        if expression_threshold is not None and not target_genes:
+            raise ValueError("expression_threshold needs target_genes")
+        self.target_genes = [tuple(g) if isinstance(g, (tuple, list)) else int(g)
+                             for g in (target_genes or [])]
+        self.expression_threshold = (0.0 if expression_threshold is None
+                                     else float(expression_threshold))
+        self.amplification_threshold = (None if amplification_threshold is None
+                                        else int(amplification_threshold))
         self.dosage_trace = []  # list of (step, dosage) for every queried step
 
     def _apply(self, cell):
