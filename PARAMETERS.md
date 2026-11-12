@@ -401,6 +401,17 @@ abundance — which is exactly why it is invisible to expression-based clone ass
 | hypoxia `D` / `k` vs. tumour size | — | O₂ diffusion length **<** tumour radius | length ≫ tumour → uniform O₂, no gradient |
 | `o2_source` | `uniform` | `uniform` \| `perfused` | `perfused` gives a hotter (more hypoxic) core than `uniform` |
 
+### Spatiotemporal record (optional; off by default) — top-level config keys
+Every run records when and where each cancer genotype arose (`tumor.genotype_births()`, written as
+`genotype_births.csv`). These two keys additionally record the spatial state over time
+(`tumor.spatial_snapshots()`, written as `spatial_history.csv.gz`); genotype engine only. Neither
+draws a random number, so the tumour grows identically with the record on or off.
+
+| Knob | Default | Valid range | Outside the range |
+|---|---|---|---|
+| `spatial_snapshot_every` | `0` (off) | `0`, or `k ≥ 1` trace snapshots between spatial snapshots | under tau-leaping a trace snapshot is one generation (× `snapshot_every`); under the exact engine it is one **event**, so a small `k` there stores a snapshot per birth or death — use a large `k` |
+| `spatial_snapshot_budget` | `5000000` entries (~60 MB) | ≳ entries in one snapshot (≈ occupied demes × genotypes per deme) | when exceeded, every other snapshot is dropped and the interval doubles; a budget below one snapshot keeps only the first |
+
 ---
 
 ## Diagnosing a tumour

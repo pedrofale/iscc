@@ -149,6 +149,27 @@ class GenotypeTumor:
     snapshot_every : int, optional
         Under tau-leaping, record a full per-clone snapshot every ``k`` generations
         (default 1) so the Muller / grid plots keep working.
+    spatial_snapshot_every : int, optional
+        Also record the spatial state of the tumour — every genotype's count in every deme — at
+        every ``k``-th trace snapshot (default 0, off). Read the record back with
+        [`spatial_snapshots`][iscc.tumor.GenotypeTumor.spatial_snapshots], and each clone's birth
+        with [`genotype_births`][iscc.tumor.GenotypeTumor.genotype_births]. Recording draws no
+        random numbers, so the tumour grows identically with it on or off. Under the exact engine
+        a trace snapshot is taken after every single event, so choose a large ``k`` there.
+    spatial_snapshot_budget : int, optional
+        Upper bound on the number of stored (deme, genotype) entries across all spatial
+        snapshots (default 5,000,000, about 60 MB). When it is exceeded, every other snapshot is
+        dropped and the interval doubles, so the record stays evenly spaced in time.
+    coarsen_passengers : bool, optional
+        Fold a division that adds only neutral passenger mutations into its parent clone instead
+        of minting a new genotype (default False). The growth dynamics are unchanged in
+        distribution, and the cost of a run tracks the number of clones rather than of cells;
+        the passengers are re-emitted per cell when cell data are materialised. Forced off when
+        epistasis is on.
+    max_cells : int, optional
+        Cap on the number of cells materialised as cell data (default None, no cap). Above it, a
+        representative subsample that preserves spatial, clonal and cell-type proportions is
+        materialised instead.
     microenv_params : dict, optional
         Microenvironment layer (hypoxia field + cell-cell communication). Off by
         default; a pure readout that never changes growth.
@@ -180,7 +201,8 @@ class GenotypeTumor:
                  genome_mode="abstract", genome_spec=None,
                  update_mode="exact", tau=1.0, snapshot_every=1, microenv_params=None,
                  layout_seed=None, expression_params=None, coarsen_passengers=False,
-                 max_cells=None, germline_params=None, founder_mutations=None):
+                 max_cells=None, germline_params=None, founder_mutations=None,
+                 spatial_snapshot_every=0, spatial_snapshot_budget=5_000_000):
         self.seed = seed
         # EVOLUTION rng (per-run: spatial seeding; grow() draws its own fresh default_rng(seed+step)).
         self.rng = np.random.default_rng(seed)
@@ -206,6 +228,19 @@ class GenotypeTumor:
         self.snapshot_every = snapshot_every
         self.time = 0.0
         self.trace_times = []
+        # Spatiotemporal record. Every genotype gets its birth (trace index, step, time, deme) in
+        # _register / _add; when spatial_snapshot_every > 0, _spatial_snapshot also stores every
+        # deme's genotype counts at every k-th trace snapshot as compact int32 arrays keyed by the
+        # genotype's creation ordinal. Neither draws a random number, so growth is byte-identical
+        # with the record on or off. The traces list and the step counter are created here, not
+        # beside the deme grid below, because the founder is registered before the grid exists.
+        self.spatial_snapshot_every = int(spatial_snapshot_every)
+        self.spatial_snapshot_budget = int(spatial_snapshot_budget)
+        self.spatial_history = []
+        self._spatial_entries = 0
+        self.traces = []
+        self.step = 0
+        self._clock = 0     # the current exact-engine event or tau generation, for birth records
 
         # Passenger coarsening (DESIGN_scalability §8): the lever that DECOUPLES growth cost from the
         # distinct-genotype count. Under a high mutation rate almost every division fixes a NEUTRAL
@@ -281,6 +316,10 @@ class GenotypeTumor:
             self.update_mode = cfg.get("update_mode", update_mode)
             self.tau = cfg.get("tau", tau)
             self.snapshot_every = cfg.get("snapshot_every", snapshot_every)
+            self.spatial_snapshot_every = int(cfg.get("spatial_snapshot_every",
+                                                      spatial_snapshot_every))
+            self.spatial_snapshot_budget = int(cfg.get("spatial_snapshot_budget",
+                                                       spatial_snapshot_budget))
             self.coarsen_passengers = bool(cfg.get("coarsen_passengers", coarsen_passengers))
             self.max_cells = cfg.get("max_cells", max_cells)
             self.germline_params = cfg.get("germline_params", germline_params)
@@ -826,8 +865,6 @@ class GenotypeTumor:
             seed_founder_mutations(self, **fm)
 
         self.deme_rates = np.array([self._deme_rate(i) for i in range(len(self.demes))], dtype=float)
-        self.traces = []
-        self.step = 0
         self.cell_data = None
         # True once `grow(materialize=False)` has advanced the counts past `cell_data`; cleared by
         # `make_cell_data`. Read with getattr so tumours pickled before the flag existed still load.
@@ -866,6 +903,14 @@ class GenotypeTumor:
     def _register(self, rep):
         rep.ord = self._next_ord
         self._next_ord += 1
+        # Birth record: the first trace snapshot that can contain the genotype, the exact-engine
+        # event or tau generation it was minted in, the time (tau only; the exact engine keeps
+        # none) and, set by _add on first placement, the deme its first cell landed in. A child is
+        # a copy of its parent's representative, so every field is overwritten here, never inherited.
+        rep.birth_trace = len(self.traces)
+        rep.birth_step = self._clock
+        rep.birth_time = self.time if self.update_mode == "tau" else float("nan")
+        rep.birth_deme = None
         self.genotypes[rep.genotype_id] = rep
         if self.coarsen_passengers and rep.type == "cancer":
             ep = rep.evolutionary_parameters
@@ -1013,8 +1058,11 @@ class GenotypeTumor:
         deme = self.demes[deme_idx]
         deme[gid] = deme.get(gid, 0) + n
         self.genotypes_counts[gid] += n
-        if self.genotypes[gid].type == "cancer":
+        rep = self.genotypes[gid]
+        if rep.type == "cancer":
             self._deme_cancer_n[deme_idx] = self._deme_cancer_n.get(deme_idx, 0) + n
+            if rep.birth_deme is None:
+                rep.birth_deme = deme_idx
 
     def _remove(self, deme_idx, gid, n):
         deme = self.demes[deme_idx]
@@ -1779,6 +1827,124 @@ class GenotypeTumor:
             snap["primary_counts"], snap["met_counts"] = self._compartment_counts()
         return snap
 
+    def _spatial_snapshot(self):
+        """Store every deme's genotype counts if the trace snapshot just appended is a spatial one.
+
+        Called right after each trace append. A no-op unless ``spatial_snapshot_every > 0``; draws
+        no random number either way. When the stored entries exceed ``spatial_snapshot_budget``,
+        snapshots off the doubled interval are dropped, so the record stays evenly spaced."""
+        k = self.spatial_snapshot_every
+        if k <= 0:
+            return
+        ti = len(self.traces) - 1
+        if ti % k:
+            return
+        genotypes = self.genotypes
+        demes, ords, counts = [], [], []
+        for di, deme in enumerate(self.demes):
+            for gid, c in deme.items():
+                demes.append(di)
+                ords.append(genotypes[gid].ord)
+                counts.append(c)
+        self.spatial_history.append(dict(
+            trace=ti, step=self._clock,
+            time=self.time if self.update_mode == "tau" else float("nan"),
+            deme=np.asarray(demes, dtype=np.int32), genotype=np.asarray(ords, dtype=np.int32),
+            count=np.asarray(counts, dtype=np.int32)))
+        self._spatial_entries += len(demes)
+        while self._spatial_entries > self.spatial_snapshot_budget and len(self.spatial_history) > 1:
+            self.spatial_snapshot_every *= 2
+            k = self.spatial_snapshot_every
+            self.spatial_history = [s for s in self.spatial_history if s["trace"] % k == 0]
+            self._spatial_entries = sum(len(s["deme"]) for s in self.spatial_history)
+
+    def _deme_location(self, deme_idx):
+        """``(compartment, row, col)`` of a deme; met demes use their position in the met grid."""
+        r, c = self.deme_coords[deme_idx]
+        return ("met" if deme_idx >= self.n_primary_demes else "primary"), int(r), int(c)
+
+    def genotype_births(self):
+        """When and where every cancer genotype arose.
+
+        Recorded for every run, whether or not spatial snapshots are on. Together with
+        [`spatial_snapshots`][iscc.tumor.GenotypeTumor.spatial_snapshots] and the genealogy, it
+        gives the tumour's spatiotemporal history: where each clone first appeared, when, and from
+        which parent.
+
+        Returns
+        -------
+        pandas.DataFrame
+            One row per cancer genotype ever created, including clones that later died out,
+            indexed by genotype id in creation order, with columns
+
+            - ``parent``: the parent genotype id (missing for the founder);
+            - ``ord``: the creation ordinal, the key ``spatial_snapshots`` reports genotypes by
+              before mapping them back to ids;
+            - ``birth_trace``: index of the first entry of ``traces`` that can contain it;
+            - ``birth_step``: the exact-engine event, or tau-leaping generation, it arose in;
+            - ``birth_time``: when it arose, in generations (tau-leaping only, NaN otherwise);
+            - ``birth_deme``: the deme its first cell was placed in (-1 if it was never placed);
+            - ``compartment``: ``"primary"`` or ``"met"``;
+            - ``row``, ``col``: the deme's position within its compartment's grid (-1 if never
+              placed).
+        """
+        rows = []
+        for gid, rep in self.genotypes.items():
+            if rep.type != "cancer":
+                continue
+            di = rep.birth_deme
+            comp, r, c = self._deme_location(di) if di is not None else (None, -1, -1)
+            rows.append(dict(genotype=gid, parent=self.genotypes_parents.get(gid), ord=rep.ord,
+                             birth_trace=rep.birth_trace, birth_step=rep.birth_step,
+                             birth_time=rep.birth_time, birth_deme=-1 if di is None else di,
+                             compartment=comp, row=r, col=c))
+        cols = ["parent", "ord", "birth_trace", "birth_step", "birth_time", "birth_deme",
+                "compartment", "row", "col"]
+        if not rows:
+            return pd.DataFrame(columns=cols).rename_axis("genotype")
+        return pd.DataFrame(rows).set_index("genotype")[cols]
+
+    def spatial_snapshots(self):
+        """The recorded spatial history: every genotype's count in every deme over time.
+
+        Empty unless the tumour was built with ``spatial_snapshot_every > 0``. One snapshot is
+        stored at every ``k``-th entry of ``traces``; if the memory budget forced thinning, the
+        interval in effect is ``spatial_snapshot_every`` and the stored snapshots stay evenly
+        spaced. Join on ``genotype`` with
+        [`genotype_births`][iscc.tumor.GenotypeTumor.genotype_births] for where and when each
+        clone arose.
+
+        Returns
+        -------
+        pandas.DataFrame
+            One row per (snapshot, deme, genotype) with a positive count, with columns
+            ``snapshot`` (position in the record), ``trace`` (index into ``traces``), ``step``,
+            ``time`` (generations; NaN under the exact engine), ``deme``, ``compartment``
+            (``"primary"`` or ``"met"``), ``row``, ``col``, ``genotype`` (genotype id),
+            ``cell_type`` (``"cancer"`` or the normal cell type) and ``count``.
+        """
+        cols = ["snapshot", "trace", "step", "time", "deme", "compartment", "row", "col",
+                "genotype", "cell_type", "count"]
+        if not self.spatial_history:
+            return pd.DataFrame(columns=cols)
+        by_ord = {rep.ord: (gid, rep.type) for gid, rep in self.genotypes.items()}
+        n = np.array([len(s["deme"]) for s in self.spatial_history])
+        deme = np.concatenate([s["deme"] for s in self.spatial_history])
+        ords = np.concatenate([s["genotype"] for s in self.spatial_history])
+        coords = np.asarray(self.deme_coords, dtype=int)
+        out = pd.DataFrame(dict(
+            snapshot=np.repeat(np.arange(len(n)), n),
+            trace=np.repeat([s["trace"] for s in self.spatial_history], n),
+            step=np.repeat([s["step"] for s in self.spatial_history], n),
+            time=np.repeat([s["time"] for s in self.spatial_history], n),
+            deme=deme,
+            compartment=np.where(deme >= self.n_primary_demes, "met", "primary"),
+            row=coords[deme, 0], col=coords[deme, 1],
+            genotype=[by_ord[o][0] for o in ords],
+            cell_type=[by_ord[o][1] for o in ords],
+            count=np.concatenate([s["count"] for s in self.spatial_history])))
+        return out[cols]
+
     def update(self, rng):
         if self.is_extinct():
             return
@@ -2240,8 +2406,10 @@ class GenotypeTumor:
             seed = self.seed
         self._clear_treatment_overrides()
         self.traces.append(self._trace_snapshot())
+        self._spatial_snapshot()
         prev_dose = 0.0
         for local_step in range(n_steps - 1):
+            self._clock = self.step + local_step
             rng = np.random.default_rng(seed + self.step + local_step)
             if treatment is not None:
                 treatment.discrete_event(self, self.step + local_step)  # e.g. surgical resection (R9)
@@ -2255,7 +2423,9 @@ class GenotypeTumor:
                 prev_dose = dose
             self.update(rng)
             self.traces.append(self._trace_snapshot())
+            self._spatial_snapshot()
         self.step += n_steps
+        self._clock = self.step
         if materialize:
             self.make_cell_data()
         else:
@@ -2736,6 +2906,7 @@ class GenotypeTumor:
             max_cell_rate += self.maximum_death_rate
         n_sub = max(1, int(np.ceil(max_cell_rate * tau / ACCURACY)))
         dt = tau / n_sub
+        self._clock = self.step
         for _ in range(n_sub):
             self._tau_substep(rng, dt)
         # Drug-induced resistance-state entry/exit (DESIGN_phenotype_plasticity.md §3.3), once per
@@ -2747,9 +2918,11 @@ class GenotypeTumor:
         self.time += tau
         if self._origin_confined:
             self._origin_tick(1.0)
+        self._clock = self.step
         if self.step % self.snapshot_every == 0:
             self.traces.append(self._trace_snapshot())
             self.trace_times.append(self.time)
+            self._spatial_snapshot()
 
     def _grow_tau(self, n_steps=1000, seed=None, treatment=None, tau=None, materialize=True,
                   **kwargs):
@@ -2767,6 +2940,7 @@ class GenotypeTumor:
         # snapshot at t=0 (matches the exact engine's initial trace)
         self.traces.append(self._trace_snapshot())
         self.trace_times.append(self.time)
+        self._spatial_snapshot()
         prev_dose = 0.0
         for _ in range(n_steps):
             if self.get_cancer_size() == 0:
@@ -4310,6 +4484,12 @@ class GenotypeTumor:
         # Discrete-event annotations (seeding / resection / chemo windows), for the Muller/animation.
         if self.events:
             pd.DataFrame(self.events).to_csv(os.path.join(output_path, "events.csv"), index=False)
+        # Spatiotemporal record: the birth table always (one row per cancer genotype), the
+        # per-deme snapshots only when they were recorded.
+        self.genotype_births().to_csv(os.path.join(output_path, "genotype_births.csv"))
+        if self.spatial_history:
+            self.spatial_snapshots().to_csv(os.path.join(output_path, "spatial_history.csv.gz"),
+                                            index=False)
 
         gene_data = self.selection.get_gene_data()
         Path(os.path.join(output_path, "gene_data")).mkdir(parents=True, exist_ok=True)
