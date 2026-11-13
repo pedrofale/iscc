@@ -9,8 +9,12 @@ Usage::
     # or grow one on an arm-homologous genome
     ... make_layer_dataset.py OUT --grow [--scale small] [--target 15000] [--total-genes 6000]
 
-The tumour is sampled once, a section for Visium and a dissociation for scRNA. Every arm then measures
-those same cells with the same assay seeds; the arms differ only in the expression step:
+The tumour is sampled as the paper's figures sample it (``common.assays``): one resection, dissociated
+and sliced (``depth_frac`` 0.5) to the tier's ``max_cells``, Visium at the regime's settings
+(``regime.VISIUM``, spot swapping on) over the tumour's grid, scRNA on every dissociated cell, with the
+paper's assay seeds (Visium ``300 + seed``, scRNA ``100 + seed``). Over the human genes Visium takes
+``HUMAN_VISIUM_KAPPA`` and scRNA ``dropout_mid=0`` at ``--n-reads`` UMIs per cell. Every arm then
+measures those same cells with the same seeds; the arms differ only in the expression step:
 ``generated`` keeps each cell's programme activities, ``permuted`` shuffles them among the cells of
 each type (``HumanGenomeLayer.expression(permute_programmes=...)``). Writes, per arm,
 ``OUT/<arm>/visium`` and ``OUT/<arm>/scrna`` (the layouts of :func:`iscc.data.human.write_visium` and
@@ -100,15 +104,14 @@ def main():
     ap.add_argument("--task")
     ap.add_argument("--grow", action="store_true")
     ap.add_argument("--arms", default="generated")
-    ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--permute-seed", type=int, default=7)
     ap.add_argument("--scale", default="small")
     ap.add_argument("--target", type=int, default=15_000)
     ap.add_argument("--total-genes", type=int, default=6_000)
     ap.add_argument("--driver-scale", type=float, default=0.4)
-    ap.add_argument("--n-cells", type=int, default=2_000)
     ap.add_argument("--n-reads", type=float, default=10_000)
-    ap.add_argument("--max-cells", type=int, default=20_000)
+    ap.add_argument("--max-cells", type=int, default=None, help="default the tier's max_cells")
     ap.add_argument("--max-log-fold", type=float, default=5.0)
     ap.add_argument("--min-clone-frac", type=float, default=0.03)
     a = ap.parse_args()
@@ -123,24 +126,30 @@ def main():
         print(f"  {name}: {wall[name]} s", flush=True)
         t0 = time.time()
 
+    import regime as RG
     t = _tumour(a)
-    if getattr(t, "programs", None) is not None and a.max_log_fold:
-        t.programs.max_log_fold = float(a.max_log_fold)                 # the programme bound, a readout
+    if getattr(getattr(t, "programs", None), "max_log_fold", None) is None and a.max_log_fold:
+        t.programs.max_log_fold = float(a.max_log_fold)   # registry.load sets it; a grown tumour may not
     lap("load" if not a.grow else "grow")
     layer = HumanGenomeLayer(t, allow_linear=t.genome_params.get("arms") is None)
-    sec = RR.section(t, max_cells=a.max_cells)
-    dis = RR.dissociated(t, max_cells=a.max_cells, seed=a.seed)
+    max_cells = a.max_cells or RG.T["max_cells"]
+    spec = RR.resect(t)
+    dis = spec.dissociate(max_cells=max_cells)
+    sec = spec.slice(depth_frac=0.5, max_cells=max_cells)
     lap("layer_and_sample")
 
     ready, sizes = [], {}
     truth_done = set()
     for arm in a.arms.split(","):
         expr = layer.expression(t, permute_programmes=(a.permute_seed if arm == "permuted" else None))
-        vz = Visium(seed=a.seed, kappa=HUMAN_VISIUM_KAPPA).run(sec, gene_lift=expr)
+        vz = Visium(seed=300 + a.seed, kappa=HUMAN_VISIUM_KAPPA, **RG.VISIUM).run(
+            sec, grid_side=t.grid_size, gene_lift=expr)
         av = layer.visium_allele_counts(vz, t, seed=a.seed)
         write_visium(os.path.join(a.out, arm, "visium"), vz, layer, allele=av, tumor=t, seed=a.seed)
         lap(f"visium_{arm}")
-        sc = scRNA(n_cells=a.n_cells, seed=a.seed, dropout_mid=0.0, n_reads=a.n_reads).run(dis, gene_lift=expr)
+        dcells = list(dis["cell_exp"].index)
+        sc = scRNA(n_cells=len(dcells), seed=100 + a.seed, dropout_mid=0.0, n_reads=a.n_reads).run(
+            dis, cell_subset=dcells, gene_lift=expr)
         ac = layer.scrna_allele_counts(sc, dis, t, seed=a.seed)
         write_scrna(os.path.join(a.out, arm, "scrna"), sc, layer, dis, allele=ac, tumor=t, seed=a.seed)
         lap(f"scrna_{arm}")
@@ -169,7 +178,7 @@ def main():
                          np.array([r[1] for r in rows]), np.array([r[2] for r in rows]),
                          np.array([r[3] for r in rows], dtype=object), np.array([r[4] for r in rows]),
                          np.array([r[5] for r in rows]), np.stack([r[6] for r in rows]), ct["arm_names"])
-            cells = list(sc.counts_csr.shape and sc.obs.index)
+            cells = list(sc.obs.index)
             cc = _cell_truth(t, layer, dis, cells, a.min_clone_frac)
             _write_truth(os.path.join(a.out, "truth_extra"), "scrna", barcodes(len(cells), seed=a.seed),
                          cc["tum"], cc["tum"].astype(float), cc["clone"], cc["hyp"], cc["epi"],

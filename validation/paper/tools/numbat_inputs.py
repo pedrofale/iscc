@@ -3,7 +3,8 @@
     python numbat_inputs.py <dataset_dir>
 
 Writes ``<dataset>/numbat/df_allele.tsv.gz`` (cell, snp_id, CHROM, POS, cM, REF, ALT, AD, DP, GT, gene)
-from ``snp_dir`` and ``gtf.tsv`` (gene, CHROM, gene_start, gene_end) from the gene BED. iscc knows each
+from ``snp_dir`` and ``gtf.tsv`` (gene, gene_start, gene_end, CHROM, gene_length: the columns of
+Numbat's own ``gtf_hg38``) from the gene BED. iscc knows each
 heterozygous SNP's phase exactly, so ``GT`` is "1|0" when ALT sits on haplotype 1 (homolog p, the
 ``A`` matrix) and "0|1" otherwise, and ``AD`` counts the ALT haplotype's UMIs. Genetic position is
 taken as 1 cM per Mb, which only sets Numbat's phase-switch prior (the phase has no switch errors).
@@ -43,9 +44,10 @@ def main(ds):
                        "gene": [sym.get(g, g) for g in s["gene_id"]]})
     df.sort_values(["CHROM", "POS", "cell"]).to_csv(os.path.join(out, "df_allele.tsv.gz"), sep="\t", index=False)
     bed = pd.read_csv(os.path.join(ds, "clonalscope", "genes.bed"), sep="\t")
-    gtf = pd.DataFrame({"gene": [sym.get(g, g) for g in bed["geneID"]],
+    gtf = pd.DataFrame({"gene": [sym.get(g, g) for g in bed["geneID"]], "gene_start": bed["start"],
+                        "gene_end": bed["end"],
                         "CHROM": bed["chr"].str.replace("chr", "", regex=False).astype(int),
-                        "gene_start": bed["start"], "gene_end": bed["end"]}).drop_duplicates("gene")
+                        "gene_length": bed["end"] - bed["start"]}).drop_duplicates("gene")
     gtf.to_csv(os.path.join(out, "gtf.tsv"), sep="\t", index=False)
     print(f"numbat inputs: {len(df)} allele entries over {df['snp_id'].nunique()} SNPs and "
           f"{df['cell'].nunique()} cells; {len(gtf)} genes", flush=True)

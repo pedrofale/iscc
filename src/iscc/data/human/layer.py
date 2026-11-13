@@ -375,11 +375,17 @@ class HumanGenomeLayer:
 
         A spot's haplotype fraction for a gene pools its cells' allele-resolved expression, after the
         same lateral diffusion the assay applied to the counts; with :class:`HumanExpression` as the
-        lift, each cell type weighs in with its own baseline for the gene."""
+        lift, each cell type weighs in with its own baseline for the gene. Spots without cells can
+        hold counts bled in from the tissue (spot swapping); they lie outside it, so no allele counts
+        are drawn there. At a tissue spot the fraction is its own cells', which leaves out the alleles
+        of the RNA bled in from its neighbours."""
         lift = getattr(assay, "gene_lift", None)
         if lift is not None and hasattr(lift, "spot_hap_fraction"):
-            return self.allele_counts(assay.spot_counts, lift.spot_hap_fraction,
-                                      list(assay.spot_counts.index), seed=seed)
+            C = as_csr(assay.spot_counts)
+            occupied = np.array([m.size > 0 for m in assay._grid["members"]], dtype=C.dtype)
+            C = (sp.diags(occupied) @ C).tocsr()
+            C.eliminate_zeros()
+            return self.allele_counts(C, lift.spot_hap_fraction, list(assay.spot_counts.index), seed=seed)
         g = assay._grid
         placed = g["placed"]
         cells = np.asarray(placed["cell_exp"].index)

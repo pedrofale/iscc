@@ -182,3 +182,13 @@ def test_permuted_programmes_move_only_the_programme_factor(grown):
             brute = perm.cell_expression(vz._grid["placed"], list(pc[m])).sum(axis=0)
             assert np.allclose(P1[s_], brute, rtol=1e-9, atol=1e-12)
             break
+
+
+def test_allele_counts_skip_spots_without_cells_under_spot_swapping(grown):
+    t, layer, expr = grown
+    vz = Visium(seed=2, kappa=HUMAN_VISIUM_KAPPA, bleed_rate=0.31, bleed_distal=0.30, bleed_sigma=6.5,
+                ambient_frac=0.0).run(t.cell_data, grid_side=12, gene_lift=expr)
+    empty = np.array([m.size == 0 for m in vz._grid["members"]])
+    assert empty.any() and np.asarray(vz.spot_counts.iloc[np.flatnonzero(empty)].sum(axis=1)).sum() > 0
+    av = layer.visium_allele_counts(vz, t)
+    assert av.total[empty].sum() == 0 and av.total[~empty].sum() > 0

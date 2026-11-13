@@ -33,12 +33,13 @@ normal <- intersect(ct[[1]][ct[[2]] == "normal"], colnames(X))
 lambdas_ref <- aggregate_counts(X[, normal, drop = FALSE], data.frame(cell = normal, group = "normal"))
 arms <- fread(file.path(ds, "clonalscope", "chrarm.tsv"))
 
+err <- NULL
 ok <- tryCatch({
   run_numbat(X, lambdas_ref, df_allele, gtf = gtf, genome = "hg38", out_dir = native,
              min_cells = min_cells, ncores = cores, ncores_nni = cores, max_iter = max_iter,
              t = 1e-5, plot = FALSE, verbose = FALSE)
   TRUE
-}, error = function(e) { cat(sprintf("run_numbat error: %s\n", conditionMessage(e))); FALSE })
+}, error = function(e) { err <<- conditionMessage(e); cat(sprintf("run_numbat error: %s\n", err)); FALSE })
 iters <- as.integer(gsub(".*joint_post_(\\d+)\\.tsv$", "\\1", list.files(native, pattern = "joint_post_\\d+\\.tsv$")))
 nb <- if (ok && length(iters)) tryCatch(Numbat$new(native, i = max(iters)), error = function(e) NULL) else NULL
 
@@ -46,7 +47,7 @@ cells <- colnames(X)
 calls <- data.table(barcode = cells, malignant = 0L, p_malignant = 0, clone = NA_character_)
 cn <- data.table(barcode = rep(cells, each = nrow(arms)), arm = rep(arms$arm, times = length(cells)),
                  value = 2, scale = "total_cn")
-status <- "no CNV found"
+status <- if (is.null(err)) "no CNV found" else paste("error:", err)
 if (!is.null(nb) && !is.null(nb$clone_post)) {
   cp <- as.data.table(nb$clone_post)
   m <- match(calls$barcode, cp$cell)

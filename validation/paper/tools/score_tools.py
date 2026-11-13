@@ -35,9 +35,10 @@ from sklearn.metrics import adjusted_rand_score, roc_auc_score
 
 
 def _runs(runs_dir):
+    """Finished runs only: a run without its run.json is still going, or failed."""
     for name in sorted(os.listdir(runs_dir)):
         p = os.path.join(runs_dir, name, "calls.tsv")
-        if os.path.exists(p):
+        if os.path.exists(p) and os.path.exists(os.path.join(runs_dir, name, "run.json")):
             assay = "visium" if "visium" in name else "scrna"
             yield name, assay, os.path.join(runs_dir, name)
 
