@@ -165,6 +165,17 @@ nav:
           - DNABatchHyperParams: reference/DNABatchHyperParams.md
           - RNABatchHyperParams: reference/RNABatchHyperParams.md
           - VisiumBatchHyperParams: reference/VisiumBatchHyperParams.md
+      - Human genome:
+          - arm_genome: reference/arm_genome.md
+          - HumanGenomeLayer: reference/HumanGenomeLayer.md
+          - GeneLift: reference/GeneLift.md
+          - AlleleCounts: reference/AlleleCounts.md
+          - write_visium: reference/write_visium.md
+          - write_scrna: reference/write_scrna.md
+          - check_tool_ready: reference/check_tool_ready.md
+          - HumanReference: reference/HumanReference.md
+          - load_reference: reference/load_reference.md
+          - fetch_snps: reference/fetch_snps.md
       - Reads:
           - emit_dna_reads: reference/emit_dna_reads.md
           - emit_scrna_reads: reference/emit_scrna_reads.md

@@ -234,7 +234,7 @@ class scRNA(Assay):
         return rng_sel.choice(np.asarray(cell_states.index), size=n, replace=False)
 
     # -- run ---------------------------------------------------------------------------
-    def run(self, cell_data, cell_subset=None, **kwargs):
+    def run(self, cell_data, cell_subset=None, gene_lift=None, **kwargs):
         """Assay single-cell RNA expression for the sampled cells.
 
         Draws per-cell UMI counts from each cell's expression state through one
@@ -251,6 +251,11 @@ class scRNA(Assay):
         cell_subset : array-like of cell IDs, optional
             Fix the assayed cells so that several batches share the same biology. By
             default every sampled cell is used.
+        gene_lift : GeneLift, optional
+            Lift the assayed cells' expression from the growth genes to human genes before any
+            count is drawn (:attr:`HumanGenomeLayer.lift <iscc.data.human.HumanGenomeLayer>`), so
+            the counts, the batch factors and the ambient soup are over the human genes. Default
+            None counts the growth genes.
 
         Returns
         -------
@@ -265,6 +270,9 @@ class scRNA(Assay):
         genes = cell_states.columns
 
         activities = cell_states.loc[target_cells].values.astype(float)
+        if gene_lift is not None:
+            activities = gene_lift(activities)
+            genes = gene_lift.genes
         totals = activities.sum(axis=1, keepdims=True)
         probs = np.divide(activities, totals, out=np.zeros_like(activities), where=totals > 0)
 
