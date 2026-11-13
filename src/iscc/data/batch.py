@@ -880,8 +880,20 @@ class VisiumBatchHyperParams:
         Capture-field strength (log-space sd of the smooth field).
     edge_sigma : float
         Tissue-boundary capture-efficiency falloff (0 = none; <1 keeps it positive).
+    edge_reference : str
+        What the falloff is measured from: ``"grid"`` (the spot grid's bounding box, the historical
+        default) or ``"tissue"`` (the nearest spot without tissue, so the tissue's own edge is dimmed
+        whatever the slide's size).
     diffusion_sigma : float
-        Lateral mRNA bleed: Gaussian kernel sd spreading expression to neighbours.
+        Lateral smoothing of composition between spots: Gaussian kernel sd (moves no counts).
+    bleed_rate : float
+        Spot swapping (SpotClean's bleeding rate): the share of each spot's counts that leaves it
+        for other spots of the slide, tissue or not; 0 = off. See
+        [`bleed`][iscc.data.visium_background.bleed].
+    bleed_distal : float
+        Share of the bled counts spread uniformly over the whole slide (the slide-wide ambient floor).
+    bleed_sigma : float
+        Sd of the Gaussian kernel the rest of the bled counts spread through (coordinate units).
     sigma_batch : float
         Per-gene batch-factor LogNormal sd.
     ambient_frac : float
@@ -907,7 +919,11 @@ class VisiumBatchHyperParams:
     field_lengthscale: float = 18.0  # real ~9 spots x spot_pitch 2.0 (coord units); was 4.0
     field_sigma: float = 0.70        # real 0.697 (capture-field strength)
     edge_sigma: float = 0.30
+    edge_reference: str = "grid"
     diffusion_sigma: float = 0.0
+    bleed_rate: float = 0.0
+    bleed_distal: float = 0.0
+    bleed_sigma: float = 0.0
     sigma_batch: float = 0.10
     ambient_frac: float = 0.05
     count_model: str = "dm"
@@ -936,11 +952,12 @@ class VisiumBatch(Batch):
         self.rng = np.random.default_rng(self.seed)
         self._realized = False
 
-    def realize(self, genes, base_profile, spot_coords):
+    def realize(self, genes, base_profile, spot_coords, in_tissue=None):
         """Draw the section-level technical state for `spot_coords` (n_spots, 2).
 
         `base_profile` (pooled spot expression) sets the ambient soup; the per-gene batch factor
         and the spatial capture field are the technical signature (reproducible from the seed).
+        `in_tissue` (a per-spot boolean) is read only with ``edge_reference="tissue"``.
         """
         n = len(genes)
         self.genes = list(genes)
@@ -954,12 +971,12 @@ class VisiumBatch(Batch):
         self.ambient_profile = amb / tot if tot > 0 else np.full(n, 1.0 / n)
         # the headline piece: a spatially-autocorrelated positive capture-efficiency field
         self.spot_coords = np.asarray(spot_coords, dtype=float)
-        self.capture_field = self._draw_capture_field(self.spot_coords)
+        self.capture_field = self._draw_capture_field(self.spot_coords, in_tissue=in_tissue)
         self._realized = True
         return self
 
     # -- the spatially-correlated capture-efficiency field -----------------------------
-    def _draw_capture_field(self, coords):
+    def _draw_capture_field(self, coords, in_tissue=None):
         """Smooth POSITIVE random field over spot coords: squared-exponential GP x edge falloff.
 
         A zero-mean GP with an RBF (squared-exponential) covariance ``K_ij = exp(-||x_i - x_j||^2
@@ -982,20 +999,37 @@ class VisiumBatch(Batch):
         g = L @ self.rng.standard_normal(n)                # zero-mean unit-variance SE-GP sample
         # LogNormal link -> positive field with mean ~1 (before edge / renormalization)
         field = np.exp(self.h.field_sigma * g - 0.5 * self.h.field_sigma ** 2)
-        field = field * self._edge_falloff(coords)
+        field = field * self._edge_falloff(coords, in_tissue=in_tissue)
         m = field.mean()
         return field / m if m > 0 else np.ones(n)
 
-    def _edge_falloff(self, coords):
-        """Tissue-boundary capture-efficiency falloff: lower efficiency near the section edge.
+    def _edge_falloff(self, coords, in_tissue=None):
+        """Capture-efficiency falloff: lower efficiency near an edge.
 
-        Distance of each spot to the nearest boundary of the spot-grid extent, normalized to [0,1]
-        (0 at the boundary, 1 at the centre); efficiency = ``1 - edge_sigma * exp(-3*dnorm)`` so the
-        very edge is reduced by `edge_sigma` and the interior is ~1. `edge_sigma<1` keeps it positive.
+        With ``edge_reference="grid"`` (the default) the edge is the spot grid's bounding box: the
+        distance of each spot to its nearest side, normalized to [0, 1] (0 at the side, 1 at the
+        centre). With ``edge_reference="tissue"`` it is the tissue's own boundary: the distance of each
+        tissue spot beyond the tissue's outermost ring, in spot pitches (0 on that ring; spots outside
+        the tissue also sit at 0), so the falloff is confined to about one pitch of the edge whatever
+        the size of the tissue, as on a real section. Either way efficiency =
+        ``1 - edge_sigma * exp(-3*dnorm)``, so the very edge is reduced by `edge_sigma` and the
+        interior is ~1. `edge_sigma<1` keeps it positive.
         """
         n = coords.shape[0]
         if self.h.edge_sigma <= 0 or n == 0:
             return np.ones(n)
+        reference = getattr(self.h, "edge_reference", "grid")
+        if reference not in ("grid", "tissue"):
+            raise ValueError(f"edge_reference must be 'grid' or 'tissue', got {reference!r}")
+        if reference == "tissue" and in_tissue is not None:
+            from scipy.spatial import cKDTree
+            tis = np.asarray(in_tissue, dtype=bool)
+            if tis.all() or not tis.any():
+                return np.ones(n)
+            dist = np.zeros(n)
+            d = cKDTree(coords[~tis]).query(coords[tis])[0]
+            dist[tis] = d - d.min()                        # the tissue's outermost spots sit at 0
+            return 1.0 - float(self.h.edge_sigma) * np.exp(-3.0 * dist / float(self.h.spot_pitch))
         r, c = coords[:, 0], coords[:, 1]
         dr = np.minimum(r - r.min(), r.max() - r)
         dc = np.minimum(c - c.min(), c.max() - c)
