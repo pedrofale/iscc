@@ -14,6 +14,7 @@
 #                   L.csv  genes x clones copy number  (rownames=genes, colnames=clones)
 # Outputs (outdir): clone_probs.csv  cells x clones assignment probabilities
 #                   clone_call.csv    cells -> hard clone call (argmax over clones)
+#                   run.csv           genes and cells dropped before the fit, and the seed that fit
 #
 # Usage: Rscript clonealign_runner.R <indir> <outdir> [max_iter] [n_repeats] [seed]
 
@@ -70,6 +71,9 @@ for (s in seed + 0:2) {
   if (!is.null(fit)) break
 }
 if (is.null(fit)) stop("clonealign failed on every seed")
+write.csv(data.frame(genes_total = length(keep_g), genes_dropped = sum(!keep_g),
+                     cells_total = length(keep_c), cells_dropped = sum(!keep_c), seed_used = s),
+          file.path(outdir, "run.csv"), row.names = FALSE)
 
 probs <- matrix(1 / ncol(L), nrow(Y), ncol(L), dimnames = list(rownames(Y), colnames(L)))
 probs[keep_c, ] <- fit$ml_params$clone_probs
