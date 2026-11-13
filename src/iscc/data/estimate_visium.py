@@ -37,6 +37,14 @@ spots), ``edge_sigma`` and ``diffusion_sigma`` (confounded with biology in a sin
 confounded with the true expression — identifiable only across >=2 sections, exactly as the scRNA
 estimator needs >=2 batches).
 
+Spots outside the tissue lift two of those. Given a raw matrix of all spots with Space Ranger's
+``in_tissue`` flag, a spot outside the tissue holds no cells, so its counts are bleed from the
+tissue plus ambient RNA, and ``_fit_off_tissue`` fits both: ``ambient_frac`` (the slide-wide floor,
+as a fraction of a tissue spot's mean total) and the bleed kernel (its sd, which sets
+``diffusion_sigma``, and the fraction of a spot's counts that bleeds away). ``edge_sigma`` stays
+prior-only: depth falls towards the tissue edge partly through bleed and partly through the tissue
+itself, and one section cannot separate the second from biology.
+
 numpy / scipy only (no JAX / R); stateless and config-driven.
 """
 from dataclasses import dataclass, field
@@ -276,8 +284,130 @@ def _fit_sigma_batch(counts, labels):
 # --------------------------------------------------------------------------------------
 # Public entry point
 # --------------------------------------------------------------------------------------
+def _pitch(coords):
+    """Spot centre-to-centre spacing: the median nearest-neighbour distance over the grid."""
+    from scipy.spatial import cKDTree
+    d, _ = cKDTree(coords).query(coords, k=2)
+    return float(np.median(d[:, 1]))
+
+
+def _bleed_kernel(coords, sigma, cutoff=5.0):
+    """Column-normalised Gaussian bleed kernel ``K[s, t]``: the share of spot ``t``'s bled mass that
+    lands on spot ``s`` (``s != t``), for a kernel sd ``sigma`` in the units of ``coords``. Sparse,
+    truncated at ``cutoff`` sd."""
+    from scipy import sparse
+    from scipy.spatial import cKDTree
+    pairs = cKDTree(coords).query_pairs(cutoff * sigma, output_type="ndarray")
+    if len(pairs) == 0:
+        return sparse.csc_matrix((len(coords), len(coords)))
+    d2 = np.sum((coords[pairs[:, 0]] - coords[pairs[:, 1]]) ** 2, axis=1)
+    w = np.exp(-d2 / (2.0 * sigma * sigma))
+    rows = np.concatenate([pairs[:, 0], pairs[:, 1]])
+    cols = np.concatenate([pairs[:, 1], pairs[:, 0]])
+    K = sparse.csc_matrix((np.concatenate([w, w]), (rows, cols)), shape=(len(coords),) * 2)
+    colsum = np.asarray(K.sum(axis=0)).ravel()
+    return K @ sparse.diags(np.divide(1.0, colsum, out=np.zeros_like(colsum), where=colsum > 0))
+
+
+def _fit_off_tissue(counts, coords, in_tissue, sigmas=None):
+    """Bleed and ambient RNA from the spots outside the tissue.
+
+    A spot outside the tissue holds no cells, so whatever it counts came from elsewhere. Its total is
+    modelled as a slide-wide ambient floor plus mRNA bled from every tissue spot through a Gaussian
+    kernel:
+
+        total_s / mu_in = a + beta * sum_t K_sigma[s, t] * total_t / mu_in      (s outside the tissue)
+
+    with ``mu_in`` the mean total of a tissue spot, ``a`` the ambient floor as a fraction of it,
+    ``beta`` the fraction of a spot's counts that bleeds to other spots, and ``K_sigma`` the
+    column-normalised kernel of :func:`_bleed_kernel`. For each ``sigma`` on a grid (in units of the
+    spot pitch) ``(a, beta)`` is fit within [0, 1] under a robust ``soft_l1`` loss, since spots
+    outside the tissue have heavy-tailed totals (debris, tissue the flag missed); the ``sigma`` with
+    the least robust cost wins. The tissue geometry enters through ``K``, so a ragged or curved edge
+    is handled.
+
+    Also returned: the off-tissue profile (median total against distance to the tissue), the inward
+    tissue profile (median total against distance into the tissue, relative to the interior) with the
+    part of its edge loss that bleed alone predicts, and the correlation of the ambient gene profile
+    (spots far from the tissue) with the pooled tissue profile, which ``iscc`` takes as the soup.
+    """
+    from scipy.optimize import least_squares
+    from scipy.spatial import cKDTree
+    in_tissue = np.asarray(in_tissue, dtype=bool)
+    if in_tissue.sum() < 10 or (~in_tissue).sum() < 10:
+        return None
+    pitch = _pitch(coords)
+    xy = coords / pitch                                       # distances in spot pitches from here on
+    total = np.asarray(counts.sum(axis=1), dtype=float).ravel()   # dense or sparse counts
+    mu_in = float(total[in_tissue].mean())
+    y = total / mu_in
+    out = ~in_tissue
+    d_out = cKDTree(xy[in_tissue]).query(xy[out])[0]          # off-tissue spot -> nearest tissue spot
+    d_in = cKDTree(xy[out]).query(xy[in_tissue])[0]           # tissue spot -> nearest off-tissue spot
+    src = np.where(in_tissue, y, 0.0)
+
+    sigmas = np.round(np.arange(0.2, 3.01, 0.05), 3) if sigmas is None else np.asarray(sigmas, float)
+    y_out = y[out]
+    scale = max(1.4826 * float(np.median(np.abs(y_out - np.median(y_out)))), 1e-3)
+    best = None
+    for sig in sigmas:
+        bled = (_bleed_kernel(xy, sig) @ src)[out]
+        fit = least_squares(lambda p: p[0] + p[1] * bled - y_out, [0.05, 0.2],
+                            bounds=([0.0, 0.0], [1.0, 1.0]), loss="soft_l1", f_scale=scale)
+        if best is None or fit.cost < best[0]:
+            best = (fit.cost, float(sig), float(fit.x[0]), float(fit.x[1]))
+    _, sigma, a, beta = best
+
+    # iscc's `_diffuse` smooths composition with a row-normalised kernel that includes the spot
+    # itself; at this sd on a hexagonal grid it keeps this share of a spot's own expression
+    ring = np.array([0.0] + [1.0] * 6 + [np.sqrt(3.0)] * 6 + [2.0] * 6 + [np.sqrt(7.0)] * 12 + [3.0] * 6)
+    smooth_keep = float(1.0 / np.exp(-ring ** 2 / (2.0 * sigma * sigma)).sum())
+
+    def profile(dist, val, step=0.5, dmax=8.0):
+        bins = np.arange(0.0, dmax + step, step)
+        idx = np.digitize(dist, bins) - 1
+        rows = []
+        for i in range(len(bins) - 1):
+            m = idx == i
+            if m.sum() >= 5:
+                rows.append((float(0.5 * (bins[i] + bins[i + 1])), float(np.median(val[m])), int(m.sum())))
+        return rows
+
+    # inward profile, and the edge loss bleed alone predicts: a tissue spot keeps (1 - beta) of its own
+    # mass and receives beta-weighted mass only from other tissue spots, so its edge neighbours lose
+    # what bleeds out of the tissue
+    K = _bleed_kernel(xy, sigma)
+    inflow = K @ src
+    kept = (1.0 - beta) * src + beta * inflow
+    interior = d_in >= 5.0
+    rel_obs = y[in_tissue] / np.median(y[in_tissue][interior]) if interior.any() else None
+    rel_bleed = (kept[in_tissue] / src[in_tissue].clip(1e-12))
+    rel_bleed = rel_bleed / np.median(rel_bleed[interior]) if interior.any() else None
+
+    far = out.copy()
+    far[out] = d_out >= max(4.0 * sigma, 3.0)
+    amb_r = None
+    amb = np.asarray(counts[far].sum(axis=0), dtype=float).ravel()
+    tis = np.asarray(counts[in_tissue].sum(axis=0), dtype=float).ravel()
+    if far.sum() >= 10 and amb.sum() > 0 and tis.sum() > 0:
+        keep = (amb + tis) > 0
+        amb_r = float(np.corrcoef(np.log1p(amb[keep] / amb.sum() * 1e6),
+                                  np.log1p(tis[keep] / tis.sum() * 1e6))[0, 1])
+
+    return dict(
+        pitch=pitch, mu_in=mu_in, sigma_pitch=sigma, ambient_frac=a, bleed_frac=beta,
+        smooth_keep=smooth_keep,
+        n_in=int(in_tissue.sum()), n_out=int(out.sum()), n_far=int(far.sum()),
+        off_profile=profile(d_out, y[out]),
+        off_profile_model=profile(d_out, a + beta * inflow[out]),
+        in_profile=profile(d_in, rel_obs) if rel_obs is not None else None,
+        in_profile_bleed=profile(d_in, rel_bleed) if rel_bleed is not None else None,
+        ambient_profile_r=amb_r,
+    )
+
+
 def estimate_visium(adata, *, count_model="dm", coords=None, section_labels=None,
-                    occupied_fraction=None):
+                    occupied_fraction=None, in_tissue=None):
     """Fit ``VisiumBatchHyperParams`` from a real Visium AnnData (MoM / curve-fit).
 
     Parameters
@@ -294,11 +424,44 @@ def estimate_visium(adata, *, count_model="dm", coords=None, section_labels=None
     occupied_fraction : float | None
         Fraction of laid spots that are on-tissue. Defaults to the fraction of non-empty spots
         (spots with >0 counts). Sets ``spots_per_tissue`` = on-tissue spot count.
+    in_tissue : sequence of bool | None
+        Per-spot tissue flag (Space Ranger's ``in_tissue``). Defaults to ``adata.obs['in_tissue']``
+        when present. Given a raw matrix of ALL spots with this flag, the library, field and
+        overdispersion fits use the tissue spots only, and the spots outside the tissue fit bleed and
+        ambient RNA (:func:`_fit_off_tissue`): ``ambient_frac`` becomes fitted, and the bleed kernel's
+        sd and fraction are reported in ``diagnostics["off_tissue"]``, with ``diffusion_sigma`` set
+        to the kernel sd in ``spot_pitch`` units of the preset. Without it, the fit is as before.
 
     Returns
     -------
     VisiumEstimate
     """
+    if in_tissue is None and hasattr(adata, "obs") and "in_tissue" in getattr(adata, "obs", {}):
+        in_tissue = adata.obs["in_tissue"].to_numpy()
+    if in_tissue is not None:
+        from scipy import sparse
+        in_tissue = np.asarray(in_tissue).astype(bool)
+        X = adata.X if hasattr(adata, "X") else adata
+        counts_all = sparse.csr_matrix(X) if sparse.issparse(X) else _dense(adata)
+        # Only a real raw matrix counts anything outside the tissue: iscc's own AnnData carries the
+        # flag too, but its empty spots emit nothing, so it takes the original path unchanged.
+        if not in_tissue.all() and counts_all[~in_tissue].sum() > 0:
+            coords_all = _spot_coords(adata, coords)
+            est = estimate_visium(_dense(counts_all[in_tissue]), count_model=count_model,
+                                  coords=coords_all[in_tissue],
+                                  section_labels=(None if section_labels is None
+                                                  else np.asarray(section_labels)[in_tissue]),
+                                  occupied_fraction=float(in_tissue.mean()), in_tissue=None)
+            est.n_spots = int(len(in_tissue))
+            off = _fit_off_tissue(counts_all, coords_all, in_tissue)
+            if off is not None:
+                h = est.hypers.to_dict()
+                h["ambient_frac"] = off["ambient_frac"]
+                h["diffusion_sigma"] = off["sigma_pitch"] * float(h["spot_pitch"])
+                est.hypers = VisiumBatchHyperParams(**h)
+                est.fitted += ["ambient_frac", "diffusion_sigma"]
+                est.diagnostics["off_tissue"] = off
+            return est
     if count_model not in ("dm", "nb"):
         raise ValueError(f"count_model must be 'dm' or 'nb', got {count_model!r}")
     counts = _dense(adata)
