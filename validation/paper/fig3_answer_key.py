@@ -211,19 +211,41 @@ def panel_b(fig, y):
         ax.set_title(f"dispersal {d}", fontsize=6)
     ax = S.ax_mm(fig, 84, y + 8, 30, 26)
     import summaries as SM                      # cached per tumour; never reload 25 tumours here
-    rows = [(float(r["task"].split("_")[0][4:]), r["assortment"]) for r in SM.load("R1")
-            if r.get("assortment") is not None]
+    # Same-clone neighbours over their expectation under random placement of the same clones: fewer,
+    # larger clones raise the raw fraction by composition alone, so the ratio is what measures mixing.
+    rows = [(float(r["task"].split("_")[0][4:]), r["assortment"], r.get("assortment_expected"),
+             r.get("n_clones")) for r in SM.load("R1") if r.get("assortment") is not None]
+    out = None
     if rows:
-        df = pd.DataFrame(rows, columns=["d", "a"])
-        g = df.groupby("d")["a"]
-        ax.errorbar(g.mean().index, g.mean().values, yerr=g.std().values, color=S.SOURCE["iscc"],
-                    marker="o", ms=2.5, lw=0.8, capsize=1.5)
+        df = pd.DataFrame(rows, columns=["d", "a", "e", "k"])
+        if df.e.notna().all():
+            df["r"] = df.a / df.e
+            g = df.groupby("d")["r"]
+            ax.errorbar(g.mean().index, g.mean().values, yerr=g.std().values, color=S.SOURCE["iscc"],
+                        marker="o", ms=2.5, lw=0.8, capsize=1.5)
+            ax.axhline(1, color=S.GREY, lw=0.5, ls=":")
+            ax.set_ylabel("Same-clone neighbours\nover random placement")
+        else:                                   # summaries computed before the expectation existed
+            g = df.groupby("d")["a"]
+            ax.errorbar(g.mean().index, g.mean().values, yerr=g.std().values, color=S.SOURCE["iscc"],
+                        marker="o", ms=2.5, lw=0.8, capsize=1.5)
+            ax.set_ylabel("Same-clone neighbours")
         ax.set_xscale("log")
         ax.set_xlabel("Dispersal rate")
-        ax.set_ylabel("Same-clone neighbours")
         S.stat(ax, f"n = {df.groupby('d').size().min()} seeds", "upper right")
+        from scipy.stats import spearmanr
+        out = {"n": int(len(df)),
+               "raw_by_d": df.groupby("d").a.mean().round(3).to_dict(),
+               "raw_rho": round(float(spearmanr(df.d, df.a)[0]), 3), "raw_p": float(spearmanr(df.d, df.a)[1]),
+               "clones_by_d": df.groupby("d").k.mean().round(2).to_dict(),
+               "clones_rho": round(float(spearmanr(df.d, df.k)[0]), 3), "clones_p": float(spearmanr(df.d, df.k)[1])}
+        if "r" in df:
+            out.update(ratio_by_d=df.groupby("d").r.mean().round(3).to_dict(),
+                       expected_by_d=df.groupby("d").e.mean().round(3).to_dict(),
+                       ratio_rho=round(float(spearmanr(df.d, df.r)[0]), 3), ratio_p=float(spearmanr(df.d, df.r)[1]))
     else:
         pending(ax)
+    return out
 
 
 # --- c: genotype against niche --------------------------------------------------------------------
@@ -574,7 +596,7 @@ def main():
     out["a_clone"] = panel_a(fig, 4)
     S.panel_letter(fig, "b", 1, 46)
     S.text_mm(fig, 6, 47.4, "Lineage shapes space", fontsize=7, va="top")
-    panel_b(fig, 46)
+    out["b"] = panel_b(fig, 46)
     S.panel_letter(fig, "c", 121, 46)
     S.text_mm(fig, 126, 47.4, "The key separates genotype from niche", fontsize=7, va="top")
     out["c"] = panel_c(fig, 46)
