@@ -133,7 +133,7 @@ def test_per_type_pooling_is_exact(grown):
 
 def test_assays_run_on_human_expression(grown):
     t, layer, expr = grown
-    sc = scRNA(n_cells=50, seed=1).run(t.cell_data, gene_lift=expr)
+    sc = scRNA(n_cells=50, seed=1, dropout_mid=0.0).run(t.cell_data, gene_lift=expr)
     assert sp.issparse(sc.counts_csr) and sc.counts_csr.shape == (50, len(expr.genes))
     assert sc.obs["n_counts"].min() > 0
     ac = layer.scrna_allele_counts(sc, t.cell_data, t)
