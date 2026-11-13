@@ -46,18 +46,35 @@ common <- intersect(colnames(Y), rownames(L))
 Y <- Y[, common, drop = FALSE]; storage.mode(Y) <- "double"
 L <- L[common, , drop = FALSE]; storage.mode(L) <- "double"
 
-set.seed(seed)
-tf$compat$v1$set_random_seed(seed)
+# clonealign's likelihood needs every kept cell to have counts on the kept genes ("Some cells have no
+# counts mapping") and a finite log copy number for every gene and clone (a copy number of 0 gives an NA
+# initial ELBO). So genes with no counts or with copy number 0 in any clone are dropped, then cells with
+# no counts on the remaining genes; those cells get uniform probabilities, as nothing assigns them.
+keep_g <- colSums(Y) > 0 & apply(L, 1, function(r) all(is.finite(r)) && all(r > 0))
+keep_c <- rowSums(Y[, keep_g, drop = FALSE]) > 0
+cat(sprintf("clonealign: dropped %d of %d genes (no counts or copy number 0) and %d of %d cells (no counts)\n",
+            sum(!keep_g), length(keep_g), sum(!keep_c), length(keep_c)))
+Yk <- Y[keep_c, keep_g, drop = FALSE]
+Lk <- L[keep_g, , drop = FALSE]
 cat(sprintf("clonealign: %d cells x %d genes, %d clones (max_iter=%d, n_repeats=%d)\n",
-            nrow(Y), ncol(Y), ncol(L), max_iter, n_repeats))
+            nrow(Yk), ncol(Yk), ncol(Lk), max_iter, n_repeats))
 
-fit <- run_clonealign(Y, L, initial_shrinks = c(0, 5, 10), n_repeats = n_repeats,
-                      print_elbos = FALSE, max_iter = max_iter, verbose = FALSE)
+# The variational fit can still start from an NA ELBO for an unlucky initialisation: try two more seeds.
+fit <- NULL
+for (s in seed + 0:2) {
+  set.seed(s)
+  tf$compat$v1$set_random_seed(s)
+  fit <- tryCatch(run_clonealign(Yk, Lk, initial_shrinks = c(0, 5, 10), n_repeats = n_repeats,
+                                 print_elbos = FALSE, max_iter = max_iter, verbose = FALSE),
+                  error = function(e) { message(sprintf("clonealign, seed %d: %s", s, conditionMessage(e))); NULL })
+  if (!is.null(fit)) break
+}
+if (is.null(fit)) stop("clonealign failed on every seed")
 
-probs <- as.data.frame(fit$ml_params$clone_probs)
-colnames(probs) <- colnames(L)
-rownames(probs) <- rownames(Y)
-write.csv(probs, file.path(outdir, "clone_probs.csv"))
-write.csv(data.frame(clone = fit$clone, row.names = rownames(Y)),
-          file.path(outdir, "clone_call.csv"))
+probs <- matrix(1 / ncol(L), nrow(Y), ncol(L), dimnames = list(rownames(Y), colnames(L)))
+probs[keep_c, ] <- fit$ml_params$clone_probs
+call <- rep(NA_character_, nrow(Y))
+call[keep_c] <- as.character(fit$clone)
+write.csv(as.data.frame(probs), file.path(outdir, "clone_probs.csv"))
+write.csv(data.frame(clone = call, row.names = rownames(Y)), file.path(outdir, "clone_call.csv"))
 cat("clonealign done ->", outdir, "\n")
