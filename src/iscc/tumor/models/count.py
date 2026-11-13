@@ -1492,7 +1492,8 @@ class GenotypeTumor:
             else:
                 ep, em = rep.get_exp_alleles(dosage_sensitivity=P.dosage_sensitivity,
                                              snv_exp_effect=P.snv_exp_effect,
-                                             dosage_saturation=P.dosage_saturation)
+                                             dosage_saturation=P.dosage_saturation,
+                                             dosage_law=getattr(P, "dosage_law", "haplotype"))
                 drive = (P.clone_drive(rep.evolutionary_parameters, rep.baseline_rates,
                                        rep.get_snvs()) + P.celltype_bias("cancer"))
                 exp = (ep + em) * P.gene_multiplier(P.mean_z(drive)[None, :])[0]
@@ -3958,7 +3959,8 @@ class GenotypeTumor:
                 if rep.type == "cancer":
                     ep, em = rep.get_exp_alleles(dosage_sensitivity=P.dosage_sensitivity,
                                                  snv_exp_effect=P.snv_exp_effect,
-                                                 dosage_saturation=P.dosage_saturation)
+                                                 dosage_saturation=P.dosage_saturation,
+                                                 dosage_law=getattr(P, "dosage_law", "haplotype"))
                     # Route 1 reads the EVOLVED per-clone phenotype, so whatever moved fitness —
                     # CINner drivers, and now R14's epistasis multiplier — propagates into the
                     # programs by construction. Route 2 reads the clone's SNV VAFs.

@@ -391,6 +391,7 @@ targeted therapy, the target-expression check that reads it). For the ductal fie
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|
 | `dosage_sensitivity_mean` / `_sd` | 0.7 / 0.25 | mean 0–1, clipped per gene | per-gene `s_g`: **1 = full linear dosage** (exactly the law the tools assume — circular); **0 = fully buffered** (copy number invisible in RNA, inferCNV/clonealign have nothing to find). Intermediate is the realistic case and the confounder that makes those benchmarks fair |
+| `dosage_law` | `"haplotype"` | `"haplotype"` \| `"total"` | where `s_g` acts. `"haplotype"`: per haplotype, so a lost haplotype is silent whatever `s_g` (losses are never buffered) and a copy-neutral LOH lowers expression. `"total"`: on the total copy number, `1 + s_g·(min(C, sat)/2 − 1)`, so gains and losses are buffered alike, with the allelic split of the `"haplotype"` law. Fitted to TCGA breast tumours, `"total"` with mean 0.86 and sd 0.61 matches gains and losses together; `"haplotype"` cannot buffer losses (`validation/paper/supp_dosage.py`) |
 | `dosage_saturation` | none | 4–12 (**total** CN) | CN beyond which expression stops rising (real amplicons saturate); absent → unbounded linear |
 | `allele_specific` | `false` | bool | `true` → emit `cell_exp_p`/`cell_exp_m` + **`cell_rna_baf`** (the BAF in RNA that Numbat/CalicoST need). A deleted haplotype is silent regardless of `s_g` |
 
