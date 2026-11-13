@@ -97,6 +97,13 @@ PROGRAM_MAX_LOG_FOLD = 5.0
 MICROENV["hypoxia"].update(O2)
 
 
+# Per-gene dosage, calibrated on TCGA breast tumours (validation/paper/supp_dosage.py, the fit in
+# validation/data/dosage_fit.json; vault: decision-dosage-total-law): the "total" law buffers gains and
+# losses alike, and s_g ~ clip(N(0.86, 0.61), 0, 1) matches the per-gene slopes of gains and of losses
+# together. The previous prior (0.7, 0.25) under the "haplotype" law could not buffer losses.
+DOSAGE = {"dosage_law": "total", "dosage_sensitivity_mean": 0.86, "dosage_sensitivity_sd": 0.61}
+
+
 def expression():
     """The program layer with both niche arms and allele-specific dosage (a fresh copy per call)."""
     e = PC.expression_params(scatter=1.0)
@@ -108,6 +115,7 @@ def expression():
     cp["niche_program_map"] = {"epithelial": "emt", "hypoxia": "hypoxia"}
     cp["niche_program_strength"] = 3.0
     cp["phenotype_program_strength"] = {"breach": 1.0, "__default__": 0.5}
+    e["dosage_params"].update(DOSAGE)
     return e
 
 

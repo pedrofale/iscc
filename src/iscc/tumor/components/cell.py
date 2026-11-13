@@ -490,7 +490,8 @@ class Cell(object):
             exp[self._seg_offsets[seg]:self._seg_offsets[seg + 1]] = seg_exp
         return exp
 
-    def get_exp_alleles(self, dosage_sensitivity=None, snv_exp_effect=None, dosage_saturation=None):
+    def get_exp_alleles(self, dosage_sensitivity=None, snv_exp_effect=None, dosage_saturation=None,
+                        dosage_law="haplotype"):
         """Allele-resolved expression: return ``(exp_p, exp_m)`` instead of their sum.
 
         This is R13's hard engine prerequisite (DESIGN_expression.md §2, §6-v2). The legacy
@@ -516,6 +517,15 @@ class Cell(object):
         All three arguments default to None = disabled (identity), so this reduces to a plain
         allele-split dosage model when the R13 overlays are off.
 
+        ``dosage_law`` chooses where ``s_g`` acts. ``"haplotype"`` (the default) is the law above: a
+        lost haplotype is silent whatever ``s_g``, so losses are never buffered, and a copy-neutral
+        loss of heterozygosity lowers expression when ``s_g < 1``. ``"total"`` buffers gains and losses
+        alike, on the total copy number ``C``: the gene's expression is
+        ``base_g · max(1 + s_g·(min(C, sat)/2 − 1), 0)`` (zero when ``C == 0``), split between the
+        haplotypes in proportion to their ``"haplotype"``-law dosages, so allelic ratios are as
+        before. Per-gene slopes of TCGA breast tumours buffer losses as much as gains
+        (validation/paper/supp_dosage.py), which the ``"haplotype"`` law cannot produce.
+
         NOTE this is deliberately NOT the scale of :meth:`get_exp`, which returns base·(1 + copies)
         (a wild-type diploid gene -> 3·base) while normal cells bypass it entirely and sit at 1·base.
         The allele path puts cancer and normal on ONE scale (wild-type diploid -> base for both),
@@ -527,6 +537,9 @@ class Cell(object):
         # `dosage_saturation` is quoted in TOTAL copy number (what users think in); a haplotype
         # carries half of it.
         sat_allele = None if dosage_saturation is None else max(float(dosage_saturation) / 2.0, 0.0)
+        if dosage_law not in ("haplotype", "total"):
+            raise ValueError(f"dosage_law must be 'haplotype' or 'total', got {dosage_law!r}")
+        total_law = dosage_law == "total" and dosage_sensitivity is not None
 
         for seg in range(self.n_segments):
             lo, hi = self._seg_offsets[seg], self._seg_offsets[seg + 1]
@@ -553,6 +566,23 @@ class Cell(object):
                     snv_factor = np.where(bits, eff_g[None, :], 1.0).mean(axis=0)
 
                 out[lo:hi] = half_base * dosage * snv_factor
+            if total_law:
+                # rescale this segment's two haplotypes so their sum follows the total-copy-number
+                # law, keeping the split between them (and so the allelic ratio) unchanged
+                c_tot = len(self.genome[seg]["p"]) + len(self.genome[seg]["m"])
+                if c_tot == 0:
+                    continue
+                c_eff = c_tot if dosage_saturation is None else min(c_tot, float(dosage_saturation))
+                target = 2.0 * np.maximum(1.0 + s_g * (c_eff / 2.0 - 1.0), 0.0)   # in half_base units
+                hap_sum = np.zeros(hi - lo)
+                for hap in ("p", "m"):
+                    c = len(self.genome[seg][hap])
+                    if c:
+                        c_h = c if sat_allele is None else min(c, sat_allele)
+                        hap_sum += np.maximum(1.0 + s_g * (c_h - 1.0), 0.0)
+                scale = np.divide(target, hap_sum, out=np.zeros(hi - lo), where=hap_sum > 0)
+                exp_p[lo:hi] *= scale
+                exp_m[lo:hi] *= scale
         return exp_p, exp_m
 
     def expresses(self, coordinates, seg_mut_effects, thres=0.5):

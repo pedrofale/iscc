@@ -293,12 +293,18 @@ class ProgramModel:
         self.dosage_sensitivity = None
         self.dosage_saturation = None
         self.allele_specific = False
+        self.dosage_law = "haplotype"
         if self.dosage_params is not None:
             dp = dict(self.dosage_params)
             mean = float(dp.get("dosage_sensitivity_mean", 0.7))
             sd = float(dp.get("dosage_sensitivity_sd", 0.25))
             self.dosage_saturation = dp.get("dosage_saturation")
             self.allele_specific = bool(dp.get("allele_specific", False))
+            # where s_g acts: "haplotype" (losses never buffered) or "total" (gains and losses alike);
+            # see Cell.get_exp_alleles
+            self.dosage_law = str(dp.get("dosage_law", "haplotype"))
+            if self.dosage_law not in ("haplotype", "total"):
+                raise ValueError(f"dosage_law must be 'haplotype' or 'total', got {self.dosage_law!r}")
             # s_g ∈ [0, 1]: 0 = fully buffered/compensated (copy number invisible in RNA), 1 = full
             # linear dosage (the law the tools assume). Most genes sit in between — that partial,
             # PER-GENE buffering is precisely the confounder that makes clonealign/inferCNV a fair
