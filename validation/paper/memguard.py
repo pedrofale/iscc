@@ -3,8 +3,9 @@
 The paper pipeline runs on laptops that are already near their memory limit, where a second large
 process pushes everything into swap and turns minutes into hours. :func:`wait_for_memory` blocks
 until the machine has room (available RAM and free swap above thresholds) or a timeout passes, and
-the pools in this directory call it before every tumour or tool run. On a cluster node with plenty
-of memory it returns at once.
+the pools in this directory call it before every tumour or tool run. Inside a Slurm job it returns at
+once: the scheduler gives the job its own memory, and the node-wide figures in /proc/meminfo
+(including a login node's exhausted swap) say nothing about it.
 """
 import os
 import re
@@ -50,7 +51,7 @@ def wait_for_memory(min_avail_gb=1.5, min_swap_free_gb=1.5, timeout_s=1800, poll
 
     Returns True when there is room, False if ``timeout_s`` passed first (the caller decides whether
     to go ahead anyway). Thresholds can be relaxed with ``ISCC_MEMGUARD=off``."""
-    if os.environ.get("ISCC_MEMGUARD", "on") == "off":
+    if os.environ.get("ISCC_MEMGUARD", "on") == "off" or os.environ.get("SLURM_JOB_ID"):
         return True
     t0 = time.time()
     warned = False

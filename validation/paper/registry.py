@@ -12,8 +12,13 @@ Usage::
     python validation/paper/registry.py list
     python validation/paper/registry.py run R1 [--jobs 3] [--force]
     python validation/paper/registry.py run all --jobs 3
+    python validation/paper/registry.py count R1,R3       # number of tasks, for a job array
+    python validation/paper/registry.py task R1,R3 7      # grow task 7 of that list (0-based)
 
 ``ISCC_PAPER_TIER`` (``preview`` or ``full``) selects the scale; see :mod:`regime`.
+``ISCC_PAPER_OUT`` moves ``analysis_data/paper`` elsewhere, for example to a cluster's project
+storage; the tier is still appended. ``task`` is what a Slurm job array calls, one task per array
+element (see ``slurm_registry.sh``).
 """
 import argparse
 import json
@@ -29,7 +34,8 @@ sys.path.insert(0, HERE)
 import regime as RG  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(HERE))
-OUT = os.path.join(REPO, "analysis_data", "paper", RG.TIER)
+OUT = os.path.join(os.environ.get("ISCC_PAPER_OUT") or os.path.join(REPO, "analysis_data", "paper"),
+                   RG.TIER)
 
 T = RG.T
 SEEDS = list(range(1, T["seeds"] + 1))
@@ -117,6 +123,11 @@ def _grow_task(run, task, kw):
                peak_mb=round(peak),
                cancer=int(t.get_cancer_size()), n_genotypes=len(t.genotypes), time=float(t.time),
                reached_target=bool(t.reached_target))
+    # One record per task beside its pickle, and the run's manifest. Array tasks finish in any order
+    # and may race on the shared manifest, so the per-task file is the one to trust; `manifest`
+    # rebuilds the shared file from them.
+    with open(os.path.splitext(path)[0] + ".json", "w") as f:
+        json.dump(rec, f)
     with open(os.path.join(OUT, run, "manifest.jsonl"), "a") as f:
         f.write(json.dumps(rec) + "\n")
     return rec
@@ -149,8 +160,9 @@ def tasks(run):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["list", "run"])
+    ap.add_argument("cmd", choices=["list", "run", "count", "task", "manifest"])
     ap.add_argument("run", nargs="?", default="all")
+    ap.add_argument("index", nargs="?", type=int, help="task index for `task` (0-based)")
     ap.add_argument("--jobs", type=int, default=1)
     ap.add_argument("--force", action="store_true")
     a = ap.parse_args()
@@ -159,8 +171,33 @@ def main():
         for n in names:
             print(f"{n}: {len(RUNS[n])} tasks ({RG.TIER})")
         return
-    todo = [(n, task, kw) for n in names for task, kw in RUNS[n]
-            if a.force or not os.path.exists(task_path(n, task))]
+    flat = [(n, task, kw) for n in names for task, kw in RUNS[n]]
+    if a.cmd == "count":
+        print(len(flat))
+        return
+    if a.cmd == "task":
+        n, task, kw = flat[a.index]
+        if not a.force and os.path.exists(task_path(n, task)):
+            print(f"  {n}/{task}: already grown", flush=True)
+            return
+        r = _grow_task(n, task, kw)
+        print(f"  {n}/{task}: {r['cancer']} cells, {r['cpu_s']} s CPU, {r['peak_mb']} MB"
+              f"{'' if r['reached_target'] else '  (target not reached)'}", flush=True)
+        return
+    if a.cmd == "manifest":
+        for n in names:
+            recs = []
+            for task, _ in RUNS[n]:
+                p = os.path.splitext(task_path(n, task))[0] + ".json"
+                if os.path.exists(p):
+                    with open(p) as f:
+                        recs.append(json.load(f))
+            if recs:
+                with open(os.path.join(OUT, n, "manifest.jsonl"), "w") as f:
+                    f.writelines(json.dumps(r) + "\n" for r in recs)
+            print(f"{n}: {len(recs)} of {len(RUNS[n])} tasks grown")
+        return
+    todo = [(n, task, kw) for n, task, kw in flat if a.force or not os.path.exists(task_path(n, task))]
     print(f"{len(todo)} tasks to grow ({RG.TIER}, {a.jobs} parallel)", flush=True)
     # a fresh process per tumour, so one large genotype registry is not carried into the next task
     with mp.get_context("spawn").Pool(processes=a.jobs, maxtasksperchild=1) as pool:
