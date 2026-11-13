@@ -157,7 +157,7 @@ class Resection:
         with _CellDataGuard(self.tumor):
             return self.tumor.make_cell_data(**kwargs)
 
-    def dissociate(self, region=None, max_cells=None, install=False):
+    def dissociate(self, region=None, max_cells=None, install=False, layers=None):
         """Dissociate a 2-D part into a per-cell table for the sequencing assays.
 
         Materialises the part at FULL column depth (all ~K cells/deme, subsampled to ``max_cells``);
@@ -176,6 +176,9 @@ class Resection:
             ``tumor.write_h5ad(...)`` export. Turn it on when you want the tumour-level helpers
             that read ``tumor.cell_data`` (``clones_from_clades``, ``to_anndata(tumor)``) to work
             on exactly these cells.
+        layers : str or iterable of str, optional
+            The gene-wide frames to build, by frame or assay name (``"scrna"``, ``"scdna"``); see
+            [`make_cell_data`][iscc.tumor.GenotypeTumor.make_cell_data]. ``None`` builds them all.
 
         Returns
         -------
@@ -184,9 +187,9 @@ class Resection:
         """
         if region is None:
             region = self._all_demes()
-        return self._materialise(install, region=region, max_cells=max_cells)
+        return self._materialise(install, region=region, max_cells=max_cells, layers=layers)
 
-    def slice(self, region=None, depth_frac=0.5, max_cells=None, install=False):
+    def slice(self, region=None, depth_frac=0.5, max_cells=None, install=False, layers=None):
         """Cut a thin histology / Visium **section**: a depth cut of a 2-D part.
 
         Keeps ``depth_frac`` of each deme's 3-D column (default half — "take away half"), leaving the
@@ -206,6 +209,11 @@ class Resection:
         install : bool, default False
             Also make this section the tumour's own ``cell_data`` — see :meth:`dissociate`. Off by
             default, so taking a section never changes what the tumour itself exports.
+        layers : str or iterable of str, optional
+            The gene-wide frames to build, by frame or assay name; ``"visium"`` builds only the
+            expression a Visium assay reads, which is most of the memory saving for a large
+            section. See [`make_cell_data`][iscc.tumor.GenotypeTumor.make_cell_data]. ``None`` builds
+            them all.
 
         Returns
         -------
@@ -215,4 +223,4 @@ class Resection:
         if region is None:
             region = self._all_demes()
         return self._materialise(install, region=region, depth_frac=depth_frac,
-                                 max_cells=max_cells)
+                                 max_cells=max_cells, layers=layers)
