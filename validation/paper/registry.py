@@ -179,7 +179,29 @@ def load(run, task):
         t.low_memory = True
     if getattr(t, "programs", None) is not None:
         t.programs.max_log_fold = RG.PROGRAM_MAX_LOG_FOLD
+        _apply_dosage(t)
     return t
+
+
+def _apply_dosage(t):
+    """Give a stored tumour the regime's per-gene dosage (``regime.DOSAGE``, calibrated on TCGA breast
+    tumours; vault: decision-dosage-total-law). Dosage is a readout drawn from its own sub-stream of the
+    layout seed when the program model is built, so a fresh model with the regime's settings carries
+    exactly the dosage a tumour grown today would; only its sensitivities and law are copied over, and
+    the rest of the stored program model is kept."""
+    dosage = getattr(RG, "DOSAGE", None)
+    ep = t.expression_params
+    if not dosage or not isinstance(ep, dict):
+        return
+    import copy
+    from iscc.tumor.programs import ProgramModel
+    ep = copy.deepcopy(ep)
+    ep.setdefault("dosage_params", {}).update(dosage)
+    fresh = ProgramModel(n_genes=t.n_genes, segment_sizes=t.selection.segment_sizes,
+                         layout_seed=t.layout_seed, run_seed=t.seed, expression_params=ep)
+    t.programs.dosage_sensitivity = fresh.dosage_sensitivity
+    t.programs.dosage_law = getattr(fresh, "dosage_law", "haplotype")
+    t.expression_params = ep
 
 
 def tasks(run):
