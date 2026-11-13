@@ -176,7 +176,8 @@ class GenotypeTumor:
     expression_params : dict, optional
         Gene-program expression layer (``program_params``, ``activity_params``,
         ``coupling_params``, ``dosage_params``, ``snv_effect_params``). Off by default;
-        a readout only.
+        a readout only. ``cell_of_origin`` (a normal cell type, e.g. ``"epithelial"``)
+        gives cancer cells that type's baseline expression instead of an unrelated one.
     layout_seed : int, optional
         GENOME-LAYOUT seed (config-determined, shared across runs of the same config):
         fixes driver identities and baseline expression so a cohort is comparable by
@@ -494,6 +495,20 @@ class GenotypeTumor:
                     self._cci_pairs = picks.reshape(-1, 2).astype(int)
                     self._cci_ligand = int(self._cci_pairs[0, 0])
                     self._cci_receptor = int(self._cci_pairs[0, 1])
+
+        # Cell of origin: a cancer cell is a transformed cell of one normal type, so with
+        # `expression_params["cell_of_origin"]` it shares that type's baseline and differs from it only
+        # by what evolution did (copy number, SNVs, programs). Without it, the cancer baseline is an
+        # unrelated draw, and malignant cells separate from every normal type on baseline alone. The
+        # cancer draw above is still made, and the gene-set designations above still read the drawn
+        # baselines, so every layout draw is unchanged; only the materialised cancer expression (and,
+        # under targeted therapy, the target-expression check that reads it) moves.
+        origin = (self.expression_params or {}).get("cell_of_origin")
+        if origin is not None:
+            if origin not in CELLTYPES or origin == "cancer":
+                raise ValueError(f"cell_of_origin must be a normal cell type "
+                                 f"{[c for c in CELLTYPES if c != 'cancer']}, got {origin!r}")
+            self.celltype_exps["cancer"] = self.celltype_exps[origin].copy()
 
         # genotype registry: id -> representative cell. Normals keyed by their type name.
         self.genotypes = {}

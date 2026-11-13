@@ -347,6 +347,15 @@ per-**run** draws off `seed`. Ground truth is surfaced on `tumor.program_truth` 
     (wild-type diploid → `base` for both), which is what a malignant-vs-reference comparison needs.
     Only applies when the layer is on, so nothing existing re-baselines.
 
+#### `cell_of_origin` — the cancer baseline
+| Knob | Default | Valid range | Outside the range |
+|---|---|---|---|
+| `cell_of_origin` | unset | a normal type: `epithelial` \| `stromal` \| `immune` | unset → `base_{cancer,g}` is its own draw, unrelated to every normal type, so malignant cells separate from normal ones on baseline alone; set → cancer cells share that type's `base_{type,g}` and differ from it only by copy number, SNVs and programs. `cancer` or an unknown type raises. |
+
+Growth and every layout draw are unchanged; only materialised cancer expression moves (and, under
+targeted therapy, the target-expression check that reads it). For the ductal field the origin is
+`epithelial`.
+
 #### `program_params` — the dictionary (K × G `loading` matrix)
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|
