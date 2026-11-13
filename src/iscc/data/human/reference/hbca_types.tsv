@@ -1,0 +1,4 @@
+type	atlas_column	atlas_labels	n_cells	n_donors	mean_counts	rna_content
+epithelial	author_cell_type	LummHR-SCGB;LummHR-active;LummHR-major;Lumsec-HLA;Lumsec-KIT;Lumsec-basal;Lumsec-lac;Lumsec-major;Lumsec-myo;Lumsec-prol	110374	107	11081.146484375	1.0
+stromal	cell_type	fibroblast	195127	107	6834.732421875	0.6167892854329047
+immune	cell_type	CD4-positive helper T cell;CD4-positive, alpha-beta T cell;CD8-positive, alpha-beta memory T cell;T cell;activated CD4-positive, alpha-beta T cell;activated CD8-positive, alpha-beta T cell;effector memory CD4-positive, alpha-beta T cell;effector memory CD8-positive, alpha-beta T cell;gamma-delta T cell;mature NK T cell;natural killer cell;regulatory T cell	71288	107	3146.3154296875	0.2839341068294666

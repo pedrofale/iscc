@@ -33,9 +33,15 @@ component) so that two patients sharing a config share their programs, exactly a
 their oncogenes. Everything that is an EVENT — the per-cell `z` noise, a given SNV's functional class
 — is drawn from the per-run evolution seed. See `constants.py`'s layout sub-stream registry.
 """
+import warnings
+
 import numpy as np
 
 from ..constants import LAYOUT_OFFSET_PROGRAMS
+
+# A program multiplier above this fold change makes one gene dominate a cell's expression; the
+# unbounded path warns once when it is crossed (see `ProgramModel.gene_multiplier`).
+PROGRAM_FOLD_WARNING = 1e6
 
 # Offsets into the per-run EVOLUTION stream (`seed + OFFSET`), for the draws that are properties of a
 # RUN rather than of the landscape. Distinct from the layout registry in `constants.py`.
@@ -262,11 +268,21 @@ class ProgramModel:
         dict_ss, reg_ss, sg_ss = ss.spawn(3)
 
         # --- the program dictionary (optional) ---
+        # `max_log_fold` bounds the program log-fold of a gene (see `gene_multiplier`); it is not a
+        # dictionary parameter, so it is taken out before the dictionary is drawn, which leaves the
+        # draw identical with or without it.
         self.dictionary = None
+        self.max_log_fold = None
+        self._warned_unbounded = False
         if self.program_params is not None:
+            pp = dict(self.program_params)
+            mlf = pp.pop("max_log_fold", None)
+            if mlf is not None:
+                if float(mlf) <= 0:
+                    raise ValueError(f"program_params['max_log_fold'] must be > 0, got {mlf!r}")
+                self.max_log_fold = float(mlf)
             self.dictionary = ProgramDictionary(n_genes, segment_sizes,
-                                                np.random.default_rng(dict_ss),
-                                                **dict(self.program_params))
+                                                np.random.default_rng(dict_ss), **pp)
         # --- route 2: direct program regulators (drawn even so they are stable) ---
         self._regulator_matrix = None
         self.regulator_genes = {}
@@ -527,10 +543,28 @@ class ProgramModel:
         return frac * mean + drive
 
     def gene_multiplier(self, Z):
-        """exp(Z · loading) — the program contribution to expression, (n_cells × n_genes)."""
+        """exp(Z · loading) — the program contribution to expression, (n_cells × n_genes).
+
+        The log-fold ``x = Z · loading`` is unbounded: activities are lognormal plus the genotype and
+        niche drive, and loadings are heavy-tailed, so a strong marker gene in an active cell can reach
+        ``exp(60)`` and take over the cell's whole library. With ``program_params["max_log_fold"] = c``
+        it saturates smoothly, ``x -> c·tanh(x / c)``: unchanged for small ``x``, never beyond ``c`` (a
+        ``e^c``-fold change; ``c = 5`` is about 150-fold, the strongest induction a real program shows).
+        Without it the multiplier is unchanged, and a warning is raised the first time it exceeds
+        ``PROGRAM_FOLD_WARNING``.
+        """
         if self.dictionary is None or Z.shape[1] == 0:
             return np.ones((Z.shape[0], self.n_genes))
-        return np.exp(np.asarray(Z) @ self.dictionary.loading)
+        x = np.asarray(Z) @ self.dictionary.loading
+        if self.max_log_fold is not None:
+            c = self.max_log_fold
+            return np.exp(c * np.tanh(x / c))
+        if not self._warned_unbounded and x.size and float(np.max(x)) > np.log(PROGRAM_FOLD_WARNING):
+            self._warned_unbounded = True
+            warnings.warn(f"a gene program multiplies a gene's expression by up to e^{float(np.max(x)):.0f}; "
+                          f"that gene then dominates the cell's library. Set "
+                          f"program_params['max_log_fold'] (e.g. 5) to bound it.", stacklevel=2)
+        return np.exp(x)
 
     def activity_rng(self):
         """The `z` stream: run-seeded and re-created per materialisation, so repeated

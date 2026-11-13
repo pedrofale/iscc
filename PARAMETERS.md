@@ -233,7 +233,7 @@ resolution traded between the detail of the dynamics and their cost; the layer w
 | `snp_window` | 1000 bp | 300–3000 | the 3' stretch of a gene a 3' library covers; only heterozygous SNPs there get allele counts |
 | `snp_coverage` | 0.1 | 0.01–0.5 | probability a UMI of a gene covers a given SNP in its window (about read length / window). A preset, not fitted |
 | `snp_concentration` | unset (binomial) | ≳ 10 | beta-binomial concentration of the haplotype split at a SNP (allelic-expression noise) |
-| `Visium(kappa=)` on human genes | `HUMAN_VISIUM_KAPPA` = 89,000 | — | the default 50 is the growth-gene scale; over 35,061 human genes it piles each spot's counts onto a few dozen genes, and `write_visium` warns |
+| `Visium(kappa=)` on human genes | `HUMAN_VISIUM_KAPPA` = 82,165 | — | fitted by `estimate_visium` on the in-tissue spots of 10x's V1_Breast_Cancer_Block_A_Section_1 over the layer's 35,061 genes (`validation/data/fit_human_visium_kappa.py`); the default 50 is the growth-gene scale and piles each spot's counts onto a few dozen genes, so `write_visium` warns |
 
 The layer emits the 35,061 GRCh38-2020-A genes that lie on the 39 modelled arms (chrX, chrY, chrM, the
 acrocentric short arms and scaffolds are not modelled). Each takes the copy number per homolog of the
@@ -394,6 +394,7 @@ targeted therapy, the target-expression check that reads it). For the ductal fie
 | **`program_genomic_scatter`** | 1.0 | 0–1 | **the programs ⟂ CNAs knob.** 1 = scattered genome-wide (functional, realistic); **0 = a contiguous block that MIMICS a CNA** — the deliberate control for "can the tool tell a program from a copy-number segment?" |
 | `program_signs` | `up` | `up` \| `bidirectional` | `bidirectional` gives each program up- AND down-genes (more realistic) |
 | `seeded_programs` | `[proliferation, emt, hypoxia, drug_resistance, immune_evasion]` | any names | anchors programs so the phenotype/niche maps can address them **by name**; extras are unnamed background |
+| `max_log_fold` | unset (unbounded) | ~3–7 (5 ≈ 150-fold) | unset → a gene's program log-fold `Σ_k z_k·loading_{k,g}` is unbounded, and with heavy-tailed loadings and strong drive one gene can take a cell's whole library (a warning is raised past a 10⁶-fold multiplier); set → it saturates as `c·tanh(x/c)`, unchanged for small log-folds and never beyond `c`. Not part of the dictionary: setting it leaves the gene–program map and loadings unchanged |
 
 #### `activity_params` — the per-cell `z` sampler (shared with R12)
 | Knob | Default | Valid range | Outside the range |

@@ -43,7 +43,8 @@ def check_tool_ready(counts, genes, tools=TOOLS, allele=None):
     - **CancerFinder**: the genes are real symbols; it re-indexes to its own gene list, so only the
       overlap is reported.
     """
-    X = sp.csr_matrix(counts.to_numpy() if hasattr(counts, "to_numpy") else counts)
+    from .layer import as_csr
+    X = as_csr(counts)
     n = X.shape[0]
     det = (X > 0)
     genes_per_bc = np.asarray(det.sum(axis=1)).ravel()

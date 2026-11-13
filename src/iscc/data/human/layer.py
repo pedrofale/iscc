@@ -20,6 +20,19 @@ import scipy.sparse as sp
 from .reference import load_reference
 
 
+def as_csr(counts):
+    """A barcodes x genes count table as a CSR matrix: a scipy matrix, a dense or sparse pandas
+    DataFrame, or an array."""
+    if sp.issparse(counts):
+        return counts.tocsr()
+    if isinstance(counts, pd.DataFrame):
+        try:
+            return counts.sparse.to_coo().tocsr()
+        except AttributeError:
+            return sp.csr_matrix(counts.to_numpy())
+    return sp.csr_matrix(np.asarray(counts))
+
+
 class GeneLift:
     """Lift a matrix over growth genes to one over human genes.
 
@@ -294,8 +307,10 @@ class HumanGenomeLayer:
         ----------
         counts : pandas.DataFrame, numpy.ndarray or scipy.sparse matrix
             Barcodes x human genes UMI counts, in the layer's gene order.
-        frac_p : numpy.ndarray
-            Barcodes x growth genes expected fraction from homolog ``p`` (see :meth:`hap_fraction`).
+        frac_p : numpy.ndarray or callable
+            Barcodes x growth genes expected fraction from homolog ``p`` (see :meth:`hap_fraction`), or
+            a function ``frac_p(barcode_rows, human_genes)`` giving it per entry (a Visium spot whose
+            cell types weight its genes differently, :meth:`HumanExpression.spot_hap_fraction`).
         barcodes : list of str
             Row labels.
         seed : int, default 0
@@ -309,7 +324,7 @@ class HumanGenomeLayer:
             raise ValueError("no SNPs: run iscc.data.human.fetch_snps() and point ISCC_HUMAN_REF at "
                              "it, or pass load_reference(snps=...) to the layer")
         obs = self.germline.loc[self.germline["observable"]].reset_index(drop=True)
-        C = sp.csr_matrix(counts.to_numpy() if hasattr(counts, "to_numpy") else counts)
+        C = as_csr(counts)
         n_bc = C.shape[0]
         # SNPs grouped by gene: for every nonzero (barcode, gene), one draw per SNP of the gene
         order = np.argsort(obs["gene"].to_numpy(), kind="stable")
@@ -330,8 +345,11 @@ class HumanGenomeLayer:
         cov = rng.binomial(n_e, self.snp_coverage)
         nz = cov > 0
         rows_e, snp_e, cov = rows_e[nz], snp_e[nz], cov[nz]
-        growth = self.cover[obs["gene"].to_numpy()[snp_e]]
-        f = np.asarray(frac_p)[rows_e, growth].astype(float)
+        human = obs["gene"].to_numpy()[snp_e]
+        if callable(frac_p):
+            f = np.asarray(frac_p(rows_e, human), dtype=float)
+        else:
+            f = np.asarray(frac_p)[rows_e, self.cover[human]].astype(float)
         if self.snp_concentration:
             c = self.snp_concentration
             f = rng.beta(np.maximum(f * c, 1e-6), np.maximum((1.0 - f) * c, 1e-6))
@@ -347,13 +365,19 @@ class HumanGenomeLayer:
         """Allele counts for an :class:`~iscc.data.scRNA` assay run with ``gene_lift=self.lift``."""
         cells = list(assay.observed_counts.index)
         frac = self.hap_fraction(cell_data, cells, tumor)
-        return self.allele_counts(assay.observed_counts, frac, cells, seed=seed)
+        counts = getattr(assay, "counts_csr", None)
+        return self.allele_counts(assay.observed_counts if counts is None else counts, frac, cells, seed=seed)
 
     def visium_allele_counts(self, assay, tumor=None, seed=0):
         """Allele counts for a :class:`~iscc.data.Visium` assay run with ``gene_lift=self.lift``.
 
         A spot's haplotype fraction for a gene pools its cells' allele-resolved expression, after the
-        same lateral diffusion the assay applied to the counts."""
+        same lateral diffusion the assay applied to the counts; with :class:`HumanExpression` as the
+        lift, each cell type weighs in with its own baseline for the gene."""
+        lift = getattr(assay, "gene_lift", None)
+        if lift is not None and hasattr(lift, "spot_hap_fraction"):
+            return self.allele_counts(assay.spot_counts, lift.spot_hap_fraction,
+                                      list(assay.spot_counts.index), seed=seed)
         g = assay._grid
         placed = g["placed"]
         cells = np.asarray(placed["cell_exp"].index)
@@ -371,6 +395,13 @@ class HumanGenomeLayer:
         raw_p = assay._diffuse(raw_p, g["spot_coords"])
         spot_frac = np.divide(raw_p, raw, out=np.full_like(raw, 0.5), where=raw > 0)
         return self.allele_counts(assay.spot_counts, spot_frac, list(assay.spot_counts.index), seed=seed)
+
+    def expression(self, tumor, **kwargs):
+        """The human-gene expression of ``tumor``'s cells from atlas baselines and Hallmark programmes
+        (:class:`~iscc.data.human.HumanExpression`; keyword arguments go to it). Pass it to the assays
+        as ``gene_lift``."""
+        from .expression import HumanExpression
+        return HumanExpression(self, tumor, **kwargs)
 
     # -- truth ----------------------------------------------------------------------------------
     def cn_segments(self, gids, tumor):

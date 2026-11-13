@@ -16,11 +16,13 @@ import scipy.io
 import scipy.sparse as sp
 
 GENOME = "GRCh38"
-# Dirichlet-multinomial concentration for Visium counts over the human genes. The default
-# `VisiumBatchHyperParams.kappa` (50) is calibrated for iscc's small growth-gene axis; the fit to a
-# real 10x Visium section over the full ~36k-gene transcriptome is about 89,000 (the note on that
-# default). Spreading 50 over 35,061 genes piles each spot's counts onto a few dozen genes.
-HUMAN_VISIUM_KAPPA = 89_000.0
+# Dirichlet-multinomial concentration for Visium counts over the human genes, fitted by
+# `estimate_visium` (count_model "dm") on the 3,798 in-tissue spots of 10x's
+# V1_Breast_Cancer_Block_A_Section_1 over the 35,061 genes the layer emits
+# (validation/data/fit_human_visium_kappa.py; 89,197 over all 36,601 features). The default
+# `VisiumBatchHyperParams.kappa` (50) is calibrated for iscc's small growth-gene axis; spread over the
+# human genes it piles each spot's counts onto a few dozen genes.
+HUMAN_VISIUM_KAPPA = 82_165.0
 
 
 def barcodes(n, seed=0, suffix="-1"):
@@ -37,8 +39,8 @@ def barcodes(n, seed=0, suffix="-1"):
 
 
 def _sparse(counts):
-    X = counts.to_numpy() if hasattr(counts, "to_numpy") else counts
-    return sp.csr_matrix(X, dtype=np.int32)
+    from .layer import as_csr
+    return as_csr(counts).astype(np.int32)
 
 
 def write_10x_mtx(path, counts, bcs, genes):
@@ -218,7 +220,8 @@ def write_scrna(out_dir, assay, layer, cell_data, allele=None, tumor=None, seed=
     os.makedirs(outs, exist_ok=True)
     cells = list(assay.observed_counts.index)
     bcs = barcodes(len(cells), seed=seed)
-    counts = _sparse(assay.observed_counts)
+    counts = _sparse(getattr(assay, "counts_csr", None) if getattr(assay, "counts_csr", None) is not None
+                     else assay.observed_counts)
     write_10x_h5(os.path.join(outs, "filtered_feature_bc_matrix.h5"), counts, bcs, layer.genes)
     write_10x_mtx(os.path.join(outs, "filtered_feature_bc_matrix"), counts, bcs, layer.genes)
     if allele is not None:

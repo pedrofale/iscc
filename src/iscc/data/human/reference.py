@@ -100,6 +100,25 @@ def load_reference(snps=None):
     return HumanReference(genes=genes, arms=arms, chrom_sizes=sizes, snps=snps)
 
 
+def load_atlas_baselines():
+    """The packaged per-cell-type baselines from the Human Breast Cell Atlas.
+
+    Returns
+    -------
+    (pandas.DataFrame, pandas.DataFrame)
+        The baselines, indexed by ``gene_id`` with one column per iscc type (``epithelial``,
+        ``stromal``, ``immune``), each summing to 1 over the GRCh38-2020-A genes; and per type the atlas
+        labels, cells, donors, mean counts and ``rna_content`` (mean counts relative to the epithelium).
+    """
+    return _table("hbca_type_baselines.tsv.gz").set_index("gene_id"), _table("hbca_types.tsv")
+
+
+def load_hallmark_programs():
+    """The packaged Hallmark gene sets that seed iscc's named programmes: ``programme``,
+    ``hallmark_set``, ``gene_id``, ``gene_name`` (MSigDB v2025.1, CC BY 4.0)."""
+    return _table("hallmark_programs.tsv")
+
+
 def read_snps(path):
     """Read a ``snps_in_genes.npz`` written by :func:`prepare_snps` into a table."""
     z = np.load(path)
