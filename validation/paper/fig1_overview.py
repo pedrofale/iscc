@@ -79,7 +79,7 @@ def main():
     items = [("Tissue", "ductal field: glands,\nepithelial wall, stroma"),
              ("Evolution", "selection on drivers,\ncopy number, traits"),
              ("Sampling and assays", "biopsy, dissociation, section;\nDNA, RNA, spatial, reads"),
-             ("Therapy (optional)", "schedules, adaptive dosing")]
+             ("Niche", "hypoxia field, epithelial wall,\nimmune cells")]
     for i, (h, s) in enumerate(items):
         y = 9 + i * 12.5
         box(fig, 5, y, 36, 11, S.PASTEL["grey"])
