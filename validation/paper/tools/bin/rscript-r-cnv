@@ -1,0 +1,4 @@
+#!/bin/bash
+# Rscript of the R copy-number image (Numbat, CopyKAT, Clonalscope, HMMcopy).
+# Point the matching ISCC_*_RSCRIPT / ISCC_*_PYTHON variable at this file; ISCC_TOOLS_DIR holds the images.
+exec apptainer exec --cleanenv -B /nobackup  "${ISCC_TOOLS_DIR:?set ISCC_TOOLS_DIR to the directory of the tool images}/r-cnv.sif" /opt/conda/bin/Rscript "$@"
