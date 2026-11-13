@@ -3,7 +3,7 @@
 #
 #   ISCC_TOOLS_DIR=<dir> validation/paper/tools/run_tool.sh <tool> <dataset_dir> <out_dir> [runner args]
 #
-# <tool> is copykat, clonalscope, calicost, cancerfinder or infercnvpy; <dataset_dir> is a folder
+# <tool> is copykat, clonalscope, calicost, cancerfinder, infercnvpy or numbat (scRNA only); <dataset_dir> is a folder
 # written by iscc.data.human.write_visium or write_scrna. ISCC_TOOLS_DIR holds the images built by
 # images/build_image.sh (r-cnv.sif, py-tools.sif) and data/ (clonalscope/cyclegenes.rds, and
 # cancerfinder/sc_pretrain_article.pkl and st_pretrain_article.pkl, Cancer-Finder's released
@@ -28,5 +28,8 @@ case "$TOOL" in
     if [ -d "$DS/outs/spatial" ]; then CKPT=st_pretrain_article.pkl; else CKPT=sc_pretrain_article.pkl; fi
     "$BIN/python-cancerfinder" "$HERE/cancerfinder.py" "$DS" "$OUT" "$ISCC_TOOLS_DIR/data/cancerfinder/$CKPT" "$@" ;;
   infercnvpy)   "$BIN/python-infercnv" "$HERE/infercnvpy_layer.py" "$DS" "$OUT" "$@" ;;
-  *) echo "unknown tool $TOOL (copykat, clonalscope, calicost, cancerfinder, infercnvpy)" >&2; exit 2 ;;
+  numbat)
+    [ -f "$DS/numbat/df_allele.tsv.gz" ] || "$BIN/python-infercnv" "$HERE/numbat_inputs.py" "$DS"
+    "$BIN/rscript-r-cnv" "$HERE/numbat_layer.R" "$DS" "$OUT" "$CORES" "$@" ;;
+  *) echo "unknown tool $TOOL (copykat, clonalscope, calicost, cancerfinder, infercnvpy, numbat)" >&2; exit 2 ;;
 esac

@@ -13,6 +13,10 @@ What must hold:
 4. **Per-type pooling is exact.** A Visium spot's pooled expression equals the sum of its cells'
    expression computed one by one.
 5. **The assays run on it.** scRNA counts come out sparse over the human genes; Visium spots too.
+6. **Shuffled programmes move only the programme factor** (`permute_programmes`, Fig 5's P2). Off the
+   programme genes a cell's expression is unchanged; on them it changes by exactly the ratio of the
+   shuffled to its own programme factor; the shuffle stays within each cell type, is fixed per
+   sample and per seed, and Visium pools agree with it.
 """
 import warnings
 
@@ -143,3 +147,38 @@ def test_assays_run_on_human_expression(grown):
     av = layer.visium_allele_counts(vz, t)
     tissue = np.asarray(vz.obs["n_cells"]) > 0
     assert av.total[tissue].sum() > 0
+
+
+def test_permuted_programmes_move_only_the_programme_factor(grown):
+    t, layer, expr = grown
+    perm = layer.expression(t, chunk=64, permute_programmes=11)
+    cd = t.cell_data
+    cells = list(cd["cell_exp"].index)
+    assert expr.hp.size and np.array_equal(perm.hp, expr.hp)
+    E0, E1 = expr.cell_expression(cd, cells), perm.cell_expression(cd, cells)
+    off = np.setdiff1d(np.arange(len(expr.genes)), expr.hp)
+    assert np.array_equal(E0[:, off], E1[:, off])                       # copy number, baseline, niche
+    F0, types, Z0 = expr._factors(cd, cells)
+    F1, _, Z1 = perm._factors(cd, cells)
+    assert np.array_equal(F0, F1)                                       # F keeps each cell's own
+    on = E0[:, expr.hp] > 0
+    ratio = perm._human_programme(Z1) / expr._human_programme(Z0)
+    assert np.allclose(E1[:, expr.hp][on] / E0[:, expr.hp][on], ratio[on])
+    assert not np.allclose(Z0, Z1)
+    for ty in np.unique(types):                                         # a shuffle within each type
+        r = types == ty
+        assert np.array_equal(np.sort(Z0[r], axis=0), np.sort(Z1[r], axis=0))
+    half = perm.cell_expression(cd, cells[: len(cells) // 2])           # fixed per sample, not per chunk
+    assert np.allclose(half, E1[: len(cells) // 2], rtol=1e-12, atol=0)   # BLAS may round per block
+    again = layer.expression(t, chunk=64, permute_programmes=11).cell_expression(cd, cells)
+    assert np.allclose(again, E1, rtol=1e-12, atol=0)
+    vz = Visium(seed=2, kappa=HUMAN_VISIUM_KAPPA)
+    vz.place_grid(cd, grid_side=12)
+    P0, P1 = expr.pool_spots(vz._grid), perm.pool_spots(vz._grid)
+    assert np.array_equal(P0[:, off], P1[:, off])
+    pc = np.asarray(vz._grid["placed"]["cell_exp"].index)
+    for s_, m in enumerate(vz._grid["members"]):
+        if m.size:
+            brute = perm.cell_expression(vz._grid["placed"], list(pc[m])).sum(axis=0)
+            assert np.allclose(P1[s_], brute, rtol=1e-9, atol=1e-12)
+            break

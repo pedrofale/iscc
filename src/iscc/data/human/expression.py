@@ -19,6 +19,10 @@ load on random human genes. The cell's program activities ``z`` are the growth m
 Nothing here builds a cells × human-genes matrix: :meth:`HumanExpression.cell_expression` works on
 chunks of cells, and :meth:`HumanExpression.pool_spots` pools a Visium section per cell type on the
 growth genes and lifts the pools, computing only the programme genes cell by cell.
+
+With ``permute_programmes`` the ``z`` of the programme factor are shuffled among the cells of each type
+of a sample, as a generator that draws cell states independently of lineage and position would make
+them; ``F``, ``B`` and the cells' copy number are untouched, so only the programme factor moves.
 """
 import warnings
 
@@ -52,6 +56,11 @@ class HumanExpression:
         Seed of the human programme loadings; default the layer's seed.
     chunk : int, default 512
         Cells processed at a time.
+    permute_programmes : int, optional
+        Seed of a shuffle of the cells' program activities among the cells of each type of a sample,
+        applied to the programme factor only (the growth-gene factor ``F`` still divides out each
+        cell's own programmes). It breaks the link of a cell's state to its lineage and position while
+        keeping each type's distribution of states. Default None: each cell keeps its own.
 
     Attributes
     ----------
@@ -63,8 +72,11 @@ class HumanExpression:
         Human-gene indices each program loads on.
     """
 
-    def __init__(self, layer, tumor, baselines=None, programmes=None, seed=None, chunk=512):
+    def __init__(self, layer, tumor, baselines=None, programmes=None, seed=None, chunk=512,
+                 permute_programmes=None):
         self.layer, self.tumor = layer, tumor
+        self.permute = None if permute_programmes is None else int(permute_programmes)
+        self._shuffled = {}
         self.genes = layer.lift.genes
         self.cover = layer.cover
         self.chunk = int(chunk)
@@ -130,9 +142,27 @@ class HumanExpression:
         gids = cell_data["cell_type"].iloc[:, 0].reindex(cells).to_numpy()
         return np.array([getattr(self.tumor.genotypes.get(g), "type", "cancer") for g in gids])
 
+    def _shuffled_programs(self, cell_data):
+        """The program activities of every cell of ``cell_data``, shuffled among the cells of each type
+        by ``permute_programmes``: one fixed shuffle per sample, so chunks and spots agree."""
+        Zdf = cell_data["cell_program"]
+        hit = self._shuffled.get(id(Zdf))
+        if hit is None or hit[0] is not Zdf:
+            cells = list(Zdf.index)
+            types = self._types(cell_data, cells)
+            rng = np.random.default_rng([self.permute, 0x5032])
+            src = np.arange(len(cells))
+            for t in np.unique(types):
+                idx = np.flatnonzero(types == t)
+                src[idx] = idx[rng.permutation(idx.size)]
+            hit = (Zdf, pd.DataFrame(Zdf.to_numpy()[src], index=Zdf.index, columns=Zdf.columns))
+            self._shuffled[id(Zdf)] = hit
+        return hit[1]
+
     def _factors(self, cell_data, cells):
         """``(F, types, Z)``: the genotype-and-niche factor per growth gene, the cell types, and the
-        program activities (None without programmes)."""
+        program activities of the programme factor (None without programmes; shuffled with
+        ``permute_programmes``)."""
         ce = cell_data["cell_exp"].reindex(cells).to_numpy(np.float64)
         types = self._types(cell_data, cells)
         base = np.empty_like(ce)
@@ -141,7 +171,9 @@ class HumanExpression:
         Z = None
         if self.P is not None and self.P.dictionary is not None and "cell_program" in cell_data:
             Z = cell_data["cell_program"].reindex(cells).to_numpy(np.float64)
-            base *= self.P.gene_multiplier(Z)
+            base *= self.P.gene_multiplier(Z)              # F divides out the cell's own programmes
+            if self.permute is not None:
+                Z = self._shuffled_programs(cell_data).reindex(cells).to_numpy(np.float64)
         F = np.ones_like(ce)
         ok = ce > 0
         F[ok] = ce[ok] / np.maximum(base[ok], TINY)
