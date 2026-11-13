@@ -129,8 +129,10 @@ def grow(seed, scale, target_cancer, spatial_snapshot_every=0, max_steps=3_000, 
     cfg = config(scale, **overrides)
     expr = expression() if expression_params == "default" else expression_params
     menv = copy.deepcopy(MICROENV) if microenv_params == "default" else microenv_params
+    # low_memory: the program multiplier is materialised per chunk too, so a large section never holds
+    # a cells x genes float64 table beyond the ones returned (decision-chunked-materialisation).
     t = GenotypeTumor(seed=seed, update_mode="tau", tau=RR.TAU, coarsen_passengers=coarsen,
-                      max_cells=1, founder_mutations=RR.FOUNDER_MUTATIONS,
+                      max_cells=1, low_memory=True, founder_mutations=RR.FOUNDER_MUTATIONS,
                       germline_params=RR.GERMLINE, expression_params=expr, microenv_params=menv,
                       spatial_snapshot_every=spatial_snapshot_every, rng_streams=rng_streams, **cfg)
     steps = 0
