@@ -34,6 +34,7 @@ def main():
     ap.add_argument("--n-clones", type=int, default=3)
     ap.add_argument("--min-spots-per-clone", type=int, default=20)
     ap.add_argument("--code", default="/opt/calicost")
+    ap.add_argument("--seed", type=int, default=0, help="CalicoST's gmm_random_state")
     a = ap.parse_args()
     t0 = time.time()
     native = os.path.join(a.out, "native")
@@ -51,6 +52,7 @@ def main():
         "filterregion_file": os.path.join(res, "HLA_regions.bed"),
         "n_clones": str(a.n_clones),
         "min_spots_per_clone": str(a.min_spots_per_clone),
+        "gmm_random_state": str(a.seed),
     }
     lines = []
     for line in template.splitlines():
@@ -90,7 +92,7 @@ def main():
         if rows:
             per_clone = pd.concat(rows)
             cn_arm = calls[["barcode", "clone"]].merge(per_clone, on="clone").drop(columns="clone").assign(scale="total_cn")
-    CALLS.write(a.out, calls, cn_arm, tool="calicost", code=a.code, n_clones=a.n_clones,
+    CALLS.write(a.out, calls, cn_arm, tool="calicost", code=a.code, n_clones=a.n_clones, seed=a.seed,
                 min_spots_per_clone=a.min_spots_per_clone, run_dir=os.path.basename(run_dir),
                 seglevel=os.path.basename(seg_files[0]) if seg_files else None, phylogeny="not run (Startle needs CPLEX)",
                 wall_s=round(time.time() - t0, 1))

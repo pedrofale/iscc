@@ -14,9 +14,12 @@ and sliced (``depth_frac`` 0.5) to the tier's ``max_cells``, Visium at the regim
 (``regime.VISIUM``, spot swapping on) over the tumour's grid, scRNA on every dissociated cell, with the
 paper's assay seeds (Visium ``300 + seed``, scRNA ``100 + seed``). Over the human genes Visium takes
 ``HUMAN_VISIUM_KAPPA`` and scRNA ``dropout_mid=0`` at ``--n-reads`` UMIs per cell. Every arm then
-measures those same cells with the same seeds; the arms differ only in the expression step:
+measures those same cells; the arms differ only in the expression step or in the assay noise:
 ``generated`` keeps each cell's programme activities, ``permuted`` shuffles them among the cells of
-each type (``HumanGenomeLayer.expression(permute_programmes=...)``). Writes, per arm,
+each type (``HumanGenomeLayer.expression(permute_programmes=...)``), and ``noise`` keeps them but
+draws the counts with assay seeds shifted by ``--noise-offset`` (a technical replicate: the batch
+signature, capture field, depth and counts are redrawn on the same cells and spots), the null P2 is
+measured against. An arm can be added later: the truth is then checked, not rewritten. Writes, per arm,
 ``OUT/<arm>/visium`` and ``OUT/<arm>/scrna`` (the layouts of :func:`iscc.data.human.write_visium` and
 :func:`iscc.data.human.write_scrna`), and once ``OUT/truth_extra`` for score_tools.py:
 
@@ -106,6 +109,7 @@ def main():
     ap.add_argument("--arms", default="generated")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--permute-seed", type=int, default=7)
+    ap.add_argument("--noise-offset", type=int, default=1000)
     ap.add_argument("--scale", default="small")
     ap.add_argument("--target", type=int, default=15_000)
     ap.add_argument("--total-genes", type=int, default=6_000)
@@ -139,18 +143,22 @@ def main():
     lap("layer_and_sample")
 
     ready, sizes = [], {}
-    truth_done = set()
+    truth_dir = os.path.join(a.out, "truth_extra")
+    truth_done = {"visium"} if os.path.exists(os.path.join(truth_dir, "visium_barcodes.tsv")) else set()
     for arm in a.arms.split(","):
+        if arm not in ("generated", "permuted", "noise"):
+            sys.exit(f"unknown arm {arm!r}")
         expr = layer.expression(t, permute_programmes=(a.permute_seed if arm == "permuted" else None))
-        vz = Visium(seed=300 + a.seed, kappa=HUMAN_VISIUM_KAPPA, **RG.VISIUM).run(
+        noise = a.noise_offset if arm == "noise" else 0               # assay seeds only; barcodes stay
+        vz = Visium(seed=300 + a.seed + noise, kappa=HUMAN_VISIUM_KAPPA, **RG.VISIUM).run(
             sec, grid_side=t.grid_size, gene_lift=expr)
-        av = layer.visium_allele_counts(vz, t, seed=a.seed)
+        av = layer.visium_allele_counts(vz, t, seed=a.seed + noise)
         write_visium(os.path.join(a.out, arm, "visium"), vz, layer, allele=av, tumor=t, seed=a.seed)
         lap(f"visium_{arm}")
         dcells = list(dis["cell_exp"].index)
-        sc = scRNA(n_cells=len(dcells), seed=100 + a.seed, dropout_mid=0.0, n_reads=a.n_reads).run(
+        sc = scRNA(n_cells=len(dcells), seed=100 + a.seed + noise, dropout_mid=0.0, n_reads=a.n_reads).run(
             dis, cell_subset=dcells, gene_lift=expr)
-        ac = layer.scrna_allele_counts(sc, dis, t, seed=a.seed)
+        ac = layer.scrna_allele_counts(sc, dis, t, seed=a.seed + noise)
         write_scrna(os.path.join(a.out, arm, "scrna"), sc, layer, dis, allele=ac, tumor=t, seed=a.seed)
         lap(f"scrna_{arm}")
         keep = np.flatnonzero((vz.obs["n_cells"] > 0).to_numpy())
@@ -160,7 +168,21 @@ def main():
         sizes[arm] = dict(spots_in_tissue=int(keep.size), cells=int(sc.counts_csr.shape[0]),
                           mean_umis_per_cell=float(sc.obs["n_counts"].mean()),
                           mean_umis_per_spot=float(np.asarray(vz.spot_counts.iloc[keep].sum(axis=1)).mean()))
-        if "visium" not in truth_done:                                  # the same cells in every arm
+        if "visium" in truth_done:                                      # an arm added later: same cells?
+            old = pd.read_csv(os.path.join(truth_dir, "visium_barcodes.tsv"), sep="\t")
+            members = vz._grid["members"]
+            keep_bcs = [barcodes(len(vz.spot_counts.index), seed=a.seed)[s] for s in keep]
+            n_cells = np.array([members[s].size for s in keep])
+            spots0 = pd.read_csv(os.path.join(a.out, "generated", "visium", "truth", "spots.tsv"), sep="\t")
+            spots0 = spots0.set_index("barcode").reindex(keep_bcs)
+            same_spots = (list(old["barcode"]) == keep_bcs
+                          and np.array_equal(spots0["n_cells"].to_numpy(), n_cells))
+            prev = pd.read_csv(os.path.join(a.out, "generated", "scrna", "truth", "cells.tsv"), sep="\t")
+            same_cells = list(prev["cell"].astype(str)) == [str(c) for c in sc.obs.index]
+            if not (same_spots and same_cells and n_cells.min() > 0):
+                sys.exit(f"arm {arm}: the sampled spots or cells differ from the existing truth")
+            lap(f"checked_{arm}")
+        else:                                                           # the same cells in every arm
             placed, members = vz._grid["placed"], vz._grid["members"]
             pcells = list(placed["cell_exp"].index)
             ct = _cell_truth(t, layer, placed, pcells, a.min_clone_frac)

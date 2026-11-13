@@ -20,7 +20,7 @@ named ``<tool>-<assay>[-<variant>]``.
   against ``log2(CN / 2)`` for the log-ratio and relative scales and against CN for ``total_cn``.
 - ``wall_s`` from ``run.json``.
 
-``compare`` writes, per tool, the change from the generated to the permuted arm, overall and within
+``compare`` writes, per tool, the change from the generated to the permuted (or noise) arm, overall and within
 the hypoxic core (top decile of hypoxia among tumour barcodes) and at the epithelial wall: the share of
 barcodes whose malignant call flips, the ARI between the two arms' clone labels, and the mean absolute
 change of the per-arm value.
@@ -136,6 +136,35 @@ def compare(truth_dir, gen_dir, perm_dir, out_csv):
             rows.append(r)
     pd.DataFrame(rows).to_csv(out_csv, index=False)
     print(pd.DataFrame(rows).to_string(index=False))
+
+
+# P2 against the noise null: each measure oriented so that a positive difference means the programme
+# shuffle changed the tool's answer more than a technical replicate (new assay seeds, new tool seed) did.
+ORIENT = {"malignant_flip": 1, "clone_ari_between_arms": -1, "cn_r_between_arms": -1, "cn_mean_abs_change": 1}
+
+
+def contrast(p2, null, margin=0.02):
+    """Per tool run, assay, stratum and measure: P2 and the null per tumour, their oriented difference,
+    in how many tumours P2 exceeds the null, and ``exceeds_all``: P2 exceeds the null in every tumour
+    with both values, by more than ``margin`` on average."""
+    keys = ["tumour", "run", "assay", "stratum"]
+    j = p2.merge(null, on=keys, suffixes=("_p2", "_null"))
+    rows = []
+    for m, sign in ORIENT.items():
+        if f"{m}_p2" not in j:
+            continue
+        d = j[keys + [f"{m}_p2", f"{m}_null"]].dropna()
+        d = d.assign(measure=m, diff=sign * (d[f"{m}_p2"] - d[f"{m}_null"]))
+        rows.append(d.rename(columns={f"{m}_p2": "p2", f"{m}_null": "null"}))
+    long = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+    if not len(long):
+        return long, long
+    g = long.groupby(["run", "assay", "stratum", "measure"])
+    summary = g.agg(n_tumours=("diff", "size"), p2=("p2", "mean"), null=("null", "mean"),
+                    mean_diff=("diff", "mean"), min_diff=("diff", "min"),
+                    n_exceed=("diff", lambda x: int((x > 0).sum()))).reset_index()
+    summary["exceeds_all"] = (summary["n_exceed"] == summary["n_tumours"]) & (summary["mean_diff"] > margin)
+    return long, summary
 
 
 if __name__ == "__main__":

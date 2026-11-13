@@ -4,12 +4,14 @@ over the human genes, and the programme-permutation contrast (P2).
 Reads the datasets written by ``tools/make_layer_dataset.py`` (``--arms generated,permuted``) and the
 runs of ``tools/submit_p2.sh``, all under ``FIG5_LAYER_DIR``::
 
-    FIG5_LAYER_DIR/<tumour>/{generated,permuted}/{visium,scrna}, <tumour>/truth_extra
-    FIG5_LAYER_DIR/runs/<tumour>/{generated,permuted}/<tool>-<assay>[-ref]
+    FIG5_LAYER_DIR/<tumour>/{generated,permuted,noise}/{visium,scrna}, <tumour>/truth_extra
+    FIG5_LAYER_DIR/runs/<tumour>/{generated,permuted,noise}/<tool>-<assay>[-ref]
 
-scores them with ``tools/score_tools.py`` into ``FIG5_LAYER_DIR/scores/`` and draws
-``figures/paper1/fig5_layer_tools.pdf`` through ``validation/_paths.py`` (``ISCC_PAPER_DIR`` picks the
-paper checkout). Panels:
+scores them with ``tools/score_tools.py`` into ``FIG5_LAYER_DIR/scores/`` (with ``p2_vs_null.csv``: P2
+against the noise null, a technical replicate measured with new assay and tool seeds) and draws
+``figures/paper1/<FIG5_LAYER_NAME>.pdf`` (default ``fig5_layer_tools``) through ``validation/_paths.py``
+(``ISCC_PAPER_DIR`` picks the paper checkout). In e-g, filled markers are P2 and hollow ones the null.
+Panels:
 
 a. malignant against normal (AUC), per tool, assay and tumour, programmes as generated;
 b. clone recovery against the D9 clones (ARI);
@@ -63,11 +65,12 @@ def collect(root):
             f = os.path.join(out, f"{tumour}_{arm}.csv")
             ST.score(ds, runs, f)
             sc.append(pd.read_csv(f).assign(tumour=tumour, arm=arm))
-        g, p = (os.path.join(root, "runs", tumour, a) for a in ("generated", "permuted"))
-        if os.path.isdir(g) and os.path.isdir(p):
-            f = os.path.join(out, f"{tumour}_p2.csv")
-            ST.compare(os.path.join(ds, "truth_extra"), g, p, f)
-            ch.append(pd.read_csv(f).assign(tumour=tumour))
+        g, p, n = (os.path.join(root, "runs", tumour, a) for a in ("generated", "permuted", "noise"))
+        for arm, other, kind in ((p, "p2", "p2"), (n, "null", "null")):
+            if os.path.isdir(g) and os.path.isdir(arm):
+                f = os.path.join(out, f"{tumour}_{other}.csv")
+                ST.compare(os.path.join(ds, "truth_extra"), g, arm, f)
+                ch.append(pd.read_csv(f).assign(tumour=tumour, kind=kind))
     scores = pd.concat(sc, ignore_index=True) if sc else pd.DataFrame()
     changes = pd.concat(ch, ignore_index=True) if ch else pd.DataFrame()
     for df in (scores, changes):
@@ -75,6 +78,11 @@ def collect(root):
             df["key"] = df["run"].map(_key)
     scores.to_csv(os.path.join(out, "scores.csv"), index=False)
     changes.to_csv(os.path.join(out, "p2_changes.csv"), index=False)
+    if len(changes) and (changes["kind"] == "null").any():
+        long, summary = ST.contrast(changes[changes["kind"] == "p2"].drop(columns=["kind", "key"]),
+                                    changes[changes["kind"] == "null"].drop(columns=["kind", "key"]))
+        long.to_csv(os.path.join(out, "p2_vs_null_by_tumour.csv"), index=False)
+        summary.to_csv(os.path.join(out, "p2_vs_null.csv"), index=False)
     return scores, changes
 
 
@@ -101,13 +109,16 @@ def _dots(ax, df, col, tumours, xlim, xlabel, ref=None):
 
 def _p2(ax, changes, col, xlim, xlabel, ref=None, labels=True):
     keys = [k for k in ORDER if k in set(changes["key"])]
+    kinds = changes["kind"] if "kind" in changes else pd.Series("p2", index=changes.index)
     for i, k in enumerate(keys):
         for s_i, (stratum, (lab, colour)) in enumerate(STRATA.items()):
             v = changes[(changes["key"] == k) & (changes["stratum"] == stratum)]
-            for _, r in v.iterrows():
+            for idx, r in v.iterrows():
                 if np.isfinite(r[col]):
+                    null = kinds.loc[idx] == "null"
                     y_ = i + (s_i - 1) * 0.22 + (0.06 if r["assay"] == "scrna" else -0.06)
-                    ax.plot(r[col], y_, "o", ms=2.4, mfc=colour, mec="white", mew=0.3,
+                    ax.plot(r[col], y_, "o", ms=2.4, mfc="white" if null else colour,
+                            mec=colour if null else "white", mew=0.5 if null else 0.3,
                             alpha=1.0 if r["assay"] == "visium" else 0.55)
     if ref is not None:
         ax.axvline(ref, color=S.GREY, lw=0.5, ls=":")
@@ -163,9 +174,10 @@ def figure(root):
             if i == 0:
                 ax.legend(handles=[Line2D([], [], marker="o", ls="none", ms=3, mfc=c, mec="white", label=lab)
                                    for lab, c in STRATA.values()], fontsize=5, frameon=False,
-                          loc="lower right", handletextpad=0.2, title="faded: scRNA", title_fontsize=4.5)
+                          loc="lower right", handletextpad=0.2, title="faded: scRNA; hollow: null",
+                          title_fontsize=4.5)
         x += 42 + 6
-    path = S.save(fig, "fig5_layer_tools")
+    path = S.save(fig, os.environ.get("FIG5_LAYER_NAME", "fig5_layer_tools"))
     with open(os.path.join(root, "scores", "fig5_layer_tools.json"), "w") as f:
         json.dump({"figure": path, "tumours": tumours,
                    "scores": scores.round(4).to_dict("records") if len(scores) else [],

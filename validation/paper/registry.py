@@ -97,6 +97,19 @@ def _runs():
     runs["R10"] = [(f"{name}_seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
                                             spatial=sp))
                    for name, sp in (("barriers", {}), ("open", off)) for s in SEEDS]
+    # R11: the human genome layer's tool figure (Fig 5) on an arm-homologous growth genome: one segment
+    # per autosomal arm, 6,000 growth genes shared in proportion to each arm's genes, and 240 drivers
+    # placed per arm from Cancer Gene Census content (driver_scale 0.4 keeps today's prop_driver 0.04
+    # load). The same three designs as R0 seed1 and R1 seed1 at dispersal 0.1 and 0.9, so the layer's
+    # copy-number segments follow real arms (vault: design-human-genome-layout, G; paper1-sprint).
+    from iscc.data.human import arm_genome
+    ag = arm_genome(total_genes=6000, driver_scale=0.4)
+    arm = dict(genome=ag["genome_params"], selection=ag["selection_params"])
+    runs["R11"] = ([("seed1", dict(seed=1, scale=SHOW, target_cancer=T["showcase_target"],
+                                   spatial_snapshot_every=2, **arm))]
+                   + [(f"disp{d}_seed1", dict(seed=1, scale=SWEEP, target_cancer=T["sweep_target"],
+                                              spatial_snapshot_every=8, cancer={"dispersal_rate": d}, **arm))
+                      for d in (0.1, 0.9)])
     return runs
 
 

@@ -8,13 +8,15 @@
 # arm from the joint posterior's states, 2 where Numbat calls nothing; scale "total_cn"), run.json, and
 # Numbat's own files in native/. If Numbat finds no CNV, every cell is written diploid and unassigned.
 #
-# Usage: Rscript numbat_layer.R <dataset_dir> <out_dir> [n_cores] [max_iter] [min_cells]
+# Usage: Rscript numbat_layer.R <dataset_dir> <out_dir> [n_cores] [max_iter] [min_cells] [seed]
 suppressMessages({library(numbat); library(Matrix); library(data.table); library(jsonlite)})
 args <- commandArgs(trailingOnly = TRUE)
 ds <- args[1]; out <- args[2]
 cores <- if (length(args) >= 3) as.integer(args[3]) else 1L
 max_iter <- if (length(args) >= 4) as.integer(args[4]) else 2L
 min_cells <- if (length(args) >= 5) as.integer(args[5]) else 50L
+seed <- if (length(args) >= 6) as.integer(args[6]) else 0L
+set.seed(seed)
 native <- file.path(out, "native")
 dir.create(native, recursive = TRUE, showWarnings = FALSE)
 t0 <- Sys.time()
@@ -71,7 +73,7 @@ fwrite(calls, file.path(out, "calls.tsv"), sep = "\t", na = "")
 fwrite(cn, file.path(out, "cn_arm.tsv"), sep = "\t")
 write_json(list(tool = "numbat", version = as.character(packageVersion("numbat")), status = status,
                 n_barcodes = length(cells), n_reference = length(normal), max_iter = max_iter,
-                min_cells = min_cells, n_cores = cores,
+                min_cells = min_cells, n_cores = cores, seed = seed,
                 wall_s = round(as.numeric(difftime(Sys.time(), t0, units = "secs")), 1)),
            file.path(out, "run.json"), auto_unbox = TRUE, pretty = TRUE)
 cat("numbat done:", status, ";", sum(calls$malignant), "of", nrow(calls), "called aneuploid\n")
