@@ -69,7 +69,9 @@ ORIGIN_CONFINEMENT = dict(RR._CFG["spatial_params"]["origin_confinement"], gener
 # now acts inside full demes, so the same mutation supply alters more of the genome: `mutation_rate`
 # 0.15 (the ER+ preset is 0.30) brings the fraction of genome altered back to the old law's.
 CROWDING_OVERFILL, CROWDING_D1 = 1.5, 5.0
-CANCER = {"mutation_rate": 0.15}
+# `force_snv` off: an SNV event whose Poisson draws all come up 0 leaves the genome unchanged, as in
+# demon and CINner, instead of placing one SNV anyway (vault: paper1-sprint, decisions).
+CANCER = {"mutation_rate": 0.15, "force_snv": False}
 DEME = {"dispersal_law": "noble", "crowding_mode": "lottery", "crowding_law": "noble",
         "crowding_overfill": CROWDING_OVERFILL, "crowding_d1": CROWDING_D1,
         "maximum_death_rate": CROWDING_D1}
