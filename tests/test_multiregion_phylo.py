@@ -168,3 +168,11 @@ def test_runs_without_optional_tree_dependency():
     assert "ete3" not in sys.modules and "dendropy" not in sys.modules
     importlib.reload(mr)  # re-import cleanly; must not raise on a missing optional dep
     assert hasattr(mr, "neighbor_joining") and hasattr(mr, "robinson_foulds")
+
+
+def test_hamming_nj_tree_with_two_leaves_is_a_star():
+    # two clones (or regions) give no internal node to root at; the tree is a star and Fitch works
+    P = np.array([[1, 0, 1], [0, 0, 1]])
+    children, root = mr.hamming_nj_tree(P)
+    assert root == 2 and sorted(children[root]) == [0, 1]
+    assert mr.fitch_length(children, {0: 1, 1: 0}, root) == 1

@@ -12,7 +12,7 @@ What is fit (and from what):
     dispersion phi    mean-variance trend  var = mu + phi*mu^2,     (always)
                       de-biased for the library-size CV (see below)
     gene_means/gamma  Splatter per-gene mean-expression table       (always, informational)
-    dropout_mid/shape logistic zero-fraction-vs-mean curve          (10x; off for Smart-seq3)
+    dropout_mid/shape logistic zero-fraction-vs-mean curve          (only with fit_dropout=True)
     sigma_batch       per-gene cross-batch log-fold-change scale    (needs >=2 batches)
     depth_batch_sigma sd of log per-batch depth                     (needs >=2 batches)
 
@@ -28,8 +28,15 @@ so the raw mean-variance slope ``S = (Var-mean)/mean^2`` measures ``phi*(1+c2)+c
 true ``phi``; on real data (which also has biological cell-cell variation) it is an effective
 dispersion, reported honestly.
 
-Protocol-aware: ``estimate_rna(adata, protocol="10x")`` fits dropout and keeps droplet ambient/
-doublet priors; ``protocol="smartseq3"`` disables dropout, enables the per-cell well term, and
+Dropout is not fit by default. The logistic curve is fit to the total zero fraction, which already
+includes the zeros the negative binomial draws, and the generator applies the dropout on top of
+those draws and after the library size is set; fitting it therefore counts zeros twice and shrinks
+the simulated libraries (on PBMC3k: median 1,227 against 2,198 UMIs). UMI counts are not
+zero-inflated beyond the negative binomial (Svensson 2020, Nat Biotechnol 38:147), and Splatter
+also leaves dropout off by default; ``fit_dropout=True`` fits it for data that need it.
+
+Protocol-aware: ``estimate_rna(adata, protocol="10x")`` keeps droplet ambient/doublet priors;
+``protocol="smartseq3"`` enables the per-cell well term, and
 keeps the plate layout (wells per plate, plates, the shared per-plate depth offset) and the
 low-ambient priors. Counts-only data cannot identify the ambient soup fraction, the doublet rate or
 the plate layout (those need empty droplets / genotype demultiplexing / the wet-lab plate map), so
@@ -278,7 +285,7 @@ def _fit_batch_params(counts, labels):
 # --------------------------------------------------------------------------------------
 # Public entry point
 # --------------------------------------------------------------------------------------
-def estimate_rna(adata, protocol="10x", batch_key=None, count_model="nb", fit_dropout=None):
+def estimate_rna(adata, protocol="10x", batch_key=None, count_model="nb", fit_dropout=False):
     """Fit ``RNABatchHyperParams`` from a real scRNA count matrix (Splatter-style).
 
     Parameters
@@ -292,8 +299,10 @@ def estimate_rna(adata, protocol="10x", batch_key=None, count_model="nb", fit_dr
     batch_key : str | None
         ``adata.obs`` column with batch labels. With >=2 batches, ``sigma_batch`` and
         ``depth_batch_sigma`` are fit; otherwise they default to 0 (single-batch data).
-    fit_dropout : bool | None
-        Force dropout fitting on/off. Default: on for 10x, off for Smart-seq3.
+    fit_dropout : bool
+        Fit the logistic dropout curve (default False). The negative binomial already draws the
+        zeros of UMI data, and the dropout is applied on top of it, so fitting it double-counts
+        zeros and shrinks the simulated library sizes (see the module notes).
 
     Returns
     -------
@@ -314,8 +323,6 @@ def estimate_rna(adata, protocol="10x", batch_key=None, count_model="nb", fit_dr
     fitted += ["mu_lib", "sigma_lib", "dispersion"]
 
     # dropout (protocol-aware)
-    if fit_dropout is None:
-        fit_dropout = (proto == "10x")
     if fit_dropout:
         dropout_mid, dropout_shape = _fit_dropout(counts)
         if dropout_mid > 0:

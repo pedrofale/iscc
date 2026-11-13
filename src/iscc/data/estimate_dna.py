@@ -226,6 +226,19 @@ def _fit_depth_dispersion(coverage, cn, gc_fit, mappability, depth_model):
     return max(kappa, 1e-6), {"per_sample_kappa": kappas, "d_index": d_index}
 
 
+def _locus_capture(coverage, cn, gc_fit, mappability):
+    """Per-locus mean coverage per copy, with the GC curve and mappability divided out (NaN where a
+    locus has no coverage): the empirical capture efficiency of each target or amplicon."""
+    eff_shape = np.exp(gc_fit)
+    if mappability is not None:
+        eff_shape = eff_shape * np.asarray(mappability, dtype=float)
+    eff_shape = np.where(eff_shape > 0, eff_shape, np.nan)
+    percopy = np.divide(coverage, np.maximum(cn, 1e-9), out=np.zeros_like(coverage), where=cn > 0)
+    resid = percopy / eff_shape[None, :]
+    with np.errstate(invalid="ignore"):
+        return np.nanmean(np.where(resid > 0, resid, np.nan), axis=0)
+
+
 def _fit_capture_sigma(coverage, cn, gc_fit, mappability):
     """Per-target (WES) / per-amplicon (panel) capture LogNormal sd, after removing GC + CN.
 
@@ -238,14 +251,7 @@ def _fit_capture_sigma(coverage, cn, gc_fit, mappability):
     (M2-style) de-biasing. A panel-of-normals would pin it exactly; without one this is the honest
     counts-only estimate.
     """
-    eff_shape = np.exp(gc_fit)
-    if mappability is not None:
-        eff_shape = eff_shape * np.asarray(mappability, dtype=float)
-    eff_shape = np.where(eff_shape > 0, eff_shape, np.nan)
-    # per-locus coverage with GC+mappability+CN removed (mean over samples)
-    percopy = np.divide(coverage, np.maximum(cn, 1e-9), out=np.zeros_like(coverage), where=cn > 0)
-    resid = percopy / eff_shape[None, :]
-    locus_mean = np.nanmean(np.where(resid > 0, resid, np.nan), axis=0)
+    locus_mean = _locus_capture(coverage, cn, gc_fit, mappability)
     ok = np.isfinite(locus_mean) & (locus_mean > 0)
     if ok.sum() < 5:
         return 0.0
@@ -441,8 +447,16 @@ def estimate_dna(coverage, alt_counts, called_cn, *, modality="bulk", breadth="w
         fitted.append("gc_curve_sigma")
         diag["gc_curve_sigma"] = gc_sigma
 
-    # CN-conditioned coverage overdispersion -> kappa (DM) or nb_dispersion (NB)
-    disp, disp_diag = _fit_depth_dispersion(coverage, cn, gc_fit, mappability, depth_model)
+    # CN-conditioned coverage overdispersion -> kappa (DM) or nb_dispersion (NB). For WES / panel
+    # data with several cells, each locus's capture efficiency (its mean coverage per copy across
+    # cells) is conditioned on, so the dispersion is the per-cell spread around it. Without this the
+    # capture spread is counted twice: once in kappa and again in capture_sigma.
+    disp_eff = mappability
+    if breadth in ("wes", "panel") and coverage.shape[0] > 1:
+        cap = _locus_capture(coverage, cn, gc_fit, mappability)
+        cap = np.where(np.isfinite(cap) & (cap > 0), cap / np.nanmean(cap), 1.0)
+        disp_eff = cap if mappability is None else np.asarray(mappability, dtype=float) * cap
+    disp, disp_diag = _fit_depth_dispersion(coverage, cn, gc_fit, disp_eff, depth_model)
     diag.update(disp_diag)
     if np.isfinite(disp):
         if depth_model == "nb":
@@ -450,6 +464,7 @@ def estimate_dna(coverage, alt_counts, called_cn, *, modality="bulk", breadth="w
             fitted.append("nb_dispersion")
         else:
             h["kappa"] = disp
+            h["kappa_loci"] = int(n_loci)      # kappa's spread is per locus count; see the hyper doc
             fitted.append("kappa")
 
     # capture efficiency spread (WES / panel only)

@@ -1,6 +1,7 @@
 """Parameter estimation & inference layer (see DESIGN_inference.md)."""
 from .indices import (
     inverse_simpson,
+    detect_combinations,
     driver_combination_counts,
     clonal_diversity,
     mean_drivers_per_cell,
@@ -20,6 +21,7 @@ from .realgenome import (
 
 __all__ = [
     "inverse_simpson",
+    "detect_combinations",
     "driver_combination_counts",
     "clonal_diversity",
     "mean_drivers_per_cell",

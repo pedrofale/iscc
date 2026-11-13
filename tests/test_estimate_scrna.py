@@ -149,10 +149,23 @@ class TestRunsOnRealisticData:
         assert {"sigma_batch", "depth_batch_sigma"} <= set(est.carried)
         assert {"mu_lib", "sigma_lib", "dispersion"} <= set(est.fitted)
 
-    def test_dropout_fit_can_be_forced_off(self):
+    def test_dropout_is_not_fit_by_default(self):
         adata = self._realistic_adata("10x")
-        est = estimate_rna(adata, protocol="10x", fit_dropout=False)
+        est = estimate_rna(adata, protocol="10x")
         assert est.hypers.dropout_mid == 0.0
+        assert "dropout_mid" not in est.fitted
+        forced = estimate_rna(adata, protocol="10x", fit_dropout=True)
+        assert np.isfinite(forced.hypers.dropout_mid) and forced.hypers.dropout_mid >= 0
+
+    def test_refit_reproduces_library_size(self):
+        """Fit -> re-simulate keeps the library sizes: dropout is no longer applied on top of a
+        library fitted to post-dropout totals."""
+        adata = self._realistic_adata("10x")
+        est = estimate_rna(adata, protocol="10x")
+        sim = scRNA(n_cells=500, seed=9, **est.scrna_kwargs()).run(_cell_data(n_cells=500, n_genes=400, seed=2))
+        lib_real = np.asarray(adata.X.sum(1)).ravel()
+        lib_sim = sim.observed_counts.values.sum(1)
+        assert np.median(lib_sim) == pytest.approx(np.median(lib_real), rel=0.15)
 
     def test_scrna_kwargs_drive_the_assay(self):
         """Fitted params splat straight back into scRNA without redefinition."""

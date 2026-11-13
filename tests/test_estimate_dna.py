@@ -159,6 +159,23 @@ class TestBreadthAndModelVariants:
         assert "capture_sigma" in est.fitted
         assert est.hypers.capture_sigma == pytest.approx(realized, abs=0.1)
 
+    def test_sc_panel_capture_not_counted_twice(self):
+        """Single-cell panel: the per-cell dispersion is fit around each amplicon's capture, so
+        re-simulating the fit reproduces the coverage spread (the capture spread used to be absorbed
+        by kappa and then added again through capture_sigma)."""
+        cd = make_cell_data(n_cells=80)
+        kw = dict(breadth="panel", target_genes=0.3, capture_sigma=0.4, kappa=3000.0, mu_depth=60.0)
+        a = scDNA(n_cells=80, seed=5, **kw).run(cd)
+        est = estimate_dna_from_assay(a)
+        b = scDNA(n_cells=80, breadth="panel", target_genes=0.3, seed=6, **est.dna_kwargs()).run(cd)
+
+        def cv(x):                          # within-cell spread at two copies
+            c = x.coverage.values.astype(float)
+            two = np.rint(x.true_cn.reindex(columns=x.coverage.columns).values) == 2
+            return float(np.median([r[k].std() / r[k].mean() for r, k in zip(c, two) if k.sum() > 5]))
+        assert cv(b) == pytest.approx(cv(a), rel=0.12)
+        assert est.hypers.kappa == pytest.approx(3000.0, rel=0.35)
+
     def test_ffpe_ct_rate_recovered_above_error_floor(self):
         cd = make_cell_data()
         assay = bulkDNA(breadth="panel", seed=4, mu_depth=2000.0, error_rate=0.005,
@@ -234,3 +251,36 @@ class TestApi:
             estimate_dna(cov, np.zeros(20), np.full(20, 2.0), modality="triple")
         with pytest.raises(ValueError):
             estimate_dna(cov, np.zeros(20), np.full(20, 2.0), breadth="exome")
+
+
+# --------------------------------------------------------------------------------------
+# kappa transfers across locus counts (kappa_loci)
+# --------------------------------------------------------------------------------------
+class TestKappaLoci:
+    """The DM's excess per-locus variance is about n_loci / kappa, so a kappa fitted on one locus
+    count must be rescaled to another. ``estimate_dna`` records the count; the draw rescales."""
+
+    @staticmethod
+    def _cv(n_loci, kappa, kappa_loci, depth=400.0, reps=40, seed=0):
+        from iscc.data.batch import _dna_depth_dm
+        h = DNABatchHyperParams(kappa=kappa, kappa_loci=kappa_loci)
+        rng = np.random.default_rng(seed)
+        w = np.ones(n_loci)
+        cvs = [c.std() / c.mean() for c in (_dna_depth_dm(rng, w, depth * n_loci, h) for _ in range(reps))]
+        return float(np.mean(cvs))
+
+    def test_default_leaves_kappa_as_given(self):
+        assert DNABatchHyperParams().kappa_loci is None
+        # without kappa_loci the spread depends on the locus count (the reason for the field)
+        assert self._cv(4000, 2000.0, None) > 1.5 * self._cv(1000, 2000.0, None)
+
+    def test_rescaled_spread_is_invariant_to_locus_count(self):
+        a = self._cv(1000, 2000.0, 1000)
+        b = self._cv(4000, 2000.0, 1000)
+        assert b == pytest.approx(a, rel=0.1)
+
+    def test_estimate_records_the_locus_count(self):
+        cd = make_cell_data()
+        est = estimate_dna_from_assay(bulkDNA(breadth="wgs", seed=1).run(cd))
+        assert est.hypers.kappa_loci == est.n_loci == N_GENES
+        assert est.dna_kwargs()["kappa_loci"] == N_GENES

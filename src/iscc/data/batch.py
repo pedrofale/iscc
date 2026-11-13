@@ -29,6 +29,7 @@ The **count emission is a pluggable step** (§B.2): everything above (biology ->
 batch) is shared and only the final draw is swapped via ``COUNT_MODELS``.
 """
 from dataclasses import dataclass, asdict
+from typing import Optional
 
 import math
 import re
@@ -612,7 +613,8 @@ def _dna_depth_dm(rng, weights, N, h):
     if s <= 0 or N <= 0:
         return np.zeros(len(w), dtype=int)
     p_bar = w / s
-    alpha = np.maximum(h.kappa * p_bar, 1e-12)
+    kappa = h.kappa if not h.kappa_loci else h.kappa * len(w) / h.kappa_loci
+    alpha = np.maximum(kappa * p_bar, 1e-12)
     p = rng.dirichlet(alpha)
     return rng.multinomial(N, p)
 
@@ -663,6 +665,12 @@ class DNABatchHyperParams:
         Mean per-locus coverage (the depth regime; breadth sets it).
     kappa : float
         DM concentration = amplification regime (large = bulk, small = single-cell).
+    kappa_loci : int, optional
+        Number of loci ``kappa`` was fitted on. The DM's excess per-locus coverage variance is
+        about ``n_loci / kappa``, so a ``kappa`` fitted on one locus count gives a different
+        coverage spread on another. When set, the depth draw rescales ``kappa`` to its own locus
+        count (``kappa * n_loci / kappa_loci``), so a fit transfers. ``None`` (the default) uses
+        ``kappa`` as given. [`estimate_dna`][iscc.data.estimate_dna] sets it.
     nb_dispersion : float
         NB per-bin overdispersion phi (only for depth_model="nb").
     gc_curve_sigma : float
@@ -688,6 +696,7 @@ class DNABatchHyperParams:
     depth_model: str = "dm"
     mu_depth: float = 30.0
     kappa: float = 2000.0
+    kappa_loci: Optional[int] = None
     nb_dispersion: float = 0.1
     gc_curve_sigma: float = 0.20
     mappability_sigma: float = 0.10

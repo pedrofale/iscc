@@ -4,13 +4,14 @@ This is the M2 (DESIGN_inference §B) upgrade of the original validation: instea
 the real data with *hardcoded* assay parameters, we now **estimate** the technical
 hyper-parameters from the real dataset (Splatter-style `estimate()`), simulate an iscc tumour
 through the scRNA assay *with the fitted params*, and overlay the same count-realism panel. The
-improvement is that library size, dispersion and the dropout curve are **learned, not guessed**.
+improvement is that library size and dispersion are **learned, not guessed**, and the zero
+fraction follows from the fitted negative binomial (dropout is not fit by default; see `estimate_rna`).
 
 `estimate()` fits the DESIGN_features §B batch model (`BatchHyperParams`). PBMC3k is a single
 batch, so the cross-batch hyper-parameters (`sigma_batch`, `depth_batch_sigma`) are not
 identifiable here — they fall back to the protocol preset (the recovery test
 `tests/test_estimate_scrna.py` exercises those on multi-batch synthetic data). What is fit from
-PBMC3k: `mu_lib`, `sigma_lib`, NB `dispersion`, and the logistic `dropout` curve.
+PBMC3k: `mu_lib`, `sigma_lib` and NB `dispersion`.
 
 Usage:  python validation/validate_scrna.py [--real path.h5ad]
 By default the real reference is scanpy's PBMC3k (downloaded on first run).
