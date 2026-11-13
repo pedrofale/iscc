@@ -165,6 +165,7 @@ nav:
           - DNABatchHyperParams: reference/DNABatchHyperParams.md
           - RNABatchHyperParams: reference/RNABatchHyperParams.md
           - VisiumBatchHyperParams: reference/VisiumBatchHyperParams.md
+          - Visium spot swapping: reference/visium_bleed.md
       - Human genome:
           - arm_genome: reference/arm_genome.md
           - HumanGenomeLayer: reference/HumanGenomeLayer.md

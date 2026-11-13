@@ -63,6 +63,7 @@ for scRNA). The assays' technical defaults live in these hyper-parameter contain
 | [`iscc.data.DNABatchHyperParams`](DNABatchHyperParams.md) | DNA technical parameters. |
 | [`iscc.data.RNABatchHyperParams`](RNABatchHyperParams.md) | scRNA technical parameters. |
 | [`iscc.data.VisiumBatchHyperParams`](VisiumBatchHyperParams.md) | Visium technical parameters. |
+| [`iscc.data.visium_background.bleed`](visium_bleed.md) | Visium spot swapping: counts bleeding between spots, as SpotClean models it. |
 
 ## Human genome layer
 

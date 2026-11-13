@@ -39,11 +39,17 @@ estimator needs >=2 batches).
 
 Spots outside the tissue lift two of those. Given a raw matrix of all spots with Space Ranger's
 ``in_tissue`` flag, a spot outside the tissue holds no cells, so its counts are bleed from the
-tissue plus ambient RNA, and ``_fit_off_tissue`` fits both: ``ambient_frac`` (the slide-wide floor,
-as a fraction of a tissue spot's mean total) and the bleed kernel (its sd, which sets
-``diffusion_sigma``, and the fraction of a spot's counts that bleeds away). ``edge_sigma`` stays
-prior-only: depth falls towards the tissue edge partly through bleed and partly through the tissue
-itself, and one section cannot separate the second from biology.
+tissue, and ``_fit_bleed`` fits SpotClean's spot-swapping model to them (Ni et al. 2022, the model
+:func:`iscc.data.visium_background.bleed` simulates): the bleeding rate, its distal share (the
+slide-wide floor) and the kernel sd become ``bleed_rate``, ``bleed_distal`` and ``bleed_sigma``,
+which replace ``ambient_frac`` and ``diffusion_sigma`` (both set to 0, since the bleed carries
+the floor and moves counts between spots). The spots within ``bleed_min_dist`` pitches of the tissue
+are left out of that fit, because a spot just outside the tissue flag can still hold tissue.
+``_fit_off_tissue``, the earlier ambient-plus-Gaussian description, is still reported in the
+diagnostics. The same raw matrix then fits ``edge_sigma`` (with ``edge_reference="tissue"``) from the
+tissue's outermost ring only, as the drop there beyond what the bleed predicts (``_fit_edge``):
+farther in, real depth keeps changing with the tissue itself, which one section cannot separate
+from biology.
 
 numpy / scipy only (no JAX / R); stateless and config-driven.
 """
@@ -406,8 +412,109 @@ def _fit_off_tissue(counts, coords, in_tissue, sigmas=None):
     )
 
 
+def _fit_bleed(counts, coords, in_tissue, sigmas=None, min_dist=0.0):
+    """SpotClean's spot-swapping parameters from the spots outside the tissue.
+
+    The model of :func:`iscc.data.visium_background.bleed`: a spot outside the tissue counts, as a
+    fraction of the mean tissue spot,
+
+        y_s = r (1 - g) sum_t W_sigma[s, t] src_t  +  r g mean_t(src_t)
+
+    with ``src`` the tissue spots' totals (0 elsewhere), ``W_sigma`` SpotClean's kernel (Gaussian,
+    normalised over every spot of the slide including the source) and the mean over all slide spots.
+    For each ``sigma`` on a grid (in spot pitches) the two non-negative coefficients ``r (1 - g)`` and
+    ``r g`` are fit under a robust ``soft_l1`` loss with ``r <= 1``; the ``sigma`` with the least cost
+    wins. ``min_dist`` (pitches) drops the off-tissue spots nearer the tissue than that, since spots
+    just outside the tissue flag can still hold some tissue, which inflates the bleed they imply.
+
+    Returns a dict with ``bleed_rate`` (r), ``bleed_distal`` (g), ``sigma_pitch``, ``n_fit``, the
+    share of the slide's UMIs counted outside the tissue (``background_share``), and the cost.
+    """
+    from scipy.optimize import least_squares
+    from scipy.spatial import cKDTree
+    from .visium_background import bleed_kernel
+    in_tissue = np.asarray(in_tissue, dtype=bool)
+    if in_tissue.sum() < 10 or (~in_tissue).sum() < 10:
+        return None
+    pitch = _pitch(coords)
+    xy = coords / pitch
+    total = np.asarray(counts.sum(axis=1), dtype=float).ravel()
+    mu_in = float(total[in_tissue].mean())
+    y = total / mu_in
+    out = ~in_tissue
+    d_out = cKDTree(xy[in_tissue]).query(xy[out])[0]
+    use = d_out >= float(min_dist)
+    if use.sum() < 10:
+        return None
+    src = np.where(in_tissue, y, 0.0)
+    m = float(src.mean())                                     # the distal share reaches every spot alike
+    y_fit = y[out][use]
+    scale = max(1.4826 * float(np.median(np.abs(y_fit - np.median(y_fit)))), 1e-3)
+    sigmas = np.round(np.arange(0.25, 8.01, 0.25), 3) if sigmas is None else np.asarray(sigmas, float)
+    best = None
+    for sig in sigmas:
+        prox = (bleed_kernel(xy, sig) @ src)[out][use]
+        fit = least_squares(lambda p: p[0] * prox + p[1] * m - y_fit, [0.2, 0.05],
+                            bounds=([0.0, 0.0], [1.0, 1.0]), loss="soft_l1", f_scale=scale)
+        b1, b2 = (float(v) for v in fit.x)
+        if b1 + b2 > 1.0:                                     # r = b1 + b2 must stay a share
+            continue
+        if best is None or fit.cost < best[0]:
+            best = (float(fit.cost), float(sig), b1, b2)
+    if best is None:
+        return None
+    cost, sigma, b1, b2 = best
+    r = b1 + b2
+    return dict(bleed_rate=r, bleed_distal=(b2 / r if r > 0 else 0.0), sigma_pitch=sigma,
+                n_fit=int(use.sum()), min_dist=float(min_dist), cost=cost,
+                background_share=float(total[out].sum() / total.sum()))
+
+
+def _fit_edge(counts, coords, in_tissue, bleed_rate, bleed_distal, sigma_pitch):
+    """The tissue-edge capture loss beyond what spot swapping explains, from the outermost ring.
+
+    Bleed alone dims a tissue's outer spots, since some of their counts leave the tissue; the rest of
+    the drop on the outermost ring (the tissue spots nearest a spot without tissue) is the edge
+    falloff of ``edge_reference="tissue"``. ``edge_sigma`` is chosen so that the assay's model, the
+    falloff on a flat tissue followed by the bleed, puts the outermost ring at the observed depth
+    relative to the interior (5+ pitches in). Only the outermost ring is used: farther in, real depth
+    keeps changing with the tissue itself.
+    """
+    from scipy.optimize import brentq
+    from scipy.spatial import cKDTree
+    from .visium_background import bleed_kernel
+    in_tissue = np.asarray(in_tissue, dtype=bool)
+    pitch = _pitch(coords)
+    xy = coords / pitch
+    total = np.asarray(counts.sum(axis=1), dtype=float).ravel()
+    d_in = cKDTree(xy[~in_tissue]).query(xy[in_tissue])[0]
+    ring = np.abs(d_in - d_in.min()) < 0.25
+    interior = d_in >= 5.0
+    if ring.sum() < 5 or interior.sum() < 5:
+        return None
+    obs = float(np.median(total[in_tissue][ring]) / np.median(total[in_tissue][interior]))
+    W = bleed_kernel(xy, sigma_pitch)
+    depth = np.zeros(len(xy))
+    depth[in_tissue] = d_in - d_in.min()
+
+    def ring_depth(e):
+        src = np.where(in_tissue, 1.0 - e * np.exp(-3.0 * depth), 0.0)
+        out = ((1.0 - bleed_rate) * src + bleed_rate * (1.0 - bleed_distal) * (W @ src)
+               + bleed_rate * bleed_distal * src.mean())[in_tissue]
+        return float(np.median(out[ring]) / np.median(out[interior]))
+
+    pred0 = ring_depth(0.0)
+    if obs >= pred0:
+        e = 0.0
+    elif obs <= ring_depth(0.9):
+        e = 0.9
+    else:
+        e = float(brentq(lambda x: ring_depth(x) - obs, 0.0, 0.9, xtol=1e-4))
+    return dict(edge_sigma=e, observed_ring=obs, bleed_predicted_ring=pred0, n_ring=int(ring.sum()))
+
+
 def estimate_visium(adata, *, count_model="dm", coords=None, section_labels=None,
-                    occupied_fraction=None, in_tissue=None):
+                    occupied_fraction=None, in_tissue=None, bleed_min_dist=1.5):
     """Fit ``VisiumBatchHyperParams`` from a real Visium AnnData (MoM / curve-fit).
 
     Parameters
@@ -427,10 +534,15 @@ def estimate_visium(adata, *, count_model="dm", coords=None, section_labels=None
     in_tissue : sequence of bool | None
         Per-spot tissue flag (Space Ranger's ``in_tissue``). Defaults to ``adata.obs['in_tissue']``
         when present. Given a raw matrix of ALL spots with this flag, the library, field and
-        overdispersion fits use the tissue spots only, and the spots outside the tissue fit bleed and
-        ambient RNA (:func:`_fit_off_tissue`): ``ambient_frac`` becomes fitted, and the bleed kernel's
-        sd and fraction are reported in ``diagnostics["off_tissue"]``, with ``diffusion_sigma`` set
-        to the kernel sd in ``spot_pitch`` units of the preset. Without it, the fit is as before.
+        overdispersion fits use the tissue spots only, and the spots outside the tissue fit
+        SpotClean's spot-swapping model (:func:`_fit_bleed`): ``bleed_rate``, ``bleed_distal`` and
+        ``bleed_sigma`` become fitted (``ambient_frac`` and ``diffusion_sigma`` are set to 0), and
+        the fit is reported in ``diagnostics["bleed"]`` beside ``diagnostics["off_tissue"]``. Without
+        it, the fit is as before.
+    bleed_min_dist : float, default 1.5
+        Spots outside the tissue nearer to it than this (in spot pitches) are left out of the bleed
+        fit. On 10x's breast section the first ring alone pushes the bleeding rate to its bound
+        (0.99) while every cut from 1.5 pitches out gives 0.2-0.3.
 
     Returns
     -------
@@ -455,12 +567,25 @@ def estimate_visium(adata, *, count_model="dm", coords=None, section_labels=None
             est.n_spots = int(len(in_tissue))
             off = _fit_off_tissue(counts_all, coords_all, in_tissue)
             if off is not None:
-                h = est.hypers.to_dict()
-                h["ambient_frac"] = off["ambient_frac"]
-                h["diffusion_sigma"] = off["sigma_pitch"] * float(h["spot_pitch"])
-                est.hypers = VisiumBatchHyperParams(**h)
-                est.fitted += ["ambient_frac", "diffusion_sigma"]
                 est.diagnostics["off_tissue"] = off
+            bl = _fit_bleed(counts_all, coords_all, in_tissue, min_dist=bleed_min_dist)
+            if bl is not None:
+                h = est.hypers.to_dict()
+                h["bleed_rate"] = bl["bleed_rate"]
+                h["bleed_distal"] = bl["bleed_distal"]
+                h["bleed_sigma"] = bl["sigma_pitch"] * float(h["spot_pitch"])
+                h["ambient_frac"] = 0.0
+                h["diffusion_sigma"] = 0.0
+                est.fitted += ["bleed_rate", "bleed_distal", "bleed_sigma"]
+                est.diagnostics["bleed"] = bl
+                edge = _fit_edge(counts_all, coords_all, in_tissue, bl["bleed_rate"], bl["bleed_distal"],
+                                 bl["sigma_pitch"])
+                if edge is not None:
+                    h["edge_sigma"] = edge["edge_sigma"]
+                    h["edge_reference"] = "tissue"
+                    est.fitted += ["edge_sigma"]
+                    est.diagnostics["edge"] = edge
+                est.hypers = VisiumBatchHyperParams(**h)
             return est
     if count_model not in ("dm", "nb"):
         raise ValueError(f"count_model must be 'dm' or 'nb', got {count_model!r}")
