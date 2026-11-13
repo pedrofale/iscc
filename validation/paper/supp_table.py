@@ -24,7 +24,8 @@ from _paths import paper_dir  # noqa: E402
 # definitions; a run added there without a row here is reported, not silently dropped).
 ROWS = {
     "R0": ("Showcase tumour, spatial snapshots every 2 steps", "Figs 1, 2e--g, 3a, 3d, 3f"),
-    "R1": ("Cancer dispersal rate 0.1, 0.3, 0.9, 2.0, 4.0", "Figs 2a, 3b, 4; S2 Fig"),
+    "R1": ("Cancer dispersal probability " + ", ".join(f"{d:g}" for d in REG.R1_DISPERSAL),
+           "Figs 2a, 3b, 4; S2 Fig"),
     "R2": ("Selection on or off (driver effect 1.0), exact passengers", "Fig 2a, 2b"),
     "R3": ("Ductal field or free growth, selection on or off", "Figs 2a, 4"),
     "R4": ("Copy-number rate 0, 0.05, 0.15, 0.3; SNV burden 0.05, 0.2, 0.5 at copy-number rate 0.05",

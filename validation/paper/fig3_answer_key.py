@@ -191,8 +191,8 @@ def assortment(t):
 
 
 def panel_b(fig, y):
-    disps = (0.1, 0.3, 0.9, 2.0, 4.0)
-    for i, d in enumerate((0.1, 4.0)):
+    disps = REG.R1_DISPERSAL
+    for i, d in enumerate((disps[0], disps[-1])):
         ax = S.ax_mm(fig, 10 + i * 34, y + 9, 30, 30)
         task = f"disp{d}_seed1"
         if not have("R1", task):
