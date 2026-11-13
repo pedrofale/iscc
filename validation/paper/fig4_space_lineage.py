@@ -174,7 +174,7 @@ def main():
     compute(a.jobs)
     S.setup()
     rows = load_cache()
-    fig = S.figure("double", 72)
+    fig = S.figure("double", 76)
     out = {}
     S.text_mm(fig, 2, 2.5, "Glands make the environment look heritable", fontsize=7,
               va="top", fontweight="bold")
@@ -208,9 +208,11 @@ def main():
             sub = df[df.arch == arch]
             ax.scatter(sub.field_sp, sub.field_lin, s=5, color=col, edgecolors=S.INK, lw=0.2,
                        label=f"{lab} ({len(sub)})")
-        ax.plot([0, 1.1], [0, 1.1], color=S.INK, lw=0.5, ls=":")
-        ax.set_xlim(0, 1.1)
-        ax.set_ylim(0, 1.1)
+        # Moran's I with these weights can exceed 1, so the axes follow the data
+        lim = max(1.1, 1.05 * float(np.nanmax(df[["field_sp", "field_lin"]].to_numpy())))
+        ax.plot([0, lim], [0, lim], color=S.INK, lw=0.5, ls=":")
+        ax.set_xlim(0, lim)
+        ax.set_ylim(0, lim)
         ax.set_xlabel("Spatial autocorrelation")
         ax.set_ylabel("Lineage autocorrelation")
         ax.set_title("hypoxia field", fontsize=5.5)
@@ -294,7 +296,7 @@ def main():
             ax.set_xticklabels(["conf.\nneutral", "conf.\nstrong", "free\nneutral", "free\nstrong"],
                                fontsize=4.3)
             ax.set_ylabel(ylab)
-        S.text_mm(fig, 108, 67, f"f-g: registry R3, {len(H)} tumours (paper regime)",
+        S.text_mm(fig, 108, 72, f"f-g: registry R3, {len(H)} tumours (paper regime)",
                   fontsize=4.5, color=S.GREY, va="top")
     path = S.save(fig, "fig4_space_lineage")
     print("wrote", path)
