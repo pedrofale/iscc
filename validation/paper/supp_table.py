@@ -31,7 +31,8 @@ ROWS = {
     "R3": ("Ductal field or free growth, selection on or off", "Figs 2a, 4"),
     "R4": ("Copy-number rate 0, 0.05, 0.15, 0.3; SNV burden 0.05, 0.2, 0.5 at copy-number rate 0.05",
            "Figs 2a, 3f, 5"),
-    "R5": ("Whole-genome duplication rate 0, 0.01, 0.03, 0.05, 0.1", "Figs 2c, 5"),
+    "R5": ("Whole-genome duplication rate " + ", ".join(f"{w:g}" for w in getattr(REG, "R5_WGD", (0, 0.01, 0.03, 0.05, 0.1))),
+           "Figs 2c, 5"),
     "R6": ("Six patients sharing one configuration", "Fig 3e; S4 Fig"),
     "R10": ("Compartment barriers on or off", "Fig 3c; S3 Fig"),
 }
