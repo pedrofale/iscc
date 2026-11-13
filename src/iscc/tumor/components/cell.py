@@ -606,7 +606,8 @@ class HostCell(Cell):
 
 class CancerCell(Cell):
     def __init__(self, mutation_rate=0.1, snv_prob=0.5, cnv_prob=0.5,
-                 n_snvs_per_allele=0.5, amp_prob=0.5, wgd_rate=0.0, genotype_id=None, seed=42, **cell_kwargs):
+                 n_snvs_per_allele=0.5, amp_prob=0.5, wgd_rate=0.0, genotype_id=None, seed=42,
+                 force_snv=True, **cell_kwargs):
         super(CancerCell, self).__init__(**cell_kwargs)
         self.type = "cancer"
         # mutation_rate is the per-division probability of *any* genome change relative to
@@ -627,6 +628,12 @@ class CancerCell(Cell):
         # snv_prob/cnv_prob semantics intact. Default 0.0 -> WGD OFF -> mutate() draws no extra random
         # variable, so growth is byte-identical to before (the F8 off-by-default discipline).
         self.wgd_rate = wgd_rate
+        # force_snv: when every per-allele Poisson draw of an SNV event comes up 0, place one SNV
+        # anyway (True, the historical default), or let the division leave the genome unchanged
+        # (False). Neither demon nor CINner forces a mutation: both draw Poisson counts that may be
+        # zero. Forcing adds about 4% to the paper regime's SNV supply and about 25% at
+        # n_snvs_per_allele 0.05, so the paper regime turns it off.
+        self.force_snv = bool(force_snv)
         self.seed  = seed
         self.set_params()
 
@@ -755,6 +762,12 @@ class CancerCell(Cell):
                             self.update_genome_summary_mutation(selection, mut_bits, seg)
                             hit_functional = True
                         placed += n_mutations
+            if placed == 0 and not getattr(self, "force_snv", True):
+                # Every per-allele Poisson draw came up 0 and nothing is forced: the division leaves
+                # the genome as it was, as a zero Poisson draw does in demon and CINner. The engine
+                # then adds the daughter to the parent clone.
+                self._n_new_snv = 0
+                return False
             if placed == 0:
                 # The engine already decided this division mutates, so an SNV event must change
                 # the genotype. Every per-allele Poisson draw came up 0 (or the rate is tiny):

@@ -41,6 +41,7 @@ Defaults are those in `notebooks/example_config.yaml`. Set them under the matchi
 | `mutation_rate` | 0.3 | ~0.05–2; **[0, 1]** under `dispersal_law: noble`, where it is the per-division probability of a mutation | **low** → monoclonal (no subclones); **high** → hypermutated mush (broken 1/f tail) |
 | `n_snvs_per_allele` | 0.02 | ~0.1–3 | **low** → no SNV diversity; **high** → hypermutated mush |
 | `snv_prob` / `cnv_prob` | 0.5 / 0.02 | relative weights (SNV vs CNA event) | all-SNV → no CNAs (inferCNV/clonealign demos degrade); all-CNA → no SNV phylogeny |
+| `force_snv` | `true` | `true` \| `false` | `true` places one SNV when every per-allele Poisson draw of an SNV event is 0, which raises the SNV supply (about 4% at the paper regime's rate, 25% at `n_snvs_per_allele` 0.05); `false` leaves such a division's genome unchanged, as demon and CINner do |
 
 ### Growth & survival — `cell_params.cancer` + `deme_params`
 | Knob | Default | Valid range | Outside the range |
