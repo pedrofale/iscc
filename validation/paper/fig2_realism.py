@@ -112,6 +112,37 @@ def panel_d(ax):
     return dict(prevalence=prev.round(2).to_dict(), n_per_rate=int(df.groupby("rate").size().min()))
 
 
+def panel_pcawg(ax):
+    """(d) The fit to the PCAWG breast-cancer arm landscape (real-genome mode, ploidy-relative arm
+    model): per-arm gain and loss frequencies re-simulated with the fitted selection against the
+    observed ones. Reads the JSON that ``validation/validate_inference_realgenome.py --out-json``
+    writes into the derived cache as ``fig2/pcawg_fit.json``."""
+    p = os.path.join(C.DERIVED, "fig2", "pcawg_fit.json")
+    if not os.path.exists(p):
+        pending(ax, "PCAWG arm-landscape fit:\npending rerun under the\nploidy-relative arm model")
+        return "pending"
+    with open(p) as f:
+        r = json.load(f)
+    for kind, col in (("gain", "#A81B20"), ("loss", "#2F479E")):    # the ends of style.DIVERGING
+        obs = np.array([np.nan if v is None else v for v in r[f"observed_{kind}"]], dtype=float)
+        fit = np.array([np.nan if v is None else v for v in r[f"fit_{kind}"]], dtype=float)
+        ax.scatter(obs, fit, s=4, color=col, edgecolors="none", label=kind)
+    vals = [v for k in ("observed_gain", "observed_loss", "fit_gain", "fit_loss") for v in r[k] if v is not None]
+    lim = max(0.05, max(vals) * 1.05)
+    ax.plot([0, lim], [0, lim], color=S.INK, lw=0.5, ls=":")
+    ax.set_xlim(0, lim)
+    ax.set_ylim(0, lim)
+    ax.set_xlabel("PCAWG arm frequency")
+    ax.set_ylabel("Re-simulated frequency")
+    st = r["stats"]
+    ax.text(0.04, 0.96, f"r = {st['r_fit']:.2f}\nCharm r = {st['r_charm']:.2f}", transform=ax.transAxes,
+            fontsize=4.8, va="top")
+    ax.legend(fontsize=4.5, loc="lower right", frameon=False)
+    return dict(r_fit=round(st["r_fit"], 3), rmse=round(st["rmse"], 3), r_charm=round(st["r_charm"], 3),
+                rho_charm=round(st["rho_charm"], 3), r_content=round(st["r_content"], 3),
+                n_ref=r["n_ref"], cohort_size=r["cohort_size"], target_size=r["target_size"])
+
+
 # --- f, g, h: the data front's fit-and-resimulate loops ---------------------------------------------
 # Each is computed in its own process (``--part f|g|h``) and cached as small JSON (histograms, binned
 # curves, statistics), so no process holds a real reference and a tumour at once for longer than it
@@ -339,8 +370,7 @@ def render():
         S.panel_letter(fig, L, xs[i] - 9, 8)
         ax = S.ax_mm(fig, xs[i], 11, 30, 27 if i < 3 else 22)
         if fn is None:
-            pending(ax, "PCAWG arm-landscape fit:\npending rerun under the\nploidy-relative arm model")
-            out[L] = "pending"
+            out[L] = panel_pcawg(ax)
         else:
             out[L] = fn(ax)
     S.text_mm(fig, 2, 57.5, "The data front's tests: fit to a real reference, re-simulate on the tumour",
