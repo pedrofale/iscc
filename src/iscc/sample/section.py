@@ -59,7 +59,9 @@ def spatialize(cell_data, section_frac=1.0, jitter=0.5, seed=0):
     keep_labels = labels[keep]
     xy = rc[keep] + rng.uniform(-jitter, jitter, size=(keep.size, 2))
 
-    out = {k: (v.reindex(keep_labels).copy() if hasattr(v, "reindex") else v)
+    # `reindex` already returns a new frame, so no further copy: at cm-scale each of these frames is
+    # gigabytes, and a second copy doubled the section's footprint while it was placed.
+    out = {k: (v.reindex(keep_labels) if hasattr(v, "reindex") else v)
            for k, v in cell_data.items()}
     out["cell_crd"] = pd.DataFrame(xy, index=keep_labels, columns=["row", "col"])
     return out
