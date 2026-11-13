@@ -400,7 +400,7 @@ class Visium(Assay):
         cell_exp = placed["cell_exp"]
         genes = cell_exp.columns
         n_genes = len(genes)
-        exp_vals = cell_exp.values.astype(float)
+        exp_vals = cell_exp.values                  # summed in float64 per spot, never copied whole
         cell_ids = np.asarray(cell_exp.index)
         ctype = placed.get("cell_type")
         clone_labels = ctype.reindex(cell_exp.index).iloc[:, 0].astype(str).values if ctype is not None else None
@@ -413,7 +413,7 @@ class Visium(Assay):
         for s, inb in enumerate(members):
             member_ids.append(cell_ids[inb])
             if inb.size:
-                raw[s] = exp_vals[inb].sum(axis=0)
+                raw[s] = exp_vals[inb].sum(axis=0, dtype=float)
             if inb.size and clone_labels is not None:
                 labs, cnts = np.unique(clone_labels[inb], return_counts=True)
                 dominant.append(str(labs[cnts.argmax()]))
