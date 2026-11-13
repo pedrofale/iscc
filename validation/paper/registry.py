@@ -39,6 +39,10 @@ OUT = os.path.join(os.environ.get("ISCC_PAPER_OUT") or os.path.join(REPO, "analy
 
 T = RG.T
 SEEDS = list(range(1, T["seeds"] + 1))
+# The dispersal sweep. Under demon's division rule `dispersal_rate` is a per-division probability, so
+# the sweep stays within (0, 1]; the old 2.0 and 4.0 arms ran at the cap of 1 (vault:
+# decision-noble-division-law). 0.9 is the paper regime's own value.
+R1_DISPERSAL = (0.03, 0.1, 0.3, 0.6, 0.9)
 SWEEP, SHOW = T["sweep_scale"], T["showcase_scale"]
 
 
@@ -51,7 +55,7 @@ def _runs():
     # R1: dispersal sweep, clonal territories through to intermixing.
     runs["R1"] = [(f"disp{d}_seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
                                             spatial_snapshot_every=8, cancer={"dispersal_rate": d}))
-                  for d in (0.1, 0.3, 0.9, 2.0, 4.0) for s in SEEDS]
+                  for d in R1_DISPERSAL for s in SEEDS]
     # R2: neutral against selected growth. Passenger coarsening OFF: the 1/f test needs every
     # passenger tracked exactly, and coarsening re-emits them as an approximate lineage overlay.
     runs["R2"] = [(f"{name}_seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
