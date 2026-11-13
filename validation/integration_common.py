@@ -309,8 +309,11 @@ def run_clonealign(Y, L, work_dir, max_iter=200, n_repeats=3, seed=1):
         raise RuntimeError(
             f"clonealign (R) failed with exit {r.returncode}. Inputs: Y {Y.shape}, L {L.shape}.\n"
             f"--- R stderr ---\n{r.stderr[-2000:]}")
-    probs = pd.read_csv(os.path.join(out_dir, "clone_probs.csv"), index_col=0)
-    return probs.reindex(Y.index)
+    probs = pd.read_csv(os.path.join(out_dir, "clone_probs.csv"), index_col=0).reindex(Y.index)
+    run_csv = os.path.join(out_dir, "run.csv")
+    if os.path.exists(run_csv):     # genes and cells the runner dropped, and the seed that fit
+        probs.attrs["clonealign_run"] = {k: int(v) for k, v in pd.read_csv(run_csv).iloc[0].items()}
+    return probs
 
 
 def score_assignment(true_labels, probs):
