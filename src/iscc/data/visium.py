@@ -109,9 +109,21 @@ class Visium(Assay):
     edge_sigma : float, default 0.30
         Tissue-boundary capture falloff: the very edge of the section is reduced by this
         fraction, the interior stays ~1. 0 disables; a value < 1 keeps efficiency positive.
+    edge_reference : {"grid", "tissue"}, default "grid"
+        What the falloff of ``edge_sigma`` is measured from: the spot grid's bounding box, or the
+        tissue's own boundary (the nearest spot without cells).
     diffusion_sigma : float, default 0.0
-        Lateral mRNA-bleed Gaussian kernel sd, spreading each spot's expression into its
-        neighbours before counting; 0 disables (no bleed).
+        Gaussian kernel sd of a lateral smoothing of composition between spots before counting; it
+        moves no counts, so spots without tissue stay empty. 0 disables.
+    bleed_rate : float, default 0.0
+        Spot swapping, as SpotClean models it: the share of each spot's counts that bleeds to other
+        spots of the slide, including spots without tissue, conserving the total (see
+        [`bleed`][iscc.data.visium_background.bleed]). 0 disables; then the assay is unchanged.
+    bleed_distal : float, default 0.0
+        Share of the bled counts spread uniformly over the slide (the slide-wide ambient floor).
+    bleed_sigma : float, default 0.0
+        Sd of the Gaussian kernel the rest of the bled counts spread through, in coordinate units
+        (the spot pitch is 2.0).
     sigma_batch : float, default 0.10
         Per-gene batch-factor LogNormal sd, shared across spots (Splatter ``batch.facScale``).
     ambient_frac : float, default 0.05
@@ -158,7 +170,8 @@ class Visium(Assay):
                  field_lengthscale=None, field_sigma=None, edge_sigma=None,
                  diffusion_sigma=None, sigma_batch=None, ambient_frac=None,
                  kappa=None, nb_dispersion=None, section_frac=None, placement=None, rotation=0.0,
-                 n_spots_x=None, n_spots_y=None, seed=42):
+                 n_spots_x=None, n_spots_y=None, seed=42, edge_reference=None, bleed_rate=None,
+                 bleed_distal=None, bleed_sigma=None):
         super(Visium, self).__init__(seed=seed, protocol="visium")
         if count_model not in COUNT_MODELS:
             raise ValueError(f"unknown count_model {count_model!r}; choose {sorted(COUNT_MODELS)}")
@@ -177,10 +190,13 @@ class Visium(Assay):
             sigma_counts=sigma_counts, field_lengthscale=field_lengthscale,
             field_sigma=field_sigma, edge_sigma=edge_sigma, diffusion_sigma=diffusion_sigma,
             sigma_batch=sigma_batch, ambient_frac=ambient_frac, kappa=kappa,
-            nb_dispersion=nb_dispersion,
+            nb_dispersion=nb_dispersion, bleed_rate=bleed_rate, bleed_distal=bleed_distal,
+            bleed_sigma=bleed_sigma,
         ).items():
             if val is not None:
                 params[name] = float(val)
+        if edge_reference is not None:
+            params["edge_reference"] = str(edge_reference)
         self.hypers = VisiumBatchHyperParams(**params)
         self.n_reads = self.hypers.mu_counts               # convenience mirror
         self.section_frac = section_frac                   # None -> use cell_crd as given
@@ -430,11 +446,16 @@ class Visium(Assay):
         # 4-5. batch realization + pluggable count draw + ambient
         label = self.batch_label if self.batch_label is not None else f"visium{self.seed}"
         base_profile = raw.sum(axis=0)                     # pooled expression -> ambient soup
-        self.batch = VisiumBatch(self.hypers, seed=self.seed, label=label).realize(
-            genes, base_profile, spot_coords)
         occupied = (n_cells_arr > 0).astype(float)
+        self.batch = VisiumBatch(self.hypers, seed=self.seed, label=label).realize(
+            genes, base_profile, spot_coords, in_tissue=occupied > 0)
         lib = self.batch.spot_library(occupied=occupied)
         comp = self.batch.composition(probs)
+        bled_in = None
+        if self.hypers.bleed_rate > 0:                     # spot swapping (draws no random numbers)
+            from .visium_background import bleed
+            lib, comp, bled_in = bleed(lib, comp, spot_coords, self.hypers.bleed_rate,
+                                       self.hypers.bleed_distal, self.hypers.bleed_sigma)
         counts = self.batch.emit(comp, lib, count_model=self.count_model)
         counts = self.batch.add_ambient(counts, lib).astype(int)
 
@@ -453,6 +474,8 @@ class Visium(Assay):
         obs["n_counts"] = counts.sum(axis=1)
         obs["library"] = lib
         obs["capture_field"] = self.capture_field
+        if bled_in is not None:
+            obs["bled_in"] = bled_in                       # truth: share of the spot's counts from elsewhere
         obs["clone"] = dominant
         obs["clone_frac"] = [max(f.values()) if f else 0.0 for f in clone_fracs]
         obs["row"] = spot_coords[:, 0]

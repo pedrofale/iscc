@@ -45,10 +45,15 @@ def test_off_tissue_fit_recovers_known_values(a, beta, sigma):
 def test_estimate_visium_reads_the_tissue_flag():
     counts, coords, in_t = _section(0.01, 0.2, 1.0)
     est = estimate_visium(counts, coords=coords, in_tissue=in_t)
-    assert {"ambient_frac", "diffusion_sigma"} <= set(est.fitted)
-    off = est.diagnostics["off_tissue"]
-    assert est.hypers.ambient_frac == pytest.approx(off["ambient_frac"])
-    assert est.hypers.diffusion_sigma == pytest.approx(off["sigma_pitch"] * est.hypers.spot_pitch)
+    # the off-tissue spots fit SpotClean's bleed, which carries the floor and moves counts, so the
+    # in-spot soup and the composition smoothing are switched off
+    assert {"bleed_rate", "bleed_distal", "bleed_sigma"} <= set(est.fitted)
+    bl = est.diagnostics["bleed"]
+    assert "off_tissue" in est.diagnostics
+    assert est.hypers.bleed_rate == pytest.approx(bl["bleed_rate"])
+    assert est.hypers.bleed_sigma == pytest.approx(bl["sigma_pitch"] * est.hypers.spot_pitch)
+    assert 0.0 < est.hypers.bleed_rate <= 1.0 and 0.0 <= est.hypers.bleed_distal <= 1.0
+    assert est.hypers.ambient_frac == 0.0 and est.hypers.diffusion_sigma == 0.0
     assert est.n_spots == len(in_t)
     assert est.spots_per_tissue == int(in_t.sum())
     # the library fit sees the tissue spots only
