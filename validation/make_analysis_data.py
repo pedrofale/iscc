@@ -559,7 +559,8 @@ def _dna(out_dir, seed, scale, n_clones):
 
     # Run it now, so the CN the downstream datasets use is CALLED copy number rather than iscc's.
     called = os.path.join(hm, "cell_cn_called.csv")
-    rscript = os.path.expanduser("~/miniconda3/envs/iscc-hmmcopy/bin/Rscript")
+    rscript = os.environ.get("ISCC_HMMCOPY_RSCRIPT",
+                             os.path.expanduser("~/miniconda3/envs/iscc-hmmcopy/bin/Rscript"))
     proc = subprocess.run([rscript, os.path.join(REPO, "validation", "hmmcopy_runner.R"),
                            os.path.join(hm, "reads.csv"), os.path.join(hm, "bins.csv"), called],
                           capture_output=True, text=True)

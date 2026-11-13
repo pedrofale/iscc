@@ -1,0 +1,4 @@
+#!/bin/bash
+# Python of CalicoST's environment; its code and GRCh38 resources are at /opt/calicost.
+# Point the matching ISCC_*_RSCRIPT / ISCC_*_PYTHON variable at this file; ISCC_TOOLS_DIR holds the images.
+exec apptainer exec --cleanenv -B /nobackup --env OMP_NUM_THREADS=1 "${ISCC_TOOLS_DIR:?set ISCC_TOOLS_DIR to the directory of the tool images}/py-tools.sif" /opt/envs/calicost/bin/python "$@"

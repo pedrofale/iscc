@@ -141,8 +141,12 @@ def write_visium(out_dir, assay, layer, allele=None, tumor=None, seed=0):
         out_dir/outs/spatial/scalefactors_json.json
         out_dir/snp_dir/                                    (CalicoST; needs allele)
         out_dir/copykat_counts.tsv.gz                       (genes x in-tissue spots)
-        out_dir/clonalscope/                                (genes.bed, sizes.txt, chrarm.tsv)
+        out_dir/clonalscope/                                (genes.bed, sizes.txt, chrarm.tsv, celltype.tsv)
         out_dir/truth/spots.tsv, cn_segments.tsv, germline_snps.tsv
+
+    ``clonalscope/celltype.tsv`` labels the in-tissue spots without tumour cells ``normal`` (the
+    baseline Clonalscope normalises against, and the reference other tools take) and the rest
+    ``tumor``: it comes from the truth, as a spot-level annotation (e.g. RCTD) would.
 
     Parameters
     ----------
@@ -181,7 +185,10 @@ def write_visium(out_dir, assay, layer, allele=None, tumor=None, seed=0):
         write_snp_dir(os.path.join(out_dir, "snp_dir"), sub, kept_bcs)
     write_copykat(os.path.join(out_dir, "copykat_counts.tsv.gz"), counts, kept_bcs, layer.genes)
     write_clonalscope_refs(os.path.join(out_dir, "clonalscope"), layer)
-    _write_spot_truth(os.path.join(out_dir, "truth"), assay, layer, bcs, tumor)
+    truth = _write_spot_truth(os.path.join(out_dir, "truth"), assay, layer, bcs, tumor)
+    frac = truth.set_index("barcode")["tumour_fraction"].reindex(kept_bcs).to_numpy()
+    pd.DataFrame({"barcode": kept_bcs, "celltype": np.where(frac > 0, "tumor", "normal")}).to_csv(
+        os.path.join(out_dir, "clonalscope", "celltype.tsv"), sep="\t", index=False)
 
 
 def write_scrna(out_dir, assay, layer, cell_data, allele=None, tumor=None, seed=0):
@@ -253,11 +260,12 @@ def _write_spot_truth(path, assay, layer, bcs, tumor):
         n_t = int(tumour_all[m].sum()) if n else 0
         rows.append((bc, assay.spot_names[s], n, n_t, (n_t / n) if n else 0.0,
                      assay.obs["clone"].iat[s], ",".join(map(str, gids_all[m])) if n else ""))
-    pd.DataFrame(rows, columns=["barcode", "spot", "n_cells", "n_tumour", "tumour_fraction",
-                                "dominant_genotype", "genotypes"]).to_csv(
-        os.path.join(path, "spots.tsv"), sep="\t", index=False)
+    spots = pd.DataFrame(rows, columns=["barcode", "spot", "n_cells", "n_tumour", "tumour_fraction",
+                                        "dominant_genotype", "genotypes"])
+    spots.to_csv(os.path.join(path, "spots.tsv"), sep="\t", index=False)
     if tumor is not None:
         layer.cn_segments(list(dict.fromkeys(gids_all)), tumor).to_csv(
             os.path.join(path, "cn_segments.tsv"), sep="\t", index=False)
     if layer.germline is not None:
         layer.germline.to_csv(os.path.join(path, "germline_snps.tsv"), sep="\t", index=False)
+    return spots

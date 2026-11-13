@@ -1,0 +1,23 @@
+#!/bin/bash
+# Submit every copy-number tool on one dataset (from make_layer_dataset.py) as separate Slurm jobs.
+#
+#   SLURM_ACCOUNT=<account> ISCC_TOOLS_DIR=<dir> validation/paper/tools/submit_tools.sh <dataset> <out> [tools]
+#
+# <dataset> holds visium/ and scrna/; results go to <out>/<tool>-<assay>/ in the common format of
+# calls.py, logs to <out>/logs/. [tools] is a comma-separated subset (default: all five). CalicoST runs
+# on Visium only (it needs spots); the others run on both assays.
+set -euo pipefail
+DS=$(readlink -f "$1"); OUT=$2; TOOLS=${3:-copykat,clonalscope,calicost,cancerfinder,infercnvpy}
+: "${SLURM_ACCOUNT:?set SLURM_ACCOUNT}" "${ISCC_TOOLS_DIR:?set ISCC_TOOLS_DIR}"
+HERE=$(dirname "$(readlink -f "$0")")
+mkdir -p "$OUT/logs"; OUT=$(readlink -f "$OUT")
+for tool in ${TOOLS//,/ }; do
+  for assay in visium scrna; do
+    [ "$tool" = calicost ] && [ "$assay" = scrna ] && continue
+    [ -d "$DS/$assay" ] || continue
+    case "$tool" in copykat|calicost) c=4; mem=32G ;; *) c=2; mem=32G ;; esac
+    sbatch --parsable -A "$SLURM_ACCOUNT" -p "${PARTITION:-cpu}" -J "$tool-$assay" -c "$c" --mem="$mem" \
+      -t "${TIME:-04:00:00}" -o "$OUT/logs/$tool-$assay-%j.out" --export=ALL \
+      --wrap "/usr/bin/time -v $HERE/run_tool.sh $tool $DS/$assay $OUT/$tool-$assay"
+  done
+done
