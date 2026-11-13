@@ -56,8 +56,14 @@ def _homologs(t, gid, seg):
     return len(g["p"]), len(g["m"])
 
 
-def _dosage(h, s_g):
-    """Expression of a gene with sensitivity ``s_g`` over its homologs, as the engine computes it."""
+def _dosage(h, s_g, law="haplotype"):
+    """Expression of a gene with sensitivity ``s_g`` over its homologs ``h``, as the engine computes it
+    (``Cell.get_exp_alleles``): per homolog, where a lost homolog is silent (``"haplotype"``), or on the
+    total copy number, buffering gains and losses alike (``"total"``)."""
+    if law == "total":
+        c = float(sum(h))
+        return np.full_like(np.asarray(s_g, dtype=float), 0.0) if c == 0 else \
+            2.0 * np.maximum(1 + np.asarray(s_g, dtype=float) * (c / 2.0 - 1), 0.0)
     return sum(np.where(c > 0, 1 + s_g * (c - 1), 0.0) for c in h)
 
 
@@ -114,17 +120,18 @@ def panel_a(fig, y):
         m0 = Yn.loc[[c for c in ref if c in Yn.index]].iloc[:, genes].mean(0).values
         ok = (m0 > 0.05) & (m1 > 0)
         dcn = consensus.loc[k].iloc[s] - base.iloc[s]
-        # the engine's law acts per homolog: dosage(c) = 1 + s(c - 1), zero for a lost homolog, so
-        # the reference curve needs the homolog copy numbers of the clone and of the reference
+        # the reference curve follows the engine's dosage law (per homolog, or on the total copy
+        # number), so it needs the homolog copy numbers of the clone and of the reference
         hk = _homologs(t, pd.Series([A["genotype"][c] for c in in_k]).mode().iloc[0], s)
         h0 = _homologs(t, pd.Series([A["genotype"][c] for c in ref]).mode().iloc[0], s)
         pts.append((sens[genes][ok], np.log2(m1[ok] / m0[ok]), dcn, hk, h0))
     gain, loss = "#C66263", "#2F479E"
     xs = np.linspace(0, 1, 50)
+    law = getattr(getattr(t, "programs", None), "dosage_law", "haplotype")
     for sg, lfc, dcn, hk, h0 in pts:
         col = gain if dcn > 0 else loss
         ax.scatter(sg, lfc, s=1.2, color=col, alpha=0.5, rasterized=True)
-        ax.plot(xs, np.log2(_dosage(hk, xs) / _dosage(h0, xs)), color=col, lw=0.8)
+        ax.plot(xs, np.log2(_dosage(hk, xs, law) / _dosage(h0, xs, law)), color=col, lw=0.8)
     ax.text(0.03, 0.97, "gain", color=gain, transform=ax.transAxes, va="top", fontsize=5)
     ax.text(0.03, 0.06, "loss", color=loss, transform=ax.transAxes, va="bottom", fontsize=5)
     ax.axhline(0, color=S.BG_CELLS, lw=0.5, zorder=0)
