@@ -179,7 +179,7 @@ def assays(run, task, seed=0, n_dna=400, force=False):
                 seed=200 + seed).run(diss, cell_subset=dna_cells)
     rna = scRNA(n_cells=len(cells), seed=100 + seed).run(diss, cell_subset=cells)
     sec = spec.slice(depth_frac=0.5, max_cells=RG.T["max_cells"])
-    vis = Visium(seed=300 + seed).run(sec, grid_side=t.grid_size)
+    vis = Visium(seed=300 + seed, **RG.VISIUM).run(sec, grid_side=t.grid_size)
     out = dict(
         cells=cells, genotype=gid.to_dict(), is_cancer=dict(zip(cells, is_cancer)),
         cell_type=_coarse_type(diss), seg_cn_true=_seg_cn(t, diss),

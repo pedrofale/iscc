@@ -78,6 +78,14 @@ DEME = {"dispersal_law": "noble", "crowding_mode": "lottery", "crowding_law": "n
 # Per-run random streams keyed by (seed, purpose, step), so neighbouring seeds never share a stream.
 RNG_STREAMS = "independent"
 
+# Visium spot swapping, fitted to 10x's V1_Breast_Cancer_Block_A_Section_1 (vault:
+# decision-visium-spot-swapping, exp-visium-bleed): SpotClean's model with a bleeding rate of 0.31, a
+# distal share of 0.30 (the slide-wide floor, so no in-spot ambient soup) and a kernel sd of 3.25 spot
+# pitches, and the edge falloff measured from the tissue's outermost ring. Needs the iscc branch
+# feat/visium-bleed.
+VISIUM = {"bleed_rate": 0.31, "bleed_distal": 0.30, "bleed_sigma": 6.5, "ambient_frac": 0.0,
+          "edge_sigma": 0.29, "edge_reference": "tissue"}
+
 # Oxygen. The calibrated programs config supplies O2 uniformly at a rate (0.3) far below consumption
 # (1.5), so every dense deme, normal or cancer, sits near the same equilibrium and the hypoxia field
 # is flat: 90% of cancer cells between 0.78 and 0.93, and normal tissue at 0.6. A hypoxia gene then
