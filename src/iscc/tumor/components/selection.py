@@ -20,7 +20,8 @@ class Selection(object):
                  resistance_state_relax=0.0, resistance_state_noise=0.0,
                  selection_mode="gene", s_arm=None,
                  max_ploidy=6, max_cn=12, max_nullisomy=2, max_mut_drivers=1000, rng=None,
-                 epistasis_params=None, dependency_params=None, layout_seed=None, ):
+                 epistasis_params=None, dependency_params=None, layout_seed=None,
+                 segment_drivers=None, ):
         # Seeded generator so the driver/resistance layout is reproducible. This ``rng`` is used
         # ONLY for the config-determined gene-role LAYOUT (make_drivers / make_dispersal /
         # make_treatment_resistant / make_immune_resistant), never for evolution — so the engines
@@ -50,6 +51,20 @@ class Selection(object):
         # genes are drivers.
         self.germline_types = np.zeros(self.n_genes, dtype=int)
         self.prop_driver = prop_driver
+        # Exact driver counts per segment, as ``[(n_oncogenes, n_suppressors), ...]`` (one pair per
+        # segment), instead of the per-gene ``prop_driver`` draw. An arm-homologous growth genome
+        # (``iscc.data.human.arm_genome``) sets them from each arm's Cancer Gene Census content, so the
+        # driver load of an arm does not change with the resolution. None (default) keeps the
+        # ``prop_driver`` draw and the layout byte-identical.
+        if segment_drivers is not None:
+            segment_drivers = [(int(o), int(t)) for o, t in segment_drivers]
+            if len(segment_drivers) != n_segments:
+                raise ValueError(f"segment_drivers has {len(segment_drivers)} entries for {n_segments} segments")
+            for seg, (o, t) in enumerate(segment_drivers):
+                if o < 0 or t < 0 or o + t > self.segment_sizes[seg]:
+                    raise ValueError(f"segment {seg}: {o} oncogenes + {t} suppressors do not fit "
+                                     f"its {self.segment_sizes[seg]} genes")
+        self.segment_drivers = segment_drivers
         self.prop_dispersal = prop_dispersal
         self.prop_treatment_resistance = prop_treatment_resistance
         self.prop_immune_resistance = prop_immune_resistance
@@ -272,8 +287,16 @@ class Selection(object):
         self.onc = []
         self.tsg = []
         for seg in range(self.n_segments):
-            driver_types = self.rng.choice([-1,0,1], p=[self.prop_driver/2, 1.-self.prop_driver, self.prop_driver/2],
-                                                size=self.segment_sizes[seg])
+            if self.segment_drivers is not None:
+                # Exact counts at random loci of the segment, from the same layout stream.
+                n_onc, n_tsg = self.segment_drivers[seg]
+                driver_types = np.zeros(self.segment_sizes[seg], dtype=int)
+                loci = self.rng.choice(self.segment_sizes[seg], size=n_onc + n_tsg, replace=False)
+                driver_types[loci[:n_onc]] = 1
+                driver_types[loci[n_onc:]] = -1
+            else:
+                driver_types = self.rng.choice([-1,0,1], p=[self.prop_driver/2, 1.-self.prop_driver, self.prop_driver/2],
+                                                    size=self.segment_sizes[seg])
             self.drivers.append(np.where(driver_types!=0)[0])
             self.passengers.append(np.where(driver_types==0)[0])
             self.driver_types.append(driver_types)

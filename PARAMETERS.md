@@ -81,6 +81,7 @@ Defaults are those in `notebooks/example_config.yaml`. Set them under the matchi
 |---|---|---|---|
 | `prop_driver` | 0.04 | 0.05–0.3 | high × strong effect → selective sweep (monoclonal) |
 | `driver_effects` | 1.1 | 1.0–2 | ≫ 1 at low mutation rate → monoclonal sweep |
+| `segment_drivers` | unset | one `[oncogenes, suppressors]` pair per segment, each summing to at most the segment's genes | unset → drivers are drawn gene by gene with `prop_driver`; set → exactly these counts at random loci of each segment, and `prop_driver` is unused. `arm_genome` sets it from each arm's Cancer Gene Census content, so an arm's driver load does not change with the resolution. A pair that does not fit raises. |
 | `prop_dispersal` / `dispersal_effects` | 0.0 / 1.1 | as above | strong → invasion dominates, structure washes out |
 | `prop_treatment_resistance` / `prop_immune_resistance` (+ `treatment_resistant_effects` / `immune_resistant_effects`) | 0.1 (treatment) / 0.02 (immune); effects 1.1 | as above | resistance is meant to **emerge**, not be pre-seeded |
 | `prop_breach` / `breach_effects` | 0.001 / 2.8 (prop 0.0 = off in the bare engine) | compartment-selection axis: sites that if mutated let a clone cross the epithelial ring (attenuate `epithelial_barrier`); heritable, sequenceable | pairs with `spatial_params.epithelial_barrier`; both must be > 0 to have any effect |
@@ -214,6 +215,45 @@ the same way** — see the warning below before comparing runs across engines.
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|
 | `n_segments` × `segment_size` | 12 × 50 (= 600 genes) | ≳ 100 genes | too few → trivial genome; assays degenerate, too few drivers |
+| `segment_sizes` | unset (all `segment_size`) | one positive size per segment | sets unequal segments, e.g. arms of different lengths |
+| `arms` | unset | one arm name per segment (`1p` … `22q`, the 39 modelled arms) | names the human arm each segment stands for; only the human genome layer reads it, growth never does |
+
+#### Arm-homologous genome and the human genome layer — `iscc.data.human`
+
+`arm_genome(total_genes=6000, weight="genes", driver_scale=1.0)` returns `genome_params` (one segment
+per arm, with `arms`) and `selection_params` (`segment_drivers`). The number of growth genes is a
+resolution traded between the detail of the dynamics and their cost; the layer works at any value.
+
+| Knob | Default | Valid range | Outside the range |
+|---|---|---|---|
+| `total_genes` / `genes_per_segment` | 6000 / unset | ≳ 4 genes per arm | fewer → small arms cannot hold their drivers (capped, with the oncogene/suppressor split kept) |
+| `weight` | `"genes"` | `"genes"` \| `"length"` \| `"uniform"` | how `total_genes` is shared between arms: by GRCh38-2020-A gene count, length, or equally |
+| `driver_scale` | 1.0 | 0.1–1 | drivers per arm = this × the Census oncogenes and suppressors (297 + 293 over the 39 arms); 0.4 gives about the paper regime's driver load |
+| `HumanGenomeLayer(seed=)` | the tumour's `layout_seed` | any int | fixes the germline: patients of one configuration share it unless given their own seed |
+| `snp_window` | 1000 bp | 300–3000 | the 3' stretch of a gene a 3' library covers; only heterozygous SNPs there get allele counts |
+| `snp_coverage` | 0.1 | 0.01–0.5 | probability a UMI of a gene covers a given SNP in its window (about read length / window). A preset, not fitted |
+| `snp_concentration` | unset (binomial) | ≳ 10 | beta-binomial concentration of the haplotype split at a SNP (allelic-expression noise) |
+| `Visium(kappa=)` on human genes | `HUMAN_VISIUM_KAPPA` = 300,000 | ≥ 300,000 | by indirect inference: `estimate_visium` gives 82,165 on the in-tissue spots of 10x's V1_Breast_Cancer_Block_A_Section_1 (over the layer's genes), and a simulated paper-regime section reproduces that estimate within 1% from an input of 300,000 up (the direct value, used as input, over-disperses the section to 55,416, because the simulated tissue already carries the heterogeneity). The default 50 is the growth-gene scale and piles each spot's counts onto a few dozen genes, so `write_visium` warns |
+
+`layer.expression(tumor)` (`HumanExpression`) is the realistic path: each cell type takes its Human
+Breast Cell Atlas baseline (epithelial = luminal epithelium, stromal = fibroblasts, immune = T/NK cells,
+host = stroma), scaled by its relative RNA content; the cancer takes its `cell_of_origin`'s; named
+programmes load on their MSigDB Hallmark sets (proliferation, EMT, hypoxia; drug resistance on
+xenobiotic metabolism as a proxy), the rest on random human genes, with the growth dictionary's loading
+distribution and the same `max_log_fold` bound. What the genotype and the niche do to a gene is read
+off the growth genes. Pass it as `gene_lift` to `scRNA.run` (chunked, sparse counts) and `Visium.run`
+(per-type pooling).
+On human genes pass `scRNA(dropout_mid=0)`: at the 10x preset's midpoint of 1.5 UMIs the logistic
+dropout deletes most of a cell's 35,061 genes (355 genes per cell at 2,300 UMIs, against 1,313 at 3,650
+without it), and UMI counts are not zero-inflated beyond the negative binomial (Svensson 2020); the run
+warns otherwise.
+
+The layer emits the 35,061 GRCh38-2020-A genes that lie on the 39 modelled arms (chrX, chrY, chrM, the
+acrocentric short arms and scaffolds are not modelled). Each takes the copy number per homolog of the
+growth gene covering its slice of the arm and, with the plain `layer.lift`, that growth
+gene's expression. Germline SNPs are the 1000 Genomes phase-3 common SNPs (allele frequency above 5%)
+inside those genes, drawn heterozygous at 2·AF·(1 − AF) and phased exactly onto the homologs;
+`fetch_snps()` downloads them (92 MB) and `ISCC_HUMAN_REF` points at the result.
 
 ### Copy-number — `cell_params.cancer`
 | Knob | Default | Valid range | Outside the range |
@@ -367,6 +407,7 @@ targeted therapy, the target-expression check that reads it). For the ductal fie
 | **`program_genomic_scatter`** | 1.0 | 0–1 | **the programs ⟂ CNAs knob.** 1 = scattered genome-wide (functional, realistic); **0 = a contiguous block that MIMICS a CNA** — the deliberate control for "can the tool tell a program from a copy-number segment?" |
 | `program_signs` | `up` | `up` \| `bidirectional` | `bidirectional` gives each program up- AND down-genes (more realistic) |
 | `seeded_programs` | `[proliferation, emt, hypoxia, drug_resistance, immune_evasion]` | any names | anchors programs so the phenotype/niche maps can address them **by name**; extras are unnamed background |
+| `max_log_fold` | unset (unbounded) | ~3–7 (5 ≈ 150-fold) | unset → a gene's program log-fold `Σ_k z_k·loading_{k,g}` is unbounded, and with heavy-tailed loadings and strong drive one gene can take a cell's whole library (a warning is raised past a 10⁶-fold multiplier); set → it saturates as `c·tanh(x/c)`, unchanged for small log-folds and never beyond `c`. Not part of the dictionary: setting it leaves the gene–program map and loadings unchanged |
 
 #### `activity_params` — the per-cell `z` sampler (shared with R12)
 | Knob | Default | Valid range | Outside the range |
