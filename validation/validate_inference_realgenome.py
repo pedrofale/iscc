@@ -286,6 +286,9 @@ def main():
                     help="also run the tau-vs-exact equivalence gate + speedup benchmark")
     ap.add_argument("--quick", action="store_true",
                     help="small local smoke check (pipeline + direction, not the final figure)")
+    ap.add_argument("--out-json", default=None,
+                    help="also write the fit (per-arm observed and fitted frequencies, s_arm, Charm, "
+                         "statistics, settings) to this JSON, which Fig 2d of the paper draws")
     args = ap.parse_args()
     if args.quick:
         args.n_ref, args.cohort_size, args.valid_cohort, args.target_size = 300, 6, 16, 400
@@ -311,6 +314,23 @@ def main():
     stats = _report(res)
     out = figure_path("validation_inference_realgenome.png")
     make_figure(res, stats, out, equiv=equiv)
+    if args.out_json:
+        import json
+
+        def _list(x):
+            return [None if not np.isfinite(v) else float(v) for v in np.asarray(x, dtype=float)]
+        rec = dict(cancer_type=res["cancer_type"], arms=list(res["arm_names"]),
+                   observed_gain=_list(res["observed_gain"]), observed_loss=_list(res["observed_loss"]),
+                   fit_gain=_list(res["fit_gain"]), fit_loss=_list(res["fit_loss"]),
+                   s_fit=_list(res["s_fit"]), charm=_list(res["charm"]), content=_list(res["content"]),
+                   stats={k: float(v) for k, v in stats.items()},
+                   n_ref=int(res["n_ref"]), cohort_size=int(res["cohort_size"]),
+                   target_size=int(res["target_size"]), update_mode=res["update_mode"],
+                   ref_secs=float(res["ref_secs"]))
+        os.makedirs(os.path.dirname(os.path.abspath(args.out_json)), exist_ok=True)
+        with open(args.out_json, "w") as f:
+            json.dump(rec, f)
+        print(f"fit -> {args.out_json}")
 
     print("\n=== M3b fit-to-real + Charm summary (tau-leaped) ===")
     print(f"  update mode           : {res['update_mode']}  "
