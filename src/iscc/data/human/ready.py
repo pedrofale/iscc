@@ -38,8 +38,10 @@ def check_tool_ready(counts, genes, tools=TOOLS, allele=None):
     - **CopyKAT**: more than 200 detected genes per cell, at least 7,000 genes detected in more than
       5% of cells, and at least 5 such genes on every chromosome.
     - **CalicoST**: more than 50 UMIs and at least 50 SNP-covering UMIs per spot.
-    - **Clonalscope**: more than 150 genes detected in at least 1% of barcodes on every modelled arm
-      (its segments without bulk DNA).
+    - **Clonalscope**: without bulk DNA its segments are the arms, and it keeps an arm only if more
+      than 150 genes there vary across barcodes (``RunCovCluster(ngene_filter=150)``) and at least 90%
+      of barcodes have counts on it (``PrepCovMatrix``). The check passes when at least 35 of the 39
+      arms survive both filters (a judgement: the tool runs with fewer, but cannot call the rest).
     - **CancerFinder**: the genes are real symbols; it re-indexes to its own gene list, so only the
       overlap is reported.
     """
@@ -70,8 +72,18 @@ def check_tool_ready(counts, genes, tools=TOOLS, allele=None):
                        np.mean(snp >= 50) >= 0.95)
                 _check(rows, tool, "median SNP UMIs per spot", float(np.median(snp)), 50, np.median(snp) >= 50)
         elif tool == "clonalscope":
-            per_arm = pd.Series(frac_bc_per_gene >= 0.01).groupby(genes["arm"].to_numpy()).sum()
-            _check(rows, tool, "fewest detected genes on an arm", int(per_arm.min()), 150, per_arm.min() > 150)
+            arm = genes["arm"].to_numpy()
+            varies = np.asarray(X.power(2).mean(axis=0)).ravel() - np.asarray(X.mean(axis=0)).ravel() ** 2 > 0
+            n_var = pd.Series(varies).groupby(arm).sum()
+            arms = pd.Index(sorted(set(arm)))
+            covered = []
+            for a in arms:
+                cols = np.flatnonzero(arm == a)
+                covered.append(float(np.mean(np.asarray(X[:, cols].sum(axis=1)).ravel() > 0)))
+            covered = pd.Series(covered, index=arms)
+            usable = int(((n_var.reindex(arms) > 150) & (covered >= 0.9)).sum())
+            _check(rows, tool, "arms with >150 varying genes and counts in >=90% of barcodes",
+                   usable, 35, usable >= 35)
         elif tool == "cancerfinder":
             n_named = int(genes["gene_name"].astype(str).str.len().gt(0).sum())
             _check(rows, tool, "genes with a symbol", n_named, 1, n_named > 0)
