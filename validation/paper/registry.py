@@ -182,6 +182,8 @@ def _apply_dosage(t):
     t.programs.dosage_sensitivity = fresh.dosage_sensitivity
     t.programs.dosage_law = getattr(fresh, "dosage_law", "haplotype")
     t.expression_params = ep
+    if getattr(t, "program_truth", None) is not None:     # the answer key reports the dosage in use
+        t.program_truth = t.programs.truth()
 
 
 def tasks(run):
