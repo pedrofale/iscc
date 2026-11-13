@@ -16,13 +16,17 @@ import scipy.io
 import scipy.sparse as sp
 
 GENOME = "GRCh38"
-# Dirichlet-multinomial concentration for Visium counts over the human genes, fitted by
-# `estimate_visium` (count_model "dm") on the 3,798 in-tissue spots of 10x's
-# V1_Breast_Cancer_Block_A_Section_1 over the 35,061 genes the layer emits
-# (validation/data/fit_human_visium_kappa.py; 89,197 over all 36,601 features). The default
-# `VisiumBatchHyperParams.kappa` (50) is calibrated for iscc's small growth-gene axis; spread over the
-# human genes it piles each spot's counts onto a few dozen genes.
-HUMAN_VISIUM_KAPPA = 82_165.0
+# Dirichlet-multinomial concentration for Visium counts over the human genes, by indirect inference
+# against 10x's V1_Breast_Cancer_Block_A_Section_1. `estimate_visium` (count model "dm") on its 3,798
+# in-tissue spots gives 82,165 over the layer's 35,061 genes (validation/data/fit_human_visium_kappa.py;
+# 89,197 over all 36,601 features), but that reads the section's tissue heterogeneity as count noise.
+# The same estimator on a simulated paper-regime section returns 55,416 at an input of 82,165, 81,464 at
+# 300,000 and 81,592 with no count noise at all (fit_human_visium_kappa_indirect.py): iscc's simulated
+# tissue already accounts for the real dispersion, so the technical concentration is only bounded from
+# below, and 300,000 is the smallest tested value that reproduces the real estimate within 1%. The
+# default `VisiumBatchHyperParams.kappa` (50) is calibrated for the small growth-gene axis; spread over
+# the human genes it piles each spot's counts onto a few dozen genes.
+HUMAN_VISIUM_KAPPA = 300_000.0
 
 
 def barcodes(n, seed=0, suffix="-1"):

@@ -314,6 +314,12 @@ class scRNA(Assay):
         """The ``HumanExpression`` path of :meth:`run`: the same batch, library, count, ambient,
         dropout and doublet steps, drawn in chunks of ``expr.chunk`` cells into a sparse matrix."""
         import scipy.sparse as sp
+        import warnings
+        if self.hypers.dropout_mid > 0:
+            warnings.warn(f"dropout_mid={self.hypers.dropout_mid:g} on {len(expr.genes)} human genes: most genes "
+                          "have expected counts below the midpoint, so the logistic dropout deletes most of a "
+                          "cell's genes (UMI counts are not zero-inflated beyond the negative binomial); "
+                          "pass dropout_mid=0", stacklevel=3)
         genes = expr.genes
         n = len(target_cells)
         self.n_cells = n

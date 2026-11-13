@@ -233,7 +233,7 @@ resolution traded between the detail of the dynamics and their cost; the layer w
 | `snp_window` | 1000 bp | 300–3000 | the 3' stretch of a gene a 3' library covers; only heterozygous SNPs there get allele counts |
 | `snp_coverage` | 0.1 | 0.01–0.5 | probability a UMI of a gene covers a given SNP in its window (about read length / window). A preset, not fitted |
 | `snp_concentration` | unset (binomial) | ≳ 10 | beta-binomial concentration of the haplotype split at a SNP (allelic-expression noise) |
-| `Visium(kappa=)` on human genes | `HUMAN_VISIUM_KAPPA` = 82,165 | — | fitted by `estimate_visium` on the in-tissue spots of 10x's V1_Breast_Cancer_Block_A_Section_1 over the layer's 35,061 genes (`validation/data/fit_human_visium_kappa.py`); the default 50 is the growth-gene scale and piles each spot's counts onto a few dozen genes, so `write_visium` warns |
+| `Visium(kappa=)` on human genes | `HUMAN_VISIUM_KAPPA` = 300,000 | ≥ 300,000 | by indirect inference: `estimate_visium` gives 82,165 on the in-tissue spots of 10x's V1_Breast_Cancer_Block_A_Section_1 (over the layer's genes), and a simulated paper-regime section reproduces that estimate within 1% from an input of 300,000 up (the direct value, used as input, over-disperses the section to 55,416, because the simulated tissue already carries the heterogeneity). The default 50 is the growth-gene scale and piles each spot's counts onto a few dozen genes, so `write_visium` warns |
 
 `layer.expression(tumor)` (`HumanExpression`) is the realistic path: each cell type takes its Human
 Breast Cell Atlas baseline (epithelial = luminal epithelium, stromal = fibroblasts, immune = T/NK cells,
@@ -243,6 +243,10 @@ xenobiotic metabolism as a proxy), the rest on random human genes, with the grow
 distribution and the same `max_log_fold` bound. What the genotype and the niche do to a gene is read
 off the growth genes. Pass it as `gene_lift` to `scRNA.run` (chunked, sparse counts) and `Visium.run`
 (per-type pooling).
+On human genes pass `scRNA(dropout_mid=0)`: at the 10x preset's midpoint of 1.5 UMIs the logistic
+dropout deletes most of a cell's 35,061 genes (355 genes per cell at 2,300 UMIs, against 1,313 at 3,650
+without it), and UMI counts are not zero-inflated beyond the negative binomial (Svensson 2020); the run
+warns otherwise.
 
 The layer emits the 35,061 GRCh38-2020-A genes that lie on the 39 modelled arms (chrX, chrY, chrM, the
 acrocentric short arms and scaffolds are not modelled). Each takes the copy number per homolog of the
