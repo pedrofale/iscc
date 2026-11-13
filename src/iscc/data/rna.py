@@ -234,7 +234,7 @@ class scRNA(Assay):
         return rng_sel.choice(np.asarray(cell_states.index), size=n, replace=False)
 
     # -- run ---------------------------------------------------------------------------
-    def run(self, cell_data, cell_subset=None, **kwargs):
+    def run(self, cell_data, cell_subset=None, gene_lift=None, **kwargs):
         """Assay single-cell RNA expression for the sampled cells.
 
         Draws per-cell UMI counts from each cell's expression state through one
@@ -251,6 +251,14 @@ class scRNA(Assay):
         cell_subset : array-like of cell IDs, optional
             Fix the assayed cells so that several batches share the same biology. By
             default every sampled cell is used.
+        gene_lift : GeneLift or HumanExpression, optional
+            Count human genes instead of the growth genes. A ``GeneLift``
+            (:attr:`HumanGenomeLayer.lift <iscc.data.human.HumanGenomeLayer>`) copies each growth
+            gene's expression to the human genes it covers. A ``HumanExpression``
+            (:meth:`HumanGenomeLayer.expression <iscc.data.human.HumanGenomeLayer.expression>`) uses
+            atlas baselines per cell type and Hallmark programmes; its counts are drawn in chunks of
+            cells and kept sparse (``counts_csr``, and ``observed_counts`` as a sparse frame), so no
+            cells x human-genes dense matrix is formed. Default None counts the growth genes.
 
         Returns
         -------
@@ -263,8 +271,13 @@ class scRNA(Assay):
         target_cells = self._select_cells(cell_states, cell_subset)
         self.n_cells = len(target_cells)
         genes = cell_states.columns
+        if gene_lift is not None and hasattr(gene_lift, "cell_expression"):
+            return self._run_human(cell_data, np.asarray(target_cells), gene_lift)
 
         activities = cell_states.loc[target_cells].values.astype(float)
+        if gene_lift is not None:
+            activities = gene_lift(activities)
+            genes = gene_lift.genes
         totals = activities.sum(axis=1, keepdims=True)
         probs = np.divide(activities, totals, out=np.zeros_like(activities), where=totals > 0)
 
@@ -297,6 +310,52 @@ class scRNA(Assay):
         self._build_obs(cell_data, target_cells, counts, is_doublet, label)
         return self
 
+    def _run_human(self, cell_data, target_cells, expr):
+        """The ``HumanExpression`` path of :meth:`run`: the same batch, library, count, ambient,
+        dropout and doublet steps, drawn in chunks of ``expr.chunk`` cells into a sparse matrix."""
+        import scipy.sparse as sp
+        import warnings
+        if self.hypers.dropout_mid > 0:
+            warnings.warn(f"dropout_mid={self.hypers.dropout_mid:g} on {len(expr.genes)} human genes: most genes "
+                          "have expected counts below the midpoint, so the logistic dropout deletes most of a "
+                          "cell's genes (UMI counts are not zero-inflated beyond the negative binomial); "
+                          "pass dropout_mid=0", stacklevel=3)
+        genes = expr.genes
+        n = len(target_cells)
+        self.n_cells = n
+        cuts = list(range(0, n, expr.chunk))
+        base_profile = np.zeros(len(genes))
+        for lo in cuts:                                   # the ambient soup needs every cell first
+            base_profile += expr.cell_expression(cell_data, target_cells[lo:lo + expr.chunk]).sum(axis=0)
+        label = self.batch_label if self.batch_label is not None else f"batch{self.seed}"
+        self.batch = Batch(self.hypers, seed=self.seed, label=label).realize(genes, base_profile)
+        if self.hypers.n_wells <= 0:
+            self.plates = None
+        elif self.plate_layout is not None:
+            self.plates = assign_plates_from_map(target_cells, self.plate_layout,
+                                                 self.hypers.n_wells, self.hypers.n_plates)
+        else:
+            self.plates = assign_plates(n, self.hypers.n_wells, self.hypers.n_plates)
+        lib = self.batch.library_factors(n, plates=self.plates)
+        blocks = []
+        for lo in cuts:
+            act = expr.cell_expression(cell_data, target_cells[lo:lo + expr.chunk])
+            tot = act.sum(axis=1, keepdims=True)
+            probs = np.divide(act, tot, out=np.zeros_like(act), where=tot > 0)
+            comp = self.batch.composition(probs)
+            l = lib[lo:lo + expr.chunk]
+            c = self.batch.emit(comp, l, count_model=self.count_model)
+            c = self.batch.add_ambient(c, l)
+            c, _ = self.batch.apply_dropout(c, comp, l)
+            blocks.append(sp.csr_matrix(c.astype(np.int32)))
+        counts = sp.vstack(blocks).tocsr() if blocks else sp.csr_matrix((0, len(genes)), dtype=np.int32)
+        counts, is_doublet = _sparse_doublets(self.batch, counts)
+        self.p_drop = None
+        self.counts_csr = counts
+        self.observed_counts = pd.DataFrame.sparse.from_spmatrix(counts, index=target_cells, columns=genes)
+        self._build_obs(cell_data, target_cells, counts, is_doublet, label)
+        return self
+
     def _build_obs(self, cell_data, target_cells, counts, is_doublet, label):
         """Assemble the per-cell ground-truth + QC table (-> AnnData `.obs`)."""
         obs = pd.DataFrame(index=pd.Index(target_cells, name="cell"))
@@ -310,8 +369,8 @@ class scRNA(Assay):
             obs["well"] = self.plates.well_ids()
             obs["well_row"] = self.plates.row
             obs["well_col"] = self.plates.col
-        obs["n_counts"] = counts.sum(axis=1)
-        obs["n_genes"] = (counts > 0).sum(axis=1)
+        obs["n_counts"] = np.asarray(counts.sum(axis=1)).ravel()
+        obs["n_genes"] = np.asarray((counts > 0).sum(axis=1)).ravel()
         obs["is_doublet"] = is_doublet
         # surface ground truth (clone / type / coords) when present
         ctype = cell_data.get("cell_type")
@@ -328,8 +387,9 @@ class scRNA(Assay):
     def to_anndata(self):
         import anndata as ad
 
+        csr = getattr(self, "counts_csr", None)
         adata = ad.AnnData(
-            X=self.observed_counts.values.astype(np.float32),
+            X=self.observed_counts.values.astype(np.float32) if csr is None else csr.astype(np.float32),
             obs=self.obs.copy(),
             var=pd.DataFrame(index=self.observed_counts.columns),
         )
@@ -351,11 +411,32 @@ class scRNA(Assay):
 
     def write(self, out_path, write_h5ad=True):
         os.makedirs(out_path, exist_ok=True)
-        # CSV kept for backward compatibility with the existing pipeline / tests
-        self.observed_counts.to_csv(os.path.join(out_path, "umis.csv"))
+        # CSV kept for backward compatibility with the existing pipeline / tests; not for human-gene
+        # counts, which are sparse and far wider (write them with iscc.data.human.write_scrna)
+        if getattr(self, "counts_csr", None) is None:
+            self.observed_counts.to_csv(os.path.join(out_path, "umis.csv"))
         if write_h5ad:
             label = self.batch.label
             self.to_anndata().write_h5ad(os.path.join(out_path, f"{label}.h5ad"))
+
+
+def _sparse_doublets(batch, counts):
+    """`Batch.apply_doublets` on a sparse barcodes x genes matrix: the same draws, merging each
+    chosen barcode with its partner's counts."""
+    import scipy.sparse as sp
+    n = counts.shape[0]
+    is_doublet = np.zeros(n, dtype=bool)
+    if batch.h.doublet_rate <= 0 or n < 2:
+        return counts, is_doublet
+    n_dbl = int(round(batch.h.doublet_rate * n))
+    if n_dbl == 0:
+        return counts, is_doublet
+    idx = batch.rng.choice(n, size=n_dbl, replace=False)
+    partners = batch.rng.choice(n, size=n_dbl, replace=True)
+    partners = np.where(partners == idx, (partners + 1) % n, partners)
+    add = sp.csr_matrix((np.ones(n_dbl), (idx, partners)), shape=(n, n))
+    is_doublet[idx] = True
+    return (counts + (add @ counts)).tocsr().astype(np.int32), is_doublet
 
 
 def run_scrna_batches(cell_data, n_batches=2, base_seed=42, design="shared",

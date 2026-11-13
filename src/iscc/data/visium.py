@@ -368,7 +368,7 @@ class Visium(Assay):
         return W @ raw
 
     # -- run ---------------------------------------------------------------------------
-    def run(self, cell_data=None, grid_side=None):
+    def run(self, cell_data=None, grid_side=None, gene_lift=None):
         """Assay a 10x Visium spatial-transcriptomics section over the placed spot grid.
 
         The slide is a **fixed** capture grid laid over the section (see :meth:`place_grid`): it pools
@@ -384,6 +384,14 @@ class Visium(Assay):
             (re-)places the grid.
         grid_side : int, optional
             Capture-area side; ``None`` (default) uses the fixed 10x v1 slide (4,992 spots).
+        gene_lift : GeneLift or HumanExpression, optional
+            Count human genes instead of the growth genes, before diffusion and counting. A
+            ``GeneLift`` (:attr:`HumanGenomeLayer.lift <iscc.data.human.HumanGenomeLayer>`) lifts each
+            spot's pooled expression; it is linear, so pooling first keeps the cost at the growth
+            genes' size. A ``HumanExpression``
+            (:meth:`HumanGenomeLayer.expression <iscc.data.human.HumanGenomeLayer.expression>`) pools
+            each spot's cells per cell type and lifts each pool with that type's atlas baseline, with
+            the programme genes summed cell by cell. Default None counts the growth genes.
 
         Returns
         -------
@@ -421,6 +429,11 @@ class Visium(Assay):
             else:
                 dominant.append("")
                 clone_fracs.append({})
+
+        self.gene_lift = gene_lift
+        if gene_lift is not None:                           # growth genes -> human genes
+            raw = gene_lift.pool_spots(g) if hasattr(gene_lift, "pool_spots") else gene_lift(raw)
+            genes = gene_lift.genes
 
         # 3. lateral mRNA diffusion, then per-spot composition (lambda)
         diffused = self._diffuse(raw, spot_coords)
