@@ -29,6 +29,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
 import common as C  # noqa: E402
 import registry as REG  # noqa: E402
+import regime as RG  # noqa: E402
 import style as S  # noqa: E402
 import realistic_regime as RR  # noqa: E402
 
@@ -273,7 +274,9 @@ def compute_h():
     del real
     t = REG.load("R0", "seed1")
     sec = RR.resect(t).slice(depth_frac=0.5, max_cells=6000)
-    kw = {**est.visium_kwargs(), "spot_pitch": 2.0, "spot_radius": 1.0}
+    # The fit reads the section's in-tissue spots only, so it cannot see spot swapping; the paper's spot
+    # swapping and tissue edge (regime.VISIUM, fitted on this section's off-tissue spots) go on top.
+    kw = {**est.visium_kwargs(), **getattr(RG, "VISIUM", {}), "spot_pitch": 2.0, "spot_radius": 1.0}
     if kw.get("field_lengthscale") is not None:
         kw["field_lengthscale"] = 2.0 * kw["field_lengthscale"]      # spot units -> demes (pitch 2)
     sim = Visium(seed=11, count_model="dm", **kw).run(sec, grid_side=t.grid_size)
