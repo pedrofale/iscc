@@ -151,6 +151,14 @@ def load(run, task):
     hyp = (t.microenv_params or {}).get("hypoxia") if isinstance(t.microenv_params, dict) else None
     if hyp is not None:
         hyp.update(RG.O2)
+    # Two more readout settings that can post-date a stored tumour: chunked materialisation of the
+    # program multiplier, and the bound on a program's log-fold (vault: decision-chunked-materialisation,
+    # decision-program-log-fold-bound). Neither touches growth, so they apply without regrowing; on code
+    # that predates them the attributes are simply unused.
+    if not hasattr(t, "low_memory"):
+        t.low_memory = True
+    if getattr(t, "programs", None) is not None:
+        t.programs.max_log_fold = RG.PROGRAM_MAX_LOG_FOLD
     return t
 
 

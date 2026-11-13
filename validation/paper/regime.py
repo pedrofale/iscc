@@ -67,6 +67,10 @@ ORIGIN_CONFINEMENT = dict(RR._CFG["spatial_params"]["origin_confinement"], gener
 # (5th-95th percentile). The field is readout-only, so registry.load applies it to stored tumours.
 O2 = {"o2_source": "perfused", "o2_supply": 10.0, "o2_consumption": 1.0, "o2_diffusion": 4.0}
 MICROENV = copy.deepcopy(PC.MICROENV)
+# The bound on a program's log-fold, c in c * tanh(x / c): without it the paper's program settings
+# raise a gene up to e^32-fold in a few cells (vault: decision-program-log-fold-bound). Readout only;
+# registry.load sets it on stored tumours.
+PROGRAM_MAX_LOG_FOLD = 5.0
 MICROENV["hypoxia"].update(O2)
 
 
