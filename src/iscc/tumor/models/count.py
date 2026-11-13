@@ -55,6 +55,8 @@ STEM_CAP = 6
 # Dedicated RNG offset for the passenger reconstruction (added to ``self.seed``) — a fixed constant
 # so the overlay is reproducible and independent of the growth stream.
 PASSENGER_RNG_OFFSET = 909090
+# Purpose keys of the per-run streams under ``rng_streams="independent"`` (see ``_run_rng``).
+_STREAM_GROW, _STREAM_PASSENGERS, _STREAM_DEPTH, _STREAM_SUBSAMPLE = 0, 1, 2, 3
 
 # --- Breast-cancer subtype presets ------------------------------------------------------------
 # Selected with ``cell_params.cancer.subtype`` (absent -> no preset -> nothing changes). A preset
@@ -125,7 +127,11 @@ class GenotypeTumor:
         ``n_snvs_per_allele``, ``snv_prob`` / ``cnv_prob``, ``amp_prob``, ``wgd_rate``.
     deme_params : dict, optional
         Per-deme demography — ``initial_cancer_cells``, ``carrying_capacity``,
-        ``maximum_death_rate`` and the density-dependent crowding law.
+        ``maximum_death_rate``, the density-dependent crowding law, and ``dispersal_law``:
+        ``"compete"`` (default) makes each division either attempt a mutation or disperse;
+        ``"noble"`` is demon's invasion rule, under which a division attempts a mutation with
+        probability ``mutation_rate`` and, independently, one of its two daughters disperses with
+        probability ``dispersal_rate``.
     spatial_params : dict, optional
         Grid and tissue geometry, given as keys of this dict (not as individual
         constructor arguments): ``grid_size``, ``dispersal_rate``, ``structure_radius`` /
@@ -178,6 +184,12 @@ class GenotypeTumor:
         ``coupling_params``, ``dosage_params``, ``snv_effect_params``). Off by default;
         a readout only. ``cell_of_origin`` (a normal cell type, e.g. ``"epithelial"``)
         gives cancer cells that type's baseline expression instead of an unrelated one.
+    rng_streams : {"offset", "independent"}, optional
+        How the per-run random streams are derived from ``seed``. ``"offset"`` (default) adds the
+        step or a fixed offset to the seed, so neighbouring seeds share streams shifted by one step
+        (seed ``s`` at step ``k`` is seed ``s + 1`` at step ``k - 1``). ``"independent"`` keys every
+        stream by ``(seed, purpose, step)`` through a ``SeedSequence``, so runs at different seeds
+        never share a stream.
     layout_seed : int, optional
         GENOME-LAYOUT seed (config-determined, shared across runs of the same config):
         fixes driver identities and baseline expression so a cohort is comparable by
@@ -203,8 +215,13 @@ class GenotypeTumor:
                  update_mode="exact", tau=1.0, snapshot_every=1, microenv_params=None,
                  layout_seed=None, expression_params=None, coarsen_passengers=False,
                  max_cells=None, germline_params=None, founder_mutations=None,
-                 spatial_snapshot_every=0, spatial_snapshot_budget=5_000_000):
+                 spatial_snapshot_every=0, spatial_snapshot_budget=5_000_000,
+                 rng_streams="offset"):
         self.seed = seed
+        # Per-run stream derivation (see ``rng_streams`` above and ``_run_rng``). "offset" is the
+        # historical seed + step / seed + constant scheme, kept as the default so every existing run is
+        # byte-identical; "independent" keys each stream by (seed, purpose, step) instead.
+        self.rng_streams = rng_streams
         # EVOLUTION rng (per-run: spatial seeding; grow() draws its own fresh default_rng(seed+step)).
         self.rng = np.random.default_rng(seed)
         # GENOME LAYOUT rng (config-determined, SHARED across same-config runs): the gene-role
@@ -325,11 +342,14 @@ class GenotypeTumor:
             self.max_cells = cfg.get("max_cells", max_cells)
             self.germline_params = cfg.get("germline_params", germline_params)
             self.founder_mutations = cfg.get("founder_mutations", founder_mutations)
+            self.rng_streams = cfg.get("rng_streams", rng_streams)
             microenv_params = cfg.get("microenv_params", microenv_params)
             expression_params = cfg.get("expression_params", expression_params)
             if cfg.get("layout_seed") is not None:
                 self.layout_seed = cfg["layout_seed"]
                 self.layout_rng = np.random.default_rng(self.layout_seed)
+        if self.rng_streams not in ("offset", "independent"):
+            raise ValueError(f"rng_streams must be 'offset' or 'independent', got {self.rng_streams!r}")
         # F8 microenvironment-driven expression (DESIGN_features §H): OPTIONAL and OFF by default
         # (absent -> None -> `make_cell_data` output is bit-identical to the base engine). When
         # enabled, a per-deme expression modifier (hypoxia field + cell-cell communication) is
@@ -677,6 +697,28 @@ class GenotypeTumor:
                     f"(requested d1={_d1:g}, clamped by maximum_death_rate={self.maximum_death_rate:g}). "
                     f"Raise BOTH crowding_d1 and maximum_death_rate above max_birth_rate — a density "
                     f"cap expressed as a rate below the evolved division rate cannot bound a deme.")
+        # Division law (Noble et al. 2022, the `demon` simulator, invasion mode). "compete" (default)
+        # is the historical fate split: a division either attempts a mutation, with probability
+        # mutation_rate / (mutation_rate + dispersal_rate), or disperses, so a dispersing daughter
+        # never mutates and raising dispersal lowers the mutation supply. "noble" is demon's rule
+        # (`cell_division` and the migration_type-0 branch of its main loop): every division attempts
+        # a mutation with probability `mutation_rate`, and independently one of the two daughters,
+        # picked at random, disperses with probability `dispersal_rate`. Both are then per-division
+        # probabilities, so a baseline above 1 is rejected rather than silently clipped.
+        self._dispersal_law = str(deme_params.get("dispersal_law", "compete"))
+        if self._dispersal_law not in ("compete", "noble"):
+            raise ValueError("dispersal_law must be 'compete' or 'noble'")
+        if self._dispersal_law == "noble":
+            _base = self.genotypes[self.founder_id].baseline_rates
+            _mu = float(self.genotypes[self.founder_id].mutation_rate)
+            if not 0.0 <= float(_base["dispersal_rate"]) <= 1.0:
+                raise ValueError(
+                    f"dispersal_law='noble' reads dispersal_rate as a per-division probability, but "
+                    f"it is {_base['dispersal_rate']:g}; give a value in [0, 1]")
+            if not 0.0 <= _mu <= 1.0:
+                raise ValueError(
+                    f"dispersal_law='noble' reads mutation_rate as a per-division probability, but "
+                    f"it is {_mu:g}; give a value in [0, 1]")
         # Which rate the uniform pressure references: the deme's own cell-weighted mean cancer
         # division rate ("deme_mean", RELATIVE purifying selection -- a costly clone is disadvantaged,
         # not lethal) or a fixed config scalar ("fixed" = `crowding_ref`, ABSOLUTE purifying selection).
@@ -767,6 +809,12 @@ class GenotypeTumor:
             self._origin_generations = float(_oc.get("generations", 200))
             if self._origin_disp_factor < 0:
                 raise ValueError("origin_confinement.dispersal_factor must be >= 0")
+            # What the tau engine's clock counts. "steps" (default, historical) ticks 1 per tau step,
+            # so `generations` means tau steps and a tau of 0.5 halves the window; "generations" ticks
+            # by `tau`, so `generations` means generations at any tau. The exact engine is unaffected.
+            self._origin_clock = str(_oc.get("clock", "steps"))
+            if self._origin_clock not in ("steps", "generations"):
+                raise ValueError("origin_confinement.clock must be 'steps' or 'generations'")
         # Number of founder cancer cells to seed (an established micro-lesion). A single founder
         # has P(extinction) ≈ death/division (~7% for the defaults) regardless of carrying
         # capacity, so a one-cell start makes runs/demos randomly cancer-free; seeding a small
@@ -1719,6 +1767,15 @@ class GenotypeTumor:
     def _cancer_gids(self, deme):
         return [gid for gid in deme if self._is_cancer(gid)]
 
+    def _run_rng(self, seed, offset, purpose):
+        """A per-run random stream. Under ``rng_streams="offset"`` it is ``default_rng(seed +
+        offset)``, the historical scheme, in which neighbouring seeds share streams shifted by one
+        unit of ``offset``. Under ``"independent"`` it is keyed by ``(seed, purpose, offset)`` through
+        a ``SeedSequence``, so no two seeds, purposes or steps share a stream."""
+        if self.rng_streams == "independent":
+            return np.random.default_rng([int(seed), purpose, int(offset)])
+        return np.random.default_rng(seed + offset)
+
     # --- origin confinement --------------------------------------------------
     def _origin_tick(self, generations):
         """Advance the founding acinus's confinement clock by ``generations`` and release it once the
@@ -2000,6 +2057,8 @@ class GenotypeTumor:
         affected = [di]
         if rng.random() < death / (div + death):
             self._remove(di, gid, 1)                       # death
+        elif self._dispersal_law == "noble":
+            self._divide_noble(di, gid, rep, rng, affected)
         else:
             # The division fate is split on the clone's OWN rates. Using the confinement-scaled
             # dispersal rate here would make a cell inside a closed acinus mutate on every division
@@ -2425,7 +2484,7 @@ class GenotypeTumor:
         prev_dose = 0.0
         for local_step in range(n_steps - 1):
             self._clock = self.step + local_step
-            rng = np.random.default_rng(seed + self.step + local_step)
+            rng = self._run_rng(seed, self.step + local_step, _STREAM_GROW)
             if treatment is not None:
                 treatment.discrete_event(self, self.step + local_step)  # e.g. surgical resection (R9)
                 dose = treatment.get_dosage(self.step + local_step, self.get_tumor_size())
@@ -2447,6 +2506,101 @@ class GenotypeTumor:
             self._cell_data_stale = True
         return self.traces
 
+    # --- demon's invasion rule (dispersal_law="noble") ------------------------
+    def _route_one(self, di, rep, rng):
+        """Where ONE dispersing cell of ``rep`` leaving deme ``di`` lands, by the same three routes as
+        the default dispersal branch of ``update``: metastatic seeding from a primary stromal deme,
+        an island hop to another gland's lumen, or a random neighbour behind the basement-membrane
+        gate. Returns ``(target, is_met)``, or ``None`` when the cell dies in transit to the met."""
+        src_g = self.gland_id[di] if self.gland_id is not None else -1
+        if (self._met_enabled and self._met_seed_kappa > 0 and di < self.n_primary_demes
+                and src_g == -1
+                and rng.random() < self._met_seed_kappa / (1.0 + self._met_seed_kappa)):
+            ms = min(max(rep.evolutionary_parameters["met_survival"], 0.0), 1.0)
+            return (self.met_vessel_idx, True) if rng.random() < self._transit_prob(ms) else None
+        tgt = None
+        if (self.cross_gland_kappa > 0 and src_g != -1
+                and rng.random() < self.cross_gland_kappa / (1.0 + self.cross_gland_kappa)):
+            tgt = self._cross_gland_target(src_g, rng)
+        if tgt is None:
+            nbrs = self._neighbors(di)
+            tgt = nbrs[int(rng.choice(len(nbrs)))] if nbrs else di
+        if (self._breach_gated_invasion and self.gland_id is not None
+                and self.gland_id[di] >= 0 and self.gland_id[tgt] < 0):
+            b = min(max(rep.evolutionary_parameters["breach"], 0.0), 1.0)
+            if rng.random() >= b:
+                tgt = di
+        return tgt, False
+
+    def _realise_one_mutant(self, tgt, gid, rng):
+        """Realise ONE mutated daughter of ``gid`` in deme ``tgt``, where the caller has already made
+        sure a slot can be had: a functional daughter becomes a new genotype unless it breaches the
+        viability limits, a purely neutral one folds into the parent, and a saturated allele grows the
+        parent. Returns the genotype the cell joined, or ``None`` when nothing was born."""
+        rep = self.genotypes[gid]
+        child = rep.divide()
+        res = child.mutate(rng, self.selection,
+                           func_mask=self._func_bits if self.coarsen_passengers else None)
+        if res == "passenger":
+            self._pass_load[gid] += child._n_new_snv
+            self._n_folded += 1
+            return gid if self._place_one(tgt, gid, rng) else None
+        if res:
+            if not self._is_viable(child):
+                return None
+            self._register(child)
+            self.genotypes_parents[child.genotype_id] = rep.genotype_id
+            return child.genotype_id if self._place_one(tgt, child.genotype_id, rng) else None
+        return gid if self._place_one(tgt, gid, rng) else None
+
+    def _divide_noble(self, di, gid, rep, rng, affected):
+        """One division under demon's invasion rule (``dispersal_law="noble"``).
+
+        The division attempts a mutation with probability ``mutation_rate``. Independently, one of its
+        two daughters, picked at random, disperses with probability ``dispersal_rate``; inside a
+        still-intact founding acinus only an ``_escape_factor`` share of those leave, and the rest stay
+        home. The parent copy and the new daughter are interchangeable unless the new one mutated, so
+        the pick is drawn only then: the mutant itself leaves, or the parent copy leaves and the mutant
+        takes its place. Every placement goes through the structural cap where it is on, and a birth
+        whose moving cell finds no slot fails, so no genotype is registered without a cell. A mutated
+        daughter is routed with its parent's traits (breach, met survival): the new mutation acts from
+        its next division on.
+        """
+        mutate = rng.random() < min(rep.mutation_rate, 1.0)
+        disp = rep.evolutionary_parameters["dispersal_rate"]
+        move = disp > 0.0 and rng.random() < disp
+        if move and (esc := self._escape_factor(di)) < 1.0 and (esc <= 0.0 or rng.random() >= esc):
+            move = False                                   # held in by the intact acinus
+        if not move:
+            if mutate:
+                if not self._lottery or self._can_place(di):
+                    self._realise_one_mutant(di, gid, rng)
+            else:
+                self._place_one(di, gid, rng)
+            return
+        mutant_leaves = mutate and rng.random() < 0.5
+        route = self._route_one(di, rep, rng)
+        if route is None:                                  # the moving cell died in transit
+            if mutate and not mutant_leaves:
+                self._remove(di, gid, 1)                   # the parent copy left; the mutant stays
+                self._realise_one_mutant(di, gid, rng)
+            return
+        tgt, is_met = route
+        if mutant_leaves:
+            if self._lottery and not self._can_place(tgt):
+                return
+            placed = self._realise_one_mutant(tgt, gid, rng)
+        else:
+            placed = gid if self._place_one(tgt, gid, rng) else None
+            if placed is not None and mutate:
+                self._remove(di, gid, 1)                   # the parent copy left; the mutant stays
+                self._realise_one_mutant(di, gid, rng)
+        if placed is not None:
+            affected.append(tgt)
+            if is_met:
+                self.events.append(dict(step=self.step, time=self.time, event="seeding",
+                                        from_deme=int(di), genotype=placed, n=1))
+
     # --- tau-leaping (generation-batched clonal update, DESIGN §7) -----------
     def _tau_substep(self, rng, dt):
         """One synchronous tau-leap of length `dt`.
@@ -2465,6 +2619,7 @@ class GenotypeTumor:
         if self._lottery:
             return self._tau_substep_lottery(rng, dt)
         deaths, dispersals, mutants, stayers = [], [], [], []
+        mut_disp, swaps = [], []     # dispersal_law="noble" only (see _split_births_noble)
         for di in self._active_demes():
             deme = self.demes[di]
             if not deme:
@@ -2485,7 +2640,10 @@ class GenotypeTumor:
                 n_death = int(rng.poisson(death * c * dt))
                 if n_death:
                     deaths.append((di, gid, n_death))
-                if n_div:
+                if n_div and self._dispersal_law == "noble":
+                    self._split_births_noble(rng, di, gid, rep, n_div, esc, mutants, stayers,
+                                             dispersals, mut_disp, swaps)
+                elif n_div:
                     denom = rep.mutation_rate + disp
                     mut_prob = rep.mutation_rate / denom if denom > 0 else 0.0
                     n_mut = int(rng.binomial(n_div, mut_prob))
@@ -2602,6 +2760,115 @@ class GenotypeTumor:
                     nbrs = self._neighbors(di)
                     tgt = nbrs[int(rng.integers(0, len(nbrs)))] if nbrs else di
                 self._add(tgt, gid, 1)
+        # dispersal_law="noble": mutated daughters that leave, and parent copies that leave while the
+        # mutant takes their place. Both lists are empty under the default law -> no draws.
+        for di, gid, n in mut_disp:
+            routes, _ = self._route_births(di, gid, n, rng)
+            for tgt, cnt, is_met in routes:
+                self._realise_mutation_births(tgt, gid, cnt, rng)
+                if is_met:
+                    self.events.append(dict(step=self.step, time=self.time, event="seeding",
+                                            from_deme=int(di), genotype=gid, n=int(cnt)))
+        for di, gid, n in swaps:
+            routes, _ = self._route_births(di, gid, n, rng)
+            for tgt, cnt, is_met in routes:
+                self._add(tgt, gid, cnt)
+                if is_met:
+                    self.events.append(dict(step=self.step, time=self.time, event="seeding",
+                                            from_deme=int(di), genotype=gid, n=int(cnt)))
+            self._convert_in_place(di, gid, n, rng)      # every parent copy left, even if it died
+
+    # --- demon's invasion rule under tau-leaping (dispersal_law="noble") ----
+    def _split_births_noble(self, rng, di, gid, rep, n, esc, mutants, stayers, dispersals,
+                            mut_disp, swaps):
+        """Split ``n`` births of ``gid`` in deme ``di`` under demon's invasion rule (see
+        ``_divide_noble``): each birth mutates with probability ``mutation_rate`` and, independently,
+        sends one daughter out with probability ``dispersal_rate``; inside an intact founding acinus
+        only an ``esc`` share leaves. When a mutated birth sends a daughter out, the mutant itself
+        leaves (``mut_disp``) or the parent copy leaves and the mutant takes its place (``swaps``),
+        with equal probability. Births that stay home unmutated join ``stayers``."""
+        mu = min(max(float(rep.mutation_rate), 0.0), 1.0)
+        d = min(max(float(rep.evolutionary_parameters["dispersal_rate"]), 0.0), 1.0)
+        n_md, n_m, n_d, n_0 = (int(k) for k in rng.multinomial(
+            n, [mu * d, mu * (1.0 - d), (1.0 - mu) * d, (1.0 - mu) * (1.0 - d)]))
+        if esc < 1.0:
+            out = int(rng.binomial(n_md, esc)) if (esc > 0.0 and n_md) else 0
+            n_m += n_md - out
+            n_md = out
+            out = int(rng.binomial(n_d, esc)) if (esc > 0.0 and n_d) else 0
+            n_0 += n_d - out
+            n_d = out
+        n_leave = int(rng.binomial(n_md, 0.5)) if n_md else 0
+        if n_m:
+            mutants.append((di, gid, n_m))
+        if n_0:
+            stayers.append((di, gid, n_0))
+        if n_d:
+            dispersals.append((di, gid, n_d))
+        if n_leave:
+            mut_disp.append((di, gid, n_leave))
+        if n_md - n_leave:
+            swaps.append((di, gid, n_md - n_leave))
+
+    def _route_births(self, di, gid, n, rng):
+        """Route ``n`` dispersing cells of ``gid`` leaving deme ``di`` by the dispersal branch's three
+        routes (metastatic seeding with its transit survival, island hops, random neighbours behind
+        the basement-membrane gate). Returns ``(routes, n_lost)``: ``routes`` is a list of
+        ``(target, count, is_met)`` and ``n_lost`` the cells that died in transit."""
+        routes = []
+        src_g = self.gland_id[di] if self.gland_id is not None else -1
+        rep = self.genotypes[gid]
+        n_met = n_lost = 0
+        if self._met_enabled and self._met_seed_kappa > 0 and di < self.n_primary_demes and src_g == -1:
+            n_met = int(rng.binomial(n, self._met_seed_kappa / (1.0 + self._met_seed_kappa)))
+        if n_met:
+            ms = min(max(rep.evolutionary_parameters["met_survival"], 0.0), 1.0)
+            n_survive = int(rng.binomial(n_met, self._transit_prob(ms)))
+            if n_survive:
+                routes.append((self.met_vessel_idx, n_survive, True))
+            n_lost = n_met - n_survive
+        n_rest = n - n_met
+        n_cross = 0
+        if self.cross_gland_kappa > 0 and src_g != -1:
+            n_cross = int(rng.binomial(n_rest, self.cross_gland_kappa / (1.0 + self.cross_gland_kappa)))
+        n_local = n_rest - n_cross
+        if n_local > 0:
+            nbrs = self._neighbors(di)
+            if not nbrs:
+                routes.append((di, n_local, False))
+            else:
+                idx = rng.integers(0, len(nbrs), size=n_local)
+                u, cnts = np.unique(idx, return_counts=True)
+                gate = (self._breach_gated_invasion and self.gland_id is not None
+                        and self.gland_id[di] >= 0)
+                b = None
+                for k, cnt in zip(u, cnts):
+                    tgt = nbrs[int(k)]; cnt = int(cnt)
+                    if gate and self.gland_id[tgt] < 0:
+                        if b is None:
+                            b = min(max(rep.evolutionary_parameters["breach"], 0.0), 1.0)
+                        n_ok = int(rng.binomial(cnt, b)) if b > 0 else 0
+                        if n_ok:
+                            routes.append((tgt, n_ok, False))
+                        if cnt - n_ok:
+                            routes.append((di, cnt - n_ok, False))   # crossing fails: stays home
+                    else:
+                        routes.append((tgt, cnt, False))
+        for _ in range(n_cross):
+            tgt = self._cross_gland_target(src_g, rng)
+            if tgt is None:
+                nbrs = self._neighbors(di)
+                tgt = nbrs[int(rng.integers(0, len(nbrs)))] if nbrs else di
+            routes.append((tgt, 1, False))
+        return routes, n_lost
+
+    def _convert_in_place(self, di, gid, n, rng):
+        """``n`` parent copies of ``gid`` have left deme ``di`` and the mutated daughters take their
+        slots: remove them and realise the mutants in place (capped at the cells still there)."""
+        m = min(int(n), self.demes[di].get(gid, 0))
+        if m:
+            self._remove(di, gid, m)
+            self._realise_mutation_births(di, gid, m, rng)
 
     # --- tau-leaping under the structural cap (DESIGN_crowding_v2.md §3.3) ---
     def _realise_mutation_births(self, di, gid, n, rng):
@@ -2660,6 +2927,7 @@ class GenotypeTumor:
         real occupancy every substep and clipped at zero.
         """
         deaths, dispersals, mutants, stayers = [], [], [], []
+        mut_disp, swaps = [], []     # dispersal_law="noble" only (see _split_births_noble)
         for di in self._active_demes():
             deme = self.demes[di]
             if not deme:
@@ -2679,7 +2947,10 @@ class GenotypeTumor:
                 n_death = int(rng.poisson(death * c * dt))
                 if n_death:
                     deaths.append((di, gid, n_death))
-                if n_div:
+                if n_div and self._dispersal_law == "noble":
+                    self._split_births_noble(rng, di, gid, rep, n_div, esc, mutants, stayers,
+                                             dispersals, mut_disp, swaps)
+                elif n_div:
                     denom = rep.mutation_rate + disp
                     mut_prob = rep.mutation_rate / denom if denom > 0 else 0.0
                     n_mut = int(rng.binomial(n_div, mut_prob))
@@ -2766,6 +3037,21 @@ class GenotypeTumor:
                     nbrs = self._neighbors(di)
                     tgt = nbrs[int(rng.integers(0, len(nbrs)))] if nbrs else di
                 _cand(tgt, ("plain", gid), 1)
+        # dispersal_law="noble" (empty otherwise): a leaving mutant competes for a slot where it lands
+        # and is realised only if it wins one; a leaving parent copy competes the same way, and only
+        # when it wins does the mutant take its place at home. A parent copy that dies in transit has
+        # left all the same, so its mutant takes its place.
+        lost_swaps = []
+        for di, gid, n in mut_disp:
+            routes, _ = self._route_births(di, gid, n, rng)
+            for tgt, cnt, is_met in routes:
+                _cand(tgt, ("metmut", di, gid) if is_met else ("mut", gid), cnt)
+        for di, gid, n in swaps:
+            routes, n_lost = self._route_births(di, gid, n, rng)
+            for tgt, cnt, is_met in routes:
+                _cand(tgt, ("swapmet" if is_met else "swap", di, gid), cnt)
+            if n_lost:
+                lost_swaps.append((di, gid, n_lost))
 
         # --- Phase 3 + 4: allocate the slots, then realise only the accepted births ---------------
         for tgt in sorted(cand):
@@ -2795,8 +3081,20 @@ class GenotypeTumor:
                     self._add(tgt, key[2], n)
                     self.events.append(dict(step=self.step, time=self.time, event="seeding",
                                             from_deme=int(key[1]), genotype=key[2], n=n))
+                elif key[0] == "metmut":
+                    self._realise_mutation_births(tgt, key[2], n, rng)
+                    self.events.append(dict(step=self.step, time=self.time, event="seeding",
+                                            from_deme=int(key[1]), genotype=key[2], n=n))
+                elif key[0] in ("swap", "swapmet"):
+                    self._add(tgt, key[2], n)
+                    if key[0] == "swapmet":
+                        self.events.append(dict(step=self.step, time=self.time, event="seeding",
+                                                from_deme=int(key[1]), genotype=key[2], n=n))
+                    self._convert_in_place(key[1], key[2], n, rng)
                 else:
                     self._add(tgt, key[1], n)
+        for di, gid, n in lost_swaps:
+            self._convert_in_place(di, gid, n, rng)
 
     def _state_twin(self, gid, target_state):
         """Get-or-create the genotype with ``gid``'s genome but ``resistance_state == target_state`` —
@@ -2932,7 +3230,7 @@ class GenotypeTumor:
         self.step += 1
         self.time += tau
         if self._origin_confined:
-            self._origin_tick(1.0)
+            self._origin_tick(tau if self._origin_clock == "generations" else 1.0)
         self._clock = self.step
         if self.step % self.snapshot_every == 0:
             self.traces.append(self._trace_snapshot())
@@ -2950,7 +3248,7 @@ class GenotypeTumor:
             seed = self.seed
         if tau is None:
             tau = self.tau
-        rng = np.random.default_rng(seed + self.step)
+        rng = self._run_rng(seed, self.step, _STREAM_GROW)
         self._clear_treatment_overrides()
         # snapshot at t=0 (matches the exact engine's initial trace)
         self.traces.append(self._trace_snapshot())
@@ -3235,7 +3533,7 @@ class GenotypeTumor:
             if p in subtree:
                 subtree[p] += subtree[g]
 
-        prng = np.random.default_rng(self.seed + PASSENGER_RNG_OFFSET)
+        prng = self._run_rng(self.seed, PASSENGER_RNG_OFFSET, _STREAM_PASSENGERS)
 
         # ---- allocate stem markers to clones, drawing globally-unique neutral positions -----------
         # Position-level global uniqueness (one stem SNV per neutral position across the whole tree)
@@ -3462,7 +3760,7 @@ class GenotypeTumor:
 
         # DEPTH cut: thin every deme's column to a fraction of its cells (a 2-D slice), up-front.
         if depth_frac is not None:
-            drng = np.random.default_rng(self.seed + 20240731)
+            drng = self._run_rng(self.seed, 20240731, _STREAM_DEPTH)
             src = []
             for deme in self.demes:
                 out = {}
@@ -3483,7 +3781,7 @@ class GenotypeTumor:
         if not subsample and reg is None and depth_frac is None:
             return [dict(d) for d in self.demes], False, total
         frac = (max_cells / total) if subsample else 1.0
-        mrng = np.random.default_rng(self.seed + 20240730)
+        mrng = self._run_rng(self.seed, 20240730, _STREAM_SUBSAMPLE)
         plan = []
         for di, deme in enumerate(src):
             if reg is not None and di not in reg:
