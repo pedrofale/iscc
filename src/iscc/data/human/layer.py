@@ -7,8 +7,10 @@ counts over the human genes (``scRNA.run(..., gene_lift=layer.lift)``, ``Visium.
 gene_lift=layer.lift)``), and :meth:`HumanGenomeLayer.allele_counts` adds per-haplotype counts at the
 SNPs that a 3' library covers.
 
-Until reference-atlas baselines replace them, a human gene's expression parameters (baseline,
-dosage sensitivity, programme loadings) are those of the growth gene that covers it.
+With ``layer.lift`` a human gene simply takes the expression of the growth gene that covers it.
+:meth:`HumanGenomeLayer.expression` is the realistic path: reference-atlas baselines per cell type and
+Hallmark programmes on the human genes (:class:`~iscc.data.human.HumanExpression`); only what the
+genotype and the niche do is read off the growth genes.
 """
 import warnings
 from dataclasses import dataclass

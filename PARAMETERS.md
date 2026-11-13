@@ -235,9 +235,18 @@ resolution traded between the detail of the dynamics and their cost; the layer w
 | `snp_concentration` | unset (binomial) | ≳ 10 | beta-binomial concentration of the haplotype split at a SNP (allelic-expression noise) |
 | `Visium(kappa=)` on human genes | `HUMAN_VISIUM_KAPPA` = 82,165 | — | fitted by `estimate_visium` on the in-tissue spots of 10x's V1_Breast_Cancer_Block_A_Section_1 over the layer's 35,061 genes (`validation/data/fit_human_visium_kappa.py`); the default 50 is the growth-gene scale and piles each spot's counts onto a few dozen genes, so `write_visium` warns |
 
+`layer.expression(tumor)` (`HumanExpression`) is the realistic path: each cell type takes its Human
+Breast Cell Atlas baseline (epithelial = luminal epithelium, stromal = fibroblasts, immune = T/NK cells,
+host = stroma), scaled by its relative RNA content; the cancer takes its `cell_of_origin`'s; named
+programmes load on their MSigDB Hallmark sets (proliferation, EMT, hypoxia; drug resistance on
+xenobiotic metabolism as a proxy), the rest on random human genes, with the growth dictionary's loading
+distribution and the same `max_log_fold` bound. What the genotype and the niche do to a gene is read
+off the growth genes. Pass it as `gene_lift` to `scRNA.run` (chunked, sparse counts) and `Visium.run`
+(per-type pooling).
+
 The layer emits the 35,061 GRCh38-2020-A genes that lie on the 39 modelled arms (chrX, chrY, chrM, the
 acrocentric short arms and scaffolds are not modelled). Each takes the copy number per homolog of the
-growth gene covering its slice of the arm and, until reference-atlas baselines replace it, that growth
+growth gene covering its slice of the arm and, with the plain `layer.lift`, that growth
 gene's expression. Germline SNPs are the 1000 Genomes phase-3 common SNPs (allele frequency above 5%)
 inside those genes, drawn heterozygous at 2·AF·(1 − AF) and phased exactly onto the homologs;
 `fetch_snps()` downloads them (92 MB) and `ISCC_HUMAN_REF` points at the result.

@@ -74,6 +74,7 @@ tools (CopyKAT, CalicoST, Clonalscope, CancerFinder). Growth never reads it.
 |---|---|
 | [`iscc.data.human.arm_genome`](arm_genome.md) | A growth genome with one segment per chromosome arm, at any resolution. |
 | [`iscc.data.human.HumanGenomeLayer`](HumanGenomeLayer.md) | The gene map, the germline, and the allele counts of an assay. |
+| [`iscc.data.human.HumanExpression`](HumanExpression.md) | Human-gene expression from atlas baselines per cell type and Hallmark programmes, for the assays' `gene_lift`. |
 | [`iscc.data.human.GeneLift`](GeneLift.md) | The map from growth genes to human genes that the assays take as `gene_lift`. |
 | [`iscc.data.human.AlleleCounts`](AlleleCounts.md) | Per-haplotype UMI counts at heterozygous SNPs. |
 | [`iscc.data.human.write_visium`](write_visium.md) | Write a Visium assay as Space Ranger output, CalicoST's `snp_dir` and the truth. |
@@ -82,6 +83,8 @@ tools (CopyKAT, CalicoST, Clonalscope, CancerFinder). Growth never reads it.
 | [`iscc.data.human.HumanReference`](HumanReference.md) | The genes, arms and SNPs of the human reference. |
 | [`iscc.data.human.load_reference`](load_reference.md) | Load the packaged reference (and the SNPs, if prepared). |
 | [`iscc.data.human.fetch_snps`](fetch_snps.md) | Download and prepare the 1000 Genomes common SNPs. |
+| [`iscc.data.human.load_atlas_baselines`](load_atlas_baselines.md) | The packaged per-cell-type baselines from the Human Breast Cell Atlas. |
+| [`iscc.data.human.load_hallmark_programs`](load_hallmark_programs.md) | The packaged Hallmark gene sets that seed the named programmes. |
 
 ## Reads
 

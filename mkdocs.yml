@@ -168,6 +168,7 @@ nav:
       - Human genome:
           - arm_genome: reference/arm_genome.md
           - HumanGenomeLayer: reference/HumanGenomeLayer.md
+          - HumanExpression: reference/HumanExpression.md
           - GeneLift: reference/GeneLift.md
           - AlleleCounts: reference/AlleleCounts.md
           - write_visium: reference/write_visium.md
@@ -176,6 +177,8 @@ nav:
           - HumanReference: reference/HumanReference.md
           - load_reference: reference/load_reference.md
           - fetch_snps: reference/fetch_snps.md
+          - load_atlas_baselines: reference/load_atlas_baselines.md
+          - load_hallmark_programs: reference/load_hallmark_programs.md
       - Reads:
           - emit_dna_reads: reference/emit_dna_reads.md
           - emit_scrna_reads: reference/emit_scrna_reads.md
