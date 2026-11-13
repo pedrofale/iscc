@@ -44,6 +44,7 @@ SEEDS = list(range(1, T["seeds"] + 1))
 # decision-noble-division-law). 0.9 is the paper regime's own value. The low end is 0.05, not 0.03: at
 # 0.03 two of five preview seeds never left the founding duct in 1,500 generations (Pedro, 2026-11-13).
 R1_DISPERSAL = (0.05, 0.1, 0.3, 0.6, 0.9)
+R5_WGD = (0.0, 0.001, 0.002, 0.005, 0.01)
 SWEEP, SHOW = T["sweep_scale"], T["showcase_scale"]
 
 
@@ -85,10 +86,12 @@ def _runs():
                   + [(f"snv{m}_seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
                                               cancer={"cnv_prob": 0.05, "n_snvs_per_allele": m}))
                      for m in (0.05, 0.2, 0.5) for s in SEEDS])
-    # R5: whole-genome duplication, prevalence across rates.
+    # R5: whole-genome duplication, prevalence across rates. Under demon's laws selection acts inside full
+    # demes, so a doubled clone sweeps more easily: at 0.01 more than half the full-scale tumours carry
+    # one (2026-11-14), so the rates bracket PCAWG's breast prevalence from below.
     runs["R5"] = [(f"wgd{w}_seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
                                            cancer={"wgd_rate": w}))
-                  for w in (0.0, 0.01, 0.03, 0.05, 0.1) for s in range(1, 2 * T["seeds"] + 1)]
+                  for w in R5_WGD for s in range(1, 2 * T["seeds"] + 1)]
     # R6: a cohort of patients sharing one configuration (private evolution seeds).
     runs["R6"] = [(f"patient{s}", dict(seed=100 + s, scale=SWEEP, target_cancer=T["sweep_target"]))
                   for s in range(1, 7)]
