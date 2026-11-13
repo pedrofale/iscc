@@ -5,7 +5,8 @@ regime, its scale and seeds, how many tumours reached their target size, CPU tim
 that read it. Peak memory is not reported: the first preview registry reused one worker process
 across tumours, so its recorded peak is a running maximum, not a per-tumour figure.
 
-Writes ``<paper>/tables/s1_table.tex``.
+Writes ``<paper>/tables/s1_table.tex`` and the same numbers as ``<paper>/figures/paper1/s1_runs.csv``,
+which the text quotes (the paper carries no tables).
 Run:  python validation/paper/supp_table.py
 """
 import json
@@ -68,6 +69,26 @@ def main():
         lines.append(f"{run} & {desc} & {size} & {len(m)} & {reached} & "
                      f"{np.median(cpu):.0f} ({cpu.min():.0f}--{cpu.max():.0f}) & {used} \\\\")
     lines += [r"\bottomrule", r"\end{tabular}"]
+    import csv
+    csv_path = os.path.join(paper_dir(), "figures", "paper1", "s1_runs.csv")
+    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+    with open(csv_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["run", "variant", "scale_target", "tumours", "reached", "cpu_median_s", "cpu_min_s",
+                    "cpu_max_s", "peak_mb_max", "commits", "used_in"])
+        for run in REG.RUNS:
+            m = manifest(run)
+            if not m or run not in ROWS:
+                continue
+            cpu = np.array([r["cpu_s"] for r in m.values()], dtype=float)
+            scale = sorted({(r["kwargs"]["scale"], r["kwargs"]["target_cancer"]) for r in m.values()})
+            w.writerow([run, ROWS[run][0], "; ".join(f"{s} {t}" for s, t in scale), len(m),
+                        sum(bool(r.get("reached_target", True)) for r in m.values()),
+                        f"{np.median(cpu):.1f}", f"{cpu.min():.1f}", f"{cpu.max():.1f}",
+                        max(r.get("peak_mb", 0) for r in m.values()),
+                        " ".join(sorted({str(r.get("commit")) for r in m.values()})),
+                        ROWS[run][1].replace("--", "-")])
+    print("wrote", csv_path)
     out = os.path.join(paper_dir(), "tables", "s1_table.tex")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w") as f:

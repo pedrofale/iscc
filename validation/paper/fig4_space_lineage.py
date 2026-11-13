@@ -9,11 +9,12 @@ Left, the lineage-space confound (R1, 25 tumours over five dispersal rates):
   (d) the ground-truth-free signature (correlation of per-gene lineage and spatial autocorrelation)
       against lineage-space coupling, on MERFISH-measured expression (124-gene panel, normalised, as
       the real references were reduced), with three real PEtracer lineages.
-Right, tissue architecture and copy-number evolution (Harald's benchmark):
+Right, tissue architecture and copy-number evolution:
   (e) confined against free growth (R3, paper regime);
-  (f)-(h) truncal copy-number fraction, clonal diversity and reconstruction error by architecture and
-      selection, from Harald's run 1 (vault experiments/data/cn-evolution-local-run-1.csv, 12x12 grid,
-      5 seeds per cell), read as is.
+  (f)-(g) truncal copy-number fraction and clonal diversity (Noble's D at the 5% detection limit) by
+      architecture and selection, from the registry's own R3 tumours;
+  (h) tree reconstruction error over its polytomy floor: pending, as iscc has no floor-normalised tree
+      score of its own yet.
 
 Why the field and not gene categories: in the paper regime copy-number dosage makes nearly every
 gene genuinely heritable, so per-gene "called heritable" rates say little about the environment, and
@@ -23,11 +24,9 @@ carries the environment's signal without dosage.
 Run:  python validation/paper/fig4_space_lineage.py [--jobs 1]
 """
 import argparse
-import io
 import json
 import multiprocessing as mp
 import os
-import subprocess
 import sys
 
 import numpy as np
@@ -43,8 +42,6 @@ import style as S  # noqa: E402
 REPO = os.path.dirname(os.path.dirname(HERE))
 CACHE = os.path.join(C.DERIVED, "petracer_v2")
 DISPS = REG.R1_DISPERSAL
-VAULT = os.path.join(os.path.dirname(REPO), "iscc-markdown")
-HARALD_CSV = "experiments/data/cn-evolution-local-run-1.csv"
 
 
 def categories(t):
@@ -102,6 +99,15 @@ def analyse(key):
     conf = dec.confusion(cats)
     arch = "free" if task.startswith("free") else "ductal"
     disp = float(task.split("_")[0][4:]) if run == "R1" else None
+    extra = {}
+    if run == "R3":
+        # Fig 4f-g: the copy-number structure that architecture sets, from the tumour itself
+        import sweep_score as SS
+        from iscc.inference import mode_indices
+        sc = SS.score_tumour(t)
+        extra = dict(selection=task.split("_")[1],
+                     trunk_fraction=sc["n_truncal_segments"] / float(t.n_segments),
+                     D=float(mode_indices(t, detection=0.05)["D"]))
     rec = dict(run=run, task=task, arch=arch, disp=disp,
                field_lin=dec.field_autocorr["hypoxia_level"]["lineage"],
                field_sp=dec.field_autocorr["hypoxia_level"]["spatial"],
@@ -111,7 +117,8 @@ def analyse(key):
                median_I_sp_merfish=float(np.median(meas.I_spatial)),
                # per-gene calls on the true expression, kept for the record (not plotted: copy-number
                # dosage makes nearly every gene heritable in this regime, see the issues note B1)
-               called_ext=conf["extrinsic"], called_intr=conf["intrinsic"], called_neu=conf["neutral"])
+               called_ext=conf["extrinsic"], called_intr=conf["intrinsic"], called_neu=conf["neutral"],
+               **extra)
     os.makedirs(CACHE, exist_ok=True)
     with open(os.path.join(CACHE, f"{run}__{task}.json"), "w") as f:
         json.dump(rec, f)
@@ -158,16 +165,6 @@ def real_points():
             sig = float(r.get("confound_corr", np.nan))
             pts.append((name, coupling, sig))
     return pts
-
-
-def harald():
-    """Harald's run 1 results, read from the vault's main branch as they are."""
-    try:
-        txt = subprocess.run(["git", "-C", VAULT, "show", f"origin/main:{HARALD_CSV}"], check=True,
-                             capture_output=True, text=True).stdout
-        return pd.read_csv(io.StringIO(txt))
-    except Exception:
-        return None
 
 
 def main():
@@ -271,17 +268,24 @@ def main():
             del t
         S.despine(ax, False, False)
         ax.set_title(arch, fontsize=5.5)
-    H = harald()
-    if H is not None:
-        H["arch"] = H.scenario.str.contains("confined").map({True: "confined", False: "free"})
+    H = df[df.run == "R3"].copy() if len(df) and "trunk_fraction" in df else None
+    if H is not None and len(H):
+        H["arch"] = H.arch.map({"ductal": "confined", "free": "free"})
+        H["selection"] = H.selection.map({"neutral": "neutral", "selected": "strong"})
         panels = (("f", "trunk_fraction", "Truncal CN fraction"), ("g", "D", "Clonal diversity, D"),
-                  ("h", "rf_excess", "Tree error over floor"))
+                  ("h", None, "Tree error over floor"))
         for i, (L, col, ylab) in enumerate(panels):
             S.panel_letter(fig, L, 106 + i * 26, 37)
             ax = S.ax_mm(fig, 113 + i * 26, 41, 18, 22)
+            if col is None:
+                S.despine(ax, False, False)
+                ax.text(0.5, 0.5, "pending: a tree score\nnormalised by its\npolytomy floor",
+                        ha="center", va="center", fontsize=4.5, color=S.GREY, transform=ax.transAxes)
+                continue
             for j, (arch, sel) in enumerate(((a, s) for a in ("confined", "free")
                                              for s in ("neutral", "strong"))):
                 sub = H[(H.arch == arch) & (H.selection == sel)][col].astype(float)
+                out[f"{L}_{arch}_{sel}"] = float(sub.mean()) if len(sub) else None
                 x = j + np.random.default_rng(j).uniform(-0.12, 0.12, len(sub))
                 c = S.CLONE_FAMILIES[0][1] if arch == "confined" else S.CLONE_FAMILIES[2][1]
                 ax.scatter(x, sub, s=3, color=c, alpha=0.8 if sel == "strong" else 0.4)
@@ -290,7 +294,7 @@ def main():
             ax.set_xticklabels(["conf.\nneutral", "conf.\nstrong", "free\nneutral", "free\nstrong"],
                                fontsize=4.3)
             ax.set_ylabel(ylab)
-        S.text_mm(fig, 108, 67, "f-h: Harald's benchmark, run 1 (12x12 grid, 5 seeds per group), read as is",
+        S.text_mm(fig, 108, 67, f"f-g: registry R3, {len(H)} tumours (paper regime)",
                   fontsize=4.5, color=S.GREY, va="top")
     path = S.save(fig, "fig4_space_lineage")
     print("wrote", path)
