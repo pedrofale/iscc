@@ -186,6 +186,10 @@ def test_assays_count_human_genes_and_writers_produce_tool_inputs(reference, tum
     assert len(cells) == 40 and cells["barcode"].is_unique
     seg = pd.read_csv(tmp_path / "vz" / "truth" / "cn_segments.tsv", sep="\t")
     assert set(seg["arm"]) == set(reference.arms["arm"])
+    ct = pd.read_csv(tmp_path / "vz" / "clonalscope" / "celltype.tsv", sep="\t")
+    spots = pd.read_csv(tmp_path / "vz" / "truth" / "spots.tsv", sep="\t").set_index("barcode")
+    assert list(ct["barcode"]) == list(bcs) and set(ct["celltype"]) <= {"normal", "tumor"}
+    assert ((ct["celltype"] == "normal").to_numpy() == (spots.loc[ct["barcode"], "n_tumour"] == 0).to_numpy()).all()
 
     ready = check_tool_ready(sc.observed_counts, layer.genes)
     assert set(ready["tool"]) == {"copykat", "calicost", "clonalscope", "cancerfinder"}
