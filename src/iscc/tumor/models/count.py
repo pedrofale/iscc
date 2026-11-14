@@ -157,6 +157,15 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         the tumour has the clonal peak real sequencing shows.
     """
 
+    # Tau-leaping options (see ``_init_tau``). Class-level defaults, so tumours pickled before the
+    # options existed read today's behaviour.
+    _tau_deaths = "poisson"
+    _tau_step = "fixed"
+    _tau_epsilon = 0.03
+    # Demes whose cells changed since the last reset; recorded by _add/_remove only while a
+    # tau_step "cgp_critical" generation runs (None otherwise: no bookkeeping).
+    _dirty = None
+
     def __init__(self, config=None, seed=42, genome_params=None, selection_params=None,
                  cancer_cell_params=None, deme_params=None, spatial_params=None,
                  epithelial_cell_params=None, stromal_cell_params=None, immune_cell_params=None,
@@ -190,6 +199,7 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         self._init_compartment_hazards(p)
         self._init_founder(seed, p)
         self._init_crowding(p)
+        self._init_tau(p)
         self._init_field(p)
         self._init_met(p)
         self._init_grid(p)
@@ -291,6 +301,29 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         self.expression_params = p.expression
         self.programs = None
         self.subtype = p.subtype
+
+    def _init_tau(self, p):
+        """The tau-leaping options, read from ``deme_params``.
+
+        ``tau_deaths``: ``"poisson"`` (default) draws Poisson(d c dt) deaths per (deme, clone), capped
+        at c; ``"binomial"`` draws Binomial(c, min(1, d dt)), binomial tau-leaping for a first-order
+        channel (Tian and Burrage 2004; Chatterjee et al. 2005), which cannot overshoot c.
+
+        ``tau_step``: ``"fixed"`` (default) splits a generation into ceil(r_max tau / 0.34) equal
+        sub-steps; ``"cgp"`` chooses each sub-step by the epsilon-bounded rule of Cao, Gillespie and
+        Petzold (2006) with ``tau_epsilon`` (default 0.03; ``_cgp_dt``); ``"cgp_critical"`` is
+        tau-leaping with critical reactions (Cao, Gillespie and Petzold 2005): the channels of demes at
+        or above K fire one event at a time and the rest are leaped with the "cgp" step
+        (``_tau_leaps_critical``). It needs a carrying capacity."""
+        self._tau_deaths = str(p.deme.get("tau_deaths", "poisson"))
+        if self._tau_deaths not in ("poisson", "binomial"):
+            raise ValueError(f"tau_deaths must be 'poisson' or 'binomial', got {self._tau_deaths!r}")
+        self._tau_step = str(p.deme.get("tau_step", "fixed"))
+        if self._tau_step not in ("fixed", "cgp", "cgp_critical"):
+            raise ValueError(f"tau_step must be 'fixed', 'cgp' or 'cgp_critical', got {self._tau_step!r}")
+        if self._tau_step == "cgp_critical" and not self._crowding:
+            raise ValueError("tau_step 'cgp_critical' needs a carrying capacity")
+        self._tau_epsilon = float(p.deme.get("tau_epsilon", 0.03))
 
     def _init_genome(self, p):
         """The genome layout (shared by every run of a config): segments, the gene roles, the
@@ -572,6 +605,8 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
 
     # --- count bookkeeping ---------------------------------------------------
     def _add(self, deme_idx, gid, n):
+        if self._dirty is not None:
+            self._dirty.add(deme_idx)
         deme = self.demes[deme_idx]
         deme[gid] = deme.get(gid, 0) + n
         self.genotypes_counts[gid] += n
@@ -582,6 +617,8 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
                 rep.birth_deme = deme_idx
 
     def _remove(self, deme_idx, gid, n):
+        if self._dirty is not None:
+            self._dirty.add(deme_idx)
         deme = self.demes[deme_idx]
         deme[gid] -= n
         if deme[gid] <= 0:
@@ -896,7 +933,19 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
             # The exact engine fires ONE cell event per call and tracks no time, so a generation here
             # is defined as one event per cancer cell.
             self._origin_tick(1.0 / max(1, self.get_cancer_size()))
+        self._update_event(rng)
+
+    def _update_event(self, rng):
+        """Pick a deme in proportion to its summed rate and fire one event in it."""
         di = int(rng.choice(len(self.demes), p=self.deme_rates / self.deme_rates.sum()))
+        self._event_in_deme(di, rng)
+
+    def _event_in_deme(self, di, rng, refresh=True):
+        """Fire one event in deme ``di``, the second and third levels of the direct method: a clone in
+        proportion to count x (division + death) (or a resident under off-target toxicity), then death
+        with probability death / (division + death), else a division with its routing, mutation, slot
+        cap and eviction. ``refresh`` updates ``deme_rates`` for the demes the event touched; the
+        critical-reaction tau-leaping (``_tau_leaps_critical``) keeps its own rates and passes False."""
         deme = self.demes[di]
         # pick a cancer genotype in the deme proportionally to count * (div + death),
         # ordered by creation ordinal (NOT the id()-based genotype_id) for reproducibility
@@ -919,7 +968,8 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         pick = int(rng.choice(len(gids) + len(tox_gids), p=weights / weights.sum()))
         if pick >= len(gids):
             self._remove(di, tox_gids[pick - len(gids)], 1)   # a normal cell dies from toxicity
-            self._refresh_rate(di)
+            if refresh:
+                self._refresh_rate(di)
             return
         gid = gids[pick]
         rep = self.genotypes[gid]
@@ -932,8 +982,9 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         else:
             self._divide_noble(di, gid, rep, rng, affected)
 
-        for idx in affected:
-            self._refresh_rate(idx)
+        if refresh:
+            for idx in affected:
+                self._refresh_rate(idx)
 
     # --- growth --------------------------------------------------------------
     def grow(self, n_steps=1000, seed=None, treatment=None, materialize=True, **kwargs):
@@ -1138,8 +1189,11 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         if n_fold:
             self._add(di, gid, n_fold)
 
-    def _tau_substep(self, rng, dt):
+    def _tau_substep(self, rng, dt, demes=None):
         """One synchronous tau-leap of length `dt`.
+
+        ``demes`` (ascending indices) restricts the leap to the channels of those demes; ``None`` leaps
+        every active deme. Births leaped from them still compete for slots wherever they land.
 
         The exact engine needs no allocation rule — it fires one event at a time, so a slot is taken
         by whichever birth happens next and the Gillespie sampler already draws that birth with
@@ -1172,7 +1226,8 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         """
         deaths, dispersals, mutants, stayers = [], [], [], []
         mut_disp, swaps = [], []     # mutated births that leave, or whose parent copy leaves
-        for di in self._active_demes():
+        binomial = self._tau_deaths == "binomial"
+        for di in (self._active_demes() if demes is None else demes):
             deme = self.demes[di]
             if not deme:
                 continue
@@ -1185,7 +1240,10 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
                 div = self._div_rate(gid, di, rep)
                 death = self._death_rate(gid, di, total, comp=comp)
                 n_div = int(rng.poisson(div * c * dt))
-                n_death = int(rng.poisson(death * c * dt))
+                if binomial:
+                    n_death = int(rng.binomial(c, min(1.0, death * dt)))
+                else:
+                    n_death = int(rng.poisson(death * c * dt))
                 if n_death:
                     deaths.append((di, gid, n_death))
                 if n_div:
@@ -1285,11 +1343,117 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         for di, gid, n in lost_swaps:
             self._convert_in_place(di, gid, n, rng)
 
+    def _cgp_dt(self, eps, demes=None):
+        """The species-based leap of Cao, Gillespie and Petzold (2006, J Chem Phys 124:044109, eq. 33).
+
+        Each (deme, cancer clone) count c is a species, changed by first-order channels (division at b,
+        death at d, both per cell), so its highest reaction order is 1. With mean drift
+        mu = (b - d) c and variance sigma^2 = (b + d) c, the leap that keeps the expected change and its
+        standard deviation within max(eps c, 1) is
+            min(max(eps c, 1) / |mu|, max(eps c, 1)^2 / sigma^2),
+        and the step is the minimum over all species. Inflow by dispersal is not credited, which only
+        shortens the step. ``demes`` restricts the species to those demes (default: every active one)."""
+        best = np.inf
+        for di in (self._active_demes() if demes is None else demes):
+            deme = self.demes[di]
+            if not deme:
+                continue
+            comp = self._deme_comp(deme)
+            for gid in self._cancer_gids(deme):
+                c = deme[gid]
+                b = self._div_rate(gid, di, self.genotypes[gid])
+                d = self._death_rate(gid, di, comp[0], comp=comp)
+                bound = max(eps * c, 1.0)
+                mu, var = abs(b - d) * c, (b + d) * c
+                if mu > 0:
+                    best = min(best, bound / mu)
+                if var > 0:
+                    best = min(best, bound * bound / var)
+        return best
+
+    def _classify_critical(self, di):
+        """Mark deme ``di`` critical when it holds a channel (a cancer cell, or a resident under
+        off-target toxicity) and its total, residents included, is at or above K, where the d1 crowding
+        channel acts; record its total propensity in ``_crit_rate`` (0 for a non-critical deme)."""
+        live = di in self._deme_cancer_n or (self._tx_death_add and self.demes[di])
+        if live and sum(self.demes[di].values()) >= self._cap_of(di):
+            self._crit_rate[di] = self._deme_rate(di)
+            self._crit.add(di)
+        else:
+            self._crit_rate[di] = 0.0
+            self._crit.discard(di)
+
+    def _tau_leaps_critical(self, rng, tau):
+        """One generation of length ``tau`` by explicit tau-leaping with critical reactions (Cao,
+        Gillespie and Petzold 2005, J Chem Phys 123:054104, "Avoiding negative populations in explicit
+        Poisson tau-leaping"). Returns the time simulated.
+
+        The channels (division and death of every cancer clone, and toxicity deaths of residents under
+        therapy) of a deme whose total is at or above K, where the d1 crowding channel acts, are
+        critical; all others are non-critical. Each leap, from the current state:
+
+        1. tau1 = the epsilon-bounded step of Cao, Gillespie and Petzold (2006) over the non-critical
+           species only (``_cgp_dt`` on the non-critical demes);
+        2. tau2 ~ Exp(a0c), a0c the summed propensity of the critical channels;
+        3. if tau1 < tau2 the non-critical channels are leaped by tau1 and no critical channel fires;
+           otherwise exactly one critical event fires, its deme chosen in proportion to its propensity
+           and the clone and event within it as in the exact engine (``_event_in_deme``), and the
+           non-critical channels are leaped by tau2;
+        4. a step that would pass the end of the generation is clipped to it; the non-critical channels
+           are leaped by the remainder and no critical event fires, which is exact for the critical
+           channels because their waiting time is memoryless.
+
+        The leap is applied first, from the rates at the leap's start, and the critical event at its
+        end: its deme is drawn from the propensities at the leap's start, and the clone and event within
+        that deme from the deme as it is after the leap, which differs only by births leaped into it
+        from its non-critical neighbours. Demes are re-classified after every leap (the demes whose
+        cells changed, recorded by ``_add`` / ``_remove``), and from scratch at the start of every
+        generation. Births leaped from a non-critical deme into a critical one are channels of the
+        source deme and stay in the leap."""
+        n = len(self.demes)
+        self._crit_rate = np.zeros(n)
+        self._crit = set()
+        for di in self._active_demes():
+            self._classify_critical(di)
+        self._dirty = set()
+        left, elapsed = tau, 0.0
+        try:
+            while left > 1e-12:
+                noncrit = [di for di in self._active_demes() if di not in self._crit]
+                tau1 = self._cgp_dt(self._tau_epsilon, noncrit) if noncrit else np.inf
+                a0c = float(self._crit_rate.sum())
+                tau2 = float(rng.exponential(1.0 / a0c)) if a0c > 0 else np.inf
+                fire = tau2 <= tau1
+                dt = tau2 if fire else tau1
+                if dt >= left:
+                    dt, fire = left, False
+                if fire:                                # the deme, by the propensities at the leap's start
+                    cum = np.cumsum(self._crit_rate)
+                    di = min(int(np.searchsorted(cum, rng.random() * cum[-1], side="right")), n - 1)
+                    while self._crit_rate[di] <= 0.0:   # float edge at a zero-rate tail entry
+                        di -= 1
+                self._tau_substep(rng, dt, demes=noncrit)   # an empty list leaps nothing, draws nothing
+                if fire:
+                    self._event_in_deme(di, rng, refresh=False)
+                    self._n_crit_events = getattr(self, "_n_crit_events", 0) + 1
+                self._n_substeps = getattr(self, "_n_substeps", 0) + 1
+                left -= dt
+                elapsed += dt
+                for di in self._dirty:
+                    self._classify_critical(di)
+                self._dirty.clear()
+        finally:
+            self._dirty = None
+            del self._crit_rate, self._crit
+        return elapsed if left > 1e-12 else tau
+
     def _tau_generation(self, rng, tau):
-        """Advance the whole tumour by one generation of length `tau`, adaptively sub-stepping so
-        the largest single-cell event probability per substep stays in the accurate Poisson
-        regime (this also prevents carrying-capacity overshoot, since death rates are re-read each
-        substep). Records a full per-clone snapshot every `snapshot_every` generations."""
+        """Advance the whole tumour by one generation of length `tau`, sub-stepped by the
+        ``tau_step`` rule (see ``_init_tau``): equal sub-steps that keep the largest single-cell event
+        probability per sub-step at most 0.34 (``"fixed"``), the Cao-Gillespie-Petzold step
+        (``"cgp"``), or tau-leaping with critical reactions (``"cgp_critical"``). Death rates are
+        re-read every sub-step. Records a full per-clone snapshot every `snapshot_every`
+        generations."""
         ACCURACY = 0.34  # keep rate*dt <= this so Poisson tau-leaping stays accurate
         if self.coarsen_passengers:
             # incremental monotone upper bound (see _max_div_disp) — avoids the O(#genotypes) scan
@@ -1302,11 +1466,21 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
                     max_cell_rate = max(max_cell_rate,
                                         ep["division_rate"] + ep["dispersal_rate"])
             max_cell_rate += self.maximum_death_rate
-        n_sub = max(1, int(np.ceil(max_cell_rate * tau / ACCURACY)))
-        dt = tau / n_sub
         self._clock = self.step
-        for _ in range(n_sub):
-            self._tau_substep(rng, dt)
+        if self._tau_step == "cgp_critical":
+            self._tau_leaps_critical(rng, tau)
+        elif self._tau_step == "cgp":
+            left = tau
+            while left > 1e-12:
+                dt = min(left, self._cgp_dt(self._tau_epsilon))
+                self._tau_substep(rng, dt)
+                self._n_substeps = getattr(self, "_n_substeps", 0) + 1
+                left -= dt
+        else:
+            n_sub = max(1, int(np.ceil(max_cell_rate * tau / ACCURACY)))
+            dt = tau / n_sub
+            for _ in range(n_sub):
+                self._tau_substep(rng, dt)
         # Drug-induced resistance-state entry/exit, once per generation on the settled counts, before
         # the snapshot. Gated: no draw / no genotype minted when the feature is off.
         if self.selection.resistance_state_on:
