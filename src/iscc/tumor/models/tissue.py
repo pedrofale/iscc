@@ -477,8 +477,8 @@ class TissueMixin:
         """Advance the founding acinus's confinement clock by ``generations`` and release it once the
         lesion has filled the acinus and then distended it for long enough.
 
-        Called once per generation by the tau engine and once per event by the exact engine (which has
-        no generation notion, so a generation there is one event per cancer cell). A no-op — and not
+        Called once per generation by the tau engine and once per event by the exact engine, with
+        that event's Gillespie waiting time, so ``generations`` is time in generations either way. A no-op — and not
         even reached, since every caller guards on ``_origin_confined`` — when the feature is off.
         """
         if not self._origin_confined:

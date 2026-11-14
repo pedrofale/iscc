@@ -477,7 +477,7 @@ draws a random number, so the tumour grows identically with the record on or off
 ### Random streams and the confinement clock
 Every per-run stream is keyed by `(seed, purpose, step)` through a `SeedSequence`, so different seeds
 never share a stream. `spatial_params.origin_confinement.generations` counts generations at any `tau`
-(the exact engine counts one generation per event per cancer cell).
+(the exact engine counts the Gillespie waiting time of each event).
 
 ### Materialisation memory
 `make_cell_data` builds the per-cell tables, the program layer's expression multiplier included, chunk by chunk, so its working set does not grow with the number of cells beyond the tables it returns.

@@ -89,7 +89,9 @@ WHOLE_SCENARIOS = {"primary_with_met": _whole_primary_met, "met": _whole_met,
 # Golden digests of whole-compartment resection: the partial-resection path must not move them.
 WHOLE_DIGESTS = {
     "met": "c11baa4d4b0f94234ec14e6c94f735a8",
-    "primary_exact": "6de6510a238c696e138ee8a7373c06c1",
+    # The exact engine keeps Gillespie's clock, so the times in t.events are real; the event
+    # sequence is unchanged.
+    "primary_exact": "aedb26d9cb98ed0c863e8f3be6c6107a",
     "primary_tau": "f97843d34d5c1f25118f770264e7e494",
     "primary_with_met": "bd4fb0858aa7b03857864b1af9a71305",
 }

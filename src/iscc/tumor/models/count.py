@@ -927,13 +927,19 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         return out[cols]
 
     def update(self, rng):
+        """One event of Gillespie's direct method (Gillespie 1977), in demon's hierarchical form: a deme
+        in proportion to its summed rate, a clone within it and the event (``_update_event``); time then
+        advances by an exponential waiting time with the total rate. The waiting time is drawn after
+        the event, from the same per-event stream, so the event draws do not depend on it; the founding
+        acinus's confinement clock counts this time."""
         if self.is_extinct():
             return
-        if self._origin_confined:
-            # The exact engine fires ONE cell event per call and tracks no time, so a generation here
-            # is defined as one event per cancer cell.
-            self._origin_tick(1.0 / max(1, self.get_cancer_size()))
+        R = float(self.deme_rates.sum())
         self._update_event(rng)
+        dt = float(rng.exponential(1.0 / R))
+        self.time += dt
+        if self._origin_confined:
+            self._origin_tick(dt)
 
     def _update_event(self, rng):
         """Pick a deme in proportion to its summed rate and fire one event in it."""
