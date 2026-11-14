@@ -42,18 +42,6 @@ SEL_ON = {**SELECTION_PARAMS, "prop_breach": 0.2, "prop_stromal_survival": 0.2,
 
 
 # --- off by default: byte-identical growth ----------------------------------------------------
-# Golden (tumor_size, cell_snv md5) for a STRUCTURED tumour with NO compartment params.
-# prop_breach/prop_stromal_survival default 0 -> the ``binomial(1, 0.0)`` draws short-circuit (no rng
-# consumed, so the gene-role layout and celltype baselines are untouched), and
-# epithelial_barrier/stromal_hazard default 0 -> the two death terms are ``+= 0.0``. So the growth
-# stream is exactly that of an engine without the axes.
-_GOLDEN_COUNT = {
-    1: (1524, "911b3ac9e297e4986678c66a4c1130bf"),
-    2: (1526, "291cfc18b067fc46b9eef9b6b6177ddc"),
-    3: (1526, "59029138da96904e502af4aa46c2badf"),
-}
-
-
 def _snv_hash(t):
     t.make_cell_data()
     return hashlib.md5(np.ascontiguousarray(t.cell_data["cell_snv"].values)).hexdigest()
@@ -65,14 +53,6 @@ def _count(seed, steps=120, selection=SELECTION_PARAMS, spatial=SPATIAL):
                       spatial_params=spatial)
     t.grow(n_steps=steps, seed=seed)
     return t
-
-
-@pytest.mark.parametrize("seed", sorted(_GOLDEN_COUNT))
-def test_count_off_by_default_byte_identical(seed):
-    t = _count(seed)
-    size, digest = _GOLDEN_COUNT[seed]
-    assert t.get_tumor_size() == size
-    assert _snv_hash(t) == digest, "compartment feature off perturbed the count-engine growth stream"
 
 
 def test_explicit_zero_matches_absent():

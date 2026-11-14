@@ -273,9 +273,16 @@ def _normal_count(t, lo=0, hi=None):
     return sum(c for i in range(lo, hi) for g, c in t.demes[i].items() if g in normal_names)
 
 
-def test_chemo_toxicity_kills_normal_tissue():
+def _no_eviction(monkeypatch):
+    """Births never displace residents, so normal cells change only by the drug's toxicity."""
+    monkeypatch.setattr(GenotypeTumor, "_evict", lambda self, deme_idx, n, rng: 0)
+    monkeypatch.setattr(GenotypeTumor, "_n_evictable", lambda self, deme_idx: 0)
+
+
+def test_chemo_toxicity_kills_normal_tissue(monkeypatch):
     """Systemic chemo's toxicity removes off-target normal cells; without treatment the static normals
-    are unchanged (so the loss is the drug's, not drift)."""
+    are unchanged (so the loss is the drug's, not drift). Eviction is switched off for the check."""
+    _no_eviction(monkeypatch)
     t = _grow_to_met(_build({**SPATIAL, **MET}))
     n0 = _normal_count(t)
     t.grow(4, seed=t.seed)                                    # untreated -> normals static
@@ -285,8 +292,9 @@ def test_chemo_toxicity_kills_normal_tissue():
     assert _normal_count(t) < n0
 
 
-def test_toxicity_gated_to_treated_compartment():
+def test_toxicity_gated_to_treated_compartment(monkeypatch):
     """Chemo sites='met' kills the met's host tissue but spares primary normal tissue."""
+    _no_eviction(monkeypatch)
     t = _grow_to_met(_build({**SPATIAL, **MET}))
     p0 = _normal_count(t, 0, t.n_primary_demes)
     m0 = _normal_count(t, t.n_primary_demes)

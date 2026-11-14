@@ -178,7 +178,7 @@ def test_region_materialisation_is_dense_and_local():
     G = t.grid_size
     center = (G // 2, G // 2)
     window = t.primary_window(side=8, center=center)
-    cd = t.make_cell_data(region=window)
+    cd = t.make_cell_data(region=window, max_cells=10 ** 6)
     demes = set(cd["cell_deme"]["deme_id"])
     assert demes.issubset(set(window))                      # nothing outside the window
     # full local density: the window's materialised cell count == the true count in those demes

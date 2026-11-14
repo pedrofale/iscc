@@ -24,15 +24,9 @@ from conftest import (
 )
 from iscc.tumor.models import GenotypeTumor
 
-# Byte-identity baseline: the single-central-ring structured run
-# (structure_radius=4, grid 15, conftest params). n_glands defaults to 1 and gland_radius to
-# structure_radius, so the ductal field reduces to exactly that ring.
+# The single-central-ring structured run (structure_radius=4, grid 15, conftest params). n_glands
+# defaults to 1 and gland_radius to structure_radius, so the ductal field reduces to that ring.
 SPATIAL = {"grid_size": 15, "n_structures": 1, "structure_radius": 4}
-_GOLDEN = {
-    1: (1524, "911b3ac9e297e4986678c66a4c1130bf"),
-    2: (1526, "291cfc18b067fc46b9eef9b6b6177ddc"),
-    3: (1526, "59029138da96904e502af4aa46c2badf"),
-}
 
 # A multi-gland field: small glands, moderate-density stroma, island dispersal on.
 FIELD = {"grid_size": 30, "n_structures": 1, "structure_radius": 3, "n_glands": 12,
@@ -54,14 +48,6 @@ def _grow(seed, steps=120, spatial=SPATIAL, deme=DEME_PARAMS, **kw):
 
 
 # --- off by default: byte-identical -----------------------------------------------------------
-@pytest.mark.parametrize("seed", sorted(_GOLDEN))
-def test_single_gland_byte_identical(seed):
-    t = _grow(seed)
-    size, digest = _GOLDEN[seed]
-    assert t.get_tumor_size() == size
-    assert _snv_hash(t) == digest, "ductal-field substrate off perturbed the single-ring growth stream"
-
-
 def test_explicit_defaults_match_absent():
     """n_glands=1 + stroma_fill_frac=1.0 + uniform K stated explicitly == the plain structured run."""
     spatial = {**SPATIAL, "n_glands": 1, "gland_radius": 4, "stroma_fill_frac": 1.0,

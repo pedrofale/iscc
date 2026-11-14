@@ -226,7 +226,7 @@ spatial_params:
     # Generations of distension after that before the wall gives way — a long in-situ phase, which is
     # what in-situ breast disease is. It has to be long because at this (deliberately low) instability
     # a lineage needs time to acquire alterations AND take over the patch: measured on this config, the
-    # patch is at a single dominant altered state by ~1000-1200 generations and is still ONE deme.
-    # Shorter windows leave the founding lineage barely altered and the tumour ends up with no clonal
-    # copy-number layer. Once released, never re-confined.
-    generations: 1200
+    # patch is at a single dominant altered state by ~500-600 generations (1000-1200 tau steps of 0.5)
+    # and is still ONE deme. Shorter windows leave the founding lineage barely altered and the tumour
+    # ends up with no clonal copy-number layer. Once released, never re-confined.
+    generations: 600

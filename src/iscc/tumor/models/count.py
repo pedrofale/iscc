@@ -52,7 +52,7 @@ STEM_CAP = 6
 # Dedicated RNG offset for the passenger reconstruction (added to ``self.seed``) — a fixed constant
 # so the overlay is reproducible and independent of the growth stream.
 PASSENGER_RNG_OFFSET = 909090
-# Purpose keys of the per-run streams under ``rng_streams="independent"`` (see ``_run_rng``).
+# Purpose keys of the per-run streams (see ``_run_rng``).
 _STREAM_GROW, _STREAM_PASSENGERS, _STREAM_DEPTH, _STREAM_SUBSAMPLE = 0, 1, 2, 3
 
 # The gene-wide per-cell frames (cells × genes) that `make_cell_data` can build, and the ones each of
@@ -92,7 +92,7 @@ def _resolve_layers(layers):
 
 def _program_multiplier(P, Z):
     """``exp(Z · loading)`` for a chunk of cells, summed over programs one at a time, so each value
-    is the same whichever chunk its cell falls in (``low_memory``; see ``make_cell_data``)."""
+    is the same whichever chunk its cell falls in (see ``make_cell_data``)."""
     if P.dictionary is None or Z.shape[1] == 0:
         return np.ones((Z.shape[0], P.n_genes))
     loading = P.dictionary.loading
@@ -168,11 +168,12 @@ class GenotypeTumor:
         ``n_snvs_per_allele``, ``snv_prob`` / ``cnv_prob``, ``amp_prob``, ``wgd_rate``.
     deme_params : dict, optional
         Per-deme demography — ``initial_cancer_cells``, ``carrying_capacity``,
-        ``maximum_death_rate``, the density-dependent crowding law, and ``dispersal_law``:
-        ``"compete"`` (default) makes each division either attempt a mutation or disperse;
-        ``"noble"`` is demon's invasion rule, under which a division attempts a mutation with
-        probability ``mutation_rate`` and, independently, one of its two daughters disperses with
-        probability ``dispersal_rate``.
+        ``maximum_death_rate``, and the crowding law's ``crowding_overfill`` (the slot cap as a
+        multiple of K, default 1.5) and ``crowding_d1`` (the death rate above K, default
+        ``maximum_death_rate``). Crowding is demon's two-valued death step under a structural slot
+        cap, and division is demon's invasion rule: a division attempts a mutation with probability
+        ``mutation_rate`` and, independently, one of its two daughters disperses with probability
+        ``dispersal_rate``.
     spatial_params : dict, optional
         Grid and tissue geometry, given as keys of this dict (not as individual
         constructor arguments): ``grid_size``, ``dispersal_rate``, ``structure_radius`` /
@@ -217,12 +218,6 @@ class GenotypeTumor:
         Cap on the number of cells materialised as cell data (default None, no cap). Above it, a
         representative subsample that preserves spatial, clonal and cell-type proportions is
         materialised instead.
-    low_memory : bool, default False
-        Materialise the program layer's per-cell expression multiplier chunk by chunk instead of for
-        all cells at once, so materialisation never holds a cells × genes float64 table beyond the
-        frames it returns. The chunked product sums in a fixed order and so differs from the
-        all-at-once matrix product in the last bits of some values. No effect without the program
-        layer.
     microenv_params : dict, optional
         Microenvironment layer (hypoxia field + cell-cell communication). Off by
         default; a pure readout that never changes growth.
@@ -231,12 +226,6 @@ class GenotypeTumor:
         ``coupling_params``, ``dosage_params``, ``snv_effect_params``). Off by default;
         a readout only. ``cell_of_origin`` (a normal cell type, e.g. ``"epithelial"``)
         gives cancer cells that type's baseline expression instead of an unrelated one.
-    rng_streams : {"offset", "independent"}, optional
-        How the per-run random streams are derived from ``seed``. ``"offset"`` (default) adds the
-        step or a fixed offset to the seed, so neighbouring seeds share streams shifted by one step
-        (seed ``s`` at step ``k`` is seed ``s + 1`` at step ``k - 1``). ``"independent"`` keys every
-        stream by ``(seed, purpose, step)`` through a ``SeedSequence``, so runs at different seeds
-        never share a stream.
     layout_seed : int, optional
         GENOME-LAYOUT seed (config-determined, shared across runs of the same config):
         fixes driver identities and baseline expression so a cohort is comparable by
@@ -262,11 +251,8 @@ class GenotypeTumor:
                  update_mode="exact", tau=1.0, snapshot_every=1, microenv_params=None,
                  layout_seed=None, expression_params=None, coarsen_passengers=False,
                  max_cells=None, germline_params=None, founder_mutations=None,
-                 spatial_snapshot_every=0, spatial_snapshot_budget=5_000_000,
-                 rng_streams="offset", low_memory=False):
+                 spatial_snapshot_every=0, spatial_snapshot_budget=5_000_000):
         self.seed = seed
-        # Per-run stream derivation (see ``rng_streams`` above and ``_run_rng``).
-        self.rng_streams = rng_streams
         # EVOLUTION rng (per-run: spatial seeding; grow() draws its own fresh default_rng(seed+step)).
         self.rng = np.random.default_rng(seed)
         # GENOME LAYOUT rng (config-determined, SHARED across same-config runs): the gene-role
@@ -326,8 +312,6 @@ class GenotypeTumor:
         # cell-type proportions are preserved) is materialised instead of every cell — a biopsy of one
         # tissue, which is exactly what an assay samples. ``None`` (default) materialises all cells.
         self.max_cells = max_cells
-        # See `low_memory` above and `make_cell_data`: chunk the program multiplier too.
-        self.low_memory = bool(low_memory)
 
         # Germline (inherited) variants: the patient's constant genetic background, carried by every
         # cell — tumour and normal alike — and so the purity / cancer-cell-fraction anchor a DNA
@@ -382,17 +366,13 @@ class GenotypeTumor:
                                                        spatial_snapshot_budget))
             self.coarsen_passengers = bool(cfg.get("coarsen_passengers", coarsen_passengers))
             self.max_cells = cfg.get("max_cells", max_cells)
-            self.low_memory = bool(cfg.get("low_memory", low_memory))
             self.germline_params = cfg.get("germline_params", germline_params)
             self.founder_mutations = cfg.get("founder_mutations", founder_mutations)
-            self.rng_streams = cfg.get("rng_streams", rng_streams)
             microenv_params = cfg.get("microenv_params", microenv_params)
             expression_params = cfg.get("expression_params", expression_params)
             if cfg.get("layout_seed") is not None:
                 self.layout_seed = cfg["layout_seed"]
                 self.layout_rng = np.random.default_rng(self.layout_seed)
-        if self.rng_streams not in ("offset", "independent"):
-            raise ValueError(f"rng_streams must be 'offset' or 'independent', got {self.rng_streams!r}")
         # Microenvironment-driven expression: optional, off when None. When enabled, a per-deme
         # expression modifier (hypoxia field + cell-cell communication) is applied at
         # materialisation only; GROWTH is untouched, so a tumour grows the same with the layer on or
@@ -668,85 +648,58 @@ class GenotypeTumor:
         self._resident_ref = deme_params.get(
             "resident_pressure_ref",
             self.genotypes[self.founder_id].baseline_rates["division_rate"])
-        # Crowding mode. "lottery" (the paper's mode) enforces the density cap STRUCTURALLY: a deme
-        # has floor(K * crowding_overfill) slots, a birth that cannot get one simply fails, and when
-        # more births are drawn than there are free slots the slots go to clones in proportion to
-        # the births they drew. The death rate (with `crowding_law="noble"`, demon's two-valued step
-        # below) is uniform across the clones of a deme, so the fitness term cannot cancel out of
-        # net growth: the rate law sets TURNOVER, the slot cap sets DENSITY, and clones compete
-        # inside full demes.
-        # Legacy mode: "own" = own-division cancer term + fixed-ref resident term.
-        self._crowding_mode = deme_params.get("crowding_mode", "own")
-        if self._crowding_mode not in ("own", "lottery"):
-            raise ValueError("crowding_mode must be 'own' or 'lottery'")
-        # Deme-model crowding (Noble et al. 2022, Nat Ecol Evol, "Within-deme dynamics"): the
-        # within-deme death rate is a TWO-VALUED STEP, not a continuous function of density —
+        # Crowding (Noble et al. 2022, Nat Ecol Evol, "Within-deme dynamics", with a structural cap).
+        # The density cap is STRUCTURAL: a deme has floor(crowding_overfill * K) slots, a birth that
+        # cannot get one fails, and when more births are drawn than there are free slots the slots go
+        # to clones in proportion to the births they drew (`_tau_substep`). The death rate is demon's
+        # two-valued step:
         #   "When the deme population size is less than or equal to the carrying capacity, the death
         #    rate takes a fixed value d0 that is less than the initial division rate. When the deme
         #    population size exceeds carrying capacity, the death rate takes a different fixed value
         #    d1 that is much greater than the largest attainable division rate."
-        # d1 being above the LARGEST ATTAINABLE division rate is what makes the cap unbreakable: a
-        # density cap expressed as a death rate below the evolved division rate lets demes overfill.
-        # Both values are constants, so the law carries no `div` and cannot cancel out of
-        # net = div - death — clone-vs-clone competition survives.
-        # `crowding_law="noble"` selects the step (the paper's law); "logistic" (the code default)
-        # is the legacy continuous ramp.
-        self._crowding_law = str(deme_params.get("crowding_law", "logistic"))
-        if self._crowding_law not in ("logistic", "noble"):
-            raise ValueError("crowding_law must be 'logistic' or 'noble'")
-        # d0 is the clone's own baseline death rate (Noble uses a single global constant, and sets
-        # it to 0 in the spatial simulations); d1 defaults to maximum_death_rate, which the shipped
-        # configs hold above max_birth_rate.
+        # d0 is the clone's own baseline death rate; d1 defaults to maximum_death_rate. The step
+        # carries no `div`, so it cannot cancel out of net = div - death and clones keep competing
+        # inside full demes. The slot cap has to exceed K (overfill > 1) for a deme to meet the step.
+        for key, law in (("crowding_mode", "lottery"), ("crowding_law", "noble"),
+                         ("dispersal_law", "noble")):
+            if deme_params.get(key, law) != law:
+                raise ValueError(f"{key}={deme_params[key]!r} was removed; the engine runs "
+                                 f"{key}={law!r} only (drop the key)")
         self._crowding_d1 = deme_params.get("crowding_d1")          # None -> maximum_death_rate
-        self._crowding_overfill = float(deme_params.get("crowding_overfill", 1.0))
+        self._crowding_overfill = float(deme_params.get("crowding_overfill", 1.5))
         if self._crowding_overfill < 1.0:
             raise ValueError("crowding_overfill must be >= 1 (1 = the slot cap sits exactly on K)")
-        if self._crowding_mode == "lottery" and self._crowding_law != "noble":
-            raise ValueError("crowding_mode='lottery' runs with crowding_law='noble'")
-        if self._crowding_law == "noble":
+        if self._crowding:
             # d1 MUST exceed the largest attainable division rate, which is what makes the cap
-            # unbreakable however far selection pushes birth rates up; below it, demes overfill by
-            # orders of magnitude. Fail loudly at construction rather than silently overfill after
-            # thousands of generations.
+            # unbreakable however far selection pushes birth rates up. The EFFECTIVE d1 is what
+            # survives the `min(death, maximum_death_rate)` clamp at the end of _death_rate, so a
+            # large d1 clipped back below the evolved division rate is caught too.
             _d1 = self.maximum_death_rate if self._crowding_d1 is None else float(self._crowding_d1)
-            # The EFFECTIVE d1 is what survives the `min(death, maximum_death_rate)` clamp at the end
-            # of _death_rate. Checking the requested value alone would wave through a large d1
-            # silently clipped back below the evolved division rate.
             _eff = min(_d1, self.maximum_death_rate)
             _max_b = float(getattr(self.genotypes[self.founder_id], "max_birth_rate", 0.0))
             if _eff <= _max_b:
                 raise ValueError(
-                    f"crowding_law='noble' needs d1 > the largest attainable division rate, but the "
+                    f"crowding needs d1 > the largest attainable division rate, but the "
                     f"EFFECTIVE d1 is {_eff:g} <= max_birth_rate={_max_b:g} "
                     f"(requested d1={_d1:g}, clamped by maximum_death_rate={self.maximum_death_rate:g}). "
                     f"Raise BOTH crowding_d1 and maximum_death_rate above max_birth_rate — a density "
                     f"cap expressed as a rate below the evolved division rate cannot bound a deme.")
-        # Division law (Noble et al. 2022, the `demon` simulator, invasion mode). "compete" (the
-        # legacy code default) is a fate split: a division either attempts a mutation, with probability
-        # mutation_rate / (mutation_rate + dispersal_rate), or disperses, so a dispersing daughter
-        # never mutates and raising dispersal lowers the mutation supply. "noble" (the paper's rule)
-        # is demon's rule
-        # (`cell_division` and the migration_type-0 branch of its main loop): every division attempts
-        # a mutation with probability `mutation_rate`, and independently one of the two daughters,
-        # picked at random, disperses with probability `dispersal_rate`. Both are then per-division
-        # probabilities, so a baseline above 1 is rejected rather than silently clipped.
-        self._dispersal_law = str(deme_params.get("dispersal_law", "compete"))
-        if self._dispersal_law not in ("compete", "noble"):
-            raise ValueError("dispersal_law must be 'compete' or 'noble'")
-        if self._dispersal_law == "noble":
-            _base = self.genotypes[self.founder_id].baseline_rates
-            _mu = float(self.genotypes[self.founder_id].mutation_rate)
-            if not 0.0 <= float(_base["dispersal_rate"]) <= 1.0:
-                raise ValueError(
-                    f"dispersal_law='noble' reads dispersal_rate as a per-division probability, but "
-                    f"it is {_base['dispersal_rate']:g}; give a value in [0, 1]")
-            if not 0.0 <= _mu <= 1.0:
-                raise ValueError(
-                    f"dispersal_law='noble' reads mutation_rate as a per-division probability, but "
-                    f"it is {_mu:g}; give a value in [0, 1]")
-        # The well-mixed regime (carrying_capacity None/0) has no capacity, hence no slots: it stays
-        # unbounded whatever crowding_mode says.
-        self._lottery = bool(self._crowding and self._crowding_mode == "lottery")
+        # Division (demon's invasion mode: `cell_division` and the migration_type-0 branch of its main
+        # loop): every division attempts a mutation with probability `mutation_rate`, and
+        # independently one of the two daughters, picked at random, disperses with probability
+        # `dispersal_rate`. Both are per-division probabilities, so a baseline above 1 is rejected
+        # rather than silently clipped.
+        _base = self.genotypes[self.founder_id].baseline_rates
+        _mu = float(self.genotypes[self.founder_id].mutation_rate)
+        if not 0.0 <= float(_base["dispersal_rate"]) <= 1.0:
+            raise ValueError(
+                f"dispersal_rate is a per-division probability, but it is "
+                f"{_base['dispersal_rate']:g}; give a value in [0, 1]")
+        if not 0.0 <= _mu <= 1.0:
+            raise ValueError(
+                f"mutation_rate is a per-division probability, but it is {_mu:g}; give a value in [0, 1]")
+        # The well-mixed regime (carrying_capacity None/0) has no capacity, hence no slots.
+        self._lottery = self._crowding
         self.structure_radius = spatial_params.get("structure_radius", 0)
         # Ductal-field substrate: the structured case is a FIELD of many small epithelial-ring glands
         # at 2D positions in moderate-density stroma (an island model). The defaults (n_glands=1,
@@ -818,12 +771,8 @@ class GenotypeTumor:
             self._origin_generations = float(_oc.get("generations", 200))
             if self._origin_disp_factor < 0:
                 raise ValueError("origin_confinement.dispersal_factor must be >= 0")
-            # What the tau engine's clock counts. "steps" (legacy default) ticks 1 per tau step,
-            # so `generations` means tau steps and a tau of 0.5 halves the window; "generations" ticks
-            # by `tau`, so `generations` means generations at any tau. The exact engine is unaffected.
-            self._origin_clock = str(_oc.get("clock", "steps"))
-            if self._origin_clock not in ("steps", "generations"):
-                raise ValueError("origin_confinement.clock must be 'steps' or 'generations'")
+            if _oc.get("clock", "generations") != "generations":
+                raise ValueError("origin_confinement counts generations; the 'steps' clock was removed")
         # Number of founder cancer cells to seed (an established micro-lesion). A single founder
         # has P(extinction) ≈ death/division (~7% for the defaults) regardless of carrying
         # capacity, so a one-cell start makes runs/demos randomly cancer-free; seeding a small
@@ -1607,54 +1556,26 @@ class GenotypeTumor:
             total = sum(deme.values())
         base = rep.evolutionary_parameters["death_rate"]
         if self._crowding:
-            # Legacy "own" law (the final else below): density-dependent death split into two
-            # crowding sources.
-            #
-            # (1) Co-resident CANCER cells crowd RELATIVE to this clone's OWN evolved division rate:
-            #     the slope is the clone's net growth (div - base) steepened by
-            #     (1 + crowding_margin), so a cancer-only deme caps at K/(1+margin) INDEPENDENT of
-            #     fitness — no overfill even for a clone evolved up to max_birth_rate.
-            # (2) The deme's immortal NORMAL cells (epithelial/stromal) crowd at a FIXED reference
-            #     rate `_resident_ref`, NOT the clone's own division. Because it is not scaled by
-            #     (div - base), this term does NOT cancel in the survival condition net = div - death:
-            #     net > 0 becomes div > base + (ref - base)(1+margin)(n_normal/K), a genuine FITNESS
-            #     THRESHOLD rising with the resident count. Only fitter cancer survives (and then
-            #     disperses onward from) a normal-occupied gland deme; the normal cells never die.
-            #
-            # A cancer-only deme has n_normal = 0, so term (2) vanishes.
-            div = self._div_rate(gid, deme_idx, rep)
             steep = 1.0 + self.crowding_margin
             # Per-deme carrying capacity: duct demes cap at K_duct, stroma at K_stroma, otherwise the
             # scalar carrying_capacity.
             K = self.carrying_capacity if self._deme_capacity is None else self._deme_capacity[deme_idx]
-            if self._crowding_mode == "lottery":
-                # Structural-cap law. The crowding pressure is UNIFORM over the deme's cancer clones —
-                # it carries no `div`, so it cannot cancel out of net = div - death, and the selection
-                # differential between two clones in the deme is their bare (b_i - d_i) - (b_k - d_k),
-                # the SAME at the front as in the packed interior. The STRUCTURAL slot cap (see
-                # `_slot_cap_of`) is what bounds density; the rate law sets turnover.
-                # demon's two-valued step (see __init__): d0 at or below K; above it a fixed d1
-                # chosen to exceed any attainable division rate. `death` then falls through to the
-                # resident / immune / treatment terms and the clamp below.
-                if total <= K:
-                    death = base
-                else:
-                    d1 = (self.maximum_death_rate if self._crowding_d1 is None
-                          else float(self._crowding_d1))
-                    death = max(base, d1)
-                # Resident pressure: the fitness gate on entering normal-occupied tissue. It does not
-                # cancel either (it carries no `div`).
-                n_normal = (n_normal_c if comp is not None
-                            else sum(deme.get(nm, 0) for nm in normal_names))
-                if n_normal:
-                    death += max(0.0, self._resident_ref - base) * steep * (n_normal / K)
+            # demon's two-valued step (see __init__), the same for every clone in the deme: d0 at or
+            # below K; above it a fixed d1 chosen to exceed any attainable division rate. The
+            # structural slot cap (`_slot_cap_of`) bounds density; the step sets turnover.
+            if total <= K:
+                death = base
             else:
-                n_normal = (n_normal_c if comp is not None
-                            else sum(deme.get(nm, 0) for nm in normal_names))
-                n_cancer = total - n_normal
-                death = base + max(0.0, div - base) * steep * (n_cancer / K)
-                if n_normal:
-                    death += max(0.0, self._resident_ref - base) * steep * (n_normal / K)
+                d1 = (self.maximum_death_rate if self._crowding_d1 is None
+                      else float(self._crowding_d1))
+                death = max(base, d1)
+            # Resident pressure: the fitness gate on entering normal-occupied tissue. The deme's
+            # immortal normal cells add death at the fixed reference rate `_resident_ref`; it carries
+            # no `div` either.
+            n_normal = (n_normal_c if comp is not None
+                        else sum(deme.get(nm, 0) for nm in normal_names))
+            if n_normal:
+                death += max(0.0, self._resident_ref - base) * steep * (n_normal / K)
         else:
             # well-mixed regime (carrying_capacity None/0): no crowding ceiling -> unbounded growth.
             death = base
@@ -1703,14 +1624,11 @@ class GenotypeTumor:
     def _cancer_gids(self, deme):
         return [gid for gid in deme if self._is_cancer(gid)]
 
-    def _run_rng(self, seed, offset, purpose):
-        """A per-run random stream. Under ``rng_streams="offset"`` it is ``default_rng(seed +
-        offset)``, in which neighbouring seeds share streams shifted by one
-        unit of ``offset``. Under ``"independent"`` it is keyed by ``(seed, purpose, offset)`` through
-        a ``SeedSequence``, so no two seeds, purposes or steps share a stream."""
-        if self.rng_streams == "independent":
-            return np.random.default_rng([int(seed), purpose, int(offset)])
-        return np.random.default_rng(seed + offset)
+    @staticmethod
+    def _run_rng(seed, offset, purpose):
+        """A per-run random stream, keyed by ``(seed, purpose, offset)`` through a ``SeedSequence``,
+        so no two seeds, purposes or steps share a stream."""
+        return np.random.default_rng([int(seed), purpose, int(offset)])
 
     # --- origin confinement --------------------------------------------------
     def _origin_tick(self, generations):
@@ -1991,97 +1909,8 @@ class GenotypeTumor:
         affected = [di]
         if rng.random() < death / (div + death):
             self._remove(di, gid, 1)                       # death
-        elif self._dispersal_law == "noble":
-            self._divide_noble(di, gid, rep, rng, affected)
         else:
-            # The division fate is split on the clone's OWN rates. Using the confinement-scaled
-            # dispersal rate here would make a cell inside a closed acinus mutate on every division
-            # (mut_prob -> 1) purely because the denominator lost its dispersal term — an artefact of
-            # how the fate is drawn, not biology. Confinement acts on the dispersal branch instead
-            # (``_escape_factor``), so mut_prob is identical confined or not.
-            disp = rep.evolutionary_parameters["dispersal_rate"]
-            denom = rep.mutation_rate + disp
-            mut_prob = rep.mutation_rate / denom if denom > 0 else 0.0
-            if rng.random() < mut_prob:
-                # Under the structural cap the slot is contested BEFORE the mutation is drawn: a
-                # mutation-branch birth that cannot get a slot must never reach mutate(), or the
-                # registry would accumulate genotypes with no cells.
-                if self._lottery and not self._can_place(di, total):
-                    pass                                       # birth fails; the division is consumed
-                else:
-                    child = rep.divide()
-                    res = child.mutate(rng, self.selection,
-                                       func_mask=self._func_bits if self.coarsen_passengers else None)
-                    if res == "passenger":
-                        # pure neutral daughter: identical dynamics, fold into the parent clone and tally
-                        # its passenger burden for lazy reconstruction. No genotype registered.
-                        self._place_one(di, gid, rng)
-                        self._pass_load[gid] += child._n_new_snv
-                        self._n_folded += 1
-                    elif res:
-                        # functional (driver / CNV / WGD) daughter -> a new genotype, unless it breaches
-                        # the viability limits, in which case it is never born (see _is_viable): the
-                        # division is consumed but adds no cell.
-                        if self._is_viable(child):
-                            self._register(child)
-                            self.genotypes_parents[child.genotype_id] = rep.genotype_id
-                            self._place_one(di, child.genotype_id, rng)
-                    else:
-                        # no-op mutation (saturated allele): same genotype, grows in place
-                        self._place_one(di, rep.genotype_id, rng)
-            elif (esc := self._escape_factor(di)) < 1.0 and (
-                    esc <= 0.0 or rng.random() >= esc):
-                # The daughter set out but the intact acinus holds it in: it stays put and competes
-                # for a slot in its own deme, exactly like a failed basement-membrane crossing.
-                # Unreachable (no rng draw, no branch) whenever the escape factor is 1.0, i.e.
-                # always when origin confinement is absent or released.
-                self._place_one(di, gid, rng)
-            else:
-                # dispersal. Three routes, mutually exclusive by SOURCE compartment:
-                #  - met seeding (primary STROMAL deme = an invaded IDC cell): a fraction ~met_seed_kappa
-                #    of daughters attempt the hop to the metastatic deposit;
-                #  - cross-gland island hop (gland-resident cell): a fraction ~cross_gland_kappa;
-                #  - local: a uniformly random von-Neumann neighbour in the same compartment.
-                # Each guarded branch short-circuits before its rng draw when off.
-                src_g = self.gland_id[di] if self.gland_id is not None else -1
-                took_met = False
-                # Met seeding is eligible ONLY from a primary stromal deme (src_g == -1 and di in the
-                # primary block), so DCIS confined to glands cannot seed but IDC in the stroma can — the
-                # clinical fact emerges from geometry, not a flag.
-                if (self._met_enabled and self._met_seed_kappa > 0 and di < self.n_primary_demes
-                        and src_g == -1
-                        and rng.random() < self._met_seed_kappa / (1.0 + self._met_seed_kappa)):
-                    took_met = True
-                    ms = min(max(rep.evolutionary_parameters["met_survival"], 0.0), 1.0)
-                    if rng.random() < self._transit_prob(ms) and self._place_one(
-                            self.met_vessel_idx, gid, rng):
-                        self.events.append(dict(step=self.step, time=self.time, event="seeding",
-                                                from_deme=int(di), genotype=gid, n=1))
-                        affected.append(self.met_vessel_idx)
-                    # else: the daughter dies in transit — parent stays, the division is still consumed.
-                if not took_met:
-                    tgt = None
-                    if (self.cross_gland_kappa > 0 and src_g != -1
-                            and rng.random() < self.cross_gland_kappa / (1.0 + self.cross_gland_kappa)):
-                        tgt = self._cross_gland_target(src_g, rng)
-                    if tgt is None:
-                        nbrs = self._neighbors(di)
-                        tgt = nbrs[int(rng.choice(len(nbrs)))] if nbrs else di
-                    # Basement-membrane gate: a duct(gland)->stroma hop is an INVASION event and needs
-                    # `breach`. It succeeds with probability = the clone's breach trait; a cell that fails
-                    # stays confined in its duct (DCIS). Off unless breach_gated_invasion is set, and only
-                    # for the duct->stroma direction (intraductal/cross-gland and stroma->stroma hops are
-                    # untouched).
-                    if (self._breach_gated_invasion and self.gland_id is not None
-                            and self.gland_id[di] >= 0 and self.gland_id[tgt] < 0):
-                        b = min(max(rep.evolutionary_parameters["breach"], 0.0), 1.0)
-                        if rng.random() >= b:
-                            tgt = di                      # crossing fails -> daughter stays in the duct
-                    # The daughter still has to find a slot where it lands (including back in its own
-                    # duct after a failed crossing); if the target is full and holds no displaceable
-                    # resident, the birth fails. No redraw.
-                    if self._place_one(tgt, gid, rng):
-                        affected.append(tgt)
+            self._divide_noble(di, gid, rep, rng, affected)
 
         for idx in affected:
             self._refresh_rate(idx)
@@ -2440,7 +2269,7 @@ class GenotypeTumor:
             self._cell_data_stale = True
         return self.traces
 
-    # --- demon's invasion rule (dispersal_law="noble") ------------------------
+    # --- demon's invasion rule ------------------------------------------------
     def _route_one(self, di, rep, rng):
         """Where ONE dispersing cell of ``rep`` leaving deme ``di`` lands, by one of three routes:
         metastatic seeding from a primary stromal deme (only a primary stromal deme can seed, so
@@ -2488,7 +2317,7 @@ class GenotypeTumor:
         return gid if self._place_one(tgt, gid, rng) else None
 
     def _divide_noble(self, di, gid, rep, rng, affected):
-        """One division under demon's invasion rule (``dispersal_law="noble"``).
+        """One division under demon's invasion rule.
 
         The division attempts a mutation with probability ``mutation_rate``. Independently, one of its
         two daughters, picked at random, disperses with probability ``dispersal_rate``; inside a
@@ -2535,184 +2364,7 @@ class GenotypeTumor:
                 self.events.append(dict(step=self.step, time=self.time, event="seeding",
                                         from_deme=int(di), genotype=placed, n=1))
 
-    # --- tau-leaping (generation-batched clonal update) -----------------------
-    def _tau_substep(self, rng, dt):
-        """One synchronous tau-leap of length `dt`.
-
-        Per (deme, genotype) with count c, draw the two reaction channels independently from
-        the CURRENT (pre-step) state -- births ~ Poisson(division_rate*c*dt) and
-        deaths ~ Poisson(death_rate*c*dt) -- then split births into a mutation branch
-        (in-place division, attempts a mutation exactly as the exact engine) and a dispersal
-        branch (daughter placed in a neighbour deme) by Binomial(n_births, mut_prob), and apply
-        everything in batch. The per-channel rates match the exact engine's
-        (event rate = c*(div+death), death share = death/(div+death)), so the two engines agree
-        in distribution as dt -> 0. Genotype ids are iterated in creation-ordinal order and all
-        randomness comes from the seeded `rng`, so runs are reproducible. Death rates are read
-        from current deme totals, so carrying-capacity crowding self-limits across substeps.
-        """
-        if self._lottery:
-            return self._tau_substep_lottery(rng, dt)
-        deaths, dispersals, mutants, stayers = [], [], [], []
-        mut_disp, swaps = [], []     # dispersal_law="noble" only (see _split_births_noble)
-        for di in self._active_demes():
-            deme = self.demes[di]
-            if not deme:
-                continue
-            comp = self._deme_comp(deme)            # ONE composition scan reused by every genotype
-            total = comp[0]
-            esc = self._escape_factor(di)
-            for gid in sorted(self._cancer_gids(deme), key=lambda g: self.genotypes[g].ord):
-                c = deme[gid]
-                rep = self.genotypes[gid]
-                div = self._div_rate(gid, di, rep)
-                death = self._death_rate(gid, di, total, comp=comp)
-                # Fate is split on the clone's OWN dispersal rate, never the confinement-scaled one
-                # (see _escape_factor): a cell's mutation probability must not depend on whether it
-                # is allowed to move.
-                disp = rep.evolutionary_parameters["dispersal_rate"]
-                n_div = int(rng.poisson(div * c * dt))
-                n_death = int(rng.poisson(death * c * dt))
-                if n_death:
-                    deaths.append((di, gid, n_death))
-                if n_div and self._dispersal_law == "noble":
-                    self._split_births_noble(rng, di, gid, rep, n_div, esc, mutants, stayers,
-                                             dispersals, mut_disp, swaps)
-                elif n_div:
-                    denom = rep.mutation_rate + disp
-                    mut_prob = rep.mutation_rate / denom if denom > 0 else 0.0
-                    n_mut = int(rng.binomial(n_div, mut_prob))
-                    n_disp = n_div - n_mut
-                    if n_mut:
-                        mutants.append((di, gid, n_mut))
-                    if n_disp and esc < 1.0:
-                        # Confined: only an `esc` fraction gets out; the rest stay and take a slot
-                        # at home. Skipped entirely (no draw) when esc == 1.0.
-                        n_out = int(rng.binomial(n_disp, esc)) if esc > 0.0 else 0
-                        if n_disp - n_out:
-                            stayers.append((di, gid, n_disp - n_out))
-                        n_disp = n_out
-                    if n_disp:
-                        dispersals.append((di, gid, n_disp))
-            # NORMAL cells die under off-target chemo toxicity in a treated compartment (they are
-            # otherwise static). Empty unless a therapy is active -> no extra draws.
-            if self._tx_death_add and self._tx_applies(di):
-                for gid in sorted((g for g in deme if g in self._tx_death_add and not self._is_cancer(g)),
-                                  key=lambda g: self.genotypes[g].ord):
-                    n_death = int(rng.poisson(self._tx_death_add[gid] * deme[gid] * dt))
-                    if n_death:
-                        deaths.append((di, gid, n_death))
-
-        # deaths first, capped at the pre-step count so a clone never goes negative
-        for di, gid, n in deaths:
-            n = min(n, self.demes[di].get(gid, 0))
-            if n:
-                self._remove(di, gid, n)
-        # dispersal-branch daughters the intact acinus held in: plain in-place births of the SAME
-        # genotype (no mutation attempt — that is the mutation branch's job). Always empty when
-        # origin confinement is absent or released.
-        for di, gid, n in stayers:
-            self._add(di, gid, n)
-        # mutation-branch births: each is one division that attempts a mutation. A successful
-        # mutate() spawns a new genotype (count 1) unless it breaches the viability limits, in
-        # which case nothing is born; a saturated allele grows the parent in place.
-        # This per-mutation genotype creation is intrinsic to the infinite-sites model and costs
-        # exactly the same as in the exact engine.
-        fmask = self._func_bits if self.coarsen_passengers else None
-        for di, gid, n in mutants:
-            rep = self.genotypes[gid]
-            n_fold = 0
-            for _ in range(n):
-                child = rep.divide()
-                res = child.mutate(rng, self.selection, func_mask=fmask)
-                if res == "passenger":
-                    # pure neutral daughter: fold into the parent clone (batched via n_fold),
-                    # tally its passenger burden. No genotype registered.
-                    n_fold += 1
-                    self._pass_load[gid] += child._n_new_snv
-                elif res:
-                    # non-viable daughter: division consumed, no cell added (see _is_viable)
-                    if self._is_viable(child):
-                        self._register(child)
-                        self.genotypes_parents[child.genotype_id] = rep.genotype_id
-                        self._add(di, child.genotype_id, 1)
-                else:
-                    self._add(di, gid, 1)
-            if n_fold:
-                self._add(di, gid, n_fold)
-                self._n_folded += n_fold
-        # dispersal-branch births: same genotype. A low fraction (~kappa) of gland-resident daughters
-        # take an island hop to another gland's lumen; the rest go to a uniformly random neighbour.
-        # kappa=0 draws no binomial and leaves the neighbour draw untouched.
-        for di, gid, n in dispersals:
-            src_g = self.gland_id[di] if self.gland_id is not None else -1
-            # met seeding: a fraction (~met_seed_kappa) of daughters from a primary STROMAL deme attempt
-            # the hop to the met, each surviving transit w.p. _transit_prob(met_survival). A disabled met
-            # (or a non-stromal / met source) draws no binomial and leaves n untouched.
-            n_met = 0
-            if self._met_enabled and self._met_seed_kappa > 0 and di < self.n_primary_demes and src_g == -1:
-                n_met = int(rng.binomial(n, self._met_seed_kappa / (1.0 + self._met_seed_kappa)))
-            if n_met:
-                ms = min(max(self.genotypes[gid].evolutionary_parameters["met_survival"], 0.0), 1.0)
-                n_survive = int(rng.binomial(n_met, self._transit_prob(ms)))
-                if n_survive:
-                    self._add(self.met_vessel_idx, gid, n_survive)
-                    self.events.append(dict(step=self.step, time=self.time, event="seeding",
-                                            from_deme=int(di), genotype=gid, n=int(n_survive)))
-            n_rest = n - n_met
-            n_cross = 0
-            if self.cross_gland_kappa > 0 and src_g != -1:
-                n_cross = int(rng.binomial(n_rest, self.cross_gland_kappa / (1.0 + self.cross_gland_kappa)))
-            n_local = n_rest - n_cross
-            if n_local > 0:
-                nbrs = self._neighbors(di)
-                if not nbrs:
-                    self._add(di, gid, n_local)
-                else:
-                    idx = rng.integers(0, len(nbrs), size=n_local)
-                    u, cnts = np.unique(idx, return_counts=True)
-                    gate = (self._breach_gated_invasion and self.gland_id is not None
-                            and self.gland_id[di] >= 0)
-                    b = None
-                    for k, cnt in zip(u, cnts):
-                        tgt = nbrs[int(k)]; cnt = int(cnt)
-                        # Basement-membrane gate: a duct->stroma hop is an INVASION event needing breach.
-                        # A Binomial(cnt, breach) fraction cross into the stroma; the rest stay confined
-                        # in the duct (DCIS). Off / non-duct->stroma hops -> add all cnt.
-                        if gate and self.gland_id[tgt] < 0:
-                            if b is None:
-                                b = min(max(self.genotypes[gid].evolutionary_parameters["breach"], 0.0), 1.0)
-                            n_ok = int(rng.binomial(cnt, b)) if b > 0 else 0
-                            if n_ok:
-                                self._add(tgt, gid, n_ok)
-                            if cnt - n_ok:
-                                self._add(di, gid, cnt - n_ok)  # crossing fails -> stays in the duct
-                        else:
-                            self._add(tgt, gid, cnt)
-            for _ in range(n_cross):
-                tgt = self._cross_gland_target(src_g, rng)
-                if tgt is None:
-                    nbrs = self._neighbors(di)
-                    tgt = nbrs[int(rng.integers(0, len(nbrs)))] if nbrs else di
-                self._add(tgt, gid, 1)
-        # dispersal_law="noble": mutated daughters that leave, and parent copies that leave while the
-        # mutant takes their place. Both lists are empty under dispersal_law="compete" -> no draws.
-        for di, gid, n in mut_disp:
-            routes, _ = self._route_births(di, gid, n, rng)
-            for tgt, cnt, is_met in routes:
-                self._realise_mutation_births(tgt, gid, cnt, rng)
-                if is_met:
-                    self.events.append(dict(step=self.step, time=self.time, event="seeding",
-                                            from_deme=int(di), genotype=gid, n=int(cnt)))
-        for di, gid, n in swaps:
-            routes, _ = self._route_births(di, gid, n, rng)
-            for tgt, cnt, is_met in routes:
-                self._add(tgt, gid, cnt)
-                if is_met:
-                    self.events.append(dict(step=self.step, time=self.time, event="seeding",
-                                            from_deme=int(di), genotype=gid, n=int(cnt)))
-            self._convert_in_place(di, gid, n, rng)      # every parent copy left, even if it died
-
-    # --- demon's invasion rule under tau-leaping (dispersal_law="noble") ----
+    # --- tau-leaping ---------------------------------------------------------
     def _split_births_noble(self, rng, di, gid, rep, n, esc, mutants, stayers, dispersals,
                             mut_disp, swaps):
         """Split ``n`` births of ``gid`` in deme ``di`` under demon's invasion rule (see
@@ -2804,7 +2456,6 @@ class GenotypeTumor:
             self._remove(di, gid, m)
             self._realise_mutation_births(di, gid, m, rng)
 
-    # --- tau-leaping under the structural cap (lottery crowding) ------------
     def _realise_mutation_births(self, di, gid, n, rng):
         """Realise ``n`` accepted mutation-branch births of ``gid`` in deme ``di``: each is one
         division that attempts a mutation, spawning a new genotype (unless it breaches the viability
@@ -2830,8 +2481,8 @@ class GenotypeTumor:
             self._add(di, gid, n_fold)
             self._n_folded += n_fold
 
-    def _tau_substep_lottery(self, rng, dt):
-        """One synchronous tau-leap of length `dt` under the ``crowding_mode="lottery"`` law.
+    def _tau_substep(self, rng, dt):
+        """One synchronous tau-leap of length `dt`.
 
         The exact engine needs no allocation rule — it fires one event at a time, so a slot is taken
         by whichever birth happens next and the Gillespie sampler already draws that birth with
@@ -2863,7 +2514,7 @@ class GenotypeTumor:
         real occupancy every substep and clipped at zero.
         """
         deaths, dispersals, mutants, stayers = [], [], [], []
-        mut_disp, swaps = [], []     # dispersal_law="noble" only (see _split_births_noble)
+        mut_disp, swaps = [], []     # mutated births that leave, or whose parent copy leaves
         for di in self._active_demes():
             deme = self.demes[di]
             if not deme:
@@ -2876,32 +2527,13 @@ class GenotypeTumor:
                 rep = self.genotypes[gid]
                 div = self._div_rate(gid, di, rep)
                 death = self._death_rate(gid, di, total, comp=comp)
-                # The clone's OWN dispersal rate, never the confinement-scaled one — confinement
-                # must not change how often a division mutates (see _escape_factor).
-                disp = rep.evolutionary_parameters["dispersal_rate"]
                 n_div = int(rng.poisson(div * c * dt))
                 n_death = int(rng.poisson(death * c * dt))
                 if n_death:
                     deaths.append((di, gid, n_death))
-                if n_div and self._dispersal_law == "noble":
+                if n_div:
                     self._split_births_noble(rng, di, gid, rep, n_div, esc, mutants, stayers,
                                              dispersals, mut_disp, swaps)
-                elif n_div:
-                    denom = rep.mutation_rate + disp
-                    mut_prob = rep.mutation_rate / denom if denom > 0 else 0.0
-                    n_mut = int(rng.binomial(n_div, mut_prob))
-                    n_disp = n_div - n_mut
-                    if n_mut:
-                        mutants.append((di, gid, n_mut))
-                    if n_disp and esc < 1.0:
-                        # Confined: only an `esc` fraction gets out, the rest stay and compete for a
-                        # slot at home. No draw at all when esc == 1.0.
-                        n_out = int(rng.binomial(n_disp, esc)) if esc > 0.0 else 0
-                        if n_disp - n_out:
-                            stayers.append((di, gid, n_disp - n_out))
-                        n_disp = n_out
-                    if n_disp:
-                        dispersals.append((di, gid, n_disp))
             if self._tx_death_add and self._tx_applies(di):
                 for gid in sorted((g for g in deme if g in self._tx_death_add and not self._is_cancer(g)),
                                   key=lambda g: self.genotypes[g].ord):
@@ -2973,7 +2605,7 @@ class GenotypeTumor:
                     nbrs = self._neighbors(di)
                     tgt = nbrs[int(rng.integers(0, len(nbrs)))] if nbrs else di
                 _cand(tgt, ("plain", gid), 1)
-        # dispersal_law="noble" (empty otherwise): a leaving mutant competes for a slot where it lands
+        # A leaving mutant competes for a slot where it lands
         # and is realised only if it wins one; a leaving parent copy competes the same way, and only
         # when it wins does the mutant take its place at home. A parent copy that dies in transit has
         # left all the same, so its mutant takes its place.
@@ -2994,7 +2626,8 @@ class GenotypeTumor:
             items = cand[tgt]
             keys = list(items)
             a = np.array([items[k] for k in keys], dtype=np.int64)
-            n_slots = max(0, self._slot_cap_of(tgt) - sum(self.demes[tgt].values()))
+            n_slots = (max(0, self._slot_cap_of(tgt) - sum(self.demes[tgt].values()))
+                       if self._crowding else int(a.sum()))       # well-mixed: no slot cap
             if int(a.sum()) <= n_slots:
                 acc = a
             else:
@@ -3162,7 +2795,7 @@ class GenotypeTumor:
         self.step += 1
         self.time += tau
         if self._origin_confined:
-            self._origin_tick(tau if self._origin_clock == "generations" else 1.0)
+            self._origin_tick(tau)
         self._clock = self.step
         if self.step % self.snapshot_every == 0:
             self.traces.append(self._trace_snapshot())
@@ -3805,7 +3438,7 @@ class GenotypeTumor:
         return [r * G + c for r in range(r0, r0 + n_r) for c in range(c0, c0 + n_c)]
 
     def make_cell_data(self, cell_prefix="C", max_cells=None, region=None, depth_frac=None,
-                       layers=None, low_memory=None, **kwargs):
+                       layers=None, **kwargs):
         """Expand the per-deme genotype counts into per-cell ground-truth tables.
 
         Materialises one row per cell (each genotype's count becomes that many identical
@@ -3844,9 +3477,6 @@ class GenotypeTumor:
             expression is several times smaller with ``layers="visium"``. The small per-cell frames
             (coordinates, types, demes, evolutionary parameters, and the optional truth layers) are
             always built. ``None`` (default) builds every frame.
-        low_memory : bool, optional
-            Chunk the program layer's expression multiplier too (see the constructor's
-            ``low_memory``); ``None`` (default) uses the tumour's setting.
 
         Returns
         -------
@@ -4041,14 +3671,9 @@ class GenotypeTumor:
         em_mat = np.empty((n_cells, n_genes)) if allele and "cell_exp_m" in layers else None
         baf_mat = np.empty((n_cells, n_genes)) if allele and "cell_rna_baf" in layers else None
         want_exp = any(m is not None for m in (exp_mat, ep_mat, em_mat, baf_mat))
-        # The program multiplier exp(z · loading). By default it is one matrix product over all
-        # cells: a product over a chunk of rows may take a different BLAS
-        # path (a single row is a matrix-vector product) and round the last bit differently, so a
-        # chunked product cannot promise the same bytes. `low_memory` accepts that and builds it per
-        # chunk, summing over programs in a fixed order so the result does not depend on the chunk.
-        low_memory = self.low_memory if low_memory is None else bool(low_memory)
-        prog_all = (P.gene_multiplier(Z) if P is not None and n_cells and want_exp and not low_memory
-                    else None)
+        # The program multiplier exp(z · loading) is built per chunk of cells, like every gene-wide
+        # frame, summing over programs in a fixed order so a value does not depend on its chunk. A
+        # large section then never holds a cells x genes float64 table beyond the frames returned.
         step = max(_MATERIALISE_MIN_ROWS, _MATERIALISE_CHUNK_BYTES // (8 * max(n_genes, 1)))
         first = 0                                       # first run that can overlap the chunk
         for s in range(0, n_cells, step):
@@ -4139,8 +3764,7 @@ class GenotypeTumor:
                 exp_mat[s:e] = buf
                 continue
             # The per-cell program activity scales both alleles; total expression is their sum.
-            prog_mult = (prog_all[s:e] if prog_all is not None
-                         else _program_multiplier(P, Z[s:e]))   # (chunk cells, n_genes)
+            prog_mult = _program_multiplier(P, Z[s:e])        # (chunk cells, n_genes)
             buf *= prog_mult
             buf_m *= prog_mult
             tot = buf + buf_m

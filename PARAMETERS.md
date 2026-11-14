@@ -38,10 +38,9 @@ Defaults are those in `notebooks/example_config.yaml`. Set them under the matchi
 ### Mutations — `cell_params.cancer`
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|
-| `mutation_rate` | 0.3 | ~0.05–2; **[0, 1]** under `dispersal_law: noble`, where it is the per-division probability of a mutation | **low** → monoclonal (no subclones); **high** → hypermutated mush (broken 1/f tail) |
+| `mutation_rate` | 0.3 | **[0, 1]**: the per-division probability of a mutation (an SNV event whose Poisson draws are all 0 leaves the genome unchanged) | **low** → monoclonal (no subclones); **high** → hypermutated mush (broken 1/f tail) |
 | `n_snvs_per_allele` | 0.02 | ~0.1–3 | **low** → no SNV diversity; **high** → hypermutated mush |
 | `snv_prob` / `cnv_prob` | 0.5 / 0.02 | relative weights (SNV vs CNA event) | all-SNV → no CNAs (inferCNV/clonealign demos degrade); all-CNA → no SNV phylogeny |
-| `force_snv` | `true` | `true` \| `false` | `true` places one SNV when every per-allele Poisson draw of an SNV event is 0, which raises the SNV supply (about 4% at the paper regime's rate, 25% at `n_snvs_per_allele` 0.05); `false` leaves such a division's genome unchanged, as demon and CINner do |
 
 ### Growth & survival — `cell_params.cancer` + `deme_params`
 | Knob | Default | Valid range | Outside the range |
@@ -49,14 +48,14 @@ Defaults are those in `notebooks/example_config.yaml`. Set them under the matchi
 | `division_rate` | 0.7 | **> `death_rate`** | ≤ death → extinction |
 | `death_rate` | 0.05 | **≪ `division_rate`** | ≥ division → extinction |
 | `initial_cancer_cells` | 20 | ≥ 5 | 1 → founder extinction (a lone founder is prone to stochastic loss, and density-dependent crowding death raises that risk at small `carrying_capacity`) |
-| `maximum_death_rate` | 1.0 | **≥ `max_birth_rate`** (0.95) | caps crowding death; **below `max_birth_rate` re-opens the over-fill bug** (evolved clones outrun the cap) |
+| `maximum_death_rate` | 1.0 | **> `max_birth_rate`** | clamps every death rate before the hazards, and is the default `crowding_d1`; at or below `max_birth_rate` construction fails (evolved clones would outrun the cap) |
 
 ### Spatial structure — `spatial_params` + `deme_params` + `cell_params.cancer`
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|
 | `carrying_capacity` | 30 | a real **per-deme cap** (cells/deme); `None` or `0` → **well-mixed** (no ceiling, unbounded growth) | too small (1–3) → a lone founder is prone to extinction (crowding ramps from occupancy 0) |
 | `grid_size` × `carrying_capacity` | 170 × 30 | the tumour caps at ~`grid_size² × carrying_capacity`; size the grid **above** the target so it can spread (≳ 10⁴ demes for a 10⁵-cell tumour) | too small → no room to spread / no O₂ gradient / too few clones |
-| `dispersal_rate` | 0.9 | **≲ `division_rate`**; **[0, 1]** under `dispersal_law: noble`, where it is the per-division probability that a daughter disperses | ≫ division → well-mixed, **no clonal territories** (silently breaks the PEtracer and multi-region benchmarks) |
+| `dispersal_rate` | 0.9 | **[0, 1]**: the per-division probability that a daughter disperses, independently of whether the division mutates | ≫ division → well-mixed, **no clonal territories** (silently breaks the PEtracer and multi-region benchmarks) |
 | `structure_radius` / `n_structures` | 4 / 1 | glandular geometry (duct size / count); the cancer founds inside and spreads across the gland | — |
 | `n_glands` | **8** | ductal-field substrate: number of small epithelial-ring glands scattered in stroma (DESIGN_ductal_field.md); `1` reproduces the single central ring | needs `structure_radius > 0`; too many for the grid → rejection sampling can't place them all |
 | `gland_radius` | = `structure_radius` | ring radius of each gland (`structure_radius` 4 → 9 demes across, ~450 µm: lumen + wall) | too large × many glands → they don't fit / overlap |
@@ -68,14 +67,21 @@ Defaults are those in `notebooks/example_config.yaml`. Set them under the matchi
 | `epithelial_barrier` | 10.0 (0.0 = off in the bare engine) | compartment-selection hazard: the epithelial ring adds `epithelial_barrier · epithelial_fraction(deme) · (1 − breach)` to a cancer cell's death (v1, DESIGN_phenotype_plasticity.md §2) | needs `structure_radius > 0`; too high → the ring is impassable and cancer stays in the lumen (raise `breach` fitness or lower the barrier) |
 | `stromal_hazard` | 0.6 (0.0 = off in the bare engine) | compartment-selection hazard: the stroma adds `stromal_hazard · stromal_fraction(deme) · (1 − stromal_survival)` to death | needs `structure_radius > 0`; the stromal analogue of `epithelial_barrier` |
 
-!!! note "`carrying_capacity` is a real per-deme cap (density-dependent crowding, 2026-07-14)"
-    Crowding death rises **relative to each clone's own (evolved) division rate**
-    (`death = death_rate + (division_rate − death_rate)·(1 + crowding_margin)·occupancy/K`, clamped at
-    `maximum_death_rate`), so a deme's occupancy caps near `carrying_capacity` even for clones whose
-    division has evolved up to `max_birth_rate`, and the tumour **spreads** (occupied demes ∝ cells/K)
-    instead of piling into a few demes. This needs `maximum_death_rate ≥ max_birth_rate` (default 1.0).
-    Set `carrying_capacity: None` (or `0`) to disable crowding entirely — the **well-mixed** regime used
-    for single-deme, unbounded-growth benchmarks. See `DESIGN_crowding.md`.
+!!! note "`carrying_capacity` is a real per-deme cap (demon's two-valued death step under a slot cap)"
+    A deme has `floor(crowding_overfill · K)` slots; a birth that finds none fails, and contested slots
+    go to clones in proportion to the births they drew. A cancer cell dies at its baseline
+    `death_rate` while the deme holds at most `K` cells and at `crowding_d1` (default
+    `maximum_death_rate`) above it, the same for every clone in the deme, so clones in a full deme keep
+    competing through their division rates. `crowding_d1`, after the `maximum_death_rate` clamp, must
+    exceed `max_birth_rate` or construction fails. Immortal residents add
+    `(resident_pressure_ref − death_rate)·(1 + crowding_margin)·n_normal/K`. Set
+    `carrying_capacity: None` (or `0`) to disable crowding entirely — the **well-mixed** regime used
+    for single-deme, unbounded-growth benchmarks.
+
+| Knob | Default | Valid range | Outside the range |
+|---|---|---|---|
+| `crowding_overfill` | 1.5 | ≥ 1 | the slot cap as a multiple of `K`; at 1 a deme never passes `K` and never meets `crowding_d1` |
+| `crowding_d1` | `maximum_death_rate` | > `max_birth_rate` (after the clamp) | the death rate above `K`; lower raises at construction |
 
 ### Selection — `selection_params`
 | Knob | Default | Valid range | Outside the range |
@@ -195,7 +201,7 @@ the same way** — see the warning below before comparing runs across engines.
 | `kill_rate` | 1.5 | ≥ 0 | the drug's strength, read by the **count** engine |
 | `kill_mode` | `"additive"` | `"additive"` \| `"proliferation"` | **the most consequential therapy knob.** `"additive"` gives every clone the same *absolute* extra death, so survival is decided by birth rate and a driver-saturated clone simply outruns the dose. `"proliferation"` scales the hazard with the clone's **own** division rate (`added_death = intensity × kill_rate × division_rate`), so every clone declines at its own rate whatever its fitness — and a cell at `division_rate = 0` takes exactly zero drug death. This is also the biology (chemotherapy kills replicating cells) |
 | `rate_multiplier` | 2.0 | ≥ 1 | the **cell** engine's drug model: `death × rate_multiplier ** (1 − treatment_resistance)`. Unused by the count engine |
-| `mutagenicity` | 1.0 (off) | ≥ 1 | multiplies `mutation_rate` while dosed. **This is not a mutation rate**: under the default `dispersal_law`, `mutation_rate` is the mutate-vs-disperse *fate* probability, so the realised boost saturates (`m/(m + dispersal_rate)`) — a nominal ×4 realises ×2.29. It also moves SNVs and CNAs in lockstep, so it **cannot** shift the balance between acquiring resistance and reverting it (measured identical at 1.0 and 4.0) |
+| `mutagenicity` | 1.0 (off) | ≥ 1 | multiplies `mutation_rate` while dosed. **This is not a mutation rate**: `mutation_rate` is a per-division probability capped at 1, so the realised boost saturates. It also moves SNVs and CNAs in lockstep, so it **cannot** shift the balance between acquiring resistance and reverting it (measured identical at 1.0 and 4.0) |
 | `mutagenicity_target` | `"all"` | `"all"` \| `"snv"` | `"snv"` makes the drug a **point mutagen**: it scales `n_snvs_per_allele` instead, which feeds only the SNV branch, so acquiring a resistance SNV gets likelier while the CNA that deletes one stays flat. This is what decouples acquisition from reversion (acquisition:reversion 0.14 → 1.74 at ×20) |
 | `mutagenicity_mode` | `"uniform"` | `"uniform"` \| `"dose"` | `"dose"` scales the mutator by `(1 − treatment_resistance)`, like every other drug effect. Note this is a **no-op for a de novo resistant clone**, which descends from a drug-exposed *sensitive* ancestor and inherits the raised rate through division — correct biology for a permanent repair-impairment mutator. It does protect a *pre-existing* resistant clone. Under `response="mechanistic"` it scales by the clone's exposure instead (its target-expression ratio, capped at 1) |
 | `response` | `"label"` | `"label"` \| `"mechanistic"` | how the count engine decides whom the drug spares. `"label"` reads the resistance labels (`treatment_resistance`, `drug_tolerance`, the resistance state); the escape-mode studies are built on it. `"mechanistic"` ignores all three, and the persister cost with them: a clone is on target only if it **carries** the drug's `targets` (a copy with the mutation, or more copies than `amplification_threshold`), its dose scales with its expression of `target_genes`, and a broad drug with `kill_mode="proliferation"` kills in proportion to division rate. Count engine only (the per-cell engines raise), and Python API only: the schedule's `chemotherapy` op does not forward it |
@@ -462,23 +468,18 @@ draws a random number, so the tumour grows identically with the record on or off
 | `spatial_snapshot_every` | `0` (off) | `0`, or `k ≥ 1` trace snapshots between spatial snapshots | under tau-leaping a trace snapshot is one generation (× `snapshot_every`); under the exact engine it is one **event**, so a small `k` there stores a snapshot per birth or death — use a large `k` |
 | `spatial_snapshot_budget` | `5000000` entries (~60 MB) | ≳ entries in one snapshot (≈ occupied demes × genotypes per deme) | when exceeded, every other snapshot is dropped and the interval doubles; a budget below one snapshot keeps only the first |
 
-### Division law, random streams and the confinement clock (optional; defaults unchanged)
-Three opt-in corrections to the genotype engine. Each default reproduces earlier runs exactly.
+### Random streams and the confinement clock
+Every per-run stream is keyed by `(seed, purpose, step)` through a `SeedSequence`, so different seeds
+never share a stream. `spatial_params.origin_confinement.generations` counts generations at any `tau`
+(the exact engine counts one generation per event per cancer cell).
 
-| Knob | Default | Valid range | Outside the range |
-|---|---|---|---|
-| `deme_params.dispersal_law` | `"compete"` | `"compete"`: each division either attempts a mutation, with probability `mutation_rate / (mutation_rate + dispersal_rate)`, or disperses, so a dispersing daughter never mutates and raising `dispersal_rate` lowers the mutation supply. `"noble"`: demon's invasion rule (Noble et al. 2022) — a division attempts a mutation with probability `mutation_rate` and, independently, one of its two daughters, picked at random, disperses with probability `dispersal_rate` | under `"noble"` both rates must lie in [0, 1], or construction fails; any other value raises |
-| `rng_streams` (top level) | `"offset"` | `"offset"`: per-run streams are `seed + step` (and `seed + constant` for passenger re-emission and materialisation), so seed `s` at step `k` replays seed `s + 1` at step `k − 1`. `"independent"`: every stream is keyed by `(seed, purpose, step)` through a `SeedSequence`, so different seeds never share a stream | any other value raises |
-| `spatial_params.origin_confinement.clock` | `"steps"` | `"steps"`: the tau engine's confinement clock ticks once per tau step, so `generations` counts tau steps (at `tau: 0.5`, `generations: 400` is 200 generations). `"generations"`: it ticks by `tau`, so `generations` means generations at any `tau`. The exact engine is unaffected | any other value raises |
-
-### Materialisation memory (optional; defaults unchanged)
-`make_cell_data` builds the per-cell tables chunk by chunk, so its working set no longer grows with the number of cells beyond the tables it returns.
-Two further savings are chosen by the caller.
+### Materialisation memory
+`make_cell_data` builds the per-cell tables, the program layer's expression multiplier included, chunk by chunk, so its working set does not grow with the number of cells beyond the tables it returns.
+A further saving is chosen by the caller.
 
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|
 | `make_cell_data(layers=...)`, also on `Resection.slice` / `dissociate` | `None` (every table) | table names (`"cell_exp"`, `"cell_snv"`, `"cell_cnv"`, `"cell_rna_vaf"`, `"cell_snv_p"`, `"cell_snv_m"`, `"cell_exp_p"`, `"cell_exp_m"`, `"cell_rna_baf"`) and/or assay names standing for the tables that assay reads (`"visium"` and `"imaging"`: expression; `"scrna"`: expression, SNVs and RNA VAF; `"scdna"`: SNVs and copy number). The small per-cell tables are always built. Values are byte-identical to a full build | an unknown name raises |
-| `low_memory` (top level) | `false` | `true` also builds the program layer's expression multiplier per chunk, summing over programs in a fixed order, so it never holds a cells × genes float64 table beyond the returned ones. Values differ from the default only in the last bits (float64 relative difference below 1e-12) | no effect without the program layer |
 
 ---
 

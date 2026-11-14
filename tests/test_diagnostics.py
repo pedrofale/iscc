@@ -93,13 +93,19 @@ def test_no_subclones_skipped_when_monoclonal():
 
 
 def test_well_mixed_flag():
-    # high dispersal relative to division -> clones smear across the whole lesion (no territories),
-    # the regime that breaks the PEtracer & multi-region benchmarks. Needs enough mutation to have
-    # >=2 subclones (else it reads as monoclonal, not mixed) under real per-deme crowding.
-    diag = _grow(cancer={"dispersal_rate": 40.0, "mutation_rate": 2.0}, steps=1200).diagnose()
-    assert "well_mixed" in _flags(diag)
-    assert diag["clone_confinement"] < 0.1
-
+    # High dispersal relative to division smears clones across the lesion (no territories), the
+    # regime that breaks the PEtracer & multi-region benchmarks. With dispersal a per-division
+    # probability (at most 1) a small tumour stays well above the default threshold, so the check is
+    # exercised with a raised threshold on a neutral, maximally dispersive tumour.
+    t = GenotypeTumor(genome_params=GENOME, selection_params={"prop_driver": 0.1, "driver_effects": 1.0},
+                      cancer_cell_params={**CANCER, "dispersal_rate": 1.0, "mutation_rate": 0.5},
+                      deme_params=DEME, spatial_params=SPATIAL, seed=0)
+    t.grow(n_steps=1200, seed=0)
+    loose = t.diagnose()
+    assert "well_mixed" not in _flags(loose)
+    strict = t.diagnose(thresholds={"confinement_min": 0.9})
+    assert "well_mixed" in _flags(strict)
+    assert strict["clone_confinement"] < 0.9
 
 def test_no_gradient_flag():
     # hypoxia on but a long O2 diffusion length (large D) on a small tumour -> no core-rim contrast.

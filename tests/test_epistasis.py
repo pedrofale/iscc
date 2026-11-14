@@ -448,7 +448,7 @@ def test_score_order_excludes_tied_events():
 RECOVERY_GENOME = {"n_segments": 5, "segment_size": 40}
 RECOVERY_SELECTION = {"prop_driver": 0.5, "driver_effects": 1.0}
 RECOVERY_CANCER = {"division_rate": 0.2, "death_rate": 0.02, "max_birth_rate": 0.95,
-                   "mutation_rate": 0.3, "dispersal_rate": 0.3, "n_snvs_per_allele": 0.15}
+                   "mutation_rate": 0.5, "dispersal_rate": 0.3, "n_snvs_per_allele": 0.15}
 RECOVERY_DEME = {"carrying_capacity": 10, "initial_cancer_cells": 4}
 RECOVERY_SPATIAL = {"grid_size": 7, "structure_radius": 0}
 

@@ -153,7 +153,7 @@ def test_real_genome_tumor_runs_with_wgd():
                             "mutation_rate": 0.4, "dispersal_rate": 0.2,
                             "snv_prob": 0.0, "cnv_prob": 1.0, "n_snvs_per_allele": 1, "amp_prob": 0.5,
                             "wgd_rate": 0.1},
-        deme_params={"carrying_capacity": 8, "maximum_death_rate": 0.5},
+        deme_params={"carrying_capacity": 8, "maximum_death_rate": 1.0},
         spatial_params={"grid_size": 10, "structure_radius": 0, "immune_density": 0.0},
     )
     t.grow(n_steps=400, seed=3)
@@ -195,7 +195,7 @@ def test_real_genome_tumor_runs_and_responds():
         cancer_cell_params={"max_birth_rate": 0.95, "division_rate": 0.4, "death_rate": 0.02,
                             "mutation_rate": 0.4, "dispersal_rate": 0.2,
                             "snv_prob": 0.0, "cnv_prob": 1.0, "n_snvs_per_allele": 1, "amp_prob": 0.5},
-        deme_params={"carrying_capacity": 8, "maximum_death_rate": 0.5},
+        deme_params={"carrying_capacity": 8, "maximum_death_rate": 1.0},
         spatial_params={"grid_size": 10, "structure_radius": 0, "immune_density": 0.0},
     )
     t.grow(n_steps=900, seed=3)

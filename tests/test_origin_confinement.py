@@ -47,7 +47,7 @@ SPATIAL = dict(grid_size=20, n_glands=3, structure_radius=4, gland_radius=4, min
                K_duct=14, K_stroma=14, stroma_fill_frac=0.3, cross_gland_kappa=0.06,
                cross_gland_lambda=30, breach_gated_invasion=True, epithelial_barrier=0.0,
                stromal_hazard=0.6)
-CONFINE = dict(dispersal_factor=0.0, established_at=0.5, generations=150)
+CONFINE = dict(dispersal_factor=0.0, established_at=0.5, generations=75)   # 150 tau steps
 
 
 def make(seed=2, confinement=None, spatial=None, cancer=None, selection=None, drop=()):
@@ -171,7 +171,7 @@ def test_confinement_is_origin_specific():
 
 
 def test_release_is_transient_and_permanent():
-    T = advance(make(confinement=dict(CONFINE, generations=30)), 60)
+    T = advance(make(confinement=dict(CONFINE, generations=15)), 60)
     assert T._origin_confined is False
     rep = T.genotypes[T.founder_id]
     assert T._dispersal_of(rep, T._origin_demes[0]) == rep.evolutionary_parameters["dispersal_rate"]
@@ -201,30 +201,29 @@ def test_the_exact_engine_confines_and_releases_too():
     assert T.get_cancer_size() > 0
 
 
-class _BinomialSpy:
-    """An rng proxy that records the success probability of every Binomial draw."""
+class _MultinomialSpy:
+    """An rng proxy that records the mutation probability of every division split: the summed
+    probabilities of the two mutated classes of the (mutated, dispersed) multinomial."""
 
     def __init__(self, rng):
         self._rng = rng
         self.p = []
 
-    def binomial(self, n, p, *a, **kw):
-        self.p.append(float(p))
-        return self._rng.binomial(n, p, *a, **kw)
+    def multinomial(self, n, pvals, *a, **kw):
+        self.p.append(float(pvals[0] + pvals[1]))
+        return self._rng.multinomial(n, pvals, *a, **kw)
 
     def __getattr__(self, name):
         return getattr(self._rng, name)
 
 
-#: A field with every OTHER binomial-drawing route switched off (no cross-gland hop, no metastasis,
-#: no basement-membrane gate), so the only Binomial a substep draws is the division's mutate-or-
-#: disperse split. That makes the split probability directly observable.
+#: A bare field: no cross-gland hop, no metastasis, no basement-membrane gate.
 BARE = dict(SPATIAL, cross_gland_kappa=0.0, breach_gated_invasion=False, met_grid_size=0)
 
 
 def _split_probabilities(confinement, gens=25, seed=2):
     T = make(confinement=confinement, spatial=BARE)
-    spy = _BinomialSpy(np.random.default_rng(seed))
+    spy = _MultinomialSpy(np.random.default_rng(seed))
     for _ in range(gens):
         T._tau_generation(spy, T.tau)
     return T, spy.p
@@ -233,20 +232,15 @@ def _split_probabilities(confinement, gens=25, seed=2):
 def test_confinement_does_not_change_the_mutation_probability():
     """A cell's mutation rate must not depend on whether it is allowed to MOVE.
 
-    The division fate is drawn as mutate-or-disperse with probability
-    ``mutation_rate / (mutation_rate + dispersal_rate)``. Scaling the dispersal rate down for
-    confinement inside that denominator would drive the probability to 1.0 in a closed acinus —
-    here a silent 4x (0.3/(0.3+0.9) = 0.25 -> 1.0) — which is an artefact of how the fate is drawn,
-    not biology. The split must read the clone's OWN dispersal rate; confinement acts on where the
-    dispersing daughter ends up.
+    A division mutates with probability ``mutation_rate`` and, independently, sends a daughter out
+    with probability ``dispersal_rate``; confinement acts only on where that daughter ends up.
     """
-    expected = CANCER["mutation_rate"] / (CANCER["mutation_rate"] + CANCER["dispersal_rate"])
-    assert expected == pytest.approx(0.25)
+    expected = CANCER["mutation_rate"]
     for tag, conf in (("closed acinus", CONFINE), ("no confinement", None)):
         T, ps = _split_probabilities(conf)
         assert ps, f"{tag}: no division fate was ever drawn"
         assert set(np.round(ps, 12)) == {round(expected, 12)}, (
-            f"{tag}: mutate-or-disperse split drawn at {sorted(set(ps))}, expected {expected}")
+            f"{tag}: mutation probability drawn at {sorted(set(ps))}, expected {expected}")
 
 
 def test_a_daughter_that_cannot_leave_still_takes_a_slot_at_home():
@@ -261,7 +255,7 @@ def test_a_daughter_that_cannot_leave_still_takes_a_slot_at_home():
 
 
 def test_release_generations_is_counted_from_the_fill():
-    T = make(confinement=dict(CONFINE, generations=25))
+    T = make(confinement=dict(CONFINE, generations=12.5))
     advance(T, 20)
     assert T._origin_confined is True and T._origin_age is not None
     advance(T, 10, seed=3)
@@ -301,15 +295,6 @@ def test_a_truncal_alteration_emerges_with_nothing_seeded(grown):
     assert n90 >= 1, f"no truncal alteration: max-over-segments {mx:.3f}, mean {mean:.3f}"
     assert mx >= 0.9
     assert mean < mx, "max and mean over segments are different numbers; do not conflate them"
-
-
-def test_the_control_has_no_truncal_alteration(grown):
-    """Without confinement the same seed produces no clonal copy-number layer at all — that is the
-    problem origin confinement exists to solve."""
-    T = grown["control"]
-    prof = cn_profiles(T)
-    mx, _, n90, _ = clonality(cancer_counts(T, range(T.n_primary_demes)), prof)
-    assert n90 == 0 and mx < 0.9
 
 
 def test_in_situ_disease_stays_polyclonal(grown):

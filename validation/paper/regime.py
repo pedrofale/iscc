@@ -69,18 +69,13 @@ ORIGIN_CONFINEMENT = dict(RR._CFG["spatial_params"]["origin_confinement"], gener
 # now acts inside full demes, so the same mutation supply alters more of the genome: `mutation_rate`
 # 0.15 (the ER+ preset is 0.30) brings the fraction of genome altered back to the old law's.
 CROWDING_OVERFILL, CROWDING_D1 = 1.5, 5.0
-# `force_snv` off: an SNV event whose Poisson draws all come up 0 leaves the genome unchanged, as in
-# demon and CINner, instead of placing one SNV anyway (vault: paper1-sprint, decisions).
 # `wgd_rate` 0.005 (the ER+ preset is 0.001): the R5 sweep puts 35% of tumours past a whole-genome
 # duplication at 0.005, inside PCAWG's 30-50%, against 5% at 0.001. It is an effective rate for this
 # lesion size, whose lineages are a few doublings shallower than a real lesion's (vault:
 # decision-paper-regime-wgd-rate).
-CANCER = {"mutation_rate": 0.15, "force_snv": False, "wgd_rate": 0.005}
-DEME = {"dispersal_law": "noble", "crowding_mode": "lottery", "crowding_law": "noble",
-        "crowding_overfill": CROWDING_OVERFILL, "crowding_d1": CROWDING_D1,
+CANCER = {"mutation_rate": 0.15, "wgd_rate": 0.005}
+DEME = {"crowding_overfill": CROWDING_OVERFILL, "crowding_d1": CROWDING_D1,
         "maximum_death_rate": CROWDING_D1}
-# Per-run random streams keyed by (seed, purpose, step), so neighbouring seeds never share a stream.
-RNG_STREAMS = "independent"
 
 # Visium spot swapping, fitted to 10x's V1_Breast_Cancer_Block_A_Section_1 (vault:
 # decision-visium-spot-swapping, exp-visium-bleed): SpotClean's model with a bleeding rate of 0.31, a
@@ -143,10 +138,8 @@ def config(scale, selection=None, cancer=None, deme=None, spatial=None, genome=N
     blocks = RR.config_for(scale, genome=genome, selection={**SELECTION, **(selection or {})},
                            cancer={**CANCER, **(cancer or {})}, deme={**DEME, **(deme or {})},
                            spatial=sp)
-    # low_memory: the program multiplier is materialised per chunk too, so a large section never holds
-    # a cells x genes float64 table beyond the ones returned (decision-chunked-materialisation).
     return dict(blocks, update_mode=update_mode, tau=tau, coarsen_passengers=coarsen,
-                rng_streams=RNG_STREAMS, low_memory=True, founder_mutations=RR.FOUNDER_MUTATIONS,
+                founder_mutations=RR.FOUNDER_MUTATIONS,
                 germline_params=RR.GERMLINE)
 
 

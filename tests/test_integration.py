@@ -33,7 +33,7 @@ GENOME = {"n_segments": 6, "segment_size": 40}
 SPATIAL = {"grid_size": 18, "structure_radius": 5}
 DEME = {"carrying_capacity": 15, "initial_cancer_cells": 4}
 CANCER = {"division_rate": 0.6, "death_rate": 0.03, "max_birth_rate": 0.98,
-          "mutation_rate": 1.2, "dispersal_rate": 0.5}
+          "mutation_rate": 1.0, "dispersal_rate": 0.5}
 
 
 @pytest.fixture(scope="module")

@@ -626,7 +626,7 @@ class HostCell(Cell):
 class CancerCell(Cell):
     def __init__(self, mutation_rate=0.1, snv_prob=0.5, cnv_prob=0.5,
                  n_snvs_per_allele=0.5, amp_prob=0.5, wgd_rate=0.0, genotype_id=None, seed=42,
-                 force_snv=True, **cell_kwargs):
+                 **cell_kwargs):
         super(CancerCell, self).__init__(**cell_kwargs)
         self.type = "cancer"
         # mutation_rate is the per-division probability of *any* genome change relative to
@@ -645,12 +645,6 @@ class CancerCell(Cell):
         # whole-genome duplication INSTEAD of the usual SNV/CNA split, leaving snv_prob/cnv_prob
         # semantics intact. At 0.0 mutate() draws no extra random variable.
         self.wgd_rate = wgd_rate
-        # force_snv: when every per-allele Poisson draw of an SNV event comes up 0, place one SNV
-        # anyway (True, the default), or let the division leave the genome unchanged
-        # (False). Neither demon nor CINner forces a mutation: both draw Poisson counts that may be
-        # zero. Forcing adds about 4% to the paper regime's SNV supply and about 25% at
-        # n_snvs_per_allele 0.05, so the paper regime turns it off.
-        self.force_snv = bool(force_snv)
         self.seed  = seed
         self.set_params()
 
@@ -778,38 +772,13 @@ class CancerCell(Cell):
                             self.update_genome_summary_mutation(selection, mut_bits, seg)
                             hit_functional = True
                         placed += n_mutations
-            if placed == 0 and not getattr(self, "force_snv", True):
-                # Every per-allele Poisson draw came up 0 and nothing is forced: the division leaves
-                # the genome as it was, as a zero Poisson draw does in demon and CINner. The engine
-                # then adds the daughter to the parent clone.
+            if placed == 0:
+                # Every per-allele Poisson draw came up 0: the division leaves the genome as it was,
+                # as a zero Poisson draw does in demon and CINner, and the engine adds the daughter
+                # to the parent clone.
                 self._n_new_snv = 0
                 return False
-            if placed == 0:
-                # The engine already decided this division mutates, so an SNV event must change
-                # the genotype. Every per-allele Poisson draw came up 0 (or the rate is tiny):
-                # force a single SNV on a random allele that still has an unmutated site.
-                candidates = [
-                    (seg, hap, ai)
-                    for seg in range(self.n_segments)
-                    for hap in ('p', 'm')
-                    for ai, allele in enumerate(self.genome[seg][hap])
-                    if len(self._available_sites(selection, seg, allele, gate_bits))
-                ]
-                if not candidates:
-                    return False  # genome fully saturated everywhere: nothing to mutate
-                seg, hap, ai = candidates[rng.choice(len(candidates))]
-                allele = self.genome[seg][hap][ai]
-                pos = int(rng.choice(self._available_sites(selection, seg, allele, gate_bits)))
-                self._cow_privatize(seg)                     # copy-on-write before the in-place set
-                new_allele = self.genome[seg][hap][ai].copy()
-                new_allele[pos] = True
-                self.genome[seg][hap][ai] = new_allele
-                mut_bits = np.zeros(self.segment_sizes[seg], dtype=bool)
-                mut_bits[pos] = True
-                if func_mask is None or func_mask[seg][pos]:
-                    self.update_genome_summary_mutation(selection, mut_bits, seg)
-                    hit_functional = True
-            self._n_new_snv = placed if placed else 1     # fallback above forces exactly one SNV
+            self._n_new_snv = placed
         elif event == 'cnv':
             # Sample segment
             segment_probs = np.array([len(self.genome[seg]['p'] + self.genome[seg]['m']) for seg in range(self.n_segments)]) # can't select empty segment

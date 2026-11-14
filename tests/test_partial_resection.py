@@ -88,10 +88,10 @@ WHOLE_SCENARIOS = {"primary_with_met": _whole_primary_met, "met": _whole_met,
 
 # Golden digests of whole-compartment resection: the partial-resection path must not move them.
 WHOLE_DIGESTS = {
-    "primary_with_met": "d0263fdab083025d2aaa924809ff79c1",
-    "met": "fa9f77542abc9ef32e33dad285602c7c",
-    "primary_tau": "abe717192f39eb1a683300438deae286",
-    "primary_exact": "b6af752cf0468c33f912ee5f3e68ef23",
+    "met": "c11baa4d4b0f94234ec14e6c94f735a8",
+    "primary_exact": "6de6510a238c696e138ee8a7373c06c1",
+    "primary_tau": "f97843d34d5c1f25118f770264e7e494",
+    "primary_with_met": "bd4fb0858aa7b03857864b1af9a71305",
 }
 
 
@@ -110,7 +110,8 @@ LESION_CANCER = {"division_rate": 0.6, "death_rate": 0.05, "max_birth_rate": 1.0
 def _lesion(target=800, mode="tau", **kw):
     Cell._genotype_counter = 2_000_000
     t = GenotypeTumor(seed=3, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
-                      cancer_cell_params=LESION_CANCER, deme_params=DEME, spatial_params=SPATIAL,
+                      cancer_cell_params=LESION_CANCER,
+                      deme_params={**DEME, "maximum_death_rate": 2.0}, spatial_params=SPATIAL,
                       update_mode=mode, **kw)
     steps = 2 if mode == "tau" else 200
     for _ in range(60):

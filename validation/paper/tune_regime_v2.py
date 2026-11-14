@@ -4,8 +4,7 @@ The criteria, the grid and the rule that picks the setting were registered in th
 any run. Each task grows one tumour on the small preview field and records what the criteria need:
 the release of the founding acinus, the first cancer cell in the stroma and whether it carries a
 breach mutation, deme occupancy against capacity, wall time, and at the end the calibration and
-evolutionary-mode summaries. ``v1`` is the old law (the fate split, ``crowding_mode="own"``, offset
-streams, a step-counting clock at 400), grown in the same harness at the same seeds.
+evolutionary-mode summaries. (The old law's ``v1`` arm was removed with the old laws.)
 
 Usage (one task per Slurm array element)::
 
@@ -47,16 +46,6 @@ OVERFILLS, D1S = (1.1, 1.5, 2.0), (2.2, 5.0, 20.0)
 MU_POINTS, MUS = ((1.5, 5.0), (2.0, 5.0)), (0.25, 0.2, 0.15)
 CANONICAL_DISPERSAL = 0.9
 
-# The old law, exactly as the paper regime ran it before v2.
-V1 = dict(
-    deme={"dispersal_law": "compete", "crowding_mode": "own", "crowding_law": "logistic",
-          "crowding_overfill": 1.0, "crowding_d1": None, "maximum_death_rate": 2.2},
-    spatial={"origin_confinement": dict(RG.ORIGIN_CONFINEMENT, generations=400, clock="steps")},
-    rng_streams="offset",
-    mutation_rate=0.30,                         # the ER+ preset, as before v2
-)
-
-
 def v2(overfill, d1, mu=None):
     """The new laws at one grid point. The first grid ran at the ER+ preset's mutation rate (0.30),
     so that is the default here even though the regime itself now uses 0.15."""
@@ -67,13 +56,13 @@ def v2(overfill, d1, mu=None):
 def tasks(stage, overfill=None, d1=None, mu=None):
     """(label, law kwargs, dispersal, seed) for every tumour of a stage."""
     if stage == "grid":
-        pts = [("v1", V1)] + [(f"v2_o{o:g}_d{d:g}", v2(o, d)) for o in OVERFILLS for d in D1S]
+        pts = [(f"v2_o{o:g}_d{d:g}", v2(o, d)) for o in OVERFILLS for d in D1S]
         return [(lab, kw, CANONICAL_DISPERSAL, s) for lab, kw in pts for s in SEEDS]
     if stage == "mu":
         pts = [(f"v2_o{o:g}_d{d:g}_mu{m:g}", v2(o, d, m)) for o, d in MU_POINTS for m in MUS]
         return [(lab, kw, CANONICAL_DISPERSAL, s) for lab, kw in pts for s in SEEDS]
     if stage == "sweep":
-        pts = [("v1", V1), (f"v2_o{overfill:g}_d{d1:g}" + (f"_mu{mu:g}" if mu else ""),
+        pts = [(f"v2_o{overfill:g}_d{d1:g}" + (f"_mu{mu:g}" if mu else ""),
                             v2(overfill, d1, mu))]
         return [(lab, kw, d, s) for lab, kw in pts for d in REG.R1_DISPERSAL for s in SEEDS]
     raise ValueError(stage)

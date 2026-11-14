@@ -16,7 +16,6 @@ until then it stops with an error rather than timing something else.
 """
 import argparse
 import copy
-import functools
 import json
 import os
 import sys
@@ -37,13 +36,10 @@ def main():
     import regime as RG
     import realistic_regime as RR
     from iscc.data import Visium
-    from iscc.tumor.models import GenotypeTumor
-
-    RG.GenotypeTumor = functools.partial(GenotypeTumor, rng_streams="independent")
     origin = dict(copy.deepcopy(RG.ORIGIN_CONFINEMENT), clock="generations", generations=200)
     t0 = time.time()
-    t = RG.grow(a.seed, a.scale, a.n_cancer, deme={"dispersal_law": "noble"},
-                spatial={"origin_confinement": origin}, max_steps=100_000, chunk=2)
+    t = RG.grow(a.seed, a.scale, a.n_cancer, spatial={"origin_confinement": origin},
+                max_steps=100_000, chunk=2)
     t1 = time.time()
     sec = RR.resect(t).slice(depth_frac=0.5, max_cells=2 * a.n_cancer)
     t2 = time.time()

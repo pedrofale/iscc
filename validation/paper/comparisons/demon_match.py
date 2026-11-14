@@ -120,7 +120,7 @@ def iscc_tumour(cond, seed):
     spatial = {"grid_size": 81, "structure_radius": 0, "stroma_fill_frac": 0.0}
     return GenotypeTumor(seed=seed, genome_params=genome, selection_params=selection,
                          cancer_cell_params=cancer, deme_params=deme, spatial_params=spatial,
-                         update_mode="exact", coarsen_passengers=True, rng_streams="independent",
+                         update_mode="exact", coarsen_passengers=True,
                          snapshot_every=10**12)   # the exact engine fires millions of events; no per-event trace
 
 
