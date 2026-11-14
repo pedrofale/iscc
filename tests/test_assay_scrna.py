@@ -1,4 +1,4 @@
-"""Tests for the scRNA assay batch-effect model (DESIGN_features §B / milestone F3)."""
+"""Tests for the scRNA assay batch-effect model."""
 import hashlib
 
 import numpy as np
@@ -11,7 +11,7 @@ from conftest import N_GENES
 def _plain_cell_data(n_cells=600, n_genes=40, seed=0):
     """Expression table with no ground-truth annotation, fixed shape and seed.
 
-    Used by the byte-identity regression test, so its construction must never change.
+    Used by the fixed-output hash test, so its construction must never change.
     """
     rng = np.random.default_rng(seed)
     gene_base = rng.lognormal(0.0, 1.0, size=n_genes)
@@ -90,9 +90,9 @@ class TestBatch:
         assert np.allclose(comp.sum(axis=1), 1.0)
 
     def test_dm_count_model_emits_fixed_total(self):
-        # The DM seam is now implemented (F6 wired it for the Visium assay): a fixed library total
-        # partitioned across genes via Dirichlet(kappa*comp) -> Multinomial, so each cell's counts
-        # sum to round(lib) exactly (the compositional alternative to the independent-per-gene NB).
+        # DM: a fixed library total partitioned across genes via Dirichlet(kappa*comp) ->
+        # Multinomial, so each cell's counts sum to round(lib) exactly (the compositional
+        # alternative to the independent-per-gene NB).
         from iscc.data.batch import Batch, RNABatchHyperParams
         b = Batch(RNABatchHyperParams(kappa=50.0), seed=4).realize([f"g{i}" for i in range(3)],
                                                                  np.ones(3))
@@ -310,7 +310,7 @@ class TestPlateNestedDepth:
             assert np.array_equal(base, alt)
 
     def test_default_smartseq3_counts_unchanged_by_the_plate_model(self):
-        """Regression guard: the presets reproduce the pre-plate-model output exactly."""
+        """The default presets reproduce a pinned count hash, so default output is stable across releases."""
         from iscc.data.rna import scRNA
         cd = _plain_cell_data(600)
         ss3 = scRNA(protocol="smartseq3", n_cells=600, seed=1).run(cd).observed_counts.values
@@ -478,7 +478,7 @@ class TestCallerPlateLayout:
 
 
 # --------------------------------------------------------------------------------------
-# Multi-batch generation (DESIGN_features §B.3)
+# Multi-batch generation
 # --------------------------------------------------------------------------------------
 class TestMultiBatch:
     def test_shared_design_same_biology_different_technical(self, labelled_cell_data):

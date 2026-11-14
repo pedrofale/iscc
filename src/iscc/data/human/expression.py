@@ -1,4 +1,4 @@
-"""Expression over the human genes from reference-atlas baselines and Hallmark programmes (L3).
+"""Expression over the human genes from reference-atlas baselines and Hallmark programmes.
 
 On the growth genes a cell's expression is, per homolog, its type's baseline times the program
 multiplier times what its genotype and niche do (dosage, SNV effects, hypoxia, CCI). This module keeps

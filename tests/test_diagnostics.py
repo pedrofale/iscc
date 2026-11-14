@@ -1,6 +1,6 @@
 """Tests for the operating-envelope QC (iscc.tumor.diagnostics / GenotypeTumor.diagnose).
 
-Checks the three contract points from DESIGN_operating_envelope.md:
+Checks three contract points:
   * a realistic config passes (no flags);
   * each deliberately-degenerate config trips the RIGHT flag with an actionable hint
     (extinct / monoclonal / well-mixed / no-microenvironment-gradient / hypermutated);
@@ -67,9 +67,9 @@ def test_monoclonal_low_mutation_flag():
 
 
 def test_no_subclones_flag():
-    # The OPPOSITE degeneracy to monoclonal, and one that passed every other check until this flag
-    # existed: mutation outruns expansion, so nearly every cell is its own genotype. Diversity stays
-    # high, yet no genotype reaches the subclone frequency and there is nothing clone-level to find.
+    # The OPPOSITE degeneracy to monoclonal, and one no other check catches: mutation outruns
+    # expansion, so nearly every cell is its own genotype. Diversity stays high, yet no genotype
+    # reaches the subclone frequency and there is nothing clone-level to find.
     #
     # `n_subclones` counts genotypes above `subclone_freq` of the tumour, so it is SIZE-DEPENDENT: in
     # this rig's ~60-cell tumours 1% is less than one cell and every singleton would qualify. The
@@ -106,7 +106,7 @@ def test_no_gradient_flag():
     menv = {"hypoxia": {"strength": 1.0, "n_genes": 30, "o2_supply": 0.3, "o2_source": "uniform",
                         "o2_diffusion": 200.0, "o2_consumption": 1.0}}
     # small tumour (small grid) with a very long O2 diffusion length -> O2 is ~uniform -> no core-rim
-    # contrast. (Default DEME K=4 + a seeded founder cluster; a K=2 deme can't hold the cluster now.)
+    # contrast. (Default DEME K=4 + a seeded founder cluster; a K=2 deme can't hold the cluster.)
     diag = _grow(spatial={"grid_size": 10}, microenv=menv, steps=500).diagnose()
     assert "no_gradient" in _flags(diag)
 
@@ -128,8 +128,8 @@ def test_no_gradient_skipped_when_microenv_off():
 
 
 def test_overfilled_check_passes_when_demes_cap():
-    # DESIGN_crowding.md: with density-dependent death, demes cap near K, so mean cells/deme is close
-    # to carrying_capacity and the over-fill check passes (it FAILED under the old carrying-capacity bug).
+    # with density-dependent death, demes cap near K, so mean cells/deme is close to
+    # carrying_capacity and the over-fill check passes.
     diag = _grow(steps=900).diagnose()
     assert "overfilled" not in _flags(diag)
     assert diag["deme_occupancy"] <= DEFAULT_THRESHOLDS["overfill_mult"] * DEME["carrying_capacity"]
@@ -143,7 +143,7 @@ def test_overfilled_skipped_when_well_mixed():
 
 
 def test_hypermutated_flag():
-    # SNV-only + no death: extreme CNA-driven hypermutation now drives lineages non-viable (error
+    # SNV-only + no death: extreme CNA-driven hypermutation drives lineages non-viable (error
     # catastrophe) before they establish under real per-deme crowding, so use a survivable SNV
     # hypermutator grown long enough to saturate TMB.
     diag = _grow(cancer={"mutation_rate": 0.5, "n_snvs_per_allele": 8.0, "snv_prob": 1.0,
@@ -170,7 +170,7 @@ def test_diagnose_does_not_alter_state():
     t.diagnose(verbose=True)
     assert dict(t.genotypes_counts) == before_counts
     assert t.get_cancer_size() == before_size
-    # the tumour's rng was not consumed (read-only readout, like the F8 ground truth)
+    # the tumour's rng was not consumed (a read-only readout)
     assert t.rng.bit_generator.state == before_rng
 
 
@@ -220,9 +220,9 @@ def test_no_advisory_for_realistic_size():
 # --- closing the loop: calibration lands in the good region ------------------
 def test_inference_base_config_is_non_degenerate():
     # The config the inference layer fits from should itself sit inside the operating envelope
-    # (this is what makes "fitting lands you in the good region" hold). The founder-extinction
-    # bottleneck the envelope caught is fixed (initial_cancer_cells = 5), so it no longer goes
-    # extinct, and it is otherwise non-degenerate.
+    # (this is what makes "fitting lands you in the good region" hold): with
+    # initial_cancer_cells = 5 the founders survive the extinction bottleneck, and it is otherwise
+    # non-degenerate.
     from iscc.inference.tumor import default_base_config
     cfg = default_base_config()
     assert cfg["deme_params"].get("initial_cancer_cells", 1) >= 5

@@ -1,6 +1,6 @@
-"""ABC inference layer: exposed rates (A.0), summary statistics (A.2), ABC engine (A.1).
+"""ABC inference layer: exposed rates, summary statistics, ABC engine.
 
-The tumour-driven parameter recovery (A.4.1) itself lives in
+The tumour-driven parameter recovery itself lives in
 ``validation/validate_inference_recovery.py`` (it needs thousands of sims); here we unit-test the
 machinery on hand-built tumours and a fast analytic toy model.
 """
@@ -36,7 +36,7 @@ def _cancer_cell(selection, **overrides):
     )
 
 
-# --- A.0: SNV/CNA rates are exposed parameters ------------------------------
+# --- SNV/CNA rates are exposed parameters -----------------------------------
 def test_cancer_cell_exposes_event_rates():
     c = _cancer_cell(_selection(), snv_prob=0.3, cnv_prob=0.7, n_snvs_per_allele=4, amp_prob=0.9)
     assert (c.snv_prob, c.cnv_prob, c.n_snvs_per_allele, c.amp_prob) == (0.3, 0.7, 4, 0.9)
@@ -77,11 +77,11 @@ def test_event_rates_thread_through_config():
     assert founder.amp_prob == 0.123 and founder.n_snvs_per_allele == 7
 
 
-# --- A.2: summary statistics ------------------------------------------------
+# --- summary statistics -----------------------------------------------------
 def _grown_tumor(seed=0, amp_prob=0.5, steps=300):
     cancer = {**CANCER, "mutation_rate": 0.5, "amp_prob": amp_prob}
     # well-mixed (no crowding ceiling) + seeded cluster: these exercise the CNA/SNV summary-stat
-    # functions on a grown population, not spatial capping (DESIGN_crowding.md well-mixed mode).
+    # functions on a grown population, not spatial capping.
     t = GenotypeTumor(genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
                       cancer_cell_params=cancer,
                       deme_params={"carrying_capacity": None, "initial_cancer_cells": 5},
@@ -131,7 +131,7 @@ def test_summaries_nan_when_extinct():
     assert np.all(np.isnan(s["gain_freq"]))
 
 
-# --- A.1: ABC engine on a fast analytic toy model ---------------------------
+# --- ABC engine on a fast analytic toy model --------------------------------
 def _toy_simulate(theta):
     # identifiable summaries: each parameter appears directly, plus an interaction term
     a, b = theta["a"], theta["b"]

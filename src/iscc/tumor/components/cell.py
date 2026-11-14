@@ -33,9 +33,8 @@ class Cell(object):
     ):
         self.n_segments = n_segments
         # Segments may have unequal sizes (real-genome mode: segment size proportional to
-        # chromosome-arm length). When ``segment_sizes`` is None we fall back to the uniform
-        # scalar ``segment_size`` for every segment, so the abstract mode is unchanged
-        # (byte-identical flat indexing). ``_seg_offsets`` gives the flat genome offset of each
+        # chromosome-arm length). When ``segment_sizes`` is None every segment has the uniform
+        # scalar ``segment_size``. ``_seg_offsets`` gives the flat genome offset of each
         # segment so positions can be addressed as offset[seg] + pos.
         if segment_sizes is None:
             segment_sizes = [segment_size] * n_segments
@@ -101,7 +100,7 @@ class Cell(object):
                                'death_rate': death_rate,
                                'dispersal_rate': dispersal_rate}
 
-        # Epistasis event set (R14, DESIGN_epistasis.md). ``event_bits`` is a bitmask over the shared
+        # Epistasis event set. ``event_bits`` is a bitmask over the shared
         # event alphabet ("event i has been acquired"); ``event_groups`` is the order this lineage
         # acquired them — the per-patient ordering ground truth TreeMHN/CBN are scored against.
         #
@@ -115,24 +114,21 @@ class Cell(object):
         #
         # Both are IMMUTABLE (int / nested tuple), so the shallow copy() in divide() propagates them
         # by value with no aliasing. Kept OFF genome_summary so the summary schema (and every
-        # dataframe built from it) is unchanged when epistasis is off. Events are MONOTONE by design:
+        # dataframe built from it) does not depend on epistasis. Events are MONOTONE by design:
         # once acquired, never lost — the generative assumption MHN/CBN/TreeMHN are defined under.
         self.event_bits = 0 if parent is None else parent.event_bits
         self.event_groups = () if parent is None else parent.event_groups
 
-        # Whole-genome-duplication ground truth (DESIGN_focal_cna.md v1): has THIS lineage ever
-        # undergone a WGD. A plain immutable bool, kept OFF genome_summary exactly like event_bits —
-        # so the summary schema (and every dataframe built from it) is unchanged when WGD is off — and
-        # propagated by value through both the shallow copy() in divide() and the parent branch above.
+        # Whole-genome-duplication ground truth: has THIS lineage ever undergone a WGD. A plain
+        # immutable bool, kept OFF genome_summary exactly like event_bits, and propagated by value through both the shallow copy() in divide() and the parent branch above.
         # Monotone: a WGD is never "undone", so once True it stays True down the lineage.
         self.is_wgd = False if parent is None else parent.is_wgd
 
-        # Drug-induced resistance STATE level (DESIGN_phenotype_plasticity.md §3.3): a carried,
-        # heritable epistate in [0, 1] (binary 0/1 for now) that is INDEPENDENT of the genome — so a
-        # CNA that deletes the triggering resistance allele leaves the cell in the state. Kept as a
-        # PLAIN ATTRIBUTE (like is_wgd), never in genome_summary and never seeded into
-        # evolutionary_parameters here, so with the feature off it adds no cell_evo column and the base
-        # schema is unchanged. Propagated by value through the shallow copy() in divide() (a daughter
+        # Drug-induced resistance STATE level: a carried, heritable epistate in [0, 1] (binary 0/1
+        # for now) that is INDEPENDENT of the genome — so a CNA that deletes the triggering
+        # resistance allele leaves the cell in the state. Kept as a PLAIN ATTRIBUTE (like is_wgd),
+        # never in genome_summary and never seeded into evolutionary_parameters here, so with the
+        # feature off it adds no cell_evo column. Propagated by value through the shallow copy() in divide() (a daughter
         # inherits it, exactly like _tx_mutagenized) and through the parent branch above; the engine's
         # update_evolutionary_parameters reads it (only when the feature is on) to fold the state into
         # the drug-protection max() and to charge its proliferation cost.
@@ -159,12 +155,12 @@ class Cell(object):
         blow-up of the raw multiplicative form for many-gene genomes.
         """
         gs = self.genome_summary
-        # Drug-induced resistance STATE — genetic entry (beta_bias, DESIGN_phenotype_plasticity.md §3.3).
+        # Drug-induced resistance STATE — genetic entry (beta_bias).
         # Acquiring >=1 mutated treatment-resistance copy SETS the carried state. This is a MONOTONE set
         # (never an else that clears it): a later CNA that deletes the allele mints a child which inherits
         # the state through divide(), and this clause — now seeing n_mut_tr==0 — does NOT clear it, so the
         # cell stays in the state with the allele gone. That is the whole feature. Guarded on the genetic
-        # knob, so it is a no-op when the feature is off (byte-identical). Never runs on a would-be EXIT
+        # knob, so it is a no-op when the feature is off. Never runs on a would-be EXIT
         # twin: the engine only builds exit twins from n_mut_tr==0 sources, so this cannot re-fire and
         # silently defeat exit.
         if selection.resistance_state_genetic and gs.get('n_mut_tr', 0) > 0:
@@ -175,8 +171,7 @@ class Cell(object):
                 gs, event_bits=self.event_bits),
             self.max_birth_rate)
         # Routed through selection so the epistasis layer can make a synthetic-lethal combination
-        # actually lethal. Returns `param` unchanged when epistasis is off / no exclusive pairs, so
-        # the death path is bit-identical to before.
+        # actually lethal; the baseline death rate passes through when there are no exclusive pairs.
         self.evolutionary_parameters['death_rate'] = selection.update_death_rate(
             gs, self.baseline_rates['death_rate'], event_bits=self.event_bits)
         self.evolutionary_parameters['dispersal_rate'] = min(
@@ -185,7 +180,7 @@ class Cell(object):
             0.0, 1.0 - 1.0 / selection.update_immune_resistance(gs))
         # All-or-nothing resistance (Selection.treatment_resistance_binary): any mutated copy makes
         # the cell FULLY resistant -- trait exactly 1.0, so the drug's (1 - trait) factor is exactly
-        # 0 and chemotherapy does not touch it, at any dose and any ploidy. Off by default.
+        # 0 and chemotherapy does not touch it, at any dose and any ploidy.
         self.evolutionary_parameters['treatment_resistance'] = (
             1.0 if (getattr(selection, "treatment_resistance_binary", False)
                     and gs.get('n_mut_tr', 0) > 0)
@@ -195,11 +190,11 @@ class Cell(object):
         # regrowing one -- see Selection.prop_drug_tolerance.
         self.evolutionary_parameters['drug_tolerance'] = max(
             0.0, 1.0 - 1.0 / selection.update_drug_tolerance(gs))
-        # Compartment-selection traits (v1): heritable resistances that attenuate a matching
+        # Compartment-selection traits: heritable resistances that attenuate a matching
         # compartment hazard in _death_rate (breach <- epithelial barrier, stromal_survival <-
         # stromal hazard), mapped from a relative fitness >=1 into [0,1) exactly like immune
         # resistance. With prop_breach/prop_stromal_survival=0 (default) N_*=0 -> update_* returns
-        # 1 -> trait 0, so this is a no-op and growth is byte-identical.
+        # 1 -> trait 0.
         #
         # WHAT the update_* below read off the genome is the selection model's ``trait_source``:
         # "dosage" (default) uses the total copies of the axis's genes, so copy-number change moves
@@ -212,13 +207,13 @@ class Cell(object):
             0.0, 1.0 - 1.0 / selection.update_stromal_survival(gs))
         self.evolutionary_parameters['met_survival'] = max(
             0.0, 1.0 - 1.0 / selection.update_met_survival(gs))
-        # Drug-induced resistance STATE (§3.3): surface the carried state LEVEL into
+        # Drug-induced resistance STATE: surface the carried state LEVEL into
         # evolutionary_parameters so proliferation_cost can charge it (below) and the engine's
         # protection term can read it. Injected ONLY when the feature is on, so with it off the
-        # evolutionary_parameters dict — and hence the cell_evo schema — is byte-identical.
+        # cell_evo schema has no resistance_state column.
         if selection.resistance_state_on:
             self.evolutionary_parameters['resistance_state'] = self.resistance_state
-        # Go-or-grow trade-off (R15): the dissemination/niche traits cost proliferation everywhere,
+        # Go-or-grow trade-off: the dissemination/niche traits cost proliferation everywhere,
         # while their benefits are compartment-gated in _death_rate, so each is net-favoured only in its
         # niche. Applied AFTER the traits are known; a no-op (x1.0) unless a *_cost is configured.
         self.evolutionary_parameters['division_rate'] *= selection.proliferation_cost(
@@ -315,7 +310,7 @@ class Cell(object):
         # Every category's wild-type count is maintained here whatever the selection model does with
         # it: these counts are the genome's ground truth (and are read back by the assay/clone
         # exports), not a fitness cache. Under ``trait_source="mutation"`` the n_wt_* of the four
-        # TRAIT axes simply stop feeding the trait value, so this bookkeeping is unchanged and only
+        # TRAIT axes simply stop feeding the trait value: this bookkeeping is the same and only
         # Selection's reading of it differs.
         n_mut_onc = int(allele_bits[selection.onc[seg]].sum())
         n_wt_onc = len(selection.onc[seg]) - n_mut_onc
@@ -494,7 +489,6 @@ class Cell(object):
                         dosage_law="haplotype"):
         """Allele-resolved expression: return ``(exp_p, exp_m)`` instead of their sum.
 
-        This is R13's hard engine prerequisite (DESIGN_expression.md §2, §6-v2). The legacy
         :meth:`get_exp` SUMS the ``p``/``m`` haplotypes, which throws away the B-allele frequency in
         RNA — precisely the signal Numbat / CalicoST / cardelino invert. Keeping the two layers
         separate emits a BAF (``exp_p / (exp_p + exp_m)``) and lets dosage and cis-SNV effects act
@@ -515,22 +509,22 @@ class Cell(object):
           effect is graded by how many copies actually carry the mutation.
 
         All three arguments default to None = disabled (identity), so this reduces to a plain
-        allele-split dosage model when the R13 overlays are off.
+        allele-split dosage model when the expression overlays are off.
 
         ``dosage_law`` chooses where ``s_g`` acts. ``"haplotype"`` (the default) is the law above: a
         lost haplotype is silent whatever ``s_g``, so losses are never buffered, and a copy-neutral
         loss of heterozygosity lowers expression when ``s_g < 1``. ``"total"`` buffers gains and losses
         alike, on the total copy number ``C``: the gene's expression is
         ``base_g · max(1 + s_g·(min(C, sat)/2 − 1), 0)`` (zero when ``C == 0``), split between the
-        haplotypes in proportion to their ``"haplotype"``-law dosages, so allelic ratios are as
-        before. Per-gene slopes of TCGA breast tumours buffer losses as much as gains
+        haplotypes in proportion to their ``"haplotype"``-law dosages, so allelic ratios are the
+        same under both laws. Per-gene slopes of TCGA breast tumours buffer losses as much as gains
         (validation/paper/supp_dosage.py), which the ``"haplotype"`` law cannot produce.
 
         NOTE this is deliberately NOT the scale of :meth:`get_exp`, which returns base·(1 + copies)
         (a wild-type diploid gene -> 3·base) while normal cells bypass it entirely and sit at 1·base.
         The allele path puts cancer and normal on ONE scale (wild-type diploid -> base for both),
         which is what a malignant-vs-reference comparison (inferCNV) needs. It only ever applies when
-        `expression_params` is set, so nothing existing re-baselines.
+        `expression_params` is set.
         """
         exp_p = np.zeros(self.n_genes)
         exp_m = np.zeros(self.n_genes)
@@ -627,7 +621,7 @@ class ImmuneCell(Cell):
         self.genotype_id = self.type
 
 class HostCell(Cell):
-    # Metastatic-deposit host parenchyma (R9): the generic resident tissue the invading cancer must
+    # Metastatic-deposit host parenchyma: the generic resident tissue the invading cancer must
     # displace in the met grid — immortal/static like epithelial/stromal, only diluted, never cleared.
     def __init__(self, **cell_kwargs):
         super(HostCell, self).__init__(**cell_kwargs)
@@ -646,20 +640,18 @@ class CancerCell(Cell):
         # n_snvs_per_allele is the Poisson mean number of new SNVs each allele (physical copy)
         # acquires in a mutating division: SNVs are spread genome-wide over all alleles, so the
         # expected number of new SNVs scales with ploidy/copy number (≈ n_snvs_per_allele ×
-        # number of alleles). Exposed as configurable parameters so inference can estimate them
-        # (DESIGN_inference A.0).
+        # number of alleles). Exposed as configurable parameters so inference can estimate them.
         self.mutation_rate = mutation_rate
         self.snv_prob = snv_prob
         self.cnv_prob = cnv_prob
         self.n_snvs_per_allele = n_snvs_per_allele
         self.amp_prob = amp_prob
-        # wgd_rate is a SEPARATE per-division channel (DESIGN_focal_cna.md v1): the probability that
-        # a mutating division is a whole-genome duplication INSTEAD of the usual SNV/CNA split, leaving
-        # snv_prob/cnv_prob semantics intact. Default 0.0 -> WGD OFF -> mutate() draws no extra random
-        # variable, so growth is byte-identical to before (the F8 off-by-default discipline).
+        # wgd_rate is a SEPARATE per-division channel: the probability that a mutating division is a
+        # whole-genome duplication INSTEAD of the usual SNV/CNA split, leaving snv_prob/cnv_prob
+        # semantics intact. At 0.0 mutate() draws no extra random variable.
         self.wgd_rate = wgd_rate
         # force_snv: when every per-allele Poisson draw of an SNV event comes up 0, place one SNV
-        # anyway (True, the historical default), or let the division leave the genome unchanged
+        # anyway (True, the default), or let the division leave the genome unchanged
         # (False). Neither demon nor CINner forces a mutation: both draw Poisson counts that may be
         # zero. Forcing adds about 4% to the paper regime's SNV supply and about 25% at
         # n_snvs_per_allele 0.05, so the paper regime turns it off.
@@ -675,8 +667,8 @@ class CancerCell(Cell):
         """Give this cell a private copy of segment ``seg``'s dict and its two hap lists before the
         segment is mutated (the individual allele bitsets stay shared until each is itself copied on
         write, in the mutate branches). Idempotent within one division via ``self._cow_segs``. This
-        is the per-segment half of the structural-sharing copy-on-write that replaces mutate()'s old
-        whole-genome deepcopy; only segments a division actually writes to are copied."""
+        is the per-segment half of mutate()'s structural-sharing copy-on-write; only segments a
+        division actually writes to are copied."""
         if seg in self._cow_segs:
             return
         old = self.genome[seg]
@@ -690,7 +682,7 @@ class CancerCell(Cell):
         # position leaves genome_summary unchanged (a pure passenger), so it returns the sentinel
         # ``"passenger"`` and skips the summary update + CINner recompute + genotype id — the caller
         # folds it into the parent clone. ``None`` (the default, and every non-coarsening caller such
-        # as the cell engine) preserves the original behaviour byte-for-byte. Only ever set when the
+        # as the cell engine) always updates the summary. Only ever set when the
         # engine's ``coarsen_passengers`` is on, which is force-disabled under epistasis (so skipping
         # the summary update can never miss an event firing from a neutral-looking SNV).
         # SNV/CNA split, per-allele SNV rate and amp/del split default to this genotype's
@@ -708,10 +700,10 @@ class CancerCell(Cell):
         # only a handful of the n_segments segments, so we copy the top-level list and the two
         # mutable summary lists cheaply here and copy each SEGMENT's dict / hap-list / allele bitset
         # lazily, on first write, via _cow_privatize. Untouched segments stay shared with the parent
-        # (their bitsets are never mutated in place — see the per-allele .copy() below). This is
-        # byte-identical to the old ``deepcopy(self.genome)`` (same bits, same rng draws) but its
-        # cost scales with segments-touched, not n_segments — the dominant growth cost when almost
-        # every division mutates (high mutation_rate). See DESIGN_scalability.md §5 phase 6.
+        # (their bitsets are never mutated in place — see the per-allele .copy() below). The result
+        # equals a whole-genome deepcopy (same bits, same rng draws) but its cost scales with
+        # segments touched, not n_segments — the dominant growth cost when almost every division
+        # mutates (high mutation_rate).
         self.genome = list(self.genome)                     # private top list; seg dicts shared for now
         gs = dict(self.genome_summary)                      # private summary; two lists still shared
         gs['seg_cns'] = list(gs['seg_cns'])
@@ -727,10 +719,9 @@ class CancerCell(Cell):
         if not any(self.genome[s]['p'] or self.genome[s]['m'] for s in range(self.n_segments)):
             return False
         hit_functional = False   # coarsening: did any SNV land on a fitness-relevant position?
-        # WGD is its own event channel (DESIGN_focal_cna.md v1), fired with probability wgd_rate per
-        # mutating division INSTEAD of the SNV/CNA split. The `wgd_rate > 0` guard is what keeps the
-        # off-by-default path byte-identical: at the default 0.0 no random variable is drawn here, so
-        # the rng.choice below sees the exact same stream as before WGD existed.
+        # WGD is its own event channel, fired with probability wgd_rate per mutating division
+        # INSTEAD of the SNV/CNA split. The `wgd_rate > 0` guard means that at 0.0 no random
+        # variable is drawn here, so the rng stream is the same as a model without WGD.
         if wgd_rate > 0 and rng.random() < wgd_rate:
             event = 'wgd'
         else:
@@ -845,9 +836,8 @@ class CancerCell(Cell):
                 sign = -1
                 allele_bits = self.genome[seg][hap][all].copy()  # capture before removing
                 # Remove the copy. The segment may reach 0 copies (nullisomy) — a real state the
-                # viability check handles. Keeping the allele but still decrementing seg_cns (the
-                # old len==1 special case) drove copy number NEGATIVE; deleting keeps seg_cns equal
-                # to the actual allele count. Segments with 0 copies carry zero CNV selection
+                # viability check handles. Deleting keeps seg_cns equal to the actual allele count,
+                # so copy number never goes negative. Segments with 0 copies carry zero CNV selection
                 # weight, so they are never picked for further deletion.
                 del self.genome[seg][hap][all]
             self.update_genome_summary_cnv(selection, allele_bits, seg, sign) # for evolutionary parameters

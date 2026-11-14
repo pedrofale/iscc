@@ -1,4 +1,4 @@
-"""F7b mutation-aware scRNA read/count tests (DESIGN_features §C).
+"""Mutation-aware scRNA read/count tests.
 
 CI-light (scReadSim is an optional binary): the count-level layer is asserted directly, and the
 read shell-out is skipped gracefully. The load-bearing invariants:
@@ -119,7 +119,7 @@ def test_emit_scrna_reads_counts_only_path(tmp_path):
     cd = t.make_cell_data()
     res = emit_scrna_reads(cd, obs_fidelity=0.5, protocol="10x", seed=3,
                            outdir=str(tmp_path))
-    # UMI totals conserved against the F3 count matrix; no binary/reference -> counts-only.
+    # UMI totals conserved against the scRNA count matrix; no binary/reference -> counts-only.
     assert np.array_equal(res["alt"].values + res["ref"].values, res["total"].values)
     assert res["status"].startswith("counts-only")
     assert res["dna_vaf"].shape == res["obs_vaf"].shape

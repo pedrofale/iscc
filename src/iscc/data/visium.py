@@ -1,11 +1,10 @@
-"""Spatial transcriptomics (Visium) assay with a spatially-correlated batch model (F6).
+"""Spatial transcriptomics (Visium) assay with a spatially-correlated batch model.
 
-Upgrades the original grid-spots -> averaged-expression -> fixed-multinomial stub to a proper
-assay matching the scRNA (F3) / DNA (F4/F5) modalities: an `Assay` + a `VisiumBatch` realization
-(`batch.py`) + hyper-parameters (`VisiumBatchHyperParams`) + AnnData output, with an `estimate`
-(`estimate_visium`, M4 §C.2) and validation (`validate_visium.py`).
+Built like the scRNA and DNA modalities: an `Assay` + a `VisiumBatch` realization
+(`batch.py`) + hyper-parameters (`VisiumBatchHyperParams`) + AnnData output, with an estimator
+(`estimate_visium`) and validation (`validate_visium.py`).
 
-Generative model for spot *s*, gene *g* (DESIGN_features §D "spatial" row):
+Generative model for spot *s*, gene *g*:
 
   1. **Spot layout** — Visium-like hexagonal spots over the 2D section (`spot_pitch` spacing,
      `spot_radius` capture radius, ~1-10 cells/spot). iscc is 2D (single section, no z).
@@ -17,7 +16,7 @@ Generative model for spot *s*, gene *g* (DESIGN_features §D "spatial" row):
      random field over the spot coords (squared-exponential GP, `field_lengthscale` / `field_sigma`)
      times an `edge_sigma` tissue-boundary falloff, scaling the per-spot library so the realized
      depth has positive spatial autocorrelation (Moran's I > 0). Lives in `VisiumBatch`.
-  5. **Shared §B.2 layer** — per-gene batch factor (`sigma_batch`), per-spot library
+  5. **Layer shared with scRNA** — per-gene batch factor (`sigma_batch`), per-spot library
      (LogNormal `mu_counts`/`sigma_counts`), the pluggable NB/DM count draw (`COUNT_MODELS`),
      and ambient soup (`ambient_frac`).
 
@@ -74,7 +73,7 @@ class Visium(Assay):
     """Visium spatial assay: lays spots over the section, aggregates cells, applies a `VisiumBatch`.
 
     Any hyper-parameter below can be overridden explicitly (``None`` keeps the default, which
-    is calibrated to a real 10x Visium section). Legacy aliases are accepted: ``n_reads`` maps
+    is calibrated to a real 10x Visium section). Aliases are accepted: ``n_reads`` maps
     onto ``mu_counts``, and a spot grid requested via ``n_spots_x`` / ``n_spots_y`` derives
     ``spot_pitch`` from ``grid_side`` at run time. The number of spots (and cells per spot)
     follows from ``grid_side`` (passed to ``run``) and the sampled ``cell_data``, so there is
@@ -88,7 +87,7 @@ class Visium(Assay):
     batch_label : str, optional
         Section/batch label; defaults to ``f"visium{seed}"``.
     n_reads : float, optional
-        Legacy alias for ``mu_counts`` (mean per-spot library size).
+        Alias for ``mu_counts`` (mean per-spot library size).
     spot_pitch : float, default 2.0
         Spot centre-to-centre spacing (coordinate units); sets spot density / number of spots.
         Overridden at run time if ``n_spots_x`` / ``n_spots_y`` are given.
@@ -118,7 +117,7 @@ class Visium(Assay):
     bleed_rate : float, default 0.0
         Spot swapping, as SpotClean models it: the share of each spot's counts that bleeds to other
         spots of the slide, including spots without tissue, conserving the total (see
-        [`bleed`][iscc.data.visium_background.bleed]). 0 disables; then the assay is unchanged.
+        [`bleed`][iscc.data.visium_background.bleed]). 0 disables it.
     bleed_distal : float, default 0.0
         Share of the bled counts spread uniformly over the slide (the slide-wide ambient floor).
     bleed_sigma : float, default 0.0
@@ -155,11 +154,11 @@ class Visium(Assay):
         centroid). The v1 slide is wider than it is tall, so a tall section captures more of itself
         rotated 90° to lie along the slide's long axis.
     n_spots_x : int, optional
-        Legacy alias: request a fixed spot-grid width. When both ``n_spots_x`` and
+        Alias: request a fixed spot-grid width. When both ``n_spots_x`` and
         ``n_spots_y`` are set, the pitch is derived as ``grid_side / max(n_spots_x, n_spots_y)``
         at run time instead of using ``spot_pitch``.
     n_spots_y : int, optional
-        Legacy alias: request a fixed spot-grid height (see ``n_spots_x``).
+        Alias: request a fixed spot-grid height (see ``n_spots_x``).
     seed : int, default 42
         RNG seed. Fixes the technical signature (per-gene batch factor, spatial capture field,
         per-spot depth) and is reproducible.
@@ -183,7 +182,7 @@ class Visium(Assay):
 
         params = VisiumBatchHyperParams().to_dict()
         params["count_model"] = count_model
-        if n_reads is not None:                            # legacy alias -> per-spot library
+        if n_reads is not None:                            # alias -> per-spot library
             params["mu_counts"] = float(n_reads)
         for name, val in dict(
             spot_pitch=spot_pitch, spot_radius=spot_radius, mu_counts=mu_counts,
@@ -495,7 +494,7 @@ class Visium(Assay):
         obs["col"] = spot_coords[:, 1]
         self.obs = obs
         self.clone_fracs = clone_fracs
-        # legacy attributes kept for any caller of the old stub
+        # aliases / CSV-shaped views of the outputs above
         self.spot_umi = self.spot_counts
         self.spot_crd = pd.DataFrame(spot_coords, index=spot_names, columns=["row", "col"])
         self.spot_cell_counts = pd.DataFrame({"n_cells": n_cells_arr}, index=spot_names)
@@ -559,7 +558,6 @@ class Visium(Assay):
 
     def write(self, out_path, write_h5ad=True):
         os.makedirs(out_path, exist_ok=True)
-        # CSVs kept for backward compatibility with the previous pipeline / tests
         self.spot_counts.to_csv(os.path.join(out_path, "spot_umi.csv"))
         self.spot_crd.to_csv(os.path.join(out_path, "spot_crd.csv"))
         self.spot_cell_counts.to_csv(os.path.join(out_path, "spot_cell_counts.csv"))

@@ -1,13 +1,13 @@
-"""Whole-genome duplication (WGD) — v1 of DESIGN_focal_cna.md.
+"""Whole-genome duplication (WGD).
 
 WGD is a punctuated event that doubles every copy on both homologs of every segment, gated by the
-existing CINner viability limits (max_ploidy / max_cn). It is a SEPARATE per-division channel
+CINner viability limits (max_ploidy / max_cn). It is a SEPARATE per-division channel
 (``wgd_rate``) that leaves the SNV/CNA split untouched and is OFF by default, so growth is
-byte-identical to before when ``wgd_rate == 0``.
+byte-identical to a WGD-free engine when ``wgd_rate == 0``.
 
 Covered here:
-  * ``wgd_rate == 0`` -> growth is byte-identical (golden hashes, verified equal to the pre-WGD
-    baseline via ``git stash``; the count-engine path is the reference).
+  * ``wgd_rate == 0`` -> growth is byte-identical (golden hashes; the count-engine path is the
+    reference).
   * a forced WGD doubles every segment's copy count and carries existing SNVs into the duplicates.
   * a WGD that would breach ``max_ploidy`` is REJECTED AT BIRTH (non-viable daughter), not applied.
   * both engines drive WGD through the same ``Cell.mutate`` seam and agree that it doubles copies.
@@ -63,8 +63,7 @@ def _fresh_cancer(selection, wgd_rate=0.0, **kw):
 # --- bit-identical when off -------------------------------------------------------------------
 # The WGD branch is gated behind ``wgd_rate > 0 and rng.random() < wgd_rate``. At the default 0.0
 # the short-circuit means NO random variable is drawn, so the rng stream (and every downstream
-# state transition) is exactly what it was before WGD existed. These golden fingerprints were
-# captured with the WGD changes stashed and re-checked with them applied -- identical both ways.
+# state transition) is exactly that of an engine without WGD. The golden fingerprints pin it.
 _GOLDEN_COUNT = {
     1: (46, "566c7173995f34bd943ace2019141cae"),
     2: (52, "dd2f14ac83142c97c0a87dfb6774f49a"),

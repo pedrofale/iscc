@@ -26,13 +26,11 @@ class Selection(object):
         # ONLY for the config-determined gene-role LAYOUT (make_drivers / make_dispersal /
         # make_treatment_resistant / make_immune_resistant), never for evolution — so the engines
         # hand it a dedicated LAYOUT rng seeded by a config-determined ``layout_seed`` (shared across
-        # same-config runs), decoupled from the per-run evolution seed. See DESIGN_cohort.md §1.
+        # same-config runs), decoupled from the per-run evolution seed.
         # ``layout_seed`` is resolved HERE, before ``self.rng``, so that ``layout_seed`` ALONE is
         # enough to reproduce the layout: constructed without an explicit ``rng`` (probes, tests,
         # notebooks) the generator is seeded from it, drawing the SAME layout the engines draw —
-        # they build ``default_rng(layout_seed)`` themselves and pass it in as ``rng``, so their
-        # behaviour is unchanged. Without this a bare ``Selection(layout_seed=42)`` re-drew a fresh
-        # random layout on every call, silently varying which loci are drivers or resistant.
+        # they build ``default_rng(layout_seed)`` themselves and pass it in as ``rng``.
         self.layout_seed = DEFAULT_LAYOUT_SEED if layout_seed is None else layout_seed
         self.rng = rng if rng is not None else np.random.default_rng(self.layout_seed)
         # Fixed about the genome. Segments may have unequal sizes (real-genome mode: size
@@ -46,16 +44,15 @@ class Selection(object):
         self.n_genes = int(self._seg_offsets[-1])
         # Per-gene germline (inherited) variant mask: 0 = none, 1 = heterozygous, 2 = homozygous.
         # All zeros unless a patient's germline is seeded (iscc.tumor.germline.apply_germline writes
-        # it), and surfaced by get_gene_data only when non-empty, so the default annotation is
-        # unchanged. It lives here because the germline is a property of the GENOME, alongside which
+        # it), and surfaced by get_gene_data only when non-empty. It lives here because the germline is a property of the GENOME, alongside which
         # genes are drivers.
         self.germline_types = np.zeros(self.n_genes, dtype=int)
         self.prop_driver = prop_driver
         # Exact driver counts per segment, as ``[(n_oncogenes, n_suppressors), ...]`` (one pair per
         # segment), instead of the per-gene ``prop_driver`` draw. An arm-homologous growth genome
         # (``iscc.data.human.arm_genome``) sets them from each arm's Cancer Gene Census content, so the
-        # driver load of an arm does not change with the resolution. None (default) keeps the
-        # ``prop_driver`` draw and the layout byte-identical.
+        # driver load of an arm does not change with the resolution. None (default) uses the
+        # ``prop_driver`` draw.
         if segment_drivers is not None:
             segment_drivers = [(int(o), int(t)) for o, t in segment_drivers]
             if len(segment_drivers) != n_segments:
@@ -68,16 +65,16 @@ class Selection(object):
         self.prop_dispersal = prop_dispersal
         self.prop_treatment_resistance = prop_treatment_resistance
         self.prop_immune_resistance = prop_immune_resistance
-        # Compartment-dependent selection (v1, DESIGN_phenotype_plasticity.md §2): two more gene-based
-        # heritable axes, exact analogues of immune resistance. ``breach`` attenuates the epithelial-
-        # ring barrier; ``stromal_survival`` attenuates the stromal hazard. OFF by default (prop 0 ->
-        # empty axis -> N_*=0 -> update_* returns 1 -> trait 0 -> zero death terms -> byte-identical).
+        # Compartment-dependent selection: two more gene-based heritable axes, exact analogues of
+        # immune resistance. ``breach`` attenuates the epithelial-ring barrier; ``stromal_survival``
+        # attenuates the stromal hazard. OFF by default (prop 0 -> empty axis -> N_*=0 -> update_*
+        # returns 1 -> trait 0 -> zero death terms).
         self.prop_breach = prop_breach
         self.prop_stromal_survival = prop_stromal_survival
-        # Metastatic-host survival (R9, metastasis module): a further gene-based heritable axis, exact
+        # Metastatic-host survival (metastasis module): a further gene-based heritable axis, exact
         # analogue of stromal_survival, that attenuates the metastatic host-tissue hazard (_met_hazard)
         # and biases transit survival on the primary->met migration hop. OFF by default (prop 0 -> empty
-        # axis -> N_ms=0 -> update_met_survival returns 1 -> trait 0 -> zero met terms -> byte-identical).
+        # axis -> N_ms=0 -> update_met_survival returns 1 -> trait 0 -> zero met terms).
         self.prop_met_survival = prop_met_survival
         # DRUG TOLERANCE — the persister axis (Sharma et al. 2010; Hata et al. 2016). Deliberately NOT
         # a second flavour of resistance: a tolerant clone SURVIVES therapy but barely proliferates,
@@ -103,48 +100,45 @@ class Selection(object):
         self.stromal_survival_effects = stromal_survival_effects
         self.met_survival_effects = met_survival_effects
         self.drug_tolerance_effects = drug_tolerance_effects
-        # Compartment-context fitness TRADE-OFFS (R15, go-or-grow): each niche/dissemination trait
+        # Compartment-context fitness TRADE-OFFS (go-or-grow): each niche/dissemination trait
         # carries a PROLIFERATION cost that applies EVERYWHERE, while its BENEFIT (attenuating a hazard)
         # is gated to its compartment in _death_rate. So a trait is net-favoured only where its niche
         # benefit outweighs the cost (breach at the wall, stromal in the stroma, met in the deposit,
         # resistance under chemo) and is selected AGAINST elsewhere — instead of being a free neutral
         # passenger that hitchhikes into every compartment. `cost` fraction of division lost per unit
-        # trait. ALL DEFAULT 0.0 -> proliferation_cost() returns 1.0 -> division byte-identical to before.
+        # trait. ALL DEFAULT 0.0 -> proliferation_cost() returns 1.0.
         self.breach_cost = breach_cost
         self.stromal_survival_cost = stromal_survival_cost
         self.met_survival_cost = met_survival_cost
         self.treatment_resistance_cost = treatment_resistance_cost
         # ALL-OR-NOTHING resistance. The graded map (trait = 1 - 1/effects^(2*n_mut/ploidy)) means a
         # cell with one mutated copy at the shipped effects 2.8 is only 64% resistant -- it still
-        # absorbs 36% of the kill and dies alongside the sensitive bulk, just slower, which is why a
-        # "resistant" clone could not expand DURING treatment. It also leaks resistance back on a
+        # absorbs 36% of the kill and dies alongside the sensitive bulk, just slower, so a
+        # "resistant" clone cannot expand DURING treatment. It also leaks resistance back on a
         # whole-genome doubling, which halves the exponent (one mutated copy at effects 20 falls from
         # 0.95 to 0.78). With this flag ANY resistance mutation sets the trait to exactly 1.0: the
         # drug term (1 - trait) becomes exactly zero -- the cell is untouched by chemotherapy -- and
         # the clone pays the FULL treatment_resistance_cost, so resistance is a clean all-or-nothing
-        # trade instead of a sliding scale. Default False -> the graded map, byte-identical.
+        # trade instead of a sliding scale. Default False -> the graded map.
         self.treatment_resistance_binary = bool(treatment_resistance_binary)
         # Tolerance is COSTLY by construction: that is what keeps persisters rare before therapy
         # (out-competed in a crowded deme) instead of taking over the tumour.
         self.drug_tolerance_cost = drug_tolerance_cost
 
-        # DRUG-INDUCED RESISTANCE STATE (DESIGN_phenotype_plasticity.md §3.3). A carried, heritable
-        # cell-state INDEPENDENT of the genome, so a CNA that deletes the triggering resistance allele
-        # does NOT restore sensitivity — the whole point being that iscc's genomic-only resistance is
-        # losable by copy-number accident (measured ~4.3e-4/division), which is why mode IV relapses at
-        # 99.1% resistant instead of a clean 100%. The state is carried on the cell (Cell.resistance_state),
+        # DRUG-INDUCED RESISTANCE STATE. A carried, heritable cell-state INDEPENDENT of the genome,
+        # so a CNA that deletes the triggering resistance allele does NOT restore sensitivity, whereas
+        # genomic-only resistance is losable by copy-number accident. The state is carried on the cell (Cell.resistance_state),
         # NOT in genome_summary; a state transition MINTS A NEW GENOTYPE ID (the engine's _state_twin).
         # Whiting & Graham's plasticity+noise categories, the two iscc's four (all-genetic) escape modes
-        # lacked. ALL knobs default to the inert value; ``resistance_state_on`` is then False and every
-        # new code path is skipped -> growth is byte-identical (the F8 off-by-default discipline).
+        # lack. ALL knobs default to the inert value; ``resistance_state_on`` is then False and every
+        # resistance-state code path is skipped.
         #   genetic   : acquiring n_mut_tr>0 SETS the state (beta_bias); retained if the allele is later lost.
         #   effect    : drug protection conferred while in the state, folded into the max(...) protection.
         #   cost      : proliferation cost per unit state, charged ALWAYS (like the other trait costs), so
         #               OFF drug a cell that exits is fitter -> the state also reverts by SELECTION.
         #   induction : per-generation drug-induced entry probability scale (plasticity, tau engine).
         #   relax     : per-generation OFF-drug exit probability = 1/tau_relax. >0 => exit is possible
-        #               (relax->inf-tau is permanent resistance; short tau is a classical persister). This
-        #               is NOT the rejected trait LATCH: exit is a first-class tunable knob, not forbidden.
+        #               (relax->inf-tau is permanent resistance; short tau is a classical persister).
         #   noise     : env-independent stochastic switching (sigma_noise).
         self.resistance_state_genetic = bool(resistance_state_genetic)
         self.resistance_state_effect = float(resistance_state_effect)
@@ -158,7 +152,7 @@ class Selection(object):
         # fitness is untouched by this and always reads copy-number dosage (that is the CINner model
         # and it is the point of the copy-number layer).
         #
-        #   "dosage"   (default, historical): the trait reads the ploidy-normalised dosage of ALL
+        #   "dosage"   (default): the trait reads the ploidy-normalised dosage of ALL
         #              trait-gene copies, mutated or not. Because a trait axis is scattered uniformly
         #              at ``prop_*``, a segment's trait-gene count fluctuates binomially around the
         #              genome mean, so almost every copy-number change moves the trait — a gain of a
@@ -214,9 +208,8 @@ class Selection(object):
         self.make_met_survival()
         self.make_expmap()
         # LAST on purpose: make_drug_tolerance() draws from the layout rng even when
-        # prop_drug_tolerance is 0 (binomial(1, 0.0, size=N) still consumes state), so calling it
-        # before make_expmap would shift the expression-map layout of every EXISTING config. Called
-        # last, an off-by-default tolerance axis leaves every other gene-role layout untouched.
+        # prop_drug_tolerance is 0 (binomial(1, 0.0, size=N) still consumes state), so called last
+        # it leaves every other gene-role layout independent of the tolerance axis.
         self.make_drug_tolerance()
 
         # Total number of genes in each category, used to make fitness *relative* to the
@@ -244,15 +237,14 @@ class Selection(object):
         
         self.gene_names = self.get_gene_names()
 
-        # Epistasis / dependency network (R14, DESIGN_epistasis.md). OFF BY DEFAULT: with no
-        # ``epistasis_params`` (or ``n_events=0``) nothing is built, ``self.epistasis`` stays None and
-        # every fitness path below is bit-identical to the additive model. When ON, the network is
+        # Epistasis / dependency network. OFF BY DEFAULT: with no ``epistasis_params`` (or
+        # ``n_events=0``) nothing is built, ``self.epistasis`` stays None and every fitness path
+        # below is the additive model. When ON, the network is
         # drawn from a DEDICATED layout SUB-STREAM (``layout_seed + LAYOUT_OFFSET_EPISTASIS``) rather
         # than from ``self.rng``: the network is part of the SHARED landscape (every patient of a
         # cohort must evolve under the SAME network for MHN/TreeMHN to be well-posed), and using a
         # sub-stream means turning epistasis on — or changing n_interactions/topology — leaves the
-        # gene-role layout drawn from ``self.rng`` above untouched. (``self.layout_seed`` itself is
-        # resolved at the top of __init__, since ``self.rng`` now defaults to a stream seeded by it.)
+        # gene-role layout drawn from ``self.rng`` above untouched.
         self.epistasis_params = epistasis_params
         self.dependency_params = dependency_params
         self.epistasis = None
@@ -267,8 +259,8 @@ class Selection(object):
     @property
     def resistance_state_on(self):
         """Whether the drug-induced resistance-state feature is active. False (every knob at its inert
-        default) gates OFF all new code — no genetic entry, no ep injection, no cost, no transitions,
-        no ground-truth column — so growth and the golden hashes are byte-identical to before."""
+        default) gates OFF the whole feature — no genetic entry, no ep injection, no cost, no
+        transitions, no ground-truth column."""
         return bool(self.resistance_state_genetic
                     or self.resistance_state_effect > 0.0
                     or self.resistance_state_cost > 0.0
@@ -439,9 +431,8 @@ class Selection(object):
         # activated (breach / stromal_survival / met_survival / treatment_resistance, counted by
         # presence). A clone that stacks every program — the "super-clone" — thus exceeds a realistic
         # mutational-load ceiling and is non-viable, the CINner way. Counting the compartment traits is
-        # what stops one lineage from being optimal in every compartment at once. NOTE off-by-default:
-        # ``max_mut_drivers`` defaults to 1000, so this is a no-op (load << 1000) unless a config sets a
-        # realistic limit; and with prop_*=0 the compartment terms are 0 -> byte-identical either way.
+        # what stops one lineage from being optimal in every compartment at once. ``max_mut_drivers``
+        # defaults to 1000, so this is a no-op (load << 1000) unless a config sets a realistic limit.
         load = (genome_summary['n_mutated_drivers']
                 + int(genome_summary.get('n_mut_breach', 0) > 0)
                 + int(genome_summary.get('n_mut_ss', 0) > 0)
@@ -453,7 +444,7 @@ class Selection(object):
         return 1
 
     def update_death_rate(self, genome_summary, param, event_bits=0, **kwargs):
-        # Synthetic lethality (R14): a genotype carrying both events of a planted mutually-exclusive
+        # Synthetic lethality: a genotype carrying both events of a planted mutually-exclusive
         # pair is REMOVED, not merely slowed. Suppressing its division alone would not purge it --
         # the density-death slope is max(0, div - death), so a clone that has stopped dividing takes
         # no crowding death and simply persists. Off unless exclusive pairs are configured.
@@ -478,8 +469,7 @@ class Selection(object):
     def _trait_fitness(self, n_wt, n_mut, ploidy, n_total, effect):
         """Relative fitness of ONE dissemination/niche trait axis, under ``trait_source``.
 
-        ``"dosage"`` is exactly :meth:`_rel_fitness` with (effect, effect**2) — the historical
-        behaviour, kept bit-for-bit.
+        ``"dosage"`` is exactly :meth:`_rel_fitness` with (effect, effect**2).
 
         ``"mutation"`` drops the wild-type dosage term, i.e. it measures the axis RELATIVE TO THE SAME
         COPY-NUMBER STATE with every trait gene wild-type::
@@ -535,9 +525,8 @@ class Selection(object):
                                genome_summary['ploidy'], self.N_onc, de, de**2)
         tsg = self._rel_fitness(genome_summary['n_wt_tsg'], genome_summary['n_mut_tsg'],
                                 genome_summary['ploidy'], self.N_tsg, 1. / de, 1.)
-        # The epistasis term multiplies the additive model rather than replacing it: the additive
-        # driver-count fitness stays exactly what it was, and the network adds
-        # exp(sum_i beta_i x_i + sum_{i<j} E_ij x_i x_j) on top (DESIGN_epistasis.md §3).
+        # The epistasis term multiplies the additive model rather than replacing it: the network adds
+        # exp(sum_i beta_i x_i + sum_{i<j} E_ij x_i x_j) on top of the driver-count fitness.
         return og * tsg * self._epistasis_multiplier(event_bits)
 
     def update_dispersal_rate(self, genome_summary, **kwargs):
@@ -592,27 +581,26 @@ class Selection(object):
                                    genome_summary['ploidy'], self.N_ms, e)
 
     def proliferation_cost(self, ep):
-        """Go-or-grow trade-off multiplier on ``division_rate`` (R15): each dissemination/niche trait
+        """Go-or-grow trade-off multiplier on ``division_rate``: each dissemination/niche trait
         costs a fraction ``*_cost`` of division PER UNIT of the trait, applied EVERYWHERE, while the
         trait's BENEFIT is gated to its compartment in ``_death_rate``. So a trait is net-favoured only
         where the niche benefit outweighs the cost, and selected against elsewhere. Returns 1.0 when
-        every cost is 0 (default) -> division byte-identical to the additive model."""
+        every cost is 0 (default)."""
         return (max(0.0, 1.0 - self.breach_cost * ep.get("breach", 0.0))
                 * max(0.0, 1.0 - self.stromal_survival_cost * ep.get("stromal_survival", 0.0))
                 * max(0.0, 1.0 - self.met_survival_cost * ep.get("met_survival", 0.0))
                 * max(0.0, 1.0 - self.treatment_resistance_cost * ep.get("treatment_resistance", 0.0))
-                # Drug-induced resistance STATE (§3.3): the tolerant level charges proliferation like the
+                # Drug-induced resistance STATE: the tolerant level charges proliferation like the
                 # other traits and, unlike drug_tolerance, ALWAYS (on or off drug) — that permanent cost
                 # is what makes an exited (reverted) cell fitter off drug, so the state reverts by
                 # SELECTION as well as by relaxation. ``ep.get`` (never a bare subscript): the key is
-                # absent when the feature is off, and cost defaults 0.0, so the factor is exactly 1.0 ->
-                # division byte-identical.
+                # absent when the feature is off, and cost defaults 0.0, so the factor is exactly 1.0.
                 * max(0.0, 1.0 - self.resistance_state_cost * ep.get("resistance_state", 0.0)))
         # NOTE drug_tolerance is deliberately NOT charged here. Every other trait's cost is permanent
         # because the trait is permanent, but the persister state only exists while the drug does --
-        # a tolerant cell off drug is an ordinary cell. Charging it here made the trait unusable: a
-        # cost high enough to hold the pool at a residual-disease floor under drug also purged that
-        # pool to ~0.1% before treatment ever started. GenotypeTumor._apply_treatment applies
+        # a tolerant cell off drug is an ordinary cell. Charging it here would make the trait unusable:
+        # a cost high enough to hold the pool at a residual-disease floor under drug would also purge
+        # that pool before treatment ever started. GenotypeTumor._apply_treatment applies
         # drug_tolerance_cost as a division multiplier for the duration of the dose instead.
 
     def get_gene_names(self, gene_prefix='G'):
@@ -644,8 +632,8 @@ class Selection(object):
                          stromal_survival_types=pd.DataFrame(stromal_survival_types, index=gene_names),
                          met_survival_types=pd.DataFrame(met_survival_types, index=gene_names))
         # Germline mask (0 none / 1 heterozygous / 2 homozygous), added ONLY when this patient
-        # actually carries germline variants — so the annotation a plain tumour writes out, and the
-        # keys a reader gets back, are exactly what they were before germline existed.
+        # actually carries germline variants, so a tumour without germline variants has no
+        # germline_types key.
         germline_types = getattr(self, "germline_types", None)
         if germline_types is not None and np.any(germline_types):
             gene_data["germline_types"] = pd.DataFrame(np.asarray(germline_types), index=gene_names)

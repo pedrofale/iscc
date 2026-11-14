@@ -14,8 +14,8 @@ source. Total mass is conserved: the slide counts what the tissue released, redi
 
 :func:`bleed` applies this to the expected counts of :class:`iscc.data.Visium` after pooling and
 before the count draw, so the draw's noise acts on the bled expectation, as in SpotClean's model.
-It is off unless ``bleed_rate > 0``, and then draws no random numbers, so the assay's random stream
-is unchanged.
+It applies only when ``bleed_rate > 0`` and draws no random numbers, so the assay's random stream
+is the same with bleeding on or off.
 """
 import numpy as np
 

@@ -1,11 +1,11 @@
-"""The multi-patient COHORT layer (DESIGN_cohort.md §2).
+"""The multi-patient COHORT layer.
 
 Runs a DIFFERENT tumour per patient — each with its own **evolution** seed (private clones, private
 passenger mutations, patient-specific CNAs and spatial structure) — over ONE **shared, config-
 determined** landscape: the same ``layout_seed`` gives every patient the SAME driver/oncogene/TSG
-gene identities and the same shared per-cell-type baseline expression (the engine seed-decoupling
-fix, DESIGN_cohort.md §1). This is exactly what makes cohort analysis meaningful — recurrence,
-shared-vs-private structure — and is exactly the ground truth a real cohort can never provide.
+gene identities and the same shared per-cell-type baseline expression, whatever the evolution
+seed. This is exactly what makes cohort analysis meaningful — recurrence, shared-vs-private
+structure — and is exactly the ground truth a real cohort can never provide.
 
 Optional **subgroups** (personalized medicine): patients are partitioned into molecular subtypes that
 share the driver landscape but differ in EFFECT scalars (e.g. ``treatment_resistant_effects``), so —
@@ -13,7 +13,7 @@ coupled to :mod:`iscc.treatment` — a therapy benefits one subgroup and not ano
 answer key (the subgroup label + its true therapy response).
 
 ``Cohort`` is a thin wrapper over :class:`iscc.tumor.models.GenotypeTumor`; the heavy lifting (growth,
-CINner selection, materialisation) is unchanged. The batch/multiplexing emission lives in
+CINner selection, materialisation) is GenotypeTumor's. The batch/multiplexing emission lives in
 :mod:`iscc.cohort.batch` and the ground-truth tables in :mod:`iscc.cohort.groundtruth`.
 """
 from dataclasses import dataclass, field
@@ -28,7 +28,7 @@ from ..constants import DEFAULT_LAYOUT_SEED
 # selection_params keys that set gene POSITIONS (the layout). A subgroup delta touching these desyncs
 # the resistance/IR gene identities across subgroups (make_drivers, using only prop_driver, runs first
 # so oncogene/TSG identities stay shared regardless — but we warn so the user keeps the landscape
-# comparable on purpose). See DESIGN_cohort.md §2.1.
+# comparable on purpose).
 _LAYOUT_PROP_KEYS = {"prop_driver", "prop_dispersal", "prop_treatment_resistance", "prop_immune_resistance"}
 
 
@@ -44,7 +44,7 @@ class Subgroup:
     an EFFECT scalar such as ``treatment_resistant_effects``; during growth, resistance mutations arise
     spontaneously at the shared resistance loci and drift as neutral standing variation, and under
     therapy they are selected in the high-effect subtype (which relapses) and inert in the low-effect
-    subtype (which is eradicated). See :func:`iscc.cohort.cohort` / the personalized-medicine benchmark.
+    subtype (which is eradicated).
 
     ``germline_mutations`` (flat gene indices) seed an INHERITED germline variant into EVERY cell of the
     patient — the founder cancer cell AND every normal cell type present (epithelial, stromal, immune,
@@ -120,7 +120,7 @@ class Cohort:
         # patient the SAME program dictionary / niche gene sets while their evolution (and hence which
         # programs each patient's clones actually drive, and which CNAs they carry) stays private.
         # That shared-dictionary/private-activity split is the ground truth the cohort-level
-        # program benchmark scores against (DESIGN_expression.md §4.3).
+        # program benchmark scores against.
         self.expression_params = expression_params
         self.microenv_params = microenv_params
         self.grow_steps = grow_steps
@@ -168,7 +168,7 @@ class Cohort:
                 warnings.warn(
                     f"subgroup {s.name!r} delta changes layout prop(s) {sorted(bad)}; this desyncs the "
                     "resistance/IR gene identities across subgroups (oncogene/TSG identities stay "
-                    "shared). Prefer EFFECT scalars for subgroups. See DESIGN_cohort.md §2.1.",
+                    "shared). Prefer EFFECT scalars for subgroups.",
                     stacklevel=3)
 
     def patient_selection_params(self, patient_idx):
@@ -306,8 +306,8 @@ def _apply_germline_mutations(tumor, gene_indices):
     set_bits(founder, update_summary=True)
     founder.update_evolutionary_parameters(sel)
     # Every non-cancer representative, tested by exclusion rather than by listing the normal
-    # types — a list silently misses any type added later (it already missed the metastatic
-    # deposit's host parenchyma, leaving those cells without the patient's germline background).
+    # types, so no normal type (e.g. a metastatic deposit's host parenchyma) is left without the
+    # patient's germline background.
     for gid, rep in tumor.genotypes.items():
         cell_type = getattr(rep, "type", None)
         if gid != tumor.founder_id and cell_type is not None and cell_type != "cancer":

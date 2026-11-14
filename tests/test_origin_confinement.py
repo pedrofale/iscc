@@ -406,7 +406,7 @@ def test_no_subtype_key_changes_nothing():
 def test_truncal_sites_measures_the_trunk_and_seeded_record_is_empty(grown):
     """With no `founder_mutations`, `seeded_truncal_sites` is empty — nothing was planted — while
     `truncal_sites()` still finds the trunk the confined acinus built. Reading the empty attribute
-    as if it were the trunk is what silently produced nan purity estimates downstream."""
+    as if it were the trunk would silently produce nan purity estimates downstream."""
     T = grown["confined"]
     T.make_cell_data()
     assert len(T.seeded_truncal_sites) == 0
@@ -436,8 +436,8 @@ def test_truncal_sites_excludes_germline_and_tightens_with_the_cutoff(grown):
 
 def test_max_cells_warns_only_when_it_caps_an_explicit_section(grown):
     """The cap is a MEMORY budget applied after region/depth_frac. When it binds on a section it,
-    not the physical request, sets the density — silently, until now. A plain whole-tumour
-    materialisation being capped is the documented representative-biopsy behaviour, not a warning."""
+    not the physical request, sets the density, so it warns. A plain whole-tumour materialisation
+    being capped is the documented representative-biopsy behaviour, not a warning."""
     T = grown["confined"]
     small = max(1, T.get_tumor_size() // 10)
 

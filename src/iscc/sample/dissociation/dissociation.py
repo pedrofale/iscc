@@ -1,9 +1,9 @@
-"""F2 — dissociation biases: BIOLOGICAL sample-prep effects.
+"""Dissociation biases: BIOLOGICAL sample-prep effects.
 
 This models the sample-prep *biology* that happens when a solid tissue is
 dissociated into a single-cell suspension — distinct from the assay's
 sequencing-technical noise. Droplet doublets / ambient release are NOT modelled
-here; those belong to the F3 assay. F2 stays the sample-prep biology:
+here; those belong to the scRNA assay. This module is the sample-prep biology:
 
 * **cell-type-dependent dissociation efficiency -> composition bias** (the
   headline piece): each biological type (cancer / immune / stromal /
@@ -22,10 +22,9 @@ import numpy as np
 from ...constants import normal_names
 
 # Every NON-cancer cell type the engine can seed, taken from the engine's own list rather
-# than repeated here — a hand-written copy goes stale the moment a type is added, which is
-# exactly what happened to ``host`` (the resident parenchyma of a metastatic deposit, i.e.
-# normal tissue of the colonised organ). While it was missing, every host cell was counted
-# as a tumour cell, overstating the purity of any sample containing a metastasis.
+# than repeated here, so no type is missed — e.g. ``host`` (the resident parenchyma of a
+# metastatic deposit, i.e. normal tissue of the colonised organ), which would otherwise be
+# counted as tumour and overstate the purity of any sample containing a metastasis.
 NORMAL_TYPES = tuple(normal_names)
 
 # Default per-type recovery probabilities. Immune cells are the hardest to

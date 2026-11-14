@@ -8,7 +8,7 @@ Two layers, mirroring test_integration.py:
   * the REAL tools run only when their dedicated env is present (``iscc-cell2location`` / ``iscc-rctd``);
     otherwise the test skips, so the core ``iscc`` suite stays green without the heavy stacks.
 
-Non-circularity: the cell types differ transcriptionally because the R13 program layer gives each a
+Non-circularity: the cell types differ transcriptionally because the program layer gives each a
 distinct COMBINATION of scattered functional programmes (an emergent property), not a hand-drawn marker
 table matching the deconvolution model.
 """
@@ -58,7 +58,7 @@ class TestDataGeneration:
         assert (T.max(1) < 0.999).mean() > 0.2
 
     def test_expression_is_realistic_not_a_pileup(self, section):
-        # the R13 program layer must not blow one marker gene up to the whole library
+        # the program layer must not blow one marker gene up to the whole library
         tot = section["spot_counts"].sum(0)
         assert float(tot.max() / tot.sum()) < 0.25
 
@@ -71,7 +71,7 @@ class TestDataGeneration:
         assert np.abs(oc - rc).sum() > 0.15                       # a real, measurable mismatch
 
     def test_dissociation_depletes_fragile_types(self, tumor, section):
-        # F2 under-recovers immune (fragile) relative to no dissociation
+        # dissociation under-recovers immune (fragile) cells relative to none
         no_diss = D.build_reference(tumor, section, mode="regional", offset=4.0,
                                     dissociation_strength=0.0, n_cells=None, seed=1)
         diss = D.build_reference(tumor, section, mode="regional", offset=4.0,

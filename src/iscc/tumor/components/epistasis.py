@@ -1,11 +1,11 @@
-"""Epistasis / evolutionary-dependency structure in selection (DESIGN_epistasis.md, R14).
+"""Epistasis / evolutionary-dependency structure in selection.
 
 iscc's selection is otherwise **additive**: abstract mode scores the *count* of mutated drivers, so
 the true event x event dependency network is ~empty and a cohort-progression benchmark (MHN, TreeMHN,
 CBN/H-CBN, REVOLVER) could only measure a method's false-positive rate. This module lets a
 **known network be planted** — the answer key those methods are scored against.
 
-The three interaction types of DESIGN_epistasis.md §2, all planted:
+Three interaction types, all planted:
 
   * **pairwise epistasis** ``E[i, j]`` — a log-additive interaction term; ``> 0`` synergy /
     co-selection, ``< 0`` antagonism;
@@ -20,12 +20,12 @@ Fitness gains one term on top of the existing additive model::
 
 ``x`` is the genotype's **event vector**, so the term is a pure function of the event set: it caches
 per genotype and is safe under tau-leaping and the exact engine alike. **Off by default** — with no
-events configured, :class:`EpistasisNetwork` is never constructed and selection is bit-identical to
-the additive model.
+events configured, :class:`EpistasisNetwork` is never constructed and selection is the additive
+model.
 
 
-The event alphabet (v1: abstract driver roles)
-----------------------------------------------
+The event alphabet (abstract driver roles)
+-----------------------------------------
 An **event** is a disjoint **module of driver genes** (``event_size`` genes drawn from the shared
 oncogene/TSG pool); it is *acquired* when >= 1 SNV lands anywhere in the module. Modules rather than
 single genes because **MHN/TreeMHN pool many tumours to fit ONE network**, which requires the same
@@ -40,8 +40,8 @@ mutated allele. That is deliberate — it is exactly the generative assumption M
 so the planted network stays the network those models are defined to recover.
 
 
-Ordering: fitness gating vs accessibility gating (DESIGN_epistasis.md §7)
--------------------------------------------------------------------------
+Ordering: fitness gating vs accessibility gating
+------------------------------------------------
 The two are different generative stories, and the progression models assume different ones, so the
 choice is explicit (``gating_mode``) and must be stated in the paper:
 
@@ -66,7 +66,7 @@ stream (``layout_seed``), in a dedicated sub-stream ``default_rng(layout_seed +
 LAYOUT_OFFSET_EPISTASIS)`` so that changing ``n_interactions`` / ``network_topology`` does not
 reshuffle the oncogene/TSG layout or the gene programs. Same config + same ``layout_seed`` => the
 identical network for every patient and across separate simulations; a different ``layout_seed`` =>
-a different network (for replicate studies). See DESIGN_cohort.md §1.
+a different network (for replicate studies).
 """
 import numpy as np
 

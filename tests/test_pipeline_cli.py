@@ -1,7 +1,7 @@
 """End-to-end CLI pipeline test: isccsim -> isccsample -> isccdata.
 
-Guards the stage-2 work (entry points + I/O schema) so the three commands stay
-runnable and their on-disk contract stays stable.
+Guards the entry points and the I/O schema, so the three commands stay runnable and their
+on-disk contract stays stable.
 """
 import os
 

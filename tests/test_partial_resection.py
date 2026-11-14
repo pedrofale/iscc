@@ -1,7 +1,7 @@
 """``Surgery(region=..., margin=...)`` — a partial resection with ground-truth margins.
 
 ``Surgery(site)`` with no region removes every cell of the compartment, so a resected primary is
-cured by construction; that stays the default and must stay byte-identical. With a ``region`` only
+cured by construction; that is the default, pinned by golden digests. With a ``region`` only
 those demes are cleared (cancer and normal residents), everything outside keeps growing, and the
 tumour records the ground truth of the cut: the cancer cells removed, the cancer cells in the rim
 of ``margin`` demes just inside the cut (the true margin status), and the cancer cells left behind,
@@ -86,7 +86,7 @@ def _whole_primary_exact():
 WHOLE_SCENARIOS = {"primary_with_met": _whole_primary_met, "met": _whole_met,
                    "primary_tau": _whole_primary_tau, "primary_exact": _whole_primary_exact}
 
-# Recorded on the code BEFORE partial resection existed (feat/mechanistic-drug + perf/materialize-opt-in).
+# Golden digests of whole-compartment resection: the partial-resection path must not move them.
 WHOLE_DIGESTS = {
     "primary_with_met": "d0263fdab083025d2aaa924809ff79c1",
     "met": "fa9f77542abc9ef32e33dad285602c7c",
@@ -97,7 +97,7 @@ WHOLE_DIGESTS = {
 
 @pytest.mark.parametrize("name", sorted(WHOLE_SCENARIOS))
 def test_whole_compartment_resection_is_byte_identical(name):
-    """(a) region=None removes the whole compartment exactly as before."""
+    """(a) region=None removes the whole compartment, reproducing the golden digests."""
     assert _digest(WHOLE_SCENARIOS[name]()) == WHOLE_DIGESTS[name]
 
 

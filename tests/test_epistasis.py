@@ -1,4 +1,4 @@
-"""Epistasis / evolutionary-dependency structure in selection (R14, DESIGN_epistasis.md).
+"""Epistasis / evolutionary-dependency structure in selection.
 
 Covers:
   * **OFF BY DEFAULT** — no epistasis_params (or n_events=0) => the engine is BIT-IDENTICAL to the
@@ -68,7 +68,7 @@ def _cohort_tumors(coh):
     return [p.tumor for p in coh.run().patients]
 
 
-# ================================ off by default (the F8 discipline) ================================
+# ================================ off by default ================================
 def test_epistasis_is_off_by_default():
     t = _tumor()
     assert t.selection.epistasis is None
@@ -77,8 +77,8 @@ def test_epistasis_is_off_by_default():
 
 
 def test_off_is_bit_identical_to_the_additive_model():
-    """The whole point of off-by-default: an absent network and an explicitly empty one both
-    reproduce the additive engine byte-for-byte at the same seed."""
+    """An absent network and an explicitly empty one both reproduce the additive engine
+    byte-for-byte at the same seed."""
     base = _grown(seed=3)
     for eq in ({"n_events": 0}, {"n_events": 0, "n_interactions": 99}):
         other = _grown(seed=3, epistasis_params=eq)
@@ -89,8 +89,8 @@ def test_off_is_bit_identical_to_the_additive_model():
 
 
 def test_turning_epistasis_on_does_not_perturb_the_gene_layout():
-    """The dedicated layout SUB-STREAM at work: the network is drawn from layout_seed +
-    LAYOUT_OFFSET_EPISTASIS, so layout_rng is untouched and nothing re-baselines."""
+    """The network is drawn from its own layout sub-stream (layout_seed + LAYOUT_OFFSET_EPISTASIS),
+    so layout_rng is untouched and the other gene roles do not move."""
     off, on = _tumor(), _tumor(epistasis_params=EPI)
     for get in ("get_oncogenes", "get_tsgs", "get_dispersal_genes",
                 "get_treatment_resistant", "get_immune_resistant"):
@@ -379,10 +379,9 @@ def test_min_clone_freq_prunes_tree_tips():
 def test_event_detection_aggregates_cell_fraction_across_clones():
     """The detection threshold is a per-EVENT cancer-cell fraction, NOT a per-clone size filter.
 
-    This is a regression test for a real bug: filtering CLONES by size and then OR-ing their events
-    calls an event undetected whenever its carriers are many small lineages -- which is exactly what
-    a favoured combination looks like, since it arises repeatedly. A 60%-cell-fraction event spread
-    over 30 clones of 2% each was being reported as ABSENT, silently zeroing the benchmark.
+    Filtering CLONES by size and then OR-ing their events would call an event undetected whenever its
+    carriers are many small lineages -- which is exactly what a favoured combination looks like, since
+    it arises repeatedly. A 60%-cell-fraction event spread over 30 clones of 2% each must be PRESENT.
     """
     t = _grown(epistasis_params=EPI)
     net = t.selection.epistasis
@@ -523,7 +522,7 @@ def test_fitness_epistasis_actually_moves_clone_fitness():
 
 
 def test_empty_network_control_recovers_nothing():
-    """The sanity control (DESIGN_epistasis.md §5): with an EMPTY E, whatever a method reports is a
+    """The sanity control: with an EMPTY E, whatever a method reports is a
     FALSE POSITIVE. We can't assert a method finds nothing, but we CAN assert the truth is empty and
     that iscc scores every reported edge against it as a false positive — which is exactly what makes
     the specificity row of the benchmark meaningful."""
@@ -603,8 +602,8 @@ def test_real_treemhn_accepts_our_tree_export():
 
 def test_treemhn_export_drops_event_free_patients():
     """A patient with no events is a root-only tree, which TreeMHN rejects outright
-    ("Tree with ID n does not contain edges from the root"). Regression test: they are dropped and
-    the survivors renumbered contiguously (TreeMHN indexes patients by position)."""
+    ("Tree with ID n does not contain edges from the root"). They are dropped and the survivors
+    renumbered contiguously (TreeMHN indexes patients by position)."""
     tumors = _cohort_tumors(_cohort(n=6, steps=200))
     trees = to_treemhn_trees(tumors)
     for pid, g in trees.groupby("Patient_ID"):
@@ -654,12 +653,12 @@ def test_lethality_can_be_turned_off_leaving_the_soft_fitness_effect():
     (i, j) = net.true_exclusive_pairs()[0]
     assert net.is_lethal(events_to_bits([i, j])) is False
     assert sel.update_death_rate({}, 0.02, event_bits=events_to_bits([i, j])) == 0.02
-    # the strongly-negative E is still there; it just no longer kills
+    # the strongly-negative E is still there; it just does not kill
     assert net.E[i, j] == -8.0
 
 
 def test_death_rate_is_untouched_when_epistasis_is_off():
-    """The death path is newly routed through selection; it must be inert by default."""
+    """The death path runs through selection; it must be inert when epistasis is off."""
     t = _tumor()
     assert t.selection.update_death_rate({}, 0.02, event_bits=0) == 0.02
     assert t.selection.epistasis is None

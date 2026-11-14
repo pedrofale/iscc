@@ -27,7 +27,7 @@ import integration_common as C  # noqa: E402
 # A small, fast, deterministic tumour: a few segments so distinct CNAs accumulate, a normal
 # compartment (structure_radius>0) for the inferCNV reference, grown just long enough for subclones.
 GENOME = {"n_segments": 6, "segment_size": 40}
-# Real per-deme crowding (DESIGN_crowding.md) caps demes near K, so the cancer spreads across the
+# Per-deme crowding caps demes near K, so the cancer spreads across the
 # gland rather than piling up; grow a larger gland (bigger grid/duct + K + steps) so each clone holds
 # enough cells for scDNA to recover its consensus copy number cleanly.
 SPATIAL = {"grid_size": 18, "structure_radius": 5}
@@ -125,11 +125,11 @@ class TestInferCNVReal:
 
 
 # ==================================================================================================
-# Numbat (allele-aware CNA-from-expression) — demo 2
+# Numbat (allele-aware CNA-from-expression)
 # --------------------------------------------------------------------------------------------------
 @pytest.fixture(scope="module")
 def allele_tumor():
-    # the same small gland, grown with the R13 allele layer ON so cell_rna_baf exists for Numbat
+    # the same small gland, grown with the allele layer ON so cell_rna_baf exists for Numbat
     return C.grow_tumor_alleles(seed=0, steps=650, genome=GENOME, spatial=SPATIAL, deme=DEME,
                                 cancer=dict(CANCER, cnv_prob=0.6, snv_prob=0.4))
 
@@ -144,7 +144,7 @@ def numbat_bundle(allele_tumor):
 
 class TestNumbatDataGen:
     def test_allele_layer_materialises(self, allele_tumor):
-        assert "cell_rna_baf" in allele_tumor.cell_data          # R13 allele layer is on
+        assert "cell_rna_baf" in allele_tumor.cell_data          # allele layer is on
         assert "cell_exp_p" in allele_tumor.cell_data and "cell_exp_m" in allele_tumor.cell_data
 
     def test_emergent_allelic_imbalance_tracks_cnas(self, allele_tumor):

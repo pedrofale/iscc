@@ -1,4 +1,4 @@
-"""Tau-leaping wiring for the M3b real-genome ABC (DESIGN_inference A.5 + DESIGN_scalability §7).
+"""Tau-leaping wiring for the real-genome ABC.
 
 The fit-to-real PCAWG + Charm experiment is HPC-bound when each cohort tumour grows in the exact
 one-event-per-update mode (a fixed 1000-event budget per tumour spends most of its time on the

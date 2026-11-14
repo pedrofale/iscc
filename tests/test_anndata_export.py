@@ -11,9 +11,8 @@ Two things are checked here.
    them anywhere.
 
 2. **Coordinates point the same way everywhere.** Every export writes ``obsm["spatial"]`` as
-   ``(x, y) = (col, row)`` — the 10x/squidpy order the Visium export already used. Before this, the
-   cell-level objects wrote ``(row, col)``, so a squidpy plot of cells came out transposed relative
-   to a Visium slide cut from the same tissue.
+   ``(x, y) = (col, row)`` — the 10x/squidpy order — so a squidpy plot of cells lines up with a
+   Visium slide cut from the same tissue instead of coming out transposed.
 """
 import os
 
@@ -264,9 +263,9 @@ class TestCloneAnnotationIsUsable:
     """The ``obs["clone"]`` labels have to name most of the cancer cells, at every scale.
 
     A fixed ``clone_min_cells`` cannot: the share of cells left in the ancestral ``"other"`` bucket
-    rises and falls with the threshold differently in every tumour (at realistic scale the old
-    default of 50 stranded 61% of cancer cells in ``"other"`` while handing back only 6 clones). The
-    default now searches for the threshold that strands the fewest cells while keeping the number of
+    rises and falls with the threshold differently in every tumour (at realistic scale a threshold
+    of 50 can strand most cancer cells in ``"other"`` while handing back only a handful of clones).
+    The default searches for the threshold that strands the fewest cells while keeping the number of
     clones readable, and records what it chose.
     """
 
@@ -452,7 +451,7 @@ class TestRoundTrip:
                                       check_dtype=False)
 
 
-# --------------------------------------------------------------------------- E2: the axis order
+# --------------------------------------------------------------------------- the axis order
 class TestSpatialAxes:
     def test_spatial_is_x_then_y(self, plain):
         a = to_anndata(plain)
@@ -494,9 +493,8 @@ class TestSpatialAxes:
         return float(np.corrcoef(x, a0)[0, 1]), float(np.corrcoef(x, a1)[0, 1])
 
     def test_cell_level_and_visium_agree_on_orientation(self, plain):
-        """The bug this fixes: a squidpy plot of the cells came out transposed relative to a Visium
-        slide built from the SAME tissue, because the cell export wrote (row, col) while Visium
-        wrote (col, row). Both now put the column index on axis 0."""
+        """A squidpy plot of the cells must line up with a Visium slide built from the SAME tissue:
+        both exports put the column index on axis 0."""
         from iscc.data.visium import Visium
         # section_frac=None + an explicit capture side keeps the spot grid in the tumour's own
         # coordinate frame, so the two objects are directly comparable
@@ -509,7 +507,7 @@ class TestSpatialAxes:
         assert same > 0.99, f"spot x vs cell axis-0 correlation only {same:.3f}"
         assert abs(crossed) < 0.2, f"spot x leaks into cell axis 1 at r={crossed:.3f}"
 
-        # the pre-fix order is exactly what "rowcol" reproduces, and it is transposed
+        # the "rowcol" order is transposed relative to Visium
         old0, old1 = self._axis_correlations(to_anndata(plain, spatial="rowcol"), spot_x, members)
         assert abs(old0) < 0.2 and old1 > 0.99, (old0, old1)
 
@@ -532,7 +530,7 @@ class TestSpatialAxes:
         a = vz.to_anndata()
         np.testing.assert_array_equal(a.obsm["spatial"][:, 0], a.obs["col"].values)
         np.testing.assert_array_equal(a.obsm["spatial"][:, 1], a.obs["row"].values)
-        # Visium always wrote (x, y); it just never said so, unlike the other four exporters.
+        # Visium writes (x, y) too, and records the convention like the other exporters.
         assert a.uns["spatial_axes"] == "xy"
 
 

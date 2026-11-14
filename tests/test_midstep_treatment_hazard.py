@@ -1,16 +1,15 @@
-"""Regression: a genotype minted MID-STEP must take the active treatment's hazard.
+"""A genotype minted MID-STEP must take the active treatment's hazard.
 
 ``_apply_treatment`` freezes the per-genotype treatment overrides (``_tx_death_add`` for
 chemo/targeted, ``_tx_immune_resist`` for immunotherapy) ONCE at the start of a treated step, from
 the genotypes present at that moment. A genotype created DURING the ensuing ``update`` /
-``_tau_generation`` (a division-mutation) is absent from those dicts, so the old
-``_tx_death_add.get(gid, 0.0)`` / ``_tx_immune_resist.get(gid, base_ir)`` defaults handed the
-newborn a DRUG-FREE step: full drug survival, and (under immunotherapy) its untouched baseline
-immune resistance. The hole scaled with the mutation rate -- worst exactly in therapy-induced
-mutagenesis / resistance-evolution runs -- and cost measurably (~14%) of the nominal kill.
+``_tau_generation`` (a division-mutation) is absent from those dicts; a plain dict default would
+hand the newborn a DRUG-FREE step (full drug survival, and under immunotherapy its untouched
+baseline immune resistance). That hole would scale with the mutation rate -- worst exactly in
+therapy-induced mutagenesis / resistance-evolution runs.
 
-The fix computes each override on demand for an unknown gid (a pure function of the clone's
-resistance / tolerance, the active dose, effectiveness and kill_rate) and memoises it, so a newborn
+Each override is computed on demand for an unknown gid (a pure function of the clone's
+resistance / tolerance, the active dose, effectiveness and kill_rate) and memoised, so a newborn
 is charged identically to an already-registered sibling. These tests pin that: a mid-step clone
 takes the same hazard as its identical-genotype parent, and coverage of live cancer cells is 100%.
 """
@@ -72,7 +71,7 @@ def _mint_clone_after_freeze(t, parent, di):
 def test_midstep_clone_takes_same_chemo_hazard_as_registered_sibling():
     """A clone minted after the drug dict is frozen must die at the SAME rate as its identical-
     genotype parent in the same deme -- the treatment term is the only thing that could differ, and
-    the old ``.get(gid, 0.0)`` default zeroed it for the newborn."""
+    a ``.get(gid, 0.0)`` default would zero it for the newborn."""
     t = _build(SEL_SENS, seed=3, update_mode="tau")
     t.grow(n_steps=40, seed=3)                              # establish a multi-clone lesion
     chemo = Chemotherapy(kill_rate=1.5)
@@ -84,7 +83,7 @@ def test_midstep_clone_takes_same_chemo_hazard_as_registered_sibling():
     di = _deme_of(t, parent)
     child = _mint_clone_after_freeze(t, parent, di)
 
-    # the bug's precondition: the frozen dict has no entry for the newborn ...
+    # the precondition: the frozen dict has no entry for the newborn ...
     assert child.genotype_id not in t._tx_death_add
     # ... yet its death rate must equal its parent's (same deme, same composition): the only term
     # that can differ between two identical genotypes here is the treatment hazard.
@@ -101,7 +100,7 @@ def test_midstep_clone_takes_same_chemo_hazard_as_registered_sibling():
 @pytest.mark.parametrize("seed", (5, 11))
 def test_treated_generation_covers_every_live_cancer_cell(seed):
     """Coverage: after a full treated tau generation mints many clones, 100% of live cancer cells --
-    newborns included -- carry a nonzero drug hazard, not the ~86% the frozen-dict-only view saw."""
+    newborns included -- carry a nonzero drug hazard, not only those in the frozen dict."""
     t = _build(SEL_SENS, seed=seed, update_mode="tau")
     t.grow(n_steps=40, seed=seed)                          # establish a lesion untreated
     chemo = Chemotherapy(kill_rate=1.2, mutagenicity=4.0)  # mutagenicity => even more mid-step mints
@@ -119,16 +118,16 @@ def test_treated_generation_covers_every_live_cancer_cell(seed):
 
     cells = sum(t.genotypes_counts[g] for g in live)
     covered = sum(t.genotypes_counts[g] for g in live if t._tx_death_add_for(g) > 0)
-    assert covered == cells                                # 100% -- the fix
-    # the frozen-dict-only view (the OLD applied coverage) misses the newborns: that gap is the bug.
+    assert covered == cells                                # 100%
+    # the frozen dict alone misses the newborns, so the on-demand path is what covers them.
     raw = sum(t.genotypes_counts[g] for g in live if g in frozen)
     assert raw < cells
 
 
 def test_midstep_clone_takes_stripped_immune_resistance_under_immunotherapy():
     """The same hole in ``_tx_immune_resist``: under immunotherapy a mid-step clone must be stripped
-    to its parent's reduced immune resistance, not left sitting at its untouched baseline (which the
-    old ``.get(gid, base_ir)`` default handed it -- a free step of full immune evasion)."""
+    to its parent's reduced immune resistance, not left sitting at its untouched baseline (which a
+    ``.get(gid, base_ir)`` default would hand it -- a free step of full immune evasion)."""
     # Immune killing is irrelevant to what this test pins (immunotherapy strips a clone's resistance
     # param whether or not immune cells sit in its deme), so keep it off and let the lesion grow.
     t = _build(SEL_IR, seed=4, immune_density=0.0, update_mode="tau")
@@ -148,9 +147,9 @@ def test_midstep_clone_takes_stripped_immune_resistance_under_immunotherapy():
 
     di = _deme_of(t, parent)
     child = _mint_clone_after_freeze(t, parent, di)
-    assert child.genotype_id not in t._tx_immune_resist    # bug precondition
+    assert child.genotype_id not in t._tx_immune_resist    # precondition
     base_ir = child.evolutionary_parameters["immune_resistance"]   # 0.6, its untouched baseline
-    # the fix: the newborn is stripped to exactly the parent's value, not left at baseline
+    # the newborn is stripped to exactly the parent's value, not left at baseline
     got = t._tx_immune_resist_for(child.genotype_id, child, base_ir)
     assert got == pytest.approx(stripped)
     assert got < base_ir

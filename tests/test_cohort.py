@@ -1,7 +1,7 @@
-"""Cohort layer + the prerequisite seed-decoupling fix (DESIGN_cohort.md).
+"""Cohort layer and the seed decoupling it relies on.
 
 Covers:
-  * the ENGINE FIX — two GenotypeTumor(same config, different EVOLUTION seed) share IDENTICAL
+  * seed decoupling — two GenotypeTumor(same config, different EVOLUTION seed) share IDENTICAL
     driver/oncogene/TSG/dispersal/TR/IR gene sets AND baseline expression (comparability by default),
     while their grown per-cell mutations differ; an explicit distinct layout_seed changes the layout;
   * the Cohort wrapper — N patients over the shared landscape (shared drivers, private evolution),
@@ -35,7 +35,7 @@ def _tumor(seed, layout_seed=None):
                          deme_params=DEME, spatial_params=SPATIAL)
 
 
-# ============================ the engine seed-decoupling fix =============================
+# ============================ layout vs evolution seed ===================================
 def test_same_config_different_seed_shares_driver_layout():
     """Comparability by default: two runs of the SAME config with DIFFERENT evolution seeds share
     every gene-role identity and the baseline expression (so recurrence/cohort analysis is meaningful)."""
@@ -73,8 +73,8 @@ def test_default_layout_seed_is_the_constant():
 
 # --------- layout_seed alone reproduces the layout, without an explicit layout rng ----------
 # The engines always hand Selection a seeded ``rng=layout_rng``, but probes/tests/notebooks build a
-# Selection directly to inspect the gene layout. Then ``layout_seed`` must be sufficient on its own:
-# an unseeded default generator silently re-drew the driver/dispersal/TR/IR loci on every call.
+# Selection directly to inspect the gene layout. Then ``layout_seed`` must be sufficient on its own,
+# or an unseeded generator would re-draw the driver/dispersal/TR/IR loci on every call.
 def _bare_selection(**kw):
     from iscc.tumor.components.selection import Selection
     return Selection(n_segments=GENOME["n_segments"], segment_size=GENOME["segment_size"],

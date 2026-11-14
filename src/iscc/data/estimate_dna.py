@@ -1,6 +1,6 @@
 """Method-of-moments / 1-D MLE ``estimate_dna()`` for the DNA assay.
 
-The DNA analogue of the scRNA ``estimate()``: fits the technical
+The DNA analogue of the scRNA ``estimate_rna()``: fits the technical
 hyper-parameters of the DNA batch model (``DNABatchHyperParams`` in
 ``batch.py``) from a real DNA-seq dataset reduced to **counts-level summary statistics** —
 per-locus coverage, alt/ref counts, and a **per-locus called copy number** — so realistic
@@ -35,7 +35,7 @@ What is fit (and from what), per modality:
     doublet_rate      NOT identifiable from counts -> prior-only (flagged)  (carried from preset)
     breadth, depth_model  chosen, not estimated (you know the assay)
 
-The ``_PRIOR_ONLY`` escape that the scRNA ``estimate()`` uses (ambient/doublet) carries the genuinely
+The ``_PRIOR_ONLY`` escape that ``estimate_rna()`` uses (ambient/doublet) carries the genuinely
 unidentifiable fields honestly instead of pretending to fit them. ``ado_rate`` /
 ``beta_binom_conc`` are the per-cell amplification/dropout layer — fittable only from single-cell
 data; they are flagged not-fit (and carried from the preset) on bulk data, and ``kappa`` means
@@ -62,7 +62,7 @@ _MODE_DEFAULTS = {
 }
 
 # Fields a counts-only estimate cannot identify even with CN (need demultiplexing); carried from
-# the preset, never claimed as "fit" — the DNA analogue of estimate()'s ambient/doublet escape.
+# the preset, never claimed as "fit" — the DNA analogue of estimate_rna()'s ambient/doublet escape.
 _PRIOR_ONLY = ("doublet_rate",)
 
 _HYPER_KEYS = set(DNABatchHyperParams().to_dict().keys())
@@ -177,8 +177,8 @@ def _fit_gc_curve(percopy, gc, mappability):
 def _fit_depth_dispersion(coverage, cn, gc_fit, mappability, depth_model):
     """CN-conditioned coverage overdispersion -> ``kappa`` (DM) or ``nb_dispersion`` (NB).
 
-    The crux of §C.1. Build the systematic expected per-locus coverage ``mu`` from the called CN x
-    the fitted efficiency shape (GC curve x mappability), normalized to the *observed* total per
+    The crux of the DNA estimator. Build the systematic expected per-locus coverage ``mu`` from
+    the called CN x the fitted efficiency shape (GC curve x mappability), normalized to the *observed* total per
     sample (bulk: 1 sample of loci; single-cell: each cell is a sample). The residual of the
     observed coverage about ``mu`` is then pure technical overdispersion:
 
@@ -187,8 +187,9 @@ def _fit_depth_dispersion(coverage, cn, gc_fit, mappability, depth_model):
         Large kappa (pooled bulk) ~ multinomial/Poisson; small kappa (lumpy single-cell MDA/MALBAC).
       * NB: ``phi = median_l ((X-mu)^2 - mu)/mu^2`` (the standard NB method-of-moments residual).
 
-    This is the DNA analogue of M2's library-size de-biasing of the NB dispersion: divide out the
-    part that is really CN (biology) before reading the technical dispersion.
+    This is the DNA analogue of the scRNA estimator's library-size de-biasing of the NB
+    dispersion: divide out the part that is really CN (biology) before reading the technical
+    dispersion.
     """
     eff_shape = np.exp(gc_fit)
     if mappability is not None:
@@ -248,7 +249,7 @@ def _fit_capture_sigma(coverage, cn, gc_fit, mappability):
     floor is the delta-method log-variance of a count with the *measured* index of dispersion
     ``d_index`` (Var(log X) ~ d_index/mu): at the DM overdispersion these data carry, the floor is
     far above the naive Poisson ``1/mu``. Deep panels make it negligible; for WES it is a genuine
-    (M2-style) de-biasing. A panel-of-normals would pin it exactly; without one this is the honest
+    de-biasing. A panel-of-normals would pin it exactly; without one this is the honest
     counts-only estimate.
     """
     locus_mean = _locus_capture(coverage, cn, gc_fit, mappability)
@@ -315,7 +316,8 @@ def _fit_ado_and_conc(coverage, alt, het_mask, min_cov=8, extreme=0.05):
 
     The raw fraction of extreme het BAFs over-counts ADO: at low coverage the Beta-Binomial alone
     lands in the extremes. We **de-bias** with the coverage-aware Beta-Binomial extreme probability
-    ``q`` at the fitted concentration (the analogue of M2 subtracting the Binomial/library floor):
+    ``q`` at the fitted concentration (the analogue of the scRNA estimator subtracting the
+    library floor):
 
         frac_extreme = ado + (1-ado)*q   =>   ado = (frac_extreme - q) / (1 - q)
 

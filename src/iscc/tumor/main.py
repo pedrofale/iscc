@@ -108,11 +108,11 @@ def main(sim_config, steps, random_seed, batch_size, treatment_kind, adaptive,
             "The 'mixed' (non-spatial) model is not yet implemented; use 'genotype' or 'glandular'."
         )
 
-    # A config-driven timed treatment SCHEDULE (metastasis module, R9): a multi-phase clinical arc
+    # A config-driven timed treatment SCHEDULE (metastasis module): a multi-phase clinical arc
     # (grow -> surgery/resection -> chemotherapy -> relapse) that also captures a compartment
     # trajectory for `isccgif --compartment`. When present it REPLACES the single-`--treatment` grow
-    # (which stays the default, unchanged, when there is no schedule). Only the genotype (count) engine
-    # drives the metastasis compartments.
+    # used when there is no schedule. Only the genotype (count) engine drives the metastasis
+    # compartments.
     schedule = config.get("schedule")
     if no_tables and schedule is None:
         raise click.ClickException(
@@ -162,7 +162,7 @@ def main(sim_config, steps, random_seed, batch_size, treatment_kind, adaptive,
 
     # Operating-envelope QC: warn (opt-out) if the run produced a degenerate tumor, or surface a
     # size advisory (e.g. "grow to a realistic size"). Read-only — it never touches the simulation
-    # output (see DESIGN_operating_envelope.md).
+    # output.
     if not no_diagnose and hasattr(tumor, "diagnose"):
         diag = tumor.diagnose()
         if not diag.ok:

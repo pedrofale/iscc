@@ -1,9 +1,8 @@
-"""Config-driven CLINICAL ARC for the metastasis module (R9): a timed treatment schedule that grows a
+"""Config-driven CLINICAL ARC for the metastasis module: a timed treatment schedule that grows a
 primary + metastasis through the full clinical story and captures a compartment TRAJECTORY that
 ``isccgif --compartment`` renders offline (grids + centered Mullers on one shared clone colormap).
 
-This promotes the arc + shared-clone-colouring logic that used to live only in a bespoke standalone
-script into the package, so the landing hero is reproducible from the ordinary CLI:
+The landing hero is reproducible from the ordinary CLI:
 
     isccsim --sim-config configs/landing.yaml -o out
     isccgif out --compartment --splash -o docs/assets/landing_hero.gif
@@ -105,12 +104,12 @@ def stage_of(rep, in_primary=False):
     base_div = getattr(rep, "baseline_rates", {}).get("division_rate", ep["division_rate"])
     tr = ep.get("treatment_resistance", 0)
     dt = ep.get("drug_tolerance", 0.0)
-    # Drug-induced resistance STATE (DESIGN_phenotype_plasticity.md §3.3): a cell carrying the
+    # Drug-induced resistance STATE: a cell carrying the
     # non-genetic resistance state reads as "resistance" — it escapes the drug via the carried state,
     # which is precisely the mode-IV relapse the red wedge draws. Checked BEFORE the tr/dt tie-break so
     # a state cell can never fall through to "tolerance" (which the mode-IV trace counts as SENSITIVE).
     # This is the ground-truth reclassification that makes a revertant (allele deleted, state kept)
-    # count as resistant, not sensitive. Off -> the attribute is 0.0 -> skipped -> byte-identical.
+    # count as resistant, not sensitive. With the feature off the attribute is 0.0 and this is skipped.
     if getattr(rep, "resistance_state", 0.0) > 0.0:
         return "resistance"
     if max(tr, dt) > 0:
@@ -138,7 +137,7 @@ def story_colors(t, min_freq=None, in_primary=False):
     call-site compatibility but unused (no band merging happens in the colour map). Normals stay muted.
 
     ``in_primary=True`` returns the PRIMARY-compartment reading of the same clones (see ``stage_of``):
-    identical except that met-survival no longer claims a clone, so the duct field shows the invasion
+    identical except that met-survival does not claim a clone, so the duct field shows the invasion
     cascade it actually has instead of going uniformly purple."""
     out = {}
     for gid, rep in t.genotypes.items():
@@ -167,7 +166,7 @@ def execute_schedule(t, schedule):
     Returns ``(frames, marks, seed, min_freq)`` where ``frames`` is a list of
     ``dict(demes=[{gid: count}, ...], cursor=int, phase=str)`` (one per captured generation) and
     ``marks`` is a list of ``(trace_index, label)`` clinical-event marks. The dynamics ALWAYS advance
-    one generation per ``grow`` call (calibration-stable), exactly as the reference arc; the capture
+    one generation per ``grow`` call (calibration-stable); the capture
     cadence is a cosmetic trim, never a dynamics change."""
     seed = int(schedule.get("seed", t.seed))
     min_freq = float(schedule.get("min_freq", 0.02))
@@ -180,7 +179,7 @@ def execute_schedule(t, schedule):
     seeding_snap = None
     # mark "seeding" when the met is ESTABLISHED (has reached this many cancer cells), not when the FIRST
     # cell arrives -- early seeds often land and die under the met-host hazard; the indicator should point
-    # at the seed that actually sticks and grows the deposit. Default 1 = the first cell (old behaviour).
+    # at the seed that actually sticks and grows the deposit. Default 1 = the first cell.
     established_at = int(schedule.get("seeding_establishes_at", 1))
 
     def capture(phase):

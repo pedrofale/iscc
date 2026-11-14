@@ -1,12 +1,11 @@
-"""Metastasis module (R9): a second, clonally-linked deme-grid (the metastatic deposit) reached from
+"""Metastasis module: a second, clonally-linked deme-grid (the metastatic deposit) reached from
 the primary by an invasion-gated migration operator, plus per-site treatment, surgical resection, and
 the two-compartment views.
 
-Design docs: the metastasis plan (2-band Muller + two-grid plot_grid), building on the ductal field
-(DESIGN_ductal_field.md) and compartment selection (DESIGN_phenotype_plasticity.md). COUNT engine only.
+Builds on the ductal field and compartment selection. COUNT engine only.
 
 Covered here:
-  * OFF-by-default -> byte-identical: the met_survival axis is inert at prop 0, and an ENABLED-but-inert
+  * off by default -> byte-identical: the met_survival axis is inert at prop 0, and an ENABLED-but-inert
     met (met_grid_size>0, met_seed_kappa=0, met_hazard=0) leaves the primary cancer growth byte-identical
     (exact + tau) — the appended host-only demes carry zero event rate.
   * met_survival is a real, sequenceable heritable axis (gene counts + per-genotype trait surface).
@@ -358,7 +357,7 @@ def test_clone_grid_series_renders(met_tumor):
 
 def test_stage_dominant_coloring(met_tumor):
     """The stage-dominant-driver colouring maps each cancer clone to its highest arc stage and renders
-    on the Muller + grids on one categorical palette (todo #14)."""
+    on the Muller + grids on one categorical palette."""
     import matplotlib
     matplotlib.use("Agg")
     from iscc.tumor import viz
@@ -389,9 +388,9 @@ def test_clone_tree_renders(met_tumor):
 
 
 def test_o2_field_solved_per_lattice():
-    """The hypoxia field with the met lattice on (paper1 met smoke, 2026-11-14: it reshaped primary +
-    met demes into one grid and failed). Each lattice gets its own field: one value per deme, and the
-    primary block equals the field solved on the primary lattice alone."""
+    """The hypoxia field with the met lattice on: primary and met demes are not one grid, so each
+    lattice gets its own field — one value per deme, and the primary block equals the field solved on
+    the primary lattice alone."""
     t = _grow_to_met(_build({**SPATIAL, **MET}), target=5)
     G, n = t.grid_size, t.n_primary_demes
     for source in ("uniform", "perfused"):

@@ -1,6 +1,6 @@
 """Method-of-moments ``estimate_visium()`` for the Visium assay.
 
-The spatial analogue of the scRNA ``estimate()`` and DNA ``estimate_dna()``: fits the technical
+The spatial analogue of ``estimate_rna()`` and ``estimate_dna()``: fits the technical
 hyper-parameters of the spatial batch model (``VisiumBatchHyperParams`` in ``batch.py``) from a
 real Visium AnnData reduced
 to **per-spot counts + spot coordinates** — so realistic spatial-technical magnitudes are *learned,
@@ -30,7 +30,7 @@ the autocorrelation amplitude ``a`` at zero lag) and a NON-SPATIAL nugget (the i
 This is exactly what separates the spatial technical layer from the per-spot depth noise — the
 spatial analogue of the scRNA estimator's library-size de-biasing of the dispersion.
 
-The ``_PRIOR_ONLY`` escape (as in ``estimate``/``estimate_dna``) carries the genuinely
+The ``_PRIOR_ONLY`` escape (as in ``estimate_rna``/``estimate_dna``) carries the genuinely
 unidentifiable-from-one-section fields honestly: ``ambient_frac`` (needs off-tissue/background
 spots), ``edge_sigma`` and ``diffusion_sigma`` (confounded with biology in a single section), and
 ``sigma_batch`` on single-section data (the per-gene factor is constant within a section, so it is
@@ -45,7 +45,7 @@ slide-wide floor) and the kernel sd become ``bleed_rate``, ``bleed_distal`` and 
 which replace ``ambient_frac`` and ``diffusion_sigma`` (both set to 0, since the bleed carries
 the floor and moves counts between spots). The spots within ``bleed_min_dist`` pitches of the tissue
 are left out of that fit, because a spot just outside the tissue flag can still hold tissue.
-``_fit_off_tissue``, the earlier ambient-plus-Gaussian description, is still reported in the
+``_fit_off_tissue``, an ambient-plus-Gaussian description of the same spots, is reported in the
 diagnostics. The same raw matrix then fits ``edge_sigma`` (with ``edge_reference="tissue"``) from the
 tissue's outermost ring only, as the drop there beyond what the bleed predicts (``_fit_edge``):
 farther in, real depth keeps changing with the tissue itself, which one section cannot separate
@@ -60,7 +60,7 @@ import numpy as np
 from .batch import VisiumBatchHyperParams
 
 # Fields a single-section counts+coords estimate cannot identify; carried from the preset, never
-# claimed as "fit" — the spatial analogue of estimate()'s ambient/doublet escape.
+# claimed as "fit" — the spatial analogue of estimate_rna()'s ambient/doublet escape.
 _PRIOR_ONLY = ("ambient_frac", "edge_sigma", "diffusion_sigma")
 
 
@@ -538,7 +538,7 @@ def estimate_visium(adata, *, count_model="dm", coords=None, section_labels=None
         SpotClean's spot-swapping model (:func:`_fit_bleed`): ``bleed_rate``, ``bleed_distal`` and
         ``bleed_sigma`` become fitted (``ambient_frac`` and ``diffusion_sigma`` are set to 0), and
         the fit is reported in ``diagnostics["bleed"]`` beside ``diagnostics["off_tissue"]``. Without
-        it, the fit is as before.
+        it, every spot informs the fits and no bleed is fit.
     bleed_min_dist : float, default 1.5
         Spots outside the tissue nearer to it than this (in spot pitches) are left out of the bleed
         fit. On 10x's breast section the first ring alone pushes the bleeding rate to its bound
@@ -556,7 +556,7 @@ def estimate_visium(adata, *, count_model="dm", coords=None, section_labels=None
         X = adata.X if hasattr(adata, "X") else adata
         counts_all = sparse.csr_matrix(X) if sparse.issparse(X) else _dense(adata)
         # Only a real raw matrix counts anything outside the tissue: iscc's own AnnData carries the
-        # flag too, but its empty spots emit nothing, so it takes the original path unchanged.
+        # flag too, but its empty spots emit nothing, so it takes the plain path below.
         if not in_tissue.all() and counts_all[~in_tissue].sum() > 0:
             coords_all = _spot_coords(adata, coords)
             est = estimate_visium(_dense(counts_all[in_tissue]), count_model=count_model,

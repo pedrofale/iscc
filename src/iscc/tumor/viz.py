@@ -279,11 +279,11 @@ def plot_muller(traces, genotypes_parents, ax=None, colormap="gnuplot", normaliz
     driver clones). ``min_freq`` (a fraction) additionally merges clones whose subtree never reaches
     that share of the grown cancer population into their nearest ancestor (Noble-style sensitivity
     threshold). The two compose: driver-collapse first, then the size threshold. Both default off, in
-    which case every genotype is a clone (the historical behaviour).
+    which case every genotype is a clone.
 
     ``centered`` (default False) stacks the clone bands SYMMETRICALLY around a central horizontal axis
     (the Noble "fish"/stream layout, ``baseline="sym"``) instead of upward from zero; the default is the
-    historical zero-based pymuller layout, byte-identical."""
+    zero-based pymuller layout."""
     genotype_counts, genotype_parents = _cancer_only(traces, genotypes_parents)
     # FULL parent map used to reconnect ancestry; replaced by the driver-tree edges after a collapse.
     merge_parents = genotypes_parents
@@ -341,13 +341,13 @@ def _expanded_cell_grid(cell_data, grid_size, traces, genotypes_parents, section
     colour. Under infinite-sites most divisions spawn a new (passenger-differentiated) genotype, so
     per-clone is usually a noisy rainbow; the single colour reads as tissue structure.
 
-    A 2D deme stands for a 3D column of up to K cells (DESIGN_ductal_field.md §3), so a flat section
+    A 2D deme stands for a 3D column of up to K cells, so a flat section
     should show only a SLICE of that depth, not the whole column: ``section_frac`` (≈
     section_thickness / column_depth) is the fraction of each deme's cells sampled UNIFORMLY at random
     into the section (1.0 = the whole column). Cells are scattered within the deme's block — the count
     engine tracks per-deme COUNTS, not sub-deme positions, so the intra-deme layout is cosmetic while
     the composition (and the sampled section depth) is exact. ``empty_color`` recolours the empty
-    background (empty demes + unfilled positions); ``None`` keeps the historical white. Returns
+    background (empty demes + unfilled positions); ``None`` keeps it white. Returns
     ``(rgb, s, type_cmap)``.
     """
     from collections import defaultdict
@@ -503,8 +503,8 @@ def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap=
                 if color_key.startswith(prefix):
                     val = cell_data[key][color_key.split("_", 1)[1]]
             if val is None:
-                # search every per-cell frame, including the ductal-field (cell_gland) and F8
-                # (cell_microenv) labels, so `color=["gland_id"]` / `["hypoxia_level"]` just work.
+                # search every per-cell frame, including the ductal-field (cell_gland) and
+                # microenvironment (cell_microenv) labels, so `color=["gland_id"]` / `["hypoxia_level"]` just work.
                 for key in ["cell_evo", "cell_exp", "cell_snv", "cell_gland", "cell_microenv",
                             "cell_program"]:
                     if key in cell_data and color_key in cell_data[key].columns:
@@ -534,7 +534,7 @@ def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap=
     return ax
 
 
-# --- metastasis: two-compartment views sharing one clone colormap (R9) -------------------------
+# --- metastasis: two-compartment views sharing one clone colormap ------------------------------
 
 def _compartment_cancer_counts(traces, key, all_cols):
     """Per-generation cancer counts for ONE compartment as a (generations x all_cols) frame, zero-
@@ -762,7 +762,7 @@ def _draw_muller_panel(ax, pop_df, anc, band_colors, normalize, smoothing_std,
     """Draw ONE Muller panel with EXPLICIT per-band colours, bypassing pymuller's colormap
     normalisation so a categorical palette maps exactly. Mirrors pymuller._muller_plot's layout.
     ``centered=True`` uses a symmetric (``baseline="sym"``) baseline — the Noble "fish"/stream layout,
-    bands growing outward from a central midline; default is the historical zero-based stack.
+    bands growing outward from a central midline; default is the zero-based stack.
     ``hard_cutoff_gen`` (e.g. the primary's resection generation) makes the transition to 0 at that
     generation a hard cliff rather than a smoothed taper (see ``_get_y_values_hardcut``)."""
     import sys as _sys

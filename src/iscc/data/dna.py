@@ -33,7 +33,7 @@ import numpy as np
 import pandas as pd
 
 
-# Capture-breadth presets (DESIGN_features §D): observed-locus regime + depth regime +
+# Capture-breadth presets: observed-locus regime + depth regime +
 # dominant capture bias. `locus_frac` / `panel_size` drive locus selection; the rest are
 # DNABatchHyperParams. Single-cell scales the depth down (see `scDNA.depth_scale`).
 DNA_BREADTH_PRESETS = {
@@ -103,7 +103,7 @@ def genome_bases(genes, seed=20240601, ti_tv=2.0):
     per-run / per-batch seed): the ref/alt alleles are properties of the genome, the SAME across
     runs, batches, breadths AND modalities (DNA, RNA, Visium). Sharing this map is exactly what
     makes a somatic SNV emit the SAME ref/alt in every modality's reads — the multi-modal
-    "one tumour -> shared ground truth" promise, now honoured at the read/allele level.
+    "one tumour -> shared ground truth" promise, honoured at the read/allele level.
 
     Each locus is drawn from its OWN gene-name-seeded RNG (see `_gene_base_seed`), so a gene's
     (ref, alt) is independent of its position in `genes` or of which other genes are present — two
@@ -216,10 +216,10 @@ class DNA(Assay):
     batch_label : str, optional
         Batch/library/chip label; defaults to ``f"dnabatch{seed}"``.
     fpr : float, optional
-        Legacy alias mapped to ``error_rate`` (per-base sequencing error) when ``error_rate``
+        Alias mapped to ``error_rate`` (per-base sequencing error) when ``error_rate``
         is not otherwise supplied.
     fnr : float, optional
-        Legacy parameter; accepted for signature parity but unused by the current model.
+        Accepted for signature parity; unused by the model.
     **hyper_overrides : float, optional
         Any [`DNABatchHyperParams`][iscc.data.DNABatchHyperParams] field may be overridden
         explicitly (e.g. ``mu_depth``, ``kappa``, ``ado_rate``, ``beta_binom_conc``,
@@ -250,8 +250,8 @@ class DNA(Assay):
         self.depth_model = depth_model
         self.n_reads = n_reads
         self.batch_label = batch_label
-        self.fnr = fnr  # accepted for back-compat; the realistic model uses error_rate
-        # back-compat: fpr -> sequencing error rate
+        self.fnr = fnr  # unused; the model uses error_rate
+        # fpr -> sequencing error rate
         if fpr is not None and "error_rate" not in hyper_overrides:
             hyper_overrides["error_rate"] = float(fpr)
         self.hypers = self._build_hypers(breadth, depth_model, hyper_overrides)
@@ -278,7 +278,7 @@ class DNA(Assay):
 
     # -- locus selection (breadth + target_genes) --------------------------------------
     def _select_loci(self, genes):
-        """Observed-locus positions for this breadth (DESIGN_features §D).
+        """Observed-locus positions for this breadth.
 
         `target_genes` overrides the breadth default: a list selects exactly those loci, a
         float a random fraction; 'all' defers to the breadth regime (wgs=all, wes=fraction,
@@ -697,7 +697,7 @@ class scDNA(DNA):
 
 
 # --------------------------------------------------------------------------------------
-# Multi-batch DNA (DESIGN_features §B.3 / §D): same biology, different technical signature.
+# Multi-batch DNA: same biology, different technical signature.
 # --------------------------------------------------------------------------------------
 def run_dna_batches(cell_data, mode="bulk", n_batches=2, base_seed=42, design="shared",
                     breadth="wgs", n_cells=100, **dna_kwargs):

@@ -1,8 +1,8 @@
-"""Tests for the spatial-scale scalability features (DESIGN_scalability.md §8-9):
+"""Tests for the spatial-scale scalability features:
 
 - **passenger coarsening** (``coarsen_passengers``): folds neutral passenger mutations during growth
-  so #genotypes tracks distinct CLONES, not cells. OFF by default (byte-identical to the exact
-  per-genotype engine — see test_count_engine / test_tau_leaping, which stay green). ON, it is
+  so #genotypes tracks distinct CLONES, not cells. OFF by default (the exact per-genotype engine,
+  pinned by test_count_engine / test_tau_leaping). ON, it is
   statistically equivalent (clonal selection intact) but not byte-identical, and per-cell passengers
   are reconstructed at materialisation.
 - **assay-memory cap** (``max_cells`` / ``make_cell_data(region=...)``): materialise a representative
@@ -217,7 +217,7 @@ def test_visium_place_grid_then_run_and_rotation():
     vz.place_grid(section)
     pre = vz.to_anndata()                                       # placed but not assayed
     lib = list(pre.uns["spatial"])[0]
-    assert pre.n_obs == vz._layout(None).shape[0]              # all v1 spots
+    assert pre.n_obs == vz._layout(None).shape[0]              # all spots
     assert float(pre.X.sum()) == 0.0                           # no expression yet — pure placement
     assert 0 < int((pre.obs["in_tissue"] == 1).sum()) < pre.n_obs
     assert pre.uns["spatial"][lib]["images"]["hires"].ndim == 3 and "spatial" in pre.obsm

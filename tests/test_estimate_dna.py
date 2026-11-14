@@ -1,8 +1,8 @@
-"""Tests for the DNA `estimate_dna()` (DESIGN_inference §C.1 / milestone M4 DNA half).
+"""Tests for the DNA `estimate_dna()`.
 
 The DNA analogue of `tests/test_estimate_scrna.py`, with the same two pillars:
-  * **Estimation recovery** — simulate DNA with known ``DNABatchHyperParams`` via the F4/F5
-    generative path -> ``estimate_dna()`` -> recover them within tolerance. Covered for bulk-WGS
+  * **Estimation recovery** — simulate DNA with known ``DNABatchHyperParams`` via the bulk /
+    single-cell DNA generative path -> ``estimate_dna()`` -> recover them within tolerance. Covered for bulk-WGS
     and single-cell-WGS (the required cases) plus bulk-panel (capture) and an NB-depth case.
   * **Modality / breadth awareness + honest flags** — single-cell-only fields (``ado_rate`` /
     ``beta_binom_conc``) are fit only from single-cell data and flagged not-fit on bulk;
@@ -11,7 +11,7 @@ The DNA analogue of `tests/test_estimate_scrna.py`, with the same two pillars:
 Recovery is method-of-moments on marginal summary statistics (no simulation loop). The CN passed to
 ``estimate_dna`` is the *true* CN — the perfect-caller stand-in for the two-pass conditioning.
 
-Note on ``depth_batch_sigma``: the F4/F5 generator computes a per-batch depth shift but bulk
+Note on ``depth_batch_sigma``: the DNA generator computes a per-batch depth shift but bulk
 coverage uses ``N = mu_depth * n_loci`` (the knob is currently dormant), so multi-batch *simulated*
 coverage carries no depth spread. We therefore test the estimator directly by injecting explicit
 per-batch mean depths and recovering their log-sd.
@@ -36,8 +36,8 @@ HET_SEGS = (0, 3, 7)                       # seg 3 is the amplified segment (mix
 def make_cell_data(n_cells=60, amp_seg=3, amp_cn=6.0, seed=0):
     """cell_data with one amplified segment and several het (VAF=0.5) loci per het segment.
 
-    Cell-constant CN/VAF isolates the *technical* layer (the analogue of M2's cell-constant
-    biology), so the residual coverage dispersion measures the amplification regime, not biology.
+    Cell-constant CN/VAF isolates the *technical* layer (as the cell-constant biology does in
+    test_estimate_scrna), so the residual coverage dispersion measures the amplification regime, not biology.
     """
     cells = [f"C{i}" for i in range(n_cells)]
     cnv = np.full((n_cells, N_GENES), 2.0)
@@ -77,13 +77,13 @@ class TestBulkWGSRecovery:
         assert est.hypers.mu_depth == pytest.approx(30.0, rel=0.05)   # wgs preset mean depth
 
     def test_kappa_recovered(self, fit):
-        """CN-conditioned coverage overdispersion -> DM concentration (the §C.1 crux)."""
+        """CN-conditioned coverage overdispersion -> DM concentration (the crux of the DNA fit)."""
         est, _ = fit
         assert "kappa" in est.fitted
         assert est.hypers.kappa == pytest.approx(self.KAPPA, rel=0.25)
 
     def test_gc_curve_tracks_realized_bias(self, fit):
-        """gc_curve_sigma recovers the batch's realized GC-curve strength (cf. M2 depth spread)."""
+        """gc_curve_sigma recovers the batch's realized GC-curve strength (cf. the scRNA depth spread)."""
         est, assay = fit
         assert "gc_curve_sigma" in est.fitted
         assert est.hypers.gc_curve_sigma == pytest.approx(_realized_gc_sigma(assay), abs=0.04)
@@ -161,7 +161,7 @@ class TestBreadthAndModelVariants:
 
     def test_sc_panel_capture_not_counted_twice(self):
         """Single-cell panel: the per-cell dispersion is fit around each amplicon's capture, so
-        re-simulating the fit reproduces the coverage spread (the capture spread used to be absorbed
+        re-simulating the fit reproduces the coverage spread (the capture spread must not be absorbed
         by kappa and then added again through capture_sigma)."""
         cd = make_cell_data(n_cells=80)
         kw = dict(breadth="panel", target_genes=0.3, capture_sigma=0.4, kappa=3000.0, mu_depth=60.0)

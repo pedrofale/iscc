@@ -1,4 +1,4 @@
-"""Parameter estimation & inference layer (see DESIGN_inference.md)."""
+"""Parameter estimation & inference layer."""
 from .indices import (
     inverse_simpson,
     detect_combinations,

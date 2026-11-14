@@ -1,6 +1,6 @@
-"""Validation tests for the F4 (bulk) + F5 (single-cell) DNA coverage model.
+"""Validation tests for the bulk and single-cell DNA coverage model.
 
-Internal-validation targets from DESIGN_features §C C1 / §G:
+Internal-validation targets:
   * coverage tracks copy number (bulk + single-cell);
   * a large-CN amplicon compositionally reduces other loci's coverage (bulk DM);
   * VAF recovers the true alt fraction at high depth (bulk);
@@ -73,7 +73,7 @@ def make_mixed_pool(n_cancer=400, n_normal=600,
     }
 
 
-# ----------------------------------------------------------------------- BULK (F4) ----
+# ----------------------------------------------------------------------- BULK ---------
 class TestBulkCoverage:
     def test_coverage_tracks_copy_number(self):
         cd = make_cnv_cell_data(amp_cn=8.0)
@@ -129,10 +129,9 @@ class TestBulkCoverage:
 # -------------------------------------------------------- BULK PURITY + GERMLINE ------
 class TestBulkPurity:
     def test_host_is_not_cancer(self):
-        """Regression: the resident parenchyma of a metastatic deposit is NORMAL tissue.
+        """The resident parenchyma of a metastatic deposit is NORMAL tissue.
 
-        It was previously missing from the non-cancer type list, so every host cell was
-        counted as a tumour cell and the purity of any met-bearing sample came out too high.
+        Were it counted as cancer, the purity of any met-bearing sample would come out too high.
         """
         assert biological_type("host") == "host"
         for t in ("immune", "stromal", "epithelial"):
@@ -148,7 +147,7 @@ class TestBulkPurity:
     def test_purity_correct_for_a_met_bearing_sample(self):
         """A pool whose whole normal compartment is host parenchyma (a metastatic deposit).
 
-        Before the fix this reported purity 1.0 — the exact silent failure the flag guards.
+        Counting host cells as cancer would report purity 1.0 here, silently.
         """
         cd = make_mixed_pool(n_cancer=400, n_normal=600, normal_types=("host",))
         assay = bulkDNA(breadth="wgs", seed=1).run(cd)
@@ -266,7 +265,7 @@ class TestBulkGermline:
             self._deep_assay(cd, np.zeros(3, dtype=bool))
 
 
-# ------------------------------------------------------------------ SINGLE-CELL (F5) --
+# ------------------------------------------------------------------ SINGLE-CELL -------
 class TestScDNA:
     def test_coverage_tracks_cn_per_cell(self):
         cd = make_cnv_cell_data(amp_cn=8.0)

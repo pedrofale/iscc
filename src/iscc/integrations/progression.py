@@ -1,4 +1,4 @@
-"""Cohort progression-model seam: MHN / TreeMHN / CBN / REVOLVER input + scoring (R14).
+"""Cohort progression-model seam: MHN / TreeMHN / CBN / REVOLVER input + scoring.
 
 The companion to :mod:`iscc.tumor.components.epistasis`. That module PLANTS a known event x event
 network; this one exports a cohort in the shape those tools consume, and scores what they recover

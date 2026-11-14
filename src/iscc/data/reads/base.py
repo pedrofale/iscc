@@ -1,4 +1,4 @@
-"""Shared read-emission seams (DESIGN_features §C C2/C3, §E `reads/base.py`).
+"""Shared read-emission seams.
 
 Modality-agnostic glue between iscc's count/coverage matrices and the third-party
 short-read simulators (DWGSIM / ART) + aligners (bwa / samtools):
@@ -10,7 +10,7 @@ short-read simulators (DWGSIM / ART) + aligners (bwa / samtools):
     bespoke layers (per-cell FASTA, coverage, variant injection) need no binary, so CI and
     the count-level path stay green without DWGSIM/ART/samtools/bwa installed.
 
-The DNA adapter lives in `reads/dna.py`; a later scRNA adapter (`reads/rna.py`) reuses the
+The DNA adapter lives in `reads/dna.py`; the scRNA adapter (`reads/rna.py`) reuses the
 same protocol + `run_binary`, and the shared variant seam in `reads/variants.py`.
 """
 from __future__ import annotations
@@ -28,7 +28,7 @@ class MissingBinaryError(RuntimeError):
 
 @runtime_checkable
 class ReadEmitter(Protocol):
-    """A per-modality read adapter (DNA: DWGSIM/ART; scRNA later: scReadSim).
+    """A per-modality read adapter (DNA: DWGSIM/ART; scRNA: scReadSim).
 
     `matrix` is the upstream count/coverage interface (the universal input both DNA and RNA
     read simulators ingest); `reference` is the sequence backend (DNA only); `outdir` is where

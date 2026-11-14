@@ -3,7 +3,7 @@
 ``make_cell_data`` builds the gene-wide frames (SNV, copy number, expression, the allele split, RNA
 VAF and BAF) chunk by chunk, and ``layers=`` builds only the frames an assay reads; both leave every
 value byte-identical. ``low_memory`` also chunks the program multiplier, which changes only the last
-bits of some values and no longer depends on the chunk size. The config
+bits of some values and does not depend on the chunk size. The config
 switches on every layer that writes at materialisation (a ``max_cells`` cap, coarsened passengers,
 germline and founder variants, hypoxia, CCI, the program layer with allele-specific dosage), and the
 chunk is made smaller than one run of identical cells, so a chunk boundary falls inside runs, inside
@@ -60,7 +60,7 @@ def _same(a, b):
 
 
 def _cell_data(t, monkeypatch, chunk_rows, **kw):
-    if chunk_rows is None:                        # one chunk: every row at once, as before chunking
+    if chunk_rows is None:                        # one chunk: every row at once
         monkeypatch.setattr(count, "_MATERIALISE_CHUNK_BYTES", 1 << 60)
     else:
         monkeypatch.setattr(count, "_MATERIALISE_CHUNK_BYTES", 1)
@@ -123,7 +123,7 @@ def test_low_memory_does_not_depend_on_the_chunk_and_matches_to_rounding(monkeyp
     default = _cell_data(t, monkeypatch, 7)
     a = _cell_data(t, monkeypatch, 7, low_memory=True)
     b = _cell_data(t, monkeypatch, 13, low_memory=True)
-    _same(a, b)                                   # the chunk no longer matters
+    _same(a, b)                                   # the chunk size does not matter
     for k in ("cell_exp_p", "cell_exp_m", "cell_rna_baf"):
         assert np.allclose(a[k].values, default[k].values, rtol=1e-12, atol=0), k
     x, y = a["cell_exp"].values, default["cell_exp"].values

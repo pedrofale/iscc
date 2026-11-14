@@ -1,4 +1,4 @@
-"""F2 dissociation tests: composition bias, stress signature, ground-truth subset."""
+"""Dissociation tests: composition bias, stress signature, ground-truth subset."""
 import os
 
 import numpy as np

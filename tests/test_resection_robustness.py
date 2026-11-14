@@ -1,9 +1,9 @@
-"""Robustness of the sampling API (Resection / Biopsy) + Visium placement (review fixes).
+"""Robustness of the sampling API (Resection / Biopsy) + Visium placement.
 
 - ``Resection(compartment=)`` selects primary / met / both (default primary), so a metastatic
-  tumour no longer silently drops its met demes from a sample.
-- taking a sample does not REPLACE the tumour's own ``cell_data``: ``dissociate`` / ``slice`` used
-  to leave the last cut installed on the tumour, so ``to_anndata(tumor)`` silently exported the
+  tumour's met demes can be sampled rather than silently dropped.
+- taking a sample does not REPLACE the tumour's own ``cell_data``: were ``dissociate`` / ``slice``
+  to leave the last cut installed on the tumour, ``to_anndata(tumor)`` would silently export the
   thin section instead of the tumour-level table.
 - a liquid biopsy draws circulating TUMOUR cells: every normal type — host parenchyma included —
   stays out of the pool.
@@ -80,8 +80,8 @@ def test_compartment_selects_the_right_deme_blocks_on_a_met_tumour():
 def test_sampling_leaves_the_tumours_own_cell_data_alone():
     """``make_cell_data`` installs what it materialises; a Resection must not let that through.
 
-    Before the fix, ``spec.slice(...)`` left the thin section sitting in ``tumor.cell_data``, so the
-    next ``to_anndata(tumor)`` / ``write_h5ad`` exported the section — fewer cells, silently — even
+    Were ``spec.slice(...)`` to leave the thin section sitting in ``tumor.cell_data``, the next
+    ``to_anndata(tumor)`` / ``write_h5ad`` would export the section — fewer cells, silently — even
     though the caller never asked for the tumour's table to change.
     """
     t = _tumor(PRIMARY)
@@ -133,7 +133,7 @@ def _liquid_cell_data(n_cancer=6, n_host=200, seed=0):
 
 
 def test_normal_types_tracks_the_shared_list():
-    """A hand-written copy of the normal-type names went stale when host parenchyma was added."""
+    """The normal-type names follow the shared list (host parenchyma included), not a hand copy."""
     assert set(NORMAL_TYPES) == set(normal_names)
     assert "host" in NORMAL_TYPES
 

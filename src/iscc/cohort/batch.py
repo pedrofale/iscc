@@ -1,4 +1,4 @@
-"""Flexible patient->batch multiplexing for the cohort (DESIGN_cohort.md §2.2).
+"""Flexible patient->batch multiplexing for the cohort.
 
 A user-specified assignment of patients to sequencing batches, emitted by reusing the scRNA
 multi-batch / "confounded" machinery (:mod:`iscc.data.rna`):

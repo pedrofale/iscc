@@ -1,18 +1,17 @@
-"""iscc.integrations.cci — F8's OWN ligand-receptor database, and the CCI export seam.
+"""iscc.integrations.cci — iscc's OWN ligand-receptor database, and the CCI export seam.
 
-W0 (DESIGN_cci_spatial.md). iscc emits its own L-R database over its own abstract gene
-identifiers (``G_1_10``, ``G_3_30``, …) rather than naming genes so a curated human database can
-match them. The analysis tools (CellChat first) are then pointed at THIS database, so gene
+iscc emits its own L-R database over its own abstract gene identifiers (``G_1_10``, ``G_3_30``,
+…) rather than naming genes so a curated human database can match them. The analysis tools (CellChat first) are then pointed at THIS database, so gene
 identifiers stay abstract and no real cancer-gene annotation is imported.
 
-The database and F8's wiring are two outputs of ONE object: a pair is *active* precisely because
-F8's CCI channel is wired to it (``tumor.microenv_truth["cci_wired_pair"]``). Everything else in the
-database is an unwired decoy. The pair CLASSES are MEASURED, not planted:
+The database and the microenvironment's CCI wiring are two outputs of ONE object: a pair is *active*
+precisely because the CCI channel is wired to it (``tumor.microenv_truth["cci_wired_pair"]``).
+Everything else in the database is an unwired decoy. The pair CLASSES are MEASURED, not planted:
 
   * **active**  — the wired pair, ``row 0`` of ``cci_pairs`` (known by construction);
   * **candidate** — every other pair (a neutral decoy needs no engineering);
   * **clone-correlated** — computed per candidate afterwards by :func:`clone_correlation`, as how
-    much of its ligand/receptor expression variance clone identity explains. This is W4's analysis
+    much of its ligand/receptor expression variance clone identity explains. This is an analysis
     axis, an OBSERVATION on the generated data, not a knob.
 
 The writer targets the exact ``Update-CellChatDB`` tutorial shape verified in
@@ -43,7 +42,7 @@ _INTERACTION_COLUMNS = ["interaction_name", "pathway_name", "ligand", "receptor"
 
 
 def cci_database(tumor, annotation=ANNOTATION_SECRETED):
-    """Build iscc's own L-R database from a grown tumour's F8 wiring + candidate pairs.
+    """Build iscc's own L-R database from a grown tumour's CCI wiring + candidate pairs.
 
     ``tumor.make_cell_data()`` must have run (so ``microenv_truth`` carries ``cci_pairs`` and
     ``cci_wired_pair``). Returns a dict of four DataFrames ``{interaction, complex, cofactor,
@@ -52,7 +51,7 @@ def cci_database(tumor, annotation=ANNOTATION_SECRETED):
     Parameters
     ----------
     tumor : GenotypeTumor
-        A tumour grown with an F8 CCI channel active (``microenv_params['cci']`` with non-zero
+        A tumour grown with a CCI channel active (``microenv_params['cci']`` with non-zero
         ``strength`` and ``n_target_genes``). ``n_candidate_pairs`` sets how many decoys accompany
         the wired pair.
     annotation : str
@@ -70,7 +69,7 @@ def cci_database(tumor, annotation=ANNOTATION_SECRETED):
         raise ValueError(f"annotation must be one of {_LEGAL_ANNOTATIONS}, got {annotation!r}")
     truth = getattr(tumor, "microenv_truth", None)
     if not truth or "cci_pairs" not in truth:
-        raise ValueError("tumor has no CCI database — grow it with an active F8 cci channel and "
+        raise ValueError("tumor has no CCI database — grow it with an active cci channel and "
                          "call make_cell_data() first (microenv_params['cci'] with strength>0).")
     pairs = np.asarray(truth["cci_pairs"], dtype=int)
     if pairs.size == 0:
@@ -145,7 +144,7 @@ def write_cci_database(tumor_or_db, out_dir, annotation=ANNOTATION_SECRETED):
 
 
 def clone_correlation(cell_data, pairs, clone_key="cell_type", exp_key="cell_exp"):
-    """Per-candidate-pair clone-correlation — W4's MEASURED analysis axis (DESIGN_cci_spatial.md W0).
+    """Per-candidate-pair clone-correlation — a MEASURED analysis axis.
 
     For each pair, how much of its ligand / receptor expression variance is explained by clone
     identity, as the correlation ratio ``eta = sqrt(SS_between / SS_total)`` in ``[0, 1]`` (0 =

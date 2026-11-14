@@ -1,4 +1,4 @@
-"""Cohort-level ground truth (DESIGN_cohort.md §2.3).
+"""Cohort-level ground truth.
 
 Exactly the structure that no simulator provides and that real cohorts can never give:
 

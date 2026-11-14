@@ -1,4 +1,4 @@
-"""OncoSpot's expression law, as used for the OncoSpot arm of Fig 3f (validation/paper/oncospot_law.py)."""
+"""OncoSpot's expression law, as used for the OncoSpot arm of the paper figure (validation/paper/oncospot_law.py)."""
 import os
 import sys
 

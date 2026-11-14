@@ -1,22 +1,9 @@
 """Standing check: does what we SAY still match what the code DOES?
 
-Every consistency bug found in the 2026-08-27 audit had one shape — a model or a config changed,
-and the things describing it did not follow:
-
-* ``kill_mode="proliferation"`` was written for the escape-modes work and reached exactly one file,
-  leaving the hero, the metastasis notebook and the PM cohort on a kill law whose own docstring says
-  it "cannot serve clones whose birth rates differ threefold".
-* ``tool_rctd_R`` kept telling readers it was "not yet on the realistic ductal field" for a day after
-  it was migrated onto it.
-* ``realistic_regime`` documented ``max_cells`` as "the config's 50k" long after the config said 8,000.
-* ``02_tumor_growth`` still teaches the CELL engine's kill formula, while every tutorial runs the
-  genotype engine, which does not read the parameter the notebook tunes.
-* ``configs/landing.yaml``'s reproduce command omitted ``--skip-confinement``, added seventeen days
-  earlier by a commit named for the problem it solves, so the documented command could not
-  regenerate the asset it claimed to.
-
-None of those are visible in a diff of the file that changed. They are only visible by reading one
-artefact against another, which is what this module automates. Everything here is fast and
+The drift this guards against has one shape: a model or a config changes, and the things describing
+it (notebooks, docstrings, config headers, reproduce commands) do not follow. That is not visible
+in a diff of the file that changed; it is only visible by reading one artefact against another,
+which is what this module automates. Everything here is fast and
 simulation-free; the expensive behavioural checks live in the validation harness.
 """
 import json
@@ -50,8 +37,8 @@ def _name(path):
 # 1. Shared constants must be DERIVED from one source, not restated.
 # --------------------------------------------------------------------------------------------------
 def test_normals_is_not_hand_copied():
-    """NORMALS was written out three times and the notebook copy had already lost "host" — the met
-    compartment's own normal tissue. Nothing used it, so nothing failed."""
+    """NORMALS must be derived from the engine's list: a hand-copied list silently drops a type (e.g.
+    "host", the met compartment's own normal tissue) and nothing fails."""
     import sys
     sys.path.insert(0, os.path.join(REPO, "validation"))
     sys.path.insert(0, os.path.join(REPO, "notebooks"))
@@ -67,9 +54,9 @@ def test_normals_is_not_hand_copied():
 
 
 def test_expression_params_hands_out_copies():
-    """programs_common.expression_params returned its module constants BY REFERENCE, and
-    base_sim.EXPR() edits what it is given — so calling EXPR() silently rewrote the calibrated
-    cohort coupling for the rest of the process."""
+    """programs_common.expression_params must hand out copies: base_sim.EXPR() edits what it is
+    given, so returning the module constants by reference would let one call silently rewrite the
+    calibrated cohort coupling for the rest of the process."""
     import sys
     sys.path.insert(0, os.path.join(REPO, "validation"))
     import programs_common as PC
@@ -91,8 +78,7 @@ def test_prose_parameter_claims_match_the_config():
     """Markdown that names a parameter value must name one the config actually produces.
 
     Scale presets are legitimate (the analysis datasets run at "mid"), so a claim is accepted if it
-    matches ANY preset — the check catches values that match NONE, which is how RCTD's "grid-26" and
-    realistic_regime's "50k" survived.
+    matches ANY preset — the check catches values that match NONE.
     """
     import sys
     sys.path.insert(0, os.path.join(REPO, "validation"))
@@ -124,9 +110,8 @@ def test_prose_parameter_claims_match_the_config():
 def _prose_of(path):
     """Comment and docstring text only — never executable lines.
 
-    The first version of this check scanned raw source and flagged `_CFG.get("max_cells", 50000)`
-    (a legitimate fallback) and a neighbouring gene count. A standing check that cries wolf gets
-    switched off, so it reads PROSE and nothing else.
+    Scanning raw source would flag code such as `_CFG.get("max_cells", 50000)` (a legitimate
+    fallback). A standing check that cries wolf gets switched off, so it reads PROSE and nothing else.
     """
     import ast
     src = open(path).read()
@@ -146,9 +131,8 @@ def _prose_of(path):
 def test_max_cells_module_matches_the_config():
     """The real invariant: realistic_regime's cap IS the config's cap.
 
-    The docstring bug ("defaults to the config's 50k" when it was 8,000) was downstream of the config
-    being lowered. Asserting the mechanism is robust; regex over free prose is not, which the first
-    two attempts at this check demonstrated by flagging a legitimate fallback and a gene count.
+    A stale number in its docstring follows from the config changing underneath it. Asserting the
+    mechanism is robust; regex over free prose is not.
     """
     import sys
     sys.path.insert(0, os.path.join(REPO, "validation"))
@@ -192,8 +176,8 @@ def test_prose_does_not_quote_a_stale_max_cells():
      "~4.7 of 5 GB of output it never opens"),
 ])
 def test_landing_reproduce_command_is_the_one_that_works(flag, why):
-    """The header of configs/landing.yaml tells the reader how to regenerate the docs hero. It has
-    twice drifted from the command that actually produces the shipped asset."""
+    """The header of configs/landing.yaml tells the reader how to regenerate the docs hero, so it
+    must carry the flags of the command that actually produces the shipped asset."""
     header = "\n".join(l for l in open(LANDING).read().splitlines() if l.startswith("#"))
     assert flag in header, f"configs/landing.yaml's reproduce command is missing {flag}: {why}"
 
@@ -215,9 +199,9 @@ def test_overview_and_config_document_the_same_hero_command():
 # 4. Treatment: the kill law must be stated, never silently defaulted.
 # --------------------------------------------------------------------------------------------------
 def test_every_configured_chemotherapy_states_its_kill_mode():
-    """`kill_mode` defaults to "additive" in arc.py. That default is how the hero ended up on a kill
-    law the engine's own docstring rejects, five days after a better one was written, with nothing
-    in the config to show a choice had been made. Requiring the key makes the choice visible.
+    """`kill_mode` defaults to "additive" in arc.py, a law that cannot serve clones whose birth rates
+    differ widely. A config that omits the key inherits it with nothing to show a choice was made;
+    requiring the key makes the choice visible.
     """
     missing = []
     for path in sorted(glob.glob(os.path.join(REPO, "configs", "*.yaml"))):
@@ -233,8 +217,8 @@ def test_every_configured_chemotherapy_states_its_kill_mode():
 # 5. Published notebooks: no internals, no dev scaffolding, no stale execution.
 # --------------------------------------------------------------------------------------------------
 def test_notebooks_do_not_reach_past_the_public_api():
-    """A tutorial that documents the API should not call through the underscore. base_sim wraps the
-    two that used to (cancer_clones, stage_palette)."""
+    """A tutorial that documents the API should not call through the underscore; base_sim wraps
+    what the notebooks need (cancer_clones, stage_palette)."""
     bad = []
     for p in NOTEBOOKS:
         for i, c in enumerate(_cells(p, "code")):

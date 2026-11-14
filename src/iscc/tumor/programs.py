@@ -1,30 +1,30 @@
 """
-Gene programs: the expression backbone (R13) and the cell-state model (R12).
+Gene programs: the expression backbone and the cell-state model.
 
-`DESIGN_expression.md` §3-§4 and `DESIGN_celltrajectory.md` describe ONE object from two sides, and
-this module is that object — build it once, use it twice. A cell's expression state is a vector of
+The expression model and the cell-state model are ONE object seen from two sides, and this module is
+that object — build it once, use it twice. A cell's expression state is a vector of
 activities ``z = (z_1 … z_K)`` over K gene PROGRAMS (the recurrent meta-programs: cell cycle,
 hypoxia, EMT, stress, stemness…; Gavish & Tirosh, Nature 2023), and expression is
 
     exp_{g,a} = base_{type,g}/2 · exp(Σ_k z_k·loading_{k,g}) · dosage(CN_{g,a}; s_g) · snv(class_{g,a}) · niche_g
 
-R12 owns how ``z`` MOVES (differentiation hierarchy, landscape deformation, niche); R13 owns
-``z`` → counts plus the gene-level dosage/SNV overlays. This module provides the shared pieces: the
+The cell-state model governs how ``z`` MOVES (differentiation hierarchy, landscape deformation,
+niche); the expression model maps ``z`` → counts plus the gene-level dosage/SNV overlays. This module provides the shared pieces: the
 program dictionary (which genes each program loads on, and how strongly), the per-cell ``z`` sampler,
 and the genotype/niche coupling that biases ``z``.
 
 WHY THIS EXISTS — non-circularity. The DNA↔RNA integration tools (clonealign, inferCNV, Numbat,
-cardelino, PhylEx) all INVERT a genotype→expression law. Before this module iscc's forward model was
-approximately the law they assume: linear dosage, genes independent, alleles summed. A benchmark
-against that is partly circular. The load-bearing property here is that **programs ⟂ CNAs**:
+cardelino, PhylEx) all INVERT a genotype→expression law. A forward model with linear dosage,
+independent genes and summed alleles is approximately the law they assume, so a benchmark against it
+is partly circular. The load-bearing property here is that **programs ⟂ CNAs**:
 programs are FUNCTIONAL gene sets scattered across the genome, CNAs are CONTIGUOUS segments. That
 orthogonality is what makes the benchmarks non-trivial, and ``program_genomic_scatter`` is the knob
 that operationalises it (turn it down to build a deliberately CNA-mimicking program as a control).
 
 READOUT-ONLY. Programs are driven BY the genotype and the niche; they never feed back into fitness.
-Program→fitness is an eco-evolutionary loop (R8b / R12-v3) and is deliberately out of scope — this
-keeps the F8 discipline, and it is what lets the whole layer stay a pure materialisation-time
-concern: growth is byte-identical whether the program layer is on or off at a given seed.
+Program→fitness is an eco-evolutionary loop and is deliberately out of scope. That is what lets the
+whole layer stay a pure materialisation-time concern: growth is the same whether the program layer is
+on or off at a given seed.
 
 STREAMS. Everything that is a property of the GENOME/LANDSCAPE — the gene→program map, `loading`,
 the program-regulator assignment, and the per-gene dosage sensitivity `s_g` — is drawn from the
@@ -57,12 +57,12 @@ DEFAULT_SEEDED_PROGRAMS = ("proliferation", "emt", "hypoxia", "drug_resistance",
 # Route 1 (the DEFAULT coupling): each evolved per-clone phenotype drives one program. The chain is
 # mutation → (the existing CINner fitness model) → phenotype → program → expression, so a mutation
 # that raises the division rate RAISES the proliferation program by construction, with no new
-# gene-tagging machinery. See DESIGN_expression.md §3.1.
+# gene-tagging machinery.
 # Note that MULTIPLE phenotypes may map to the SAME program — `clone_drive` sums their contributions
 # (`drive[k] += ...`). The invasive `emt` program is driven by BOTH `breach` (the compartment-selection
-# invasion trait, DESIGN_phenotype_plasticity.md §2 / DESIGN_ductal_field.md §5) and `dispersal_rate`.
+# invasion trait) and `dispersal_rate`.
 # `breach` is the biologically apt, always-live genetic arm of the invasive phenotype; `dispersal_rate`
-# is retained but is INERT whenever `prop_dispersal == 0` (dispersal never varies ⇒ zero fold-change ⇒
+# is INERT whenever `prop_dispersal == 0` (dispersal never varies ⇒ zero fold-change ⇒
 # no drive), which is the default in the structured configs — so relying on it alone gives the emt
 # program no genetic signal. Keeping both means emt has a robust genetic arm regardless of prop_dispersal.
 DEFAULT_PHENOTYPE_PROGRAM_MAP = {
@@ -73,11 +73,11 @@ DEFAULT_PHENOTYPE_PROGRAM_MAP = {
     "immune_resistance": "immune_evasion",
 }
 
-# Route 3: which niche field drives which program (generalises F8's hypoxia/CCI gene sets).
-# Available niche fields: the F8 fields "hypoxia" / "cci", and — in a structured (gland) tumour — the
-# compartment fields "epithelial" / "stromal" (per-deme live fraction; DESIGN_phenotype_plasticity.md
-# §2 Part D). Mapping "epithelial" -> "emt" makes the invasive program env-responsive to the
-# epithelial interface, which is the genetic-vs-niche expression confound v1 ships.
+# Route 3: which niche field drives which program (generalises the microenvironment hypoxia/CCI gene
+# sets). Available niche fields: the microenvironment fields "hypoxia" / "cci", and — in a structured
+# (gland) tumour — the compartment fields "epithelial" / "stromal" (per-deme live fraction). Mapping
+# "epithelial" -> "emt" makes the invasive program env-responsive to the epithelial interface, which
+# is a genetic-vs-niche expression confound.
 DEFAULT_NICHE_PROGRAM_MAP = {"hypoxia": "hypoxia"}
 
 # The SNV functional classes (axis B). `silent` and `missense` leave mRNA level alone (a missense
@@ -105,7 +105,7 @@ class ProgramDictionary:
     A property of the GENOME, so it is drawn from the layout stream and is IDENTICAL across two runs
     (patients) that share a config — the same requirement the shared driver landscape already meets.
 
-    Parameters mirror `DESIGN_expression.md` §4.1 (`program_params`):
+    Parameters (the keys of `program_params`):
 
     n_programs (K)
         How many programs exist.
@@ -321,7 +321,7 @@ class ProgramModel:
     # ---------------------------------------------------------------- landscape draws
     def _draw_regulators(self, rng):
         """Route 2: tag a sparse subset of genes as DIRECT program regulators — mutating one shifts
-        `z` for its target programs with NO fitness change (R12's plasticity cases: differentiation
+        `z` for its target programs with NO fitness change (the plasticity cases: differentiation
         block, de-differentiation, an aberrant program switched on).
 
         Sparse on purpose: if most drivers moved a program, every clone would be its own expression
@@ -353,9 +353,9 @@ class ProgramModel:
         population, so every clone carrying it inherits the same class) but of THIS RUN, not of the
         landscape — so it draws from the run stream.
 
-        The multiplier is deliberately kept SEPARATE from the fitness effect (`selection.mut_effects`),
-        which is the knob these two shared before: entangling "this mutation is advantageous" with
-        "this mutation raises expression" is what made the SNV-based benchmarks circular.
+        The multiplier is deliberately kept SEPARATE from the fitness effect (`selection.mut_effects`):
+        entangling "this mutation is advantageous" with "this mutation raises expression" would make
+        the SNV-based benchmarks circular.
         """
         sp = dict(self.snv_effect_params)
         p = np.array([float(sp.get("p_silent", 0.55)), float(sp.get("p_missense", 0.30)),
@@ -437,9 +437,9 @@ class ProgramModel:
         return drive
 
     def niche_drive(self, fields):
-        """Route 3 — niche → program: the per-DEME drive from the F8 fields (n_demes × K).
+        """Route 3 — niche → program: the per-DEME drive from the microenvironment fields (n_demes × K).
 
-        Generalises F8: any program can be tagged niche-responsive via `niche_program_map`, instead of
+        Any program can be tagged niche-responsive via `niche_program_map`, instead of
         hypoxia/CCI being hard-wired to their own private gene sets.
         """
         K = self.n_programs
@@ -556,7 +556,7 @@ class ProgramModel:
         ``exp(60)`` and take over the cell's whole library. With ``program_params["max_log_fold"] = c``
         it saturates smoothly, ``x -> c·tanh(x / c)``: unchanged for small ``x``, never beyond ``c`` (a
         ``e^c``-fold change; ``c = 5`` is about 150-fold, the strongest induction a real program shows).
-        Without it the multiplier is unchanged, and a warning is raised the first time it exceeds
+        Without it the multiplier is unbounded, and a warning is raised the first time it exceeds
         ``PROGRAM_FOLD_WARNING``.
         """
         if self.dictionary is None or Z.shape[1] == 0:

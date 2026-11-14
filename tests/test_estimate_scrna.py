@@ -1,6 +1,6 @@
-"""Tests for the scRNA `estimate_rna()` (DESIGN_inference §B / milestone M2).
+"""Tests for the scRNA `estimate_rna()`.
 
-Two pillars (cf. the PLOS Comp Bio bar, DESIGN_inference "Why this exists"):
+Two pillars:
   * **Estimation recovery** — simulate with known ``RNABatchHyperParams`` -> estimate_rna -> recover
     them within tolerance (no external data; the key methods-paper validation).
   * **Runs on realistic data** — estimate_rna on a realistic single-batch AnnData returns valid,
@@ -158,8 +158,8 @@ class TestRunsOnRealisticData:
         assert np.isfinite(forced.hypers.dropout_mid) and forced.hypers.dropout_mid >= 0
 
     def test_refit_reproduces_library_size(self):
-        """Fit -> re-simulate keeps the library sizes: dropout is no longer applied on top of a
-        library fitted to post-dropout totals."""
+        """Fit -> re-simulate keeps the library sizes: dropout is not applied a second time on top
+        of a library fitted to post-dropout totals."""
         adata = self._realistic_adata("10x")
         est = estimate_rna(adata, protocol="10x")
         sim = scRNA(n_cells=500, seed=9, **est.scrna_kwargs()).run(_cell_data(n_cells=500, n_genes=400, seed=2))

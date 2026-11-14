@@ -3,9 +3,9 @@ compartment trajectory: two cell-resolution deme-grids on the LEFT, their own-co
 ("fish"/symmetric) Mullers on the RIGHT, a shared tumour-time axis, and ONE shared clone colormap so a
 clone is the same colour in the grid and the Muller.
 
-This holds the ``build_figure`` / centered-Muller / GIF logic (promoted from an earlier bespoke
-standalone script). It is ENGINE-FREE: everything is read from the trajectory pickle written by
-``isccsim`` (see ``iscc.tumor.arc``), so the GIF renders offline.
+This holds the ``build_figure`` / centered-Muller / GIF logic. It is ENGINE-FREE: everything is
+read from the trajectory pickle written by ``isccsim`` (see ``iscc.tumor.arc``), so the GIF renders
+offline.
 
 ``splash=True`` is the minimal HERO variant (no legend, "Primary"/"Metastasis" titles only, no axis
 numbers, per-panel event labels with a legible semi-opaque box); ``splash=False`` is the fully-labelled
@@ -103,8 +103,8 @@ def build_figure(traj, splash=False, scale=1.0):
                                  driver_map=traj["driver_map"], min_freq=traj["min_freq"],
                                  clone_colors=colors,
                                  # the primary band reads the same clones in the PRIMARY compartment,
-                                 # where met-survival is not a stage (arc.stage_of); older trajectories
-                                 # without the key fall back to the shared map.
+                                 # where met-survival is not a stage (arc.stage_of); a trajectory
+                                 # without the key falls back to the shared map.
                                  clone_colors_primary=traj.get("colors_primary"),
                                  mark_generations=marks, star_genotype=None,
                                  # smoothing_std is a Gaussian width in GENERATIONS: the pymuller default
@@ -207,7 +207,7 @@ def render_animation(traj, out_path, splash=False, poster=True, scale=1.0):
     frames = traj["frames"]
     colors = traj["colors"]
     # primary-compartment reading of the same clones (arc.stage_of): met-survival is not a stage a duct
-    # cell can be at. Trajectories written before this key existed fall back to the shared map.
+    # cell can be at. A trajectory without this key falls back to the shared map.
     colors_primary = traj.get("colors_primary") or colors
     deme_coords = traj["deme_coords"]
     n_primary = traj["n_primary_demes"]

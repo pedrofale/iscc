@@ -1,4 +1,4 @@
-"""Noble evolutionary-mode indices (n, D, J1) on the genotype engine (DESIGN_inference.md M0/M0b)."""
+"""Noble evolutionary-mode indices (n, D, J1) on the genotype engine."""
 import math
 
 import numpy as np

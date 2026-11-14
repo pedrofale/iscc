@@ -1,12 +1,12 @@
-"""Drug-induced resistance STATE — DESIGN_phenotype_plasticity.md §3.3.
+"""Drug-induced resistance STATE.
 
 A carried, heritable resistance cell-state INDEPENDENT of the genome: acquiring a resistance mutation
 sets it (genetic entry / beta_bias), the drug can induce it (plasticity), and it relaxes back off drug
 over a configurable timescale (tau_relax) — so, unlike the genomic-only trait, a CNA that deletes the
 triggering allele does NOT restore sensitivity. The state feeds the drug-protection term and charges a
 proliferation cost. A state transition MINTS A NEW GENOTYPE ID (the state is not derivable from the
-genome). OFF BY DEFAULT: with every knob at its inert default ``resistance_state_on`` is False and no
-new code path runs, so growth is byte-identical (the golden-hash discipline of test_wgd).
+genome). OFF BY DEFAULT: with every knob at its inert default ``resistance_state_on`` is False and the
+state code path does not run, so growth is byte-identical to a run without the state.
 
 Covered here:
   * off-by-default: explicit-inert == absent (byte-identical stream); no new cell_data / cell_evo schema.
@@ -14,7 +14,7 @@ Covered here:
   * inheritance of the state through divide() and mutate() (allele-loss children keep it).
   * the effect: a state cell takes attenuated drug (folded into the protection max()).
   * the cost: a state cell divides slower, and a twin's rate reflects its OWN state.
-  * EXIT is genuinely reachable (relax>0 flips state 1->0) — NOT the rejected latch.
+  * EXIT is genuinely reachable (relax>0 flips state 1->0) — the state is not a one-way latch.
   * a transition mints a NEW genotype id sharing the genome, records the parent, and REUSES the twin.
 """
 import hashlib
@@ -82,8 +82,8 @@ def test_any_knob_turns_the_feature_on(knob, val):
 @pytest.mark.parametrize("seed", [1, 2, 3])
 def test_explicit_inert_state_matches_absent_keys(seed):
     """All state knobs explicitly at their inert defaults must be byte-identical to omitting them —
-    the same guarantee test_wgd pins for wgd_rate=0. (off==pre-feature is carried by the existing
-    golden-hash suite, which stays green because every new path is gated on resistance_state_on.)"""
+    the same guarantee test_wgd pins for wgd_rate=0. (Off matching a state-free engine is carried by
+    the golden-hash suite: every state path is gated on resistance_state_on.)"""
     a = _count(seed, steps=120)
     inert = {**SELECTION_PARAMS, "resistance_state_genetic": False, "resistance_state_effect": 0.0,
              "resistance_state_cost": 0.0, "resistance_state_induction": 0.0,
@@ -212,11 +212,11 @@ def test_state_twin_mints_a_new_genotype_sharing_the_genome():
     assert t._state_twin(twin, 0.0) == gid
 
 
-# --- EXIT is reachable: this is NOT the rejected latch ----------------------------------------------
+# --- EXIT is reachable: the state is not a one-way latch --------------------------------------------
 def test_exit_is_possible_not_a_latch():
     """With relax high and no drug, a state cell (allele already gone) relaxes back to sensitive within
-    a few generations, producing a state-0 twin. The rejected feature was a trait that could NEVER
-    decrease; here exit is a first-class, reachable transition."""
+    a few generations, producing a state-0 twin. A trait that could NEVER decrease would be a latch;
+    here exit is a first-class, reachable transition."""
     # prop_treatment_resistance=0.0 -> no resistance loci exist -> n_mut_tr is always 0, so every
     # forced-state cell is exit-eligible (no genetic anchor).
     sel_kw = {"prop_treatment_resistance": 0.0,

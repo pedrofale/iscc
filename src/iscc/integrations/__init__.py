@@ -50,6 +50,6 @@ __all__ = [
     "count_spurious_parallel", "multiregion_phylogeny",
     "neighbor_joining", "hamming_nj_tree", "fitch_length", "robinson_foulds",
     "clone_lineage_tree", "ordering_reversal_rate",
-    # W0: iscc's own ligand-receptor database (CellChat/CellPhoneDB), and the W4 clone-correlation axis
+    # iscc's own ligand-receptor database (CellChat/CellPhoneDB), and the clone-correlation axis
     "cci_database", "write_cci_database", "referenced_genes", "clone_correlation",
 ]

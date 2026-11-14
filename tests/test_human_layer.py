@@ -7,7 +7,7 @@ What must hold:
 2. **Arm genome.** ``arm_genome`` gives one segment per arm at any resolution, driver counts from the
    Census that do not change with resolution, and a configuration the engine grows.
 3. **Growth is untouched.** ``segment_drivers`` unset leaves the driver layout byte-identical, and the
-   assays without ``gene_lift`` are unchanged (covered by the existing assay suites).
+   assays without ``gene_lift`` do not touch the layer (covered by the assay suites).
 4. **Resolution-free map.** The same human genes come out at every resolution; each growth gene covers
    a contiguous stretch of one arm, in genomic order.
 5. **Allele counts follow the homologs.** A homolog lost in a genotype contributes no SNP UMIs from

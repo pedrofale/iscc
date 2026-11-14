@@ -1,17 +1,17 @@
-"""Compartment-dependent selection — v1 of DESIGN_phenotype_plasticity.md §2, on the ductal-field
-substrate (DESIGN_ductal_field.md). COUNT engine only (the cell-engine mirror is deferred with the
-count-only substrate).
+"""Compartment-dependent selection on the ductal-field substrate. COUNT engine only: the
+compartment death terms live in the count engine's death rate, like the substrate itself.
 
-Two new gene-based heritable axes (``breach`` / ``stromal_survival``) attenuate two local compartment
+Two gene-based heritable axes (``breach`` / ``stromal_survival``) attenuate two local compartment
 hazards (``epithelial_barrier`` / ``stromal_hazard``), BOTH keyed to the deme's LIVE cell fraction
 (symmetric with the immune term): the gland wall (epithelial cells) and the stroma (stromal cells).
 So a clone that has diluted the resident normals feels less of the barrier, and a lumen-founded lesion
 is confined (DCIS) until a subclone evolves ``breach`` (cross the wall) and ``stromal_survival``
-(survive the stroma) — DCIS→IDC. The compartment is also an R13 route-3 niche field driving the
-invasive program at the epithelial front — the genetic-vs-niche expression confound.
+(survive the stroma) — DCIS→IDC. The compartment is also a niche field driving the invasive
+program at the epithelial front — the genetic-vs-niche expression confound.
 
 Covered here:
-  * OFF-by-default -> growth is byte-identical (golden hashes; and on the multi-gland ductal field).
+  * with the feature off, growth is byte-identical to a run without the parameters (golden hashes;
+    and on the multi-gland ductal field).
   * a breach-competent genotype has strictly LOWER death than a non-breacher in an epithelial-
     occupied deme, and EQUAL death in a pure-cancer deme (the trait pays off only at the wall).
   * stromal_survival is the analogous statement in a stromal-cell-occupied deme.
@@ -41,12 +41,12 @@ SEL_ON = {**SELECTION_PARAMS, "prop_breach": 0.2, "prop_stromal_survival": 0.2,
           "breach_effects": 1.5, "stromal_survival_effects": 1.5}
 
 
-# --- OFF-by-default: byte-identical growth ----------------------------------------------------
-# Golden (tumor_size, cell_snv md5) captured on the pre-feature engine for a STRUCTURED tumour with
-# NO compartment params. prop_breach/prop_stromal_survival default 0 -> the ``binomial(1, 0.0)`` draws
-# short-circuit (no rng consumed, so the gene-role layout and celltype baselines are untouched), and
-# epithelial_barrier/stromal_hazard default 0 -> the two death terms are ``+= 0.0``. So the whole
-# growth stream is exactly what it was before the axes existed.
+# --- off by default: byte-identical growth ----------------------------------------------------
+# Golden (tumor_size, cell_snv md5) for a STRUCTURED tumour with NO compartment params.
+# prop_breach/prop_stromal_survival default 0 -> the ``binomial(1, 0.0)`` draws short-circuit (no rng
+# consumed, so the gene-role layout and celltype baselines are untouched), and
+# epithelial_barrier/stromal_hazard default 0 -> the two death terms are ``+= 0.0``. So the growth
+# stream is exactly that of an engine without the axes.
 _GOLDEN_COUNT = {
     1: (1524, "911b3ac9e297e4986678c66a4c1130bf"),
     2: (1526, "291cfc18b067fc46b9eef9b6b6177ddc"),
@@ -183,12 +183,7 @@ def test_live_composition_gates_the_barrier():
     assert d_many > d_few
 
 
-# --- both engines agree on the compartment death terms ----------------------------------------
-# NB the cell-engine mirror is DEFERRED in v1 (the ductal-field substrate is count-engine only), so
-# there is no engine-agreement test here; the death terms live in count.py's _death_rate only.
-
-
-# --- Part D: the compartment as an R13 niche field (the confound) ------------------------------
+# --- the compartment as a niche field (the confound) -------------------------------------------
 _EXPR = {
     "program_params": {"n_programs": 6, "n_genes_per_program": 8, "program_overlap": 0.1},
     "coupling_params": {"niche_program_map": {"epithelial": "emt"}, "niche_program_strength": 3.0},
@@ -205,7 +200,7 @@ def test_compartment_niche_field_drives_program():
                       expression_params=_EXPR)
     t.grow(n_steps=60, seed=1)
     t.make_cell_data()
-    # ground truth recorded even though F8 (hypoxia/cci) is off
+    # ground truth recorded even with hypoxia/cci off
     assert "epithelial" in t.microenv_truth and "stromal" in t.microenv_truth
     assert t.microenv_truth["epithelial"].shape[0] == len(t.demes)
     # the niche drive is monotone in the epithelial field for the mapped program

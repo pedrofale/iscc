@@ -1,4 +1,4 @@
-"""Summary statistics for ABC inference on the genotype-count engine (DESIGN_inference A.2).
+"""Summary statistics for ABC inference on the genotype-count engine.
 
 ABC compresses a whole simulated tumour to a short vector of summaries; the inference engine
 (``abc.py``) then matches simulated vectors to an observed one. The summaries here are the

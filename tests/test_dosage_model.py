@@ -2,8 +2,8 @@
 
 What must hold:
 
-1. **Default unchanged.** `s_g` is the clipped normal drawn as before, from the same layout
-   sub-stream, and the law is the "haplotype" law.
+1. **Default.** `s_g` is the clipped normal drawn from its layout sub-stream, and the law is the
+   "haplotype" law.
 2. **The "total" law** buffers losses as it buffers gains, leaves a copy-neutral loss of
    heterozygosity at the diploid level, and keeps the allelic split of the "haplotype" law.
 3. **Readout only.** Growth is byte-identical whatever the prior or the law, since dosage acts at

@@ -2,7 +2,7 @@
 Create an animation of a tumor growth given a list of outputs from a simulation on a grid.
 
 Two modes:
-  * DEFAULT  — the historical single-grid growth animation (standard Muller), from grid_*.csv +
+  * DEFAULT  — the single-grid growth animation (standard Muller), from grid_*.csv +
                genotype-count/parent CSVs.
   * --compartment — the primary + metastasis COMPOSITE (grids left, centered symmetric Mullers right,
                shared time axis, shared clone colormap), rendered from the compartment trajectory an

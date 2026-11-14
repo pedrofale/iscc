@@ -1,4 +1,4 @@
-"""M3a: the real-tumour empirical (n, D, J1) table is valid.
+"""The real-tumour empirical (n, D, J1) table is valid.
 
 Guards the committed `validation/data/noble_empirical_indices.csv` (computed from the published
 Noble et al. 2022 phylogenies by `build_noble_empirical_indices.py`, using iscc's own index

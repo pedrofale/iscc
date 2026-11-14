@@ -1,6 +1,6 @@
-"""Single-cell RNA-seq assay with a protocol-aware batch-effect model (DESIGN_features §B).
+"""Single-cell RNA-seq assay with a protocol-aware batch-effect model.
 
-Generative model for cell *c*, gene *g*, batch *b* (DESIGN_features §B.2), starting from
+Generative model for cell *c*, gene *g*, batch *b*, starting from
 the tumour's ground-truth expression `lambda_cg` (= `cell_data['cell_exp']`):
 
     beta_gb ~ LogNormal(0, sigma_batch^2)        per-gene batch factor, shared across batch b
@@ -21,7 +21,7 @@ Protocol presets set which technical components dominate:
                  plate-nested (a per-plate offset x a per-well term).
 
 Two `scRNA` instances with the same hyper-parameters and different seeds are two batches:
-same biology, different technical signature (§B.3). `run_scrna_batches` builds a labelled
+same biology, different technical signature. `run_scrna_batches` builds a labelled
 multi-batch benchmark (shared / balanced-split / confounded designs).
 """
 from .assay import Assay
@@ -33,7 +33,7 @@ import numpy as np
 import pandas as pd
 
 
-# Protocol-typical hyper-parameter presets (DESIGN_features §B.2, §D).
+# Protocol-typical hyper-parameter presets.
 PROTOCOL_PRESETS = {
     # Droplet protocol: no plates, so n_wells = 0 switches the whole plate layer off.
     "10x": dict(
@@ -45,9 +45,8 @@ PROTOCOL_PRESETS = {
     # 5' UMIs suppress amplification noise (low dispersion); plate prep -> low ambient /
     # few doublets, higher sensitivity (deeper) / lower dropout. Cells are index-sorted one
     # per well onto 384-well plates (n_plates=0 -> as many plates as the cells need).
-    # plate_sigma defaults to 0 (plates are bookkeeping only) so the preset reproduces the
-    # depths this protocol produced before plates existed; set it to ~0.1-0.2 to switch on
-    # the shared per-plate depth offset.
+    # plate_sigma defaults to 0 (plates are bookkeeping only); set it to ~0.1-0.2 to switch
+    # on the shared per-plate depth offset.
     "smartseq3": dict(
         sigma_batch=0.10, mu_lib=8000.0, sigma_lib=0.45, dispersion=0.15,
         ambient_frac=0.005, doublet_rate=0.01, dropout_mid=0.0, dropout_shape=1.0,
@@ -78,7 +77,7 @@ class scRNA(Assay):
     """scRNA-seq assay: applies a protocol-keyed `Batch` to a sample's `cell_exp`.
 
     The ``protocol`` preset sets typical magnitudes for every technical knob below; any of
-    them can be overridden explicitly (``None`` keeps the preset value). Legacy aliases are
+    them can be overridden explicitly (``None`` keeps the preset value). Aliases are
     accepted: ``n_reads`` maps onto ``mu_lib`` and ``lib_size_sigma`` onto ``sigma_lib``.
 
     Parameters
@@ -100,9 +99,9 @@ class scRNA(Assay):
     batch_label : str, optional
         Label recorded for this batch/realization; defaults to ``f"batch{seed}"``.
     n_reads : float, optional
-        Legacy alias for ``mu_lib`` (mean library size).
+        Alias for ``mu_lib`` (mean library size).
     lib_size_sigma : float, optional
-        Legacy alias for ``sigma_lib`` (per-cell library-size LogNormal sd).
+        Alias for ``sigma_lib`` (per-cell library-size LogNormal sd).
     dispersion : float, optional
         Negative-binomial overdispersion phi (``var = mu + phi*mu^2``); used only when
         ``count_model="nb"`` (phi <= 0 collapses to Poisson). Default None -> preset
@@ -194,7 +193,7 @@ class scRNA(Assay):
 
         params = dict(PROTOCOL_PRESETS[self.protocol])
         params["protocol"] = self.protocol
-        # legacy aliases
+        # aliases
         if n_reads is not None:
             params["mu_lib"] = float(n_reads)
         if lib_size_sigma is not None:
@@ -220,7 +219,7 @@ class scRNA(Assay):
             raise ValueError("plate_layout needs a plate protocol (n_wells > 0), "
                              f"but protocol {self.protocol!r} has n_wells=0")
         self.plate_layout = plate_layout
-        # convenience mirror for callers that still read `.n_reads`
+        # convenience mirror of mu_lib
         self.n_reads = self.hypers.mu_lib
         # plate/well placement of the assayed cells; set by `run` (None without plates)
         self.plates = None
@@ -411,8 +410,8 @@ class scRNA(Assay):
 
     def write(self, out_path, write_h5ad=True):
         os.makedirs(out_path, exist_ok=True)
-        # CSV kept for backward compatibility with the existing pipeline / tests; not for human-gene
-        # counts, which are sparse and far wider (write them with iscc.data.human.write_scrna)
+        # no CSV for human-gene counts, which are sparse and far wider (write them with
+        # iscc.data.human.write_scrna)
         if getattr(self, "counts_csr", None) is None:
             self.observed_counts.to_csv(os.path.join(out_path, "umis.csv"))
         if write_h5ad:
@@ -442,7 +441,7 @@ def _sparse_doublets(batch, counts):
 def run_scrna_batches(cell_data, n_batches=2, base_seed=42, design="shared",
                       protocol="10x", n_cells=100, count_model="nb", plate_layout=None,
                       **scrna_kwargs):
-    """Generate `n_batches` scRNA batches that share biology but differ technically (§B.3).
+    """Generate `n_batches` scRNA batches that share biology but differ technically.
 
     designs:
       * ``"shared"``  — every batch measures the SAME cells (exact cell<->cell correspondence

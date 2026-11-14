@@ -6,15 +6,15 @@ Stage 2 of the iscc pipeline. Reads the ground-truth `cell_data/` written by
 ground truth preserved) plus a `sample_meta.yaml` describing how it was taken.
 The resulting `cell_data/` is the input to `isccdata`.
 
-Two sampling methods (the F1/F2 sampling layer):
+Two sampling methods:
 
-* **biopsy** (F1) — spatial region selection over the `cell_crd` grid:
+* **biopsy** — spatial region selection over the `cell_crd` grid:
   `--biopsy-type {needle,punch,multiregion,liquid}`. Multi-region tags each disk
   with its own `region` label (the multi-region-heterogeneity substrate for
   phylogeny); liquid biopsy draws a few circulating cells biased toward
   high-dispersal clones. A per-cell `region` label is written to
   `cell_data/cell_region.csv` and the geometry is recorded in `sample_meta.yaml`.
-* **dissociation** (F2) — cell-type-dependent recovery -> composition bias
+* **dissociation** — cell-type-dependent recovery -> composition bias
   (`--dissociation-bias`, `--recovery`), plus an optional dissociation-stress
   expression signature (`--stress-strength`).
 
@@ -89,7 +89,7 @@ def _parse_recovery(recovery):
 )
 @click.option("--fraction", default=1.0, type=float,
               help="Optional uniform thinning of the selected cells (0-1].")
-# --- F1 biopsy geometry ---
+# --- biopsy geometry ---
 @click.option("--biopsy-type", default="punch",
               type=click.Choice(["needle", "punch", "multiregion", "liquid"]),
               help="Biopsy geometry (method=biopsy).")
@@ -100,7 +100,7 @@ def _parse_recovery(recovery):
 @click.option("--n-liquid", default=20, type=int, help="Number of circulating cells (liquid).")
 @click.option("--center", default=None, help="Geometry centre as 'row,col' (default: centroid).")
 @click.option("--grid-size", default=None, type=int, help="Grid extent (default: infer from coords).")
-# --- F2 dissociation ---
+# --- dissociation ---
 @click.option("--dissociation-bias/--no-dissociation-bias", default=True,
               help="Apply cell-type-dependent recovery (method=dissociation).")
 @click.option("--recovery", default=None,

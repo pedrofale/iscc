@@ -1,4 +1,4 @@
-"""Landing clinical-arc feature (metastasis module, R9): the config-driven timed treatment SCHEDULE
+"""Landing clinical-arc feature (metastasis module): the config-driven timed treatment SCHEDULE
 that grows a primary+metastasis through grow -> surgery/resection -> chemotherapy -> relapse and
 captures a compartment TRAJECTORY, plus the `isccgif --compartment` composite renderer.
 
@@ -138,12 +138,12 @@ def test_drug_escape_stage_matches_engine_protection(tr, dt, expect):
 
 def test_drug_escape_stage_ranks_above_the_cascade_and_tolerates_missing_key():
     """Drug escape outranks the metastatic cascade (it is the last sweep of the arc), a clone with
-    neither drug trait still reads its cascade stage, and a genotype minted before the tolerance axis
-    existed (no ``drug_tolerance`` key at all) behaves exactly as it always did."""
+    neither drug trait still reads its cascade stage, and a genotype with no ``drug_tolerance`` key
+    at all is staged on its other traits."""
     assert arc.stage_of(_rep(treatment_resistance=0.0, drug_tolerance=0.8,
                              met_survival=0.5, stromal_survival=0.3)) == "tolerance"
     assert arc.stage_of(_rep(treatment_resistance=0.0, drug_tolerance=0.0, met_survival=0.5)) == "met"
-    assert arc.stage_of(_rep(treatment_resistance=0.5)) == "resistance"        # legacy rep, no dt key
+    assert arc.stage_of(_rep(treatment_resistance=0.5)) == "resistance"        # no dt key
     assert arc.stage_of(_rep(breach=0.2)) == "breach"
 
 
@@ -302,15 +302,14 @@ def test_isccgif_compartment_cli(tmp_path, sim_out, splash):
 
 
 def test_default_animate_still_requires_count_args(sim_out):
-    """The historical single-grid mode is unchanged: without --compartment it still needs the
-    genotype-count/parent arguments (additive, non-breaking)."""
+    """The single-grid mode: without --compartment it needs the genotype-count/parent arguments."""
     r = CliRunner().invoke(gif_main, [sim_out], catch_exceptions=False)
     assert r.exit_code != 0
     assert "GENOTYPE_COUNTS" in r.output or "compartment" in r.output
 
 
 def test_r15_proliferation_cost_and_driver_load():
-    """R15 compartment-context fitness. (a) proliferation_cost: each *_cost lowers a trait-carrying
+    """Compartment-context fitness. (a) proliferation_cost: each *_cost lowers a trait-carrying
     clone's division as a multiplicative penalty, and is exactly 1.0 (byte-identical) when all costs are
     0. (b) the driver LOAD counts the dissemination traits toward max_mut_drivers, so a clone that has
     activated every trait is non-viable under a realistic ceiling."""
@@ -366,7 +365,7 @@ def test_landing_config_is_valid_and_schedule_shaped():
     assert cfg["selection_params"]["prop_breach"] == tut["selection_params"]["prop_breach"] == 0.02
     assert cfg["spatial_params"]["breach_gated_invasion"] is tut["spatial_params"]["breach_gated_invasion"] is True
     assert cfg["cell_params"]["cancer"] == tut["cell_params"]["cancer"]
-    # R15 go-or-grow: the invasion costs + the driver-load ceiling are shared with the tutorial
+    # go-or-grow: the invasion costs + the driver-load ceiling are shared with the tutorial
     for k in ("breach_cost", "stromal_survival_cost", "max_mut_drivers"):
         assert cfg["selection_params"][k] == tut["selection_params"][k]
     # the landing-only ADDITIONS: metastasis + treatment (off in the tutorial) + the met compartment,

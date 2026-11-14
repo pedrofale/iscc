@@ -1,6 +1,6 @@
 """Spot swapping in the Visium assay (`bleed_rate`, `bleed_distal`, `bleed_sigma`) and the tissue-
-referenced edge falloff (`edge_reference="tissue"`). Both are off by default, and then the assay is
-unchanged; with them on, a slide counts reads outside the tissue, as a real slide does."""
+referenced edge falloff (`edge_reference="tissue"`). Both are off by default, and then the assay
+reproduces a pinned digest; with them on, a slide counts reads outside the tissue, as a real slide does."""
 import hashlib
 
 import numpy as np
@@ -45,7 +45,7 @@ def _digest(vz):
     return hashlib.sha256(np.ascontiguousarray(vz.spot_counts.to_numpy(np.int64)).tobytes()).hexdigest()[:16]
 
 
-# digest of the default assay on this section, recorded with the code before this change (27c1b78)
+# digest of the default assay on this section: with bleed and the tissue edge off it must not move
 DEFAULT_DIGEST = "cdf7ab731f44d5f7"
 
 

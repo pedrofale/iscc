@@ -2,7 +2,7 @@
 
 The default ``response="label"`` decides who a drug spares by resistance LABELS: the evolved
 ``treatment_resistance`` / ``drug_tolerance`` traits and the carried ``resistance_state``. The
-escape-mode studies are built on it, so it stays the default and must stay byte-identical.
+escape-mode studies are built on it, so its output is pinned by golden digests.
 
 The mechanistic mode ignores all three. A cancer clone's response comes from what it is:
 
@@ -84,7 +84,7 @@ def _run_label(name, **tx_kw):
     return t
 
 
-# Recorded on the code BEFORE the mechanistic mode existed (dev @ 3e29c9f).
+# Golden digests of the label-mode runs: the mechanistic branch must not move them.
 LABEL_DIGESTS = {
     "chemo_dose_mutator_persister": "58a4c98f370dbeacd25590228c7369e8",
     "targeted": "5c045e91a55268ae1ffbf582ecd93c7c",
@@ -96,7 +96,7 @@ LABEL_DIGESTS = {
 
 @pytest.mark.parametrize("name", sorted(LABEL_SCENARIOS))
 def test_label_mode_is_byte_identical(name):
-    """(a) The default response, and an explicit response="label", reproduce the pre-change runs."""
+    """(a) The default response, and an explicit response="label", reproduce the golden digests."""
     assert _digest(_run_label(name)) == LABEL_DIGESTS[name]
     assert _digest(_run_label(name, response="label")) == LABEL_DIGESTS[name]
 

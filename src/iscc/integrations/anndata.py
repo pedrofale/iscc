@@ -50,8 +50,7 @@ import pandas as pd
 #: The per-cell tables that are NOT plain annotation columns and get their own destination.
 _SPECIAL = {"cell_crd", "cell_program"}
 
-#: The layer set the original dict-only export attached. Kept as the default for that path so
-#: existing callers get exactly what they always got.
+#: The default layer set for a ``cell_data`` dict (no tumour): SNV VAFs and copy number.
 _LEGACY_LAYERS = ("cell_snv", "cell_cnv")
 
 #: Cache of the genotype ids that name a normal cell type rather than a cancer clone (filled on
@@ -389,7 +388,7 @@ def to_anndata(source, X="cell_exp", layers=None, obs_extra=True, spatial="xy",
     layers : {"all", None} or sequence of str
         Which other per-cell gene matrices become ``.layers``. ``"all"`` takes every one the run
         produced (the default for a tumour); a sequence names them explicitly. For a ``cell_data``
-        dict the default stays the historical ``("cell_snv", "cell_cnv")``.
+        dict the default is ``("cell_snv", "cell_cnv")``.
     obs_extra : bool
         Attach the per-cell annotation tables (deme, gland, compartment, microenvironment,
         evolutionary rates, ...) to ``.obs``. ``False`` keeps only the identity and coordinate
@@ -456,7 +455,7 @@ def to_anndata(source, X="cell_exp", layers=None, obs_extra=True, spatial="xy",
                 for col in frame.columns:
                     _add_obs(obs, str(col), frame[col].values, taken)
     else:
-        # Historical dict export: clone / deme / coordinates (+ microenvironment) only.
+        # Dict export: clone / deme / coordinates (+ microenvironment) only.
         if genotype is not None:
             obs["clone"] = genotype
         deme = frames.get("cell_deme")

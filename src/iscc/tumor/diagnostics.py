@@ -1,4 +1,4 @@
-"""Operating-envelope QC — read-only diagnosis of a grown tumour (DESIGN_operating_envelope.md).
+"""Operating-envelope QC — read-only diagnosis of a grown tumour.
 
 After growth, :func:`diagnose` computes phenotype metrics and flags each **degenerate regime**
 (extinct / monoclonal / no-subclones / hypermutated / well-mixed / no-microenvironment-gradient /
@@ -7,7 +7,7 @@ knob. It answers the user question "did my run produce a crappy tumour?" and pro
 benchmarks: the *well-mixed* and *no-gradient* regimes silently break the PEtracer lineage–space
 confound and the multi-region-phylogeny demos, so those get their own flags.
 
-This is a **read-only readout** (like the F8 microenvironment ground truth): it never draws from the
+This is a **read-only readout** (like the microenvironment ground truth): it never draws from the
 tumour's rng and never mutates the counts, so it cannot change simulation output. It reads the grown
 state through the genotype-count interface (``genotypes_counts`` / ``genotypes`` / ``_is_cancer`` /
 ``demes`` / ``deme_coords`` / ``selection``), which both the count and cell engines expose.
@@ -16,7 +16,7 @@ import numpy as np
 
 from ..validation import clone_diversity, population_vaf, neutral_sfs_rsq
 
-# Default thresholds (DESIGN_operating_envelope.md). Lenient on purpose: flag the clearly broken,
+# Default thresholds. Lenient on purpose: flag the clearly broken,
 # not the merely unusual. Overridable per call: ``tumor.diagnose(thresholds={"shannon_min": 1.0})``.
 DEFAULT_THRESHOLDS = {
     "min_cancer": 25,        # < this many cancer cells -> extinct / too small (hard fail)
@@ -35,7 +35,7 @@ DEFAULT_THRESHOLDS = {
     "min_genes": 100,        # fewer than this many genes -> trivial genome
     "overfill_mult": 3.0,    # mean cells/occupied-deme above this x carrying_capacity -> demes over-filling
     "within_clone_frac_min": 0.05,  # within-clone share of program-activity variance below this ->
-                                    # clone == expression state (R13; skipped when programs are off)
+                                    # clone == expression state (skipped when programs are off)
     "vaf_1f_rsq": None,      # reported only (context-dependent under selection); not a hard gate
 }
 
@@ -243,11 +243,11 @@ def cna_stats(tumor):
 
 
 def deme_occupancy(tumor):
-    """Mean total cells per OCCUPIED deme — the crowding QC (DESIGN_crowding.md).
+    """Mean total cells per OCCUPIED deme — the crowding QC.
 
     With density-dependent death this should sit near ``carrying_capacity``; a value far above K means
-    the per-deme cap is not binding and cells are piling into a few demes instead of spreading (the
-    old carrying-capacity bug). Returns nan for an empty tumour."""
+    the per-deme cap is not binding and cells are piling into a few demes instead of spreading.
+    Returns nan for an empty tumour."""
     occ = [sum(d.values()) for d in tumor.demes if d]
     return float(np.mean(occ)) if occ else float("nan")
 
@@ -292,7 +292,7 @@ def hypoxia_contrast(tumor, core_frac=0.3, rim_frac=0.3):
 
 # --- diagnosis ---------------------------------------------------------------
 def program_within_clone_frac(tumor):
-    """Share of program-activity variance that is WITHIN clones rather than between them (R13).
+    """Share of program-activity variance that is WITHIN clones rather than between them.
 
     The degenerate regime this catches is `z` collapsing to the per-clone drive, which needs ALL of
     `activity_sd = 0`, `activity_noise = 0` and no activation mask (`n_active_programs_per_cell >=
@@ -324,7 +324,7 @@ def program_within_clone_frac(tumor):
 
 
 def diagnose(tumor, thresholds=None, verbose=False):
-    """Compute phenotype metrics and flag degenerate regimes. See DESIGN_operating_envelope.md.
+    """Compute phenotype metrics and flag degenerate regimes.
 
     Read-only: never draws from the tumour's rng or mutates the counts, so it cannot alter output.
     Returns a :class:`TumorDiagnosis`. ``thresholds`` overrides individual defaults.
@@ -385,7 +385,7 @@ def diagnose(tumor, thresholds=None, verbose=False):
     if not extinct and not np.isnan(ploidy) and ploidy > th["ploidy_max_plausible"]:
         advisories.append(
             f"implausibly high mean ploidy ({ploidy:.1f}): real tumours rarely exceed ~4 -- lower "
-            f"wgd_rate / amp_prob, or tighten max_ploidy / max_cn (DESIGN_focal_cna.md)")
+            f"wgd_rate / amp_prob, or tighten max_ploidy / max_cn")
 
     # trivial genome (config-time)
     checks.append(Check(
@@ -432,9 +432,7 @@ def diagnose(tumor, thresholds=None, verbose=False):
     # other check. Diversity can be very high while NO genotype reaches `subclone_freq`, because
     # mutation outruns expansion and each cell ends up its own genotype. Nothing clone-level or
     # cohort-level can then be recovered: there are no clones to tell apart, no clone-specific CNAs
-    # at appreciable frequency, and patient-to-patient differences average away. Measured on the
-    # program cohort at mutation_rate=1.0: 879 cells, 741 genotypes, 86% singletons, largest clone
-    # 0.6% -- n_subclones=0, shannon 6.53, and diagnose() returned OK.
+    # at appreciable frequency, and patient-to-patient differences average away.
     # Only meaningful at high diversity; a genuinely low-diversity tumour is monoclonal, which has
     # its own flag and would otherwise trip this one too.
     if shannon >= th["shannon_min"]:
@@ -450,7 +448,7 @@ def diagnose(tumor, thresholds=None, verbose=False):
     checks.append(Check("cna_runaway", np.isnan(fga) or fga <= th["fga_max"], fga, th["fga_max"],
                         "CNA runaway / saturated genome: lower amp_prob / max_cn"))
 
-    # clone == expression state (R13) — only meaningful when the program layer is on.
+    # clone == expression state — only meaningful when the program layer is on.
     if not np.isnan(within_frac):
         checks.append(Check(
             "clone_is_state", within_frac >= th["within_clone_frac_min"], within_frac,
@@ -464,7 +462,7 @@ def diagnose(tumor, thresholds=None, verbose=False):
         checks.append(Check("clone_is_state", True, within_frac, th["within_clone_frac_min"],
                             skipped=True))
 
-    # demes over-filling — the carrying-capacity QC (DESIGN_crowding.md). With density-dependent
+    # demes over-filling — the carrying-capacity QC. With density-dependent
     # death the mean cells/occupied-deme should sit near carrying_capacity; a value far above K means
     # the cap is not binding (cells piling into a few demes rather than spreading). Skipped in the
     # well-mixed regime (carrying_capacity None/0), which has no per-deme ceiling by design.
@@ -474,8 +472,7 @@ def diagnose(tumor, thresholds=None, verbose=False):
         limit = th["overfill_mult"] * K
         checks.append(Check("overfilled", occupancy <= limit, occupancy, limit,
                             "demes over-filling (mean cells/deme >> carrying_capacity): the per-deme "
-                            "cap is not binding -- set maximum_death_rate >= max_birth_rate (see "
-                            "DESIGN_crowding.md)"))
+                            "cap is not binding -- set maximum_death_rate >= max_birth_rate"))
     else:
         checks.append(Check("overfilled", True, occupancy, None, skipped=True))
 

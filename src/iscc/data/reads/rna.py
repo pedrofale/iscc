@@ -59,7 +59,7 @@ def distort_vaf(rna_vaf, obs_fidelity):
 def observed_allele_counts(expr_counts, rna_vaf, obs_fidelity=1.0, error_rate=0.001, rng=None):
     """Split each cell-gene's expression UMIs into alt/ref counts, conserving the total.
 
-      expr_counts   cells x genes UMI matrix (the F3 scRNA count matrix; fixes the totals).
+      expr_counts   cells x genes UMI matrix (the scRNA count matrix; fixes the totals).
       rna_vaf       cells x genes true RNA-VAF (`cell_rna_vaf`); reindexed to `expr_counts`.
       obs_fidelity  the single distortion knob (see `distort_vaf`).
       error_rate    per-base RNA error/editing floor handed to `variants.inject`.
@@ -89,7 +89,7 @@ class SyntheticTranscriptome:
 
     Each gene gets a deterministic random cDNA of `read_length` bases with the variant site at a
     fixed interior position carrying the CANONICAL per-locus ref base; an alt-carrying molecule
-    substitutes the CANONICAL alt base there. Mirrors the DNA `SyntheticReference`: works on today's
+    substitutes the CANONICAL alt base there. Mirrors the DNA `SyntheticReference`: works on the
     abstract genome with no external reference, and crucially shares the SAME canonical (ref, alt)
     map (`iscc.data.dna.genome_bases`) so a somatic SNV emits identical alleles in scRNA/Visium and
     DNA reads. Only the variant SITE must match across modalities; the surrounding transcript
@@ -171,7 +171,7 @@ def spot_clone_mixture_vaf(spot_members, cell_exp, cell_rna_vaf, genes):
                              / sum_{c in s} cell_exp[c, g]                    (0 where unexpressed)
 
     This clone-mixture signal is exactly what spatial deconvolution must untangle. `spot_members` is
-    the per-spot list of member cell ids (the F6 assay records it as ``Visium.spot_members``).
+    the per-spot list of member cell ids (the Visium assay records it as ``Visium.spot_members``).
     Returns a (n_spots x n_genes) DataFrame aligned to `genes`.
     """
     exp = pd.DataFrame(cell_exp).reindex(columns=list(genes))
@@ -204,7 +204,7 @@ def emit_visium_reads(cell_data, grid_side=None, obs_fidelity=0.5, error_rate=0.
     `SyntheticTranscriptome`) — the per-"cell" barcode index simply becomes the SPATIAL barcode.
 
     Runs the Visium assay to get the spot x gene expression count matrix (fixing UMI totals) and
-    the spot->cell membership it records, computes the NEW spot-level clone-mixture RNA-VAF (the
+    the spot->cell membership it records, computes the spot-level clone-mixture RNA-VAF (the
     expression-weighted mixture of member cells' `cell_rna_vaf`; see `spot_clone_mixture_vaf`), then
     splits each spot-gene's UMIs into alt/ref via `observed_allele_counts`. The SAME invariants as
     scRNA hold: spot UMI totals conserved exactly (alt + ref == count), and per-base sequencing error
@@ -222,7 +222,7 @@ def emit_visium_reads(cell_data, grid_side=None, obs_fidelity=0.5, error_rate=0.
 
     if "cell_rna_vaf" not in cell_data:
         raise KeyError("cell_data lacks 'cell_rna_vaf'; call make_cell_data() on a current engine "
-                       "(F7b adds it). The mutation-aware Visium path needs the true RNA-VAF.")
+                       "(make_cell_data adds it). The mutation-aware Visium path needs the true RNA-VAF.")
     if "cell_crd" not in cell_data:
         raise KeyError("Visium needs spatial coordinates (cell_crd).")
     os.makedirs(outdir, exist_ok=True)
@@ -312,7 +312,7 @@ def emit_scrna_reads(cell_data, obs_fidelity=0.5, protocol="10x", error_rate=0.0
 
     if "cell_rna_vaf" not in cell_data:
         raise KeyError("cell_data lacks 'cell_rna_vaf'; call make_cell_data() on a current engine "
-                       "(F7b adds it). The mutation-aware scRNA path needs the true RNA-VAF.")
+                       "(make_cell_data adds it). The mutation-aware scRNA path needs the true RNA-VAF.")
     os.makedirs(outdir, exist_ok=True)
 
     assay = scRNA(protocol=protocol, seed=seed, **scrna_kwargs).run(cell_data, cell_subset=cell_subset)

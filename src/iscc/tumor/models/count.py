@@ -6,11 +6,9 @@ counts** over a shared **genotype registry**. A "cell" is a unit of count in a (
 deme) bucket; cells of the same genotype in the same deme are statistically exchangeable, so
 counting them loses no information.
 
-This realises the same birth/death/mutation/dispersal process as the cell-level
-`GlandularTumor` (validated by statistical equivalence — it is NOT byte-identical, since it
-draws "how many of the count" rather than "which cell"), but each event is O(1) integer
-arithmetic on counts. A genotype is carried by a representative cell (reusing its genome /
-mutate / get_snvs / get_cnvs / get_exp and CINner fitness).
+Each birth/death/mutation/dispersal event draws "how many of the count" rather than "which
+cell", so it is O(1) integer arithmetic on counts. A genotype is carried by a representative cell
+(reusing its genome / mutate / get_snvs / get_cnvs / get_exp and CINner fitness).
 
 Normal cells (epithelial/stromal/immune) are seeded as **static** genotype counts (they don't
 divide or mutate); they provide tissue structure, cell-type labels, and the local immune density
@@ -37,20 +35,19 @@ from ...constants import normal_names, DEFAULT_LAYOUT_SEED, LAYOUT_OFFSET_F8_PRO
 
 CELLTYPES = ["cancer", "epithelial", "stromal", "immune"]
 
-# --- Coalescent passenger overlay (v1, DESIGN_snv_coalescent.md §9 step 1) --------------------------
+# --- Coalescent passenger overlay -------------------------------------------------------------------
 # Fraction of a clone's realized folded passenger burden (``_pass_load``) that is treated as
 # CLADE-CLONAL (a "stem" born on the clone's founding edge, inherited by the whole subtree) vs.
 # PRIVATE (per-cell singletons). 0.35 was chosen empirically: high enough that the shared clade
 # signal dominates the per-cell noise (so a passenger-only tree recovers the clone-tree clades),
 # low enough to keep a realistic per-cell singleton tail (the SFS is not collapsed to pure clonal
-# markers). The stem layer is what the old per-cell-independent reconstruction entirely lacked.
+# markers).
 F_STEM_DEFAULT = 0.35
 # Every clone-split that separates sampled cells should be MARKABLE, so each clone on a sampled
 # lineage gets at least this many stem markers even when its folded burden rounds to zero.
 STEM_FLOOR = 2
 # Per-clone cap on stem markers, so the finite neutral-site budget spreads across many splits
-# instead of saturating on one early high-burden clone (the genome-saturation headroom lever of
-# DESIGN_snv_coalescent.md §4.4 / §7.3; raise the genome for deeper trees).
+# instead of saturating on one early high-burden clone (raise the genome size for deeper trees).
 STEM_CAP = 6
 # Dedicated RNG offset for the passenger reconstruction (added to ``self.seed``) — a fixed constant
 # so the overlay is reproducible and independent of the growth stream.
@@ -125,10 +122,9 @@ def _program_multiplier(P, Z):
 # Nothing else about the subtypes is modelled here — no receptor signalling, no subtype-specific
 # driver genes, no treatment response. These are three instability dials and that is all.
 BREAST_SUBTYPES = {
-    # cnv_prob is the share of mutating divisions that change copy number. These values were briefly
-    # tuned down while a defect quadrupled the mutation rate inside the confined founding patch; with
-    # that removed they are back where they belong, and give the aneuploidy burden a real breast tumour
-    # carries (about a third of the genome altered for the luminal subtype).
+    # cnv_prob is the share of mutating divisions that change copy number. These values give the
+    # aneuploidy burden a real breast tumour carries (about a third of the genome altered for the
+    # luminal subtype).
     "ER+": dict(cnv_prob=0.045, wgd_rate=0.001, mutation_rate=0.30),
     "TNBC": dict(cnv_prob=0.100, wgd_rate=0.006, mutation_rate=0.45),
 }
@@ -140,9 +136,7 @@ class GenotypeTumor:
     The tumour grows on a grid of demes (lattice patches); each deme is represented as
     **genotype counts** over a shared registry rather than one Python object per cell, so it
     is spatially explicit at the deme level while every birth / death / mutation / dispersal
-    event is O(1) integer arithmetic on counts. It realises the same evolutionary process as
-    the cell-level [`GlandularTumor`][iscc.tumor.GlandularTumor] (statistically equivalent,
-    roughly two orders of magnitude faster) and is the class most users should reach for.
+    event is O(1) integer arithmetic on counts. It is the class most users should reach for.
     Typical flow: construct, call ``grow`` to run the dynamics, then read the per-cell
     ground truth off ``make_cell_data`` and quality-check it with ``diagnose``.
 
@@ -227,8 +221,8 @@ class GenotypeTumor:
         Materialise the program layer's per-cell expression multiplier chunk by chunk instead of for
         all cells at once, so materialisation never holds a cells × genes float64 table beyond the
         frames it returns. The chunked product sums in a fixed order and so differs from the
-        all-at-once matrix product in the last bits of some values; ``False`` keeps the output
-        byte-identical to earlier versions. No effect without the program layer.
+        all-at-once matrix product in the last bits of some values. No effect without the program
+        layer.
     microenv_params : dict, optional
         Microenvironment layer (hypoxia field + cell-cell communication). Off by
         default; a pure readout that never changes growth.
@@ -271,9 +265,7 @@ class GenotypeTumor:
                  spatial_snapshot_every=0, spatial_snapshot_budget=5_000_000,
                  rng_streams="offset", low_memory=False):
         self.seed = seed
-        # Per-run stream derivation (see ``rng_streams`` above and ``_run_rng``). "offset" is the
-        # historical seed + step / seed + constant scheme, kept as the default so every existing run is
-        # byte-identical; "independent" keys each stream by (seed, purpose, step) instead.
+        # Per-run stream derivation (see ``rng_streams`` above and ``_run_rng``).
         self.rng_streams = rng_streams
         # EVOLUTION rng (per-run: spatial seeding; grow() draws its own fresh default_rng(seed+step)).
         self.rng = np.random.default_rng(seed)
@@ -281,19 +273,17 @@ class GenotypeTumor:
         # layout (Selection) and shared per-cell-type baseline expression. Defaulting layout_seed to
         # DEFAULT_LAYOUT_SEED makes any two same-config runs share their driver identities by
         # construction (comparability by default) — recurrence / cohort analysis is meaningful — while
-        # they still differ in evolution. See DESIGN_cohort.md §1. Byte-identical to the previous
-        # single-rng plumbing at the default seed 42 (structure_radius=0 never consumes self.rng at
-        # construction, and evolution never reads it).
+        # they still differ in evolution.
         self.layout_seed = DEFAULT_LAYOUT_SEED if layout_seed is None else layout_seed
         self.layout_rng = np.random.default_rng(self.layout_seed)
         self.type = "genotype"
 
-        # Update mode (DESIGN_scalability §7). "exact" = the reference one-birth/death-per-update
-        # Gillespie engine (default, unchanged). "tau" = tau-leaping: advance ALL clones once per
+        # Update mode. "exact" = the reference one-birth/death-per-update Gillespie engine.
+        # "tau" = tau-leaping: advance ALL clones once per
         # discrete generation of length `tau` by drawing Poisson(rate*count*tau) births/deaths per
         # (deme, genotype), so wall-time scales with #clones x #generations rather than #cells.
         # `snapshot_every` records a full per-clone count snapshot every k generations (so
-        # plot_muller/plot_grid keep working, now on a real-time x-axis -- see self.trace_times).
+        # plot_muller/plot_grid keep working, on a real-time x-axis -- see self.trace_times).
         self.update_mode = update_mode
         self.tau = tau
         self.snapshot_every = snapshot_every
@@ -302,8 +292,8 @@ class GenotypeTumor:
         # Spatiotemporal record. Every genotype gets its birth (trace index, step, time, deme) in
         # _register / _add; when spatial_snapshot_every > 0, _spatial_snapshot also stores every
         # deme's genotype counts at every k-th trace snapshot as compact int32 arrays keyed by the
-        # genotype's creation ordinal. Neither draws a random number, so growth is byte-identical
-        # with the record on or off. The traces list and the step counter are created here, not
+        # genotype's creation ordinal. Neither draws a random number, so growth is the same with the
+        # record on or off. The traces list and the step counter are created here, not
         # beside the deme grid below, because the founder is registered before the grid exists.
         self.spatial_snapshot_every = int(spatial_snapshot_every)
         self.spatial_snapshot_budget = int(spatial_snapshot_budget)
@@ -313,11 +303,10 @@ class GenotypeTumor:
         self.step = 0
         self._clock = 0     # the current exact-engine event or tau generation, for birth records
 
-        # Passenger coarsening (DESIGN_scalability §8): the lever that DECOUPLES growth cost from the
-        # distinct-genotype count. Under a high mutation rate almost every division fixes a NEUTRAL
-        # (passenger) SNV and so, in the exact model, spawns a brand-new genotype whose fitness is
-        # identical to its parent's — making #genotypes track #cells and the whole growth loop
-        # super-linear (see the grid-90 profile in §7). With ``coarsen_passengers`` on, a mutating
+        # Passenger coarsening DECOUPLES growth cost from the distinct-genotype count. Under a high
+        # mutation rate almost every division fixes a NEUTRAL (passenger) SNV and so, in the exact
+        # model, spawns a brand-new genotype whose fitness is identical to its parent's — making
+        # #genotypes track #cells and the whole growth loop super-linear. With ``coarsen_passengers`` on, a mutating
         # division whose daughter is genome_summary-identical to the parent (a pure passenger: no
         # driver hit, no copy-number change, no WGD) is NOT registered as a new genotype; it grows the
         # parent clone in place and its neutral burden is tallied in ``self._pass_load`` for lazy
@@ -326,18 +315,16 @@ class GenotypeTumor:
         # cells. The dynamics are unchanged in distribution — a passenger daughter has identical
         # division/death/dispersal rates, so folding it into the parent leaves every future event rate
         # the same (selection fully intact). Passengers are re-emitted per sampled cell in
-        # ``make_cell_data``. OFF by default -> byte-identical to the exact per-genotype engine.
-        # Force-off when epistasis is on (an SNV anywhere in an event module can fire an event, so
+        # ``make_cell_data``. Force-off when epistasis is on (an SNV anywhere in an event module can fire an event, so
         # "genome_summary unchanged" no longer implies "dynamically neutral").
         self.coarsen_passengers = bool(coarsen_passengers)
 
-        # Assay-memory cap (DESIGN_scalability §9). ``make_cell_data`` materialises one row per cell
+        # Assay-memory cap. ``make_cell_data`` materialises one row per cell
         # across ~a dozen dense (n_cells × n_genes) frames; at cm-scale (millions of cells) that is
         # tens of GB. ``max_cells`` bounds it: when the tumour exceeds the cap, a REPRESENTATIVE
         # subsample (Binomial(count, cap/total) per (deme, genotype) bucket, so spatial + clonal +
         # cell-type proportions are preserved) is materialised instead of every cell — a biopsy of one
-        # tissue, which is exactly what an assay samples. ``None`` (default) materialises all cells, so
-        # every existing small-tumour run/test is byte-identical. The re-scaled example_config sets it.
+        # tissue, which is exactly what an assay samples. ``None`` (default) materialises all cells.
         self.max_cells = max_cells
         # See `low_memory` above and `make_cell_data`: chunk the program multiplier too.
         self.low_memory = bool(low_memory)
@@ -348,8 +335,8 @@ class GenotypeTumor:
         # ``{"het_frac": 5e-3, "hom_frac": 0.33, "seed": 7}``; ``seed`` defaults to this run's seed,
         # since a germline background is private to one individual. ``None`` (the default) means no
         # germline layer at all. The variants are drawn from a dedicated rng and written into the
-        # founder genomes before any growth rng is touched, so a tumour is byte-identical with the
-        # layer on or off at a given seed.
+        # founder genomes before any growth rng is touched, so a tumour grows the same with the layer
+        # on or off at a given seed.
         self.germline_params = germline_params
 
         # Founder (truncal) mutations: what the transformed cell already carried at t=0 — the
@@ -360,7 +347,7 @@ class GenotypeTumor:
         # every cancer cell is the founder, so an empty founder genome is an empty clonal layer.
         self.founder_mutations = founder_mutations
 
-        # Real-genome mode (DESIGN_inference A.5): the genome is wired from a GenomeSpec built
+        # Real-genome mode: the genome is wired from a GenomeSpec built
         # from human chromosome-arm data (arm lengths -> segment_sizes, per-arm oncogene/TSG
         # content) and selection uses the per-arm copy-number model (selection_mode="arm",
         # s_arm vector) instead of the abstract random gene-driver layout. The engine is
@@ -406,25 +393,21 @@ class GenotypeTumor:
                 self.layout_rng = np.random.default_rng(self.layout_seed)
         if self.rng_streams not in ("offset", "independent"):
             raise ValueError(f"rng_streams must be 'offset' or 'independent', got {self.rng_streams!r}")
-        # F8 microenvironment-driven expression (DESIGN_features §H): OPTIONAL and OFF by default
-        # (absent -> None -> `make_cell_data` output is bit-identical to the base engine). When
-        # enabled, a per-deme expression modifier (hypoxia field + cell-cell communication) is
-        # applied at materialisation only; GROWTH is untouched, so a tumour is byte-identical with
-        # F8 on or off at the same seed (the modifier draws from a dedicated rng). Fitness-coupling
-        # of the microenvironment (hypoxia slowing division, etc.) is a FUTURE EXTENSION.
+        # Microenvironment-driven expression: optional, off when None. When enabled, a per-deme
+        # expression modifier (hypoxia field + cell-cell communication) is applied at
+        # materialisation only; GROWTH is untouched, so a tumour grows the same with the layer on or
+        # off at the same seed (the modifier draws from a dedicated rng). The microenvironment does
+        # not feed back into fitness.
         self.microenv_params = microenv_params
-        # R13 gene-program expression (DESIGN_expression.md): OPTIONAL and OFF by default, on exactly
-        # the F8 discipline — absent -> None -> `make_cell_data` is bit-identical to the base engine,
-        # and GROWTH never reads it at all, so a tumour is byte-identical with the program layer on or
-        # off at a given seed. Programs are a READOUT: the genotype and the niche drive them, they
-        # never feed back into fitness (that loop is R8b/R12-v3). Built after `self.selection` below,
-        # since the model needs the gene count. See `iscc.tumor.programs`.
+        # Gene-program expression: optional, off when None. GROWTH never reads it, so a tumour grows
+        # the same with the program layer on or off at a given seed. Programs are a READOUT: the
+        # genotype and the niche drive them, they never feed back into fitness. Built after
+        # `self.selection` below, since the model needs the gene count. See `iscc.tumor.programs`.
         self.expression_params = expression_params
         self.programs = None
 
         # Subtype preset (see BREAST_SUBTYPES). ``subtype`` is a cancer-cell config key that stands in
-        # for three instability numbers; it is popped here so the cell class never sees it. Absent ->
-        # the params dict is copied unchanged -> byte-identical.
+        # for three instability numbers; it is popped here so the cell class never sees it.
         cancer_cell_params = dict(cancer_cell_params or {})
         subtype = cancer_cell_params.pop("subtype", None)
         if subtype is not None:
@@ -441,7 +424,7 @@ class GenotypeTumor:
         self.n_segments = genome_params["n_segments"]
         self.segment_size = genome_params.get("segment_size", 1000)
         # Per-segment sizes (real-genome mode: proportional to chromosome-arm length); falls
-        # back to a uniform scalar so the abstract mode is unchanged.
+        # back to a uniform scalar in the abstract mode.
         self.segment_sizes = genome_params.get("segment_sizes")
         self._normal_params = {
             "epithelial": (EpithelialCell, epithelial_cell_params or {}),
@@ -452,7 +435,7 @@ class GenotypeTumor:
 
         # ``layout_seed`` is handed over (as well as ``layout_rng``) so the optional epistasis network
         # can draw from its own layout SUB-STREAM — part of the shared landscape, but independent of
-        # the gene-role layout drawn from layout_rng. See DESIGN_epistasis.md / constants.py.
+        # the gene-role layout drawn from layout_rng. See constants.py.
         self.selection = Selection(n_segments=self.n_segments, segment_size=self.segment_size,
                                    segment_sizes=self.segment_sizes, rng=self.layout_rng,
                                    layout_seed=self.layout_seed, **selection_params)
@@ -491,7 +474,7 @@ class GenotypeTumor:
         self._pass_load = Counter()     # gid -> cumulative passenger SNVs folded into that clone
         self._n_folded = 0              # diagnostics: passenger divisions folded this run
 
-        # R13 program layer. The dictionary (gene->program map, `loading`, regulators, `s_g`) is part
+        # Program layer. The dictionary (gene->program map, `loading`, regulators, `s_g`) is part
         # of the SHARED landscape and so draws from `layout_seed`'s program sub-stream — two patients
         # with the same config get the SAME programs, exactly as they already get the same oncogenes.
         # The per-cell `z` and each SNV's functional class are per-RUN events and draw from `seed`.
@@ -510,21 +493,18 @@ class GenotypeTumor:
             exp[self.selection.get_oncogenes()] = 0.01
             self.celltype_exps[ct] = exp
 
-        # F8 program designation: pick the hypoxia-responsive and CCI-receptor-target gene sets
-        # (the ground-truth cell-extrinsic modules). A DEDICATED rng (not self.rng) keeps the
-        # growth trajectory byte-identical whether F8 is on or off at a given seed.
+        # Microenvironment program designation: pick the hypoxia-responsive and CCI-receptor-target
+        # gene sets (the ground-truth cell-extrinsic modules). A DEDICATED rng (not self.rng) keeps
+        # the growth trajectory the same whether the layer is on or off at a given seed.
         # WHICH genes respond to hypoxia is a property of the GENOME, not of a run, so the stream is
-        # the LAYOUT one: two patients in a cohort must share their niche programs exactly as they
-        # share their oncogenes. (This previously read `self.seed + 9973` — the per-run EVOLUTION
-        # seed — which silently gave every patient a different hypoxia programme; F8 predates
-        # `layout_seed` and was never migrated. The dedicated-stream intent was right, the seed
-        # source was wrong.)
+        # the LAYOUT one: two patients in a cohort share their niche programs exactly as they share
+        # their oncogenes.
         self._hypoxia_genes = np.array([], dtype=int)
         self._cci_target_genes = np.array([], dtype=int)
-        # W0 (DESIGN_cci_spatial.md): iscc's OWN ligand-receptor database. `_cci_pairs` is
-        # (n_candidate_pairs x 2) of gene indices (col 0 = ligand, col 1 = receptor); row 0 is the
-        # WIRED pair F8's CCI channel is driven by, every other row is an unwired decoy. Empty (and
-        # ligand/receptor None) unless a CCI channel is active, so an F8-off tumour is untouched.
+        # iscc's OWN ligand-receptor database. `_cci_pairs` is (n_candidate_pairs x 2) of gene
+        # indices (col 0 = ligand, col 1 = receptor); row 0 is the WIRED pair the CCI channel is
+        # driven by, every other row is an unwired decoy. Empty (and ligand/receptor None) unless a
+        # CCI channel is active.
         self._cci_pairs = np.empty((0, 2), dtype=int)
         self._cci_ligand = None
         self._cci_receptor = None
@@ -540,10 +520,10 @@ class GenotypeTumor:
             if n_cci > 0:
                 self._cci_target_genes = prog_rng.choice(self.n_genes, size=min(n_cci, self.n_genes),
                                                          replace=False)
-            # Draw the L-R database from the SAME layout sub-stream, AFTER the target-gene draws so
-            # those stay byte-identical (the pooling of patients onto ONE landscape is only justified
-            # against a shared network — the epistasis-network argument). `n_candidate_pairs` is the
-            # ONE new parameter (default 1 -> a database holding only the wired pair).
+            # Draw the L-R database from the SAME layout sub-stream, AFTER the target-gene draws, so
+            # it is part of the shared landscape (pooling patients onto ONE landscape is only
+            # justified against a shared network). `n_candidate_pairs` defaults to 1 -> a database
+            # holding only the wired pair.
             # The WIRED pair's ligand and receptor are themselves MODULATED by the CCI field (see
             # `_microenv_deme_mod`): that is what puts the L-R signal in the two genes every CCI tool
             # actually reads. Only the hypoxia set is excluded from the pool, so a candidate's
@@ -557,7 +537,7 @@ class GenotypeTumor:
                 # of the time, and the field boost is MULTIPLICATIVE: 0 * (1 + strength*field) = 0, so
                 # the channel would be undetectable and the wired pair would be handicapped against
                 # decoys that happen to be well expressed. Restricting the pool to genes above the
-                # genome-mean baseline (~top 20%) fixes both. A designation rule, not a parameter.
+                # genome-mean baseline (~top 20%) avoids both. A designation rule, not a parameter.
                 base_expr = np.mean([self.celltype_exps[ct] for ct in self.celltype_exps], axis=0)
                 pool = np.setdiff1d(np.flatnonzero(base_expr > base_expr.mean()),
                                     self._hypoxia_genes)
@@ -577,8 +557,8 @@ class GenotypeTumor:
         # by what evolution did (copy number, SNVs, programs). Without it, the cancer baseline is an
         # unrelated draw, and malignant cells separate from every normal type on baseline alone. The
         # cancer draw above is still made, and the gene-set designations above still read the drawn
-        # baselines, so every layout draw is unchanged; only the materialised cancer expression (and,
-        # under targeted therapy, the target-expression check that reads it) moves.
+        # baselines, so every layout draw is the same either way; only the materialised cancer
+        # expression (and, under targeted therapy, the target-expression check that reads it) moves.
         origin = (self.expression_params or {}).get("cell_of_origin")
         if origin is not None:
             if origin not in CELLTYPES or origin == "cancer":
@@ -591,7 +571,7 @@ class GenotypeTumor:
         self.genotypes_parents = {}
         self.genotypes_counts = Counter()
         self._next_ord = 0
-        # Drug-induced resistance STATE (DESIGN_phenotype_plasticity.md §3.3): the (genotype x epistate)
+        # Drug-induced resistance STATE: the (genotype x epistate)
         # sublineage registry. Maps a genotype id -> a SHARED dict {state_level -> gid} holding every
         # state-variant of the SAME genome; a state transition of g to level s' looks up the twin here
         # and mints it (via _state_twin) only once, reusing it across generations, so the state costs a
@@ -600,9 +580,8 @@ class GenotypeTumor:
         self._state_families = {}
         # Running max of (division + dispersal) over cancer genotypes, maintained incrementally in
         # _register so the tau-leap substep count doesn't need an O(#genotypes) scan every generation
-        # (only under coarsen_passengers, where #genotypes can still be large; the exact-engine path
-        # keeps its live-max scan so it stays byte-identical). Monotone upper bound -> conservative
-        # (never too-few substeps).
+        # (only under coarsen_passengers, where #genotypes can still be large; otherwise the live-max
+        # scan is used). Monotone upper bound -> conservative (never too-few substeps).
         self._max_div_disp = 0.0
 
         # per-immune-cell contact kill hazard, and per-step treatment overrides
@@ -614,32 +593,32 @@ class GenotypeTumor:
         # The active dose's context, kept alongside the override dicts so the hazard for a genotype
         # MINTED MID-STEP (by a division-mutation during update / _tau_generation, after this step's
         # _apply_treatment already froze the dicts) can be computed on demand rather than defaulting
-        # to zero. Without this a newborn clone escapes the drug for one whole step -- worst exactly
-        # in therapy-induced-mutagenesis runs, where mid-step minting is most frequent. None => no
-        # active treatment => the on-demand paths return the untreated defaults (byte-identical).
+        # to zero, so a newborn clone never escapes the drug for a step (mid-step minting is most
+        # frequent in therapy-induced-mutagenesis runs). None => no active treatment => the
+        # on-demand paths return the untreated defaults.
         self._tx_treatment = None
         self._tx_dosage = 0.0
         # Per-genotype division multiplier that applies ONLY while the drug is on (drug-tolerant
         # persisters). The tolerant state is DRUG-INDUCED: off drug a tolerant cell is an ordinary
         # cell and pays nothing, so this cost cannot live in `division_rate`, which is baked at
         # genotype level and would apply everywhere and always -- purging the tolerant pool long
-        # before the first dose. Empty dict => no override => byte-identical.
+        # before the first dose. Empty dict => no override.
         self._tx_div_mult = {}
-        self._tx_sites = "both"  # active treatment's target compartment(s): both / met / primary (R9)
-        # Compartment-dependent selection (v1, DESIGN_phenotype_plasticity.md §2). Two local hazards,
+        self._tx_sites = "both"  # active treatment's target compartment(s): both / met / primary
+        # Compartment-dependent selection. Two local hazards,
         # each contributed by a resident normal compartment the gland geometry seeds and each
         # attenuated by a MATCHING heritable trait (breach / stromal_survival), exactly the shape of
         # the immune term above. This is the whole "payoff table": edit these two coefficients (+ the
         # two prop_/effects axes in selection_params) in config, not the engine. DEFAULT 0.0 -> the
-        # terms vanish -> growth is byte-identical to before (the F8 off-by-default discipline).
+        # terms vanish.
         self._epithelial_barrier = (spatial_params or {}).get("epithelial_barrier", 0.0)
         self._stromal_hazard = (spatial_params or {}).get("stromal_hazard", 0.0)
-        # Breach-GATED invasion (DESIGN_ductal_field.md §3.2): with this on, crossing the basement
+        # Breach-GATED invasion: with this on, crossing the basement
         # membrane — a dispersal hop from a DUCT deme into a STROMA deme — succeeds only in proportion to
         # the clone's heritable `breach` trait; a cell that fails stays confined in the duct (DCIS). This
         # makes breach a true GATE (only breach clones enter the stroma) rather than the epithelial_barrier
         # death-hazard, which merely disadvantages non-breach cells in the duct and so leaks. DEFAULT
-        # False -> the duct->stroma hop is an ordinary neighbour dispersal (byte-identical to before).
+        # False -> the duct->stroma hop is an ordinary neighbour dispersal.
         self._breach_gated_invasion = bool((spatial_params or {}).get("breach_gated_invasion", False))
 
         # founder cancer genotype
@@ -662,10 +641,9 @@ class GenotypeTumor:
 
         # grid of demes; each deme is a dict {genotype_id: count}
         self.grid_size = spatial_params["grid_size"]
-        # carrying_capacity is a real per-deme CAP now (DESIGN_crowding.md, Option A): crowding
-        # death rises RELATIVE to each clone's own evolved division rate, so demes cap near K even
-        # for fast-evolved clones. Setting it to None or 0 disables crowding entirely -> the
-        # "well-mixed" regime (unbounded growth in a deme), used by the single-deme SISTEM benchmark.
+        # carrying_capacity is the per-deme cap K. Setting it to None or 0 disables crowding
+        # entirely -> the "well-mixed" regime (unbounded growth in a deme), used by the single-deme
+        # SISTEM benchmark.
         self.carrying_capacity = deme_params.get("carrying_capacity", 10)
         self._crowding = self.carrying_capacity is not None and self.carrying_capacity > 0
         # Positive fill/normalisation capacity: used for structure filling, immune seeding and the
@@ -677,39 +655,35 @@ class GenotypeTumor:
         self.crowding_margin = deme_params.get("crowding_margin", 0.1)
         # maximum_death_rate MUST be >= max_birth_rate for the cap to bind: a clone whose division
         # evolved up to max_birth_rate needs its crowding death to be able to reach (and exceed) that
-        # rate. Default 1.0 (>= the 0.8 max_birth_rate default). A lower value re-opens the overfill bug.
+        # rate. Default 1.0 (>= the 0.8 max_birth_rate default); a lower value lets a deme overfill.
         self.maximum_death_rate = deme_params.get("maximum_death_rate", 1.0)
-        # Resident-pressure reference division rate (DESIGN_crowding.md, invasion gate). A deme's
+        # Resident-pressure reference division rate (invasion gate). A deme's
         # immortal normal cells (epithelial/stromal) contribute to a cancer cell's crowding death at
         # this FIXED reference rate rather than at the cancer cell's own evolved division rate — so
         # their contribution does NOT cancel in the survival condition (net = div - death > 0) and
         # becomes a genuine FITNESS THRESHOLD a cancer clone must clear to establish (and then invade)
         # a normal-occupied gland deme. Defaults to the founder cancer division rate: a clone must be
-        # at least as fit as a baseline cancer cell to hold a slot against a resident. Cancer-only
-        # demes (no normal cells) are byte-identical to before (the term is zero there). Raise it for
-        # a stricter invasion gate.
+        # at least as fit as a baseline cancer cell to hold a slot against a resident. The term is
+        # zero in cancer-only demes (no normal cells). Raise it for a stricter invasion gate.
         self._resident_ref = deme_params.get(
             "resident_pressure_ref",
             self.genotypes[self.founder_id].baseline_rates["division_rate"])
-        # Crowding law (DESIGN_crowding.md). "own" = Option A (own-division cancer term + fixed-ref
-        # resident term). "fixed" = a single UNIFIED law: crowding death rises with TOTAL occupancy
-        # relative to a FIXED reference (`crowding_ref`, default max_birth_rate), NOT the clone's own
-        # division. => near-neutral where there is space (low density) and fitness-selective where
-        # crowded (the invasion border), from one context-free rule; nothing exceeds the reference so
-        # demes still cannot overfill. Subsumes the resident-pressure gate (normals count in `total`).
-        # "lottery" = the structural-cap law (DESIGN_crowding_v2.md), PROTOTYPE, off by default:
-        # the crowding death is UNIFORM across the clones of a deme (so the fitness term cannot
-        # cancel) and sits BELOW the deme's mean net growth, while the density cap is enforced
-        # STRUCTURALLY -- a deme has floor(K) slots, a birth that cannot get one simply fails, and
-        # when more births are drawn than there are slots the slots go to clones in proportion to the
-        # births they drew. Rate law sets TURNOVER, the cap sets DENSITY, and neither has to
-        # compromise for the other, so demes sit at K *and* clones compete inside them.
+        # Crowding mode. "lottery" (the paper's mode) enforces the density cap STRUCTURALLY: a deme
+        # has floor(K * crowding_overfill) slots, a birth that cannot get one simply fails, and when
+        # more births are drawn than there are free slots the slots go to clones in proportion to
+        # the births they drew. The death rate (with `crowding_law="noble"`, demon's two-valued step
+        # below) is uniform across the clones of a deme, so the fitness term cannot cancel out of
+        # net growth: the rate law sets TURNOVER, the slot cap sets DENSITY, and clones compete
+        # inside full demes.
+        # Legacy modes: "own" = own-division cancer term + fixed-ref resident term. "fixed" = crowding
+        # death rises with TOTAL occupancy relative to a FIXED reference (`crowding_ref`, default
+        # max_birth_rate), NOT the clone's own division; normals count in `total`.
         self._crowding_mode = deme_params.get("crowding_mode", "own")
         self._crowding_ref = deme_params.get(
             "crowding_ref", getattr(self.genotypes[self.founder_id], "max_birth_rate", 0.98))
         # rho: the uniform crowding pressure as a FRACTION of the deme's mean net growth. Must be < 1
         # -- the rate law alone has to want to overfill, otherwise the structural cap never binds and
-        # the whole law is inert (DESIGN_crowding_v2.md §8, amendment 1).
+        # the whole law is inert.
         self._crowding_turnover = float(deme_params.get("crowding_turnover", 0.6))
         # Deme-model crowding (Noble et al. 2022, Nat Ecol Evol, "Within-deme dynamics"): the
         # within-deme death rate is a TWO-VALUED STEP, not a continuous function of density —
@@ -717,17 +691,18 @@ class GenotypeTumor:
         #    rate takes a fixed value d0 that is less than the initial division rate. When the deme
         #    population size exceeds carrying capacity, the death rate takes a different fixed value
         #    d1 that is much greater than the largest attainable division rate."
-        # d1 being above the LARGEST ATTAINABLE division rate is what makes the cap unbreakable: it
-        # is the exact property the 2026-07 overfill bug lacked, where the death cap sat BELOW the
-        # evolved division rate. Both values are constants, so the law carries no `div` and cannot
-        # cancel out of net = div - death — clone-vs-clone competition survives for free.
-        # `crowding_law="logistic"` (default) keeps the shipped ramp; "noble" selects the step.
+        # d1 being above the LARGEST ATTAINABLE division rate is what makes the cap unbreakable: a
+        # density cap expressed as a death rate below the evolved division rate lets demes overfill.
+        # Both values are constants, so the law carries no `div` and cannot cancel out of
+        # net = div - death — clone-vs-clone competition survives.
+        # `crowding_law="noble"` selects the step (the paper's law); "logistic" (the code default)
+        # is the legacy continuous ramp.
         self._crowding_law = str(deme_params.get("crowding_law", "logistic"))
         if self._crowding_law not in ("logistic", "noble"):
             raise ValueError("crowding_law must be 'logistic' or 'noble'")
         # d0 defaults to the clone's own baseline death rate (Noble uses a single global constant,
         # and sets it to 0 in the spatial simulations); d1 to maximum_death_rate, which the shipped
-        # configs already hold above max_birth_rate.
+        # configs hold above max_birth_rate.
         self._crowding_d0 = deme_params.get("crowding_d0")          # None -> the clone's own base
         self._crowding_d1 = deme_params.get("crowding_d1")          # None -> maximum_death_rate
         self._crowding_overfill = float(deme_params.get("crowding_overfill", 1.0))
@@ -735,15 +710,13 @@ class GenotypeTumor:
             raise ValueError("crowding_overfill must be >= 1 (1 = the slot cap sits exactly on K)")
         if self._crowding_law == "noble":
             # d1 MUST exceed the largest attainable division rate, which is what makes the cap
-            # unbreakable however far selection pushes birth rates up. This is not a style check:
-            # the 2026-07 overfill bug was exactly a density cap expressed as a rate that sat BELOW
-            # the evolved division rate (`maximum_death_rate` 0.5 against an evolved 0.8), and the
-            # tumour piled 1,200-4,200 cells into demes of nominal capacity 10. Fail loudly at
-            # construction rather than silently overfill after thousands of generations.
+            # unbreakable however far selection pushes birth rates up; below it, demes overfill by
+            # orders of magnitude. Fail loudly at construction rather than silently overfill after
+            # thousands of generations.
             _d1 = self.maximum_death_rate if self._crowding_d1 is None else float(self._crowding_d1)
             # The EFFECTIVE d1 is what survives the `min(death, maximum_death_rate)` clamp at the end
-            # of _death_rate. Checking the requested value alone would wave through exactly the 2026-07
-            # configuration — a large d1 silently clipped back below the evolved division rate.
+            # of _death_rate. Checking the requested value alone would wave through a large d1
+            # silently clipped back below the evolved division rate.
             _eff = min(_d1, self.maximum_death_rate)
             _max_b = float(getattr(self.genotypes[self.founder_id], "max_birth_rate", 0.0))
             if _eff <= _max_b:
@@ -753,10 +726,11 @@ class GenotypeTumor:
                     f"(requested d1={_d1:g}, clamped by maximum_death_rate={self.maximum_death_rate:g}). "
                     f"Raise BOTH crowding_d1 and maximum_death_rate above max_birth_rate — a density "
                     f"cap expressed as a rate below the evolved division rate cannot bound a deme.")
-        # Division law (Noble et al. 2022, the `demon` simulator, invasion mode). "compete" (default)
-        # is the historical fate split: a division either attempts a mutation, with probability
+        # Division law (Noble et al. 2022, the `demon` simulator, invasion mode). "compete" (the
+        # legacy code default) is a fate split: a division either attempts a mutation, with probability
         # mutation_rate / (mutation_rate + dispersal_rate), or disperses, so a dispersing daughter
-        # never mutates and raising dispersal lowers the mutation supply. "noble" is demon's rule
+        # never mutates and raising dispersal lowers the mutation supply. "noble" (the paper's rule)
+        # is demon's rule
         # (`cell_division` and the migration_type-0 branch of its main loop): every division attempts
         # a mutation with probability `mutation_rate`, and independently one of the two daughters,
         # picked at random, disperses with probability `dispersal_rate`. Both are then per-division
@@ -793,22 +767,21 @@ class GenotypeTumor:
                              "pressure exceeds the deme's mean net growth and demes UNDER-fill; at "
                              "rho <= 0 there is no turnover and nothing ever competes.")
         self.structure_radius = spatial_params.get("structure_radius", 0)
-        # Ductal-field substrate (DESIGN_ductal_field.md): the structured case is a FIELD of many small
-        # epithelial-ring glands at 2D positions in moderate-density stroma (an island model), not one
-        # central ring. OFF-BY-DEFAULT: n_glands=1 + gland_radius=structure_radius + stroma_fill_frac=1.0 +
-        # K_duct=K_stroma=carrying_capacity reproduces the single-central-ring seeding byte-identically.
+        # Ductal-field substrate: the structured case is a FIELD of many small epithelial-ring glands
+        # at 2D positions in moderate-density stroma (an island model). The defaults (n_glands=1,
+        # gland_radius=structure_radius, stroma_fill_frac=1.0, K_duct=K_stroma=carrying_capacity) give
+        # a single central ring.
         self.n_glands = int(spatial_params.get("n_glands", 1))
         self.gland_radius = int(spatial_params.get("gland_radius", self.structure_radius))
         self.min_gland_sep = spatial_params.get("min_gland_sep", 2 * self.gland_radius + 2)
         self.stroma_fill_frac = float(spatial_params.get("stroma_fill_frac", 1.0))
         # Per-compartment carrying capacity (K captures the duct's/stroma's 3D depth — a deme is a 3D
-        # column, so K is MODERATE-TO-LARGE, not a handful). Default to the scalar carrying_capacity so
-        # a uniform-K field is byte-identical to the current single-K crowding law.
+        # column, so K is MODERATE-TO-LARGE, not a handful). Default to the scalar carrying_capacity.
         self._cap_duct = int(spatial_params.get("K_duct", self._cap)) if self._crowding else 1
         self._cap_stroma = int(spatial_params.get("K_stroma", self._cap)) if self._crowding else 1
         # Cross-gland (island) dispersal: a low rate that seeds one gland's lumen from another's,
-        # abstracting intraductal spread through the out-of-plane ductal tree. kappa=0 -> OFF ->
-        # byte-identical. lambda (distance kernel over gland centres); None -> uniform targeting.
+        # abstracting intraductal spread through the out-of-plane ductal tree. kappa=0 -> off.
+        # lambda (distance kernel over gland centres); None -> uniform targeting.
         self.cross_gland_kappa = float(spatial_params.get("cross_gland_kappa", 0.0))
         self.cross_gland_lambda = spatial_params.get("cross_gland_lambda", None)
         # Ground-truth ductal-field labels, populated by _seed_structure (None when unstructured).
@@ -835,8 +808,7 @@ class GenotypeTumor:
         # Casasent et al., Cell 2018, 6 of 10 lesions profiled at single-cell resolution), so a duct
         # must stay free to be colonised by several clones.
         #
-        # Config (``spatial_params.origin_confinement``), a dict; absent -> None -> nothing at all
-        # happens and growth is byte-identical:
+        # Config (``spatial_params.origin_confinement``), a dict; absent -> None -> no confinement:
         #   dispersal_factor : dispersal rate inside the founding patch, as a MULTIPLE of the
         #                      configured ``dispersal_rate`` (0 => a closed acinus, nothing gets out).
         #                      A multiplier, not an absolute rate, so an evolved dispersal trait still
@@ -844,9 +816,9 @@ class GenotypeTumor:
         #                      rates: a would-be disperser that cannot leave competes for a slot where
         #                      it is (``_escape_factor``). Deliberately so — confinement must not
         #                      change how often a division mutates. Scaling the dispersal rate inside
-        #                      the mutate-or-disperse denominator instead would send the mutation
-        #                      probability to 1.0 in a closed acinus (a silent 4x at the shipped
-        #                      rates), which is an artefact of how the fate is drawn, not biology.
+        #                      the legacy mutate-or-disperse denominator instead would send the
+        #                      mutation probability to 1.0 in a closed acinus, an artefact of how the
+        #                      fate is drawn, not biology.
         #   established_at   : the countdown does not start until the founding patch is at least this
         #                      fraction of its carrying capacity — an acinus with a handful of cells in
         #                      it is not distending anything yet. Fractions of K, so it means the same
@@ -865,7 +837,7 @@ class GenotypeTumor:
             self._origin_generations = float(_oc.get("generations", 200))
             if self._origin_disp_factor < 0:
                 raise ValueError("origin_confinement.dispersal_factor must be >= 0")
-            # What the tau engine's clock counts. "steps" (default, historical) ticks 1 per tau step,
+            # What the tau engine's clock counts. "steps" (legacy default) ticks 1 per tau step,
             # so `generations` means tau steps and a tau of 0.5 halves the window; "generations" ticks
             # by `tau`, so `generations` means generations at any tau. The exact engine is unaffected.
             self._origin_clock = str(_oc.get("clock", "steps"))
@@ -874,18 +846,18 @@ class GenotypeTumor:
         # Number of founder cancer cells to seed (an established micro-lesion). A single founder
         # has P(extinction) ≈ death/division (~7% for the defaults) regardless of carrying
         # capacity, so a one-cell start makes runs/demos randomly cancer-free; seeding a small
-        # cluster removes that founder bottleneck. Default 1 preserves prior behaviour.
+        # cluster removes that founder bottleneck. Default 1.
         self.initial_cancer_cells = deme_params.get("initial_cancer_cells", 1)
         # Founder cells actually seeded: the requested cluster, capped by K when crowding is on
         # (can't over-seed a deme past its capacity) and left uncapped in the well-mixed regime.
         self._n_founder = max(1, min(self.initial_cancer_cells, self._cap)
                               if self._crowding else self.initial_cancer_cells)
-        # Metastasis module (R9): a SECOND deme-grid — the metastatic deposit — appended to
+        # Metastasis module: a SECOND deme-grid — the metastatic deposit — appended to
         # self.demes, sharing the genotype registry + genotypes_parents genealogy + Selection with the
         # primary (so a clone keeps ONE identity/colour across both grids, enabling the 2-band Muller).
         # The met is a homogeneous met_grid_size x met_grid_size lattice filled with immortal `host`
         # parenchyma; one fixed `vessel` deme is the migration entry point (and O2 point-source).
-        # OFF by default (met_grid_size=0 -> _seed_met is a no-op -> nothing appended -> byte-identical).
+        # OFF by default (met_grid_size=0 -> _seed_met is a no-op -> nothing appended).
         self.met_grid_size = int(spatial_params.get("met_grid_size", 0))
         self._met_enabled = self.met_grid_size > 0
         self._cap_met = int(spatial_params.get("K_met", self._cap)) if self._crowding else 1
@@ -894,9 +866,9 @@ class GenotypeTumor:
         self.met_vessel = (tuple(_mv) if _mv is not None
                            else (self.met_grid_size // 2, self.met_grid_size // 2))
         self.met_vessel_idx = None
-        # Host-tissue death hazard (attenuated by met_survival; used in _death_rate, Step 3) and the
-        # migration knobs (seed rate + transit-survival floor; used in the dispersal branch, Step 4).
-        # All default to 0 -> inert -> byte-identical.
+        # Host-tissue death hazard (attenuated by met_survival; used in _death_rate) and the
+        # migration knobs (seed rate + transit-survival floor; used in the dispersal paths).
+        # All default to 0 -> inert.
         self._met_hazard = spatial_params.get("met_hazard", 0.0)
         self._met_seed_kappa = float(spatial_params.get("met_seed_kappa", 0.0))
         self._met_transit_floor = float(spatial_params.get("met_transit_floor", 0.0))
@@ -916,8 +888,7 @@ class GenotypeTumor:
         # iterate the cancer-occupied demes instead of all grid_size**2 of them (_active_demes).
         self._deme_cancer_n = {}
         self.deme_coords = [(i // self.grid_size, i % self.grid_size) for i in range(n_demes)]
-        # Per-deme carrying capacity (DESIGN_ductal_field.md §3): uniform = carrying_capacity by
-        # default (byte-identical to the scalar law); _seed_structure overwrites duct demes with
+        # Per-deme carrying capacity: uniform = carrying_capacity by default; _seed_structure overwrites duct demes with
         # K_duct and stroma demes with K_stroma. Only consulted when crowding is on.
         self._deme_capacity = (np.full(n_demes, self.carrying_capacity, dtype=float)
                                if self._crowding else None)
@@ -933,8 +904,8 @@ class GenotypeTumor:
         # cancer growing into them experiences local immune pressure (and so that
         # immunotherapy has a substrate to act on). The count scales with carrying
         # capacity (immune_density = immune cells per capacity unit) so the immune
-        # fraction is not washed out once a deme fills with cancer. Static for now
-        # (no division/migration yet).
+        # fraction is not washed out once a deme fills with cancer. Static: immune cells
+        # neither divide nor migrate.
         self.immune_density = spatial_params.get("immune_density", 0.0)
         n_immune = int(round(self.immune_density * self._cap))
         if n_immune > 0:
@@ -960,8 +931,7 @@ class GenotypeTumor:
         # Germline layer. Applied HERE — after every normal genotype has been registered, so the
         # inherited variants reach the whole tissue and not just the tumour, and before the per-deme
         # event rates below, so nothing has to be recomputed. It draws from its own seeded rng and
-        # never touches the growth stream, so `germline_params=None` leaves this an early return and
-        # the run byte-identical to one built before the layer existed.
+        # never touches the growth stream, so growth is the same with the layer on or off.
         self.germline_sites = np.array([], dtype=int)
         self.germline_zygosity = np.array([], dtype="<U4")
         self.germline_homolog = np.array([], dtype="<U4")
@@ -973,8 +943,7 @@ class GenotypeTumor:
         # Founder (truncal) mutations. Applied to the founder genotype AFTER it is registered and the
         # germline is in place (so the two layers can be kept off each other's positions) and BEFORE
         # any growth, which is what makes them clonal by descent rather than by reconstruction. Like
-        # the germline it uses its own seeded rng, so `founder_mutations=None` is an early return and
-        # the run is byte-identical to one built before the layer existed.
+        # the germline it uses its own seeded rng, so the growth stream is the same with or without it.
         self.seeded_truncal_sites = np.array([], dtype=int)
         self.seeded_truncal_homolog = np.array([], dtype="<U4")
         self.seeded_truncal_is_driver = np.array([], dtype=bool)
@@ -986,7 +955,7 @@ class GenotypeTumor:
         self.deme_rates = np.array([self._deme_rate(i) for i in range(len(self.demes))], dtype=float)
         self.cell_data = None
         # True once `grow(materialize=False)` has advanced the counts past `cell_data`; cleared by
-        # `make_cell_data`. Read with getattr so tumours pickled before the flag existed still load.
+        # `make_cell_data`. Read with getattr so older pickled tumours without the flag still load.
         self._cell_data_stale = False
 
     # --- genotype registry ---------------------------------------------------
@@ -997,8 +966,7 @@ class GenotypeTumor:
         still consumed, but it yields no cell and no genotype is registered.
 
         WHY REJECT-AT-BIRTH. The alternative is to check lazily, when a cell is next *sampled* for
-        an event -- which is what the cell-level engine used to do. Both rules agree on the long-run
-        dynamics: the division yields no surviving descendant either way, and the event is consumed
+        an event. Both rules agree on the long-run dynamics: the division yields no surviving descendant either way, and the event is consumed
         either way, so the parent pays for it identically. They differ only in a transient: under
         the lazy rule the doomed cell occupies a carrying-capacity slot until it happens to be
         picked. That dwell time is not a modelled quantity -- it is set by the deme's total event
@@ -1009,13 +977,7 @@ class GenotypeTumor:
         ever exists. It is also the complete seam -- ``update_evolutionary_parameters`` (the only
         thing that computes viability) runs only inside ``Cell.mutate``, so a successful mutation is
         the ONLY way a genotype can become non-viable. Founders and normal cells are viable by
-        construction, in this engine and the cell engine alike.
-
-        BOTH ENGINES NOW REJECT AT BIRTH. ``Deme.apply_event`` applies the same rule for the
-        cell-level engine (its ``sample_event`` viability check survives only as a backstop), so the
-        limits are a true invariant everywhere rather than a property of this engine alone. That
-        change was a no-op at the shipped defaults, where the limits are never reached -- see
-        tests/test_count_engine.py::test_cell_engine_default_limits_are_a_noop.
+        construction.
         """
         return self.selection.update_viability(rep.genome_summary) != 0
 
@@ -1052,14 +1014,13 @@ class GenotypeTumor:
     def _is_cancer(self, gid):
         return self.genotypes[gid].type == "cancer"
 
-    # --- structure seeding: the ductal field (DESIGN_ductal_field.md §2) -------
+    # --- structure seeding: the ductal field ------------------------------------
     def _place_glands(self):
         """Gland centres in the grid interior, >= min_gland_sep apart, ring fully inside the grid.
 
-        n_glands==1 short-circuits to the grid centre and draws NO rng, so the single-gland field is
-        byte-identical to the old single central ring (the founder draw below is then the first rng
-        consumption, exactly as before). n_glands>1 rejection-samples from ``self.rng`` (the LAYOUT rng,
-        so the field layout is cohort-comparable like every other make_*)."""
+        n_glands==1 short-circuits to the grid centre and draws NO rng (the founder draw in
+        ``_seed_structure`` is then the first rng consumption). n_glands>1 rejection-samples from
+        ``self.rng``, the per-run rng seeded by ``seed``."""
         c0 = self.grid_size // 2
         if self.n_glands <= 1:
             return [(c0, c0)]
@@ -1079,7 +1040,7 @@ class GenotypeTumor:
     def _seed_structure(self):
         """Seed a FIELD of small epithelial-ring glands in moderate-density stroma, one cancer founder in gland
         0's lumen. n_glands=1 + gland_radius=structure_radius + stroma_fill_frac=1.0 +
-        K_duct=K_stroma=carrying_capacity reproduces the old single-central-ring seeding byte-for-byte."""
+        K_duct=K_stroma=carrying_capacity gives a single central ring filled to K."""
         n_demes = len(self.demes)
         self.gland_centers = self._place_glands()
         self.gland_id = np.full(n_demes, -1, dtype=int)
@@ -1107,7 +1068,7 @@ class GenotypeTumor:
             self.gland_lumen_demes.append(lumen)
             occupied |= set(border) | set(circle)
 
-        # founder: one micro-lesion in gland 0's lumen (same rng draw as the old single ring)
+        # founder: one micro-lesion just inside gland 0's ring
         cr, cc = self.gland_centers[0]
         in_border = bresenham_circumference(cr, cc, self.gland_radius - 1)
         in_border = [(r, c) for (r, c) in in_border if 0 <= r < self.grid_size and 0 <= c < self.grid_size]
@@ -1119,8 +1080,8 @@ class GenotypeTumor:
             self._origin_demes = (origin,)
 
         # stroma fills the rest, seeded at MODERATE density (stroma_fill_frac≈0.3-0.5: real stromal
-        # cells that carry the stromal hazard as a LIVE fraction, DESIGN_ductal_field.md §5, with
-        # headroom for an invasive mass). stroma_fill_frac=1.0 (the default) recovers the old behaviour.
+        # cells that carry the stromal hazard as a LIVE fraction, with headroom for an invasive mass).
+        # stroma_fill_frac=1.0 (the default) fills stroma demes to K_stroma.
         stroma = self._normal_genotype("stromal")
         n_stroma = int(round(self.stroma_fill_frac * self._cap_stroma))
         for r in range(self.grid_size):
@@ -1133,10 +1094,10 @@ class GenotypeTumor:
                         self._add(di, stroma, n_stroma)
 
     def _seed_met(self):
-        """Seed the metastatic deposit (R9): a met_grid_size x met_grid_size lattice appended to
+        """Seed the metastatic deposit: a met_grid_size x met_grid_size lattice appended to
         self.demes, every deme filled to K_met with immortal/static `host` parenchyma, plus one fixed
         `vessel` deme (the migration entry point and O2 point-source). No internal structure. A no-op
-        when met_grid_size == 0 (nothing appended -> byte-identical)."""
+        when met_grid_size == 0 (nothing appended)."""
         if not self._met_enabled:
             return
         G = self.met_grid_size
@@ -1157,8 +1118,8 @@ class GenotypeTumor:
         vr, vc = self.met_vessel
         self.met_vessel_idx = base + vr * G + vc
         # Host baseline expression from a DEDICATED layout sub-stream (NOT by adding "host" to
-        # CELLTYPES, which would draw an extra layout_rng.beta and shift the shared landscape). Off-met
-        # runs never reach here, so the landscape is byte-identical whether or not the met exists.
+        # CELLTYPES, which would draw an extra layout_rng.beta and shift the shared landscape), so
+        # the landscape is the same whether or not the met exists.
         mrng = np.random.default_rng(self.layout_seed + LAYOUT_OFFSET_MET)
         exp = mrng.beta(0.1, 1.0, size=self.n_genes)
         exp[self.selection.get_tsgs()] = 0.8
@@ -1198,7 +1159,7 @@ class GenotypeTumor:
             else:
                 self._deme_cancer_n.pop(deme_idx, None)
 
-    # --- structural density cap: slots + eviction (DESIGN_crowding_v2.md §3.2/§3.4) -----------
+    # --- structural density cap: slots + eviction (lottery crowding) --------------------------
     #: Resident cell types a cancer birth may DISPLACE to take a slot. Invasive carcinoma replaces
     #: normal tissue — a duct effaced by DCIS is the canonical picture — so epithelium, stroma and
     #: metastatic host parenchyma are evictable. Immune cells are not (see `evict_immune`): letting a
@@ -1286,8 +1247,7 @@ class GenotypeTumor:
         return True
 
     def _cross_gland_target(self, src_gland, rng):
-        """A lumen deme of ANOTHER gland, for an island (cross-gland) dispersal hop
-        (DESIGN_ductal_field.md §4). Glands are chosen distance-weighted (prob ~ exp(-d/lambda) over
+        """A lumen deme of ANOTHER gland, for an island (cross-gland) dispersal hop. Glands are chosen distance-weighted (prob ~ exp(-d/lambda) over
         gland centres from the source) or uniformly when ``cross_gland_lambda`` is None; the daughter
         lands in a random lumen deme of the chosen gland — lumen->lumen, bypassing the wall, so a
         confined intraductal hop needs no breach. Returns None if no other gland has a lumen deme."""
@@ -1309,7 +1269,7 @@ class GenotypeTumor:
         return lumen[int(rng.integers(0, len(lumen)))]
 
     def _transit_prob(self, met_survival):
-        """Probability a migrating daughter survives transit to the met (R9), biased by the clone's
+        """Probability a migrating daughter survives transit to the met, biased by the clone's
         heritable met_survival: met_transit_floor + (1 - met_transit_floor) * met_survival. A low floor
         makes wild-type cells (met_survival 0) rarely survive and high-met_survival clones survive often,
         so the deposit's founders are ENRICHED for met_survival — the transit bottleneck that makes the
@@ -1319,8 +1279,7 @@ class GenotypeTumor:
     def _neighbors(self, deme_idx):
         # Compartment-aware von Neumann neighbourhood: neighbours stay within the SAME grid. Met demes
         # are a contiguous tail block with their own met_grid_size lattice and met-local coords, so a
-        # cancer cell dispersing inside the deposit never leaks into the primary (and vice versa). When
-        # met is off every deme_idx < n_primary_demes, so this is the original primary-grid computation.
+        # cancer cell dispersing inside the deposit never leaks into the primary (and vice versa).
         if deme_idx < self.n_primary_demes:
             G, base = self.grid_size, 0
         else:
@@ -1332,7 +1291,7 @@ class GenotypeTumor:
                 out.append(base + rr * G + cc)
         return out
 
-    # --- rates (mirror Deme.get_cancer_death_rate) ---------------------------
+    # --- rates -----------------------------------------------------------------
     def _immune_fraction(self, deme, total=None):
         # No immune cells anywhere -> the fraction is identically zero; skip the per-genotype scan
         # (this is O(#genotypes-in-deme) and dominates the clone-heavy tau-leaping loop otherwise).
@@ -1388,15 +1347,15 @@ class GenotypeTumor:
         ``(total, n_normal, n_immune, n_epithelial, n_stromal, n_host, b_bar, d_bar)``.
 
         ``b_bar`` / ``d_bar`` are the deme's cell-weighted mean CANCER division and baseline death
-        rates — the reference the ``"lottery"`` crowding law's uniform pressure is scaled by
-        (DESIGN_crowding_v2.md §3.1). They are accumulated in this same pass (two extra floats, no
+        rates — the reference the ``"lottery"`` crowding law's uniform pressure is scaled by. They
+        are accumulated in this same pass (two extra floats, no
         extra scan) and left at 0.0 under every other crowding mode, which never reads them.
 
         Passing the result into ``_death_rate`` (via its ``comp`` argument) lets every genotype in a
         deme reuse ONE composition scan instead of each re-running the O(#genotypes) immune /
         epithelial / stromal / host ``_*_fraction`` scans. That turns the per-deme death-rate work
         from O(#genotypes²) to O(#genotypes) — the dominant per-substep cost once a high mutation
-        rate makes #genotypes track #cells (see the grid-90 profile in DESIGN_scalability.md §7).
+        rate makes #genotypes track #cells.
         ``n_normal`` matches ``sum(deme.get(nm, 0) for nm in normal_names)`` because a normal
         genotype's id IS its type name."""
         total = n_normal = n_immune = n_epi = n_stro = n_host = 0
@@ -1431,7 +1390,7 @@ class GenotypeTumor:
 
     def _compartment_fields(self):
         """Per-deme epithelial / stromal LIVE fractions, as two (n_demes,) arrays — the compartment
-        as a niche field for R13 route-3 (DESIGN_phenotype_plasticity.md §2, Part D). The SAME clone
+        as a niche field for the program layer. The SAME clone
         then expresses the niche-driven (e.g. invasive) program more at the epithelial interface than
         in the stroma: an env-responsive phenotype and the genetic-vs-niche attribution confound, with
         iscc knowing both contributions. Zero everywhere when no gland structure was seeded."""
@@ -1448,8 +1407,7 @@ class GenotypeTumor:
 
     def _tx_applies(self, deme_idx):
         """Whether the active treatment's per-genotype override acts in this deme's compartment
-        (Treatment.sites: 'both' / 'met' / 'primary'). 'both' (the default) is byte-identical to the
-        pre-metastasis, ungated behaviour."""
+        (Treatment.sites: 'both' / 'met' / 'primary'). 'both' (the default) acts everywhere."""
         if self._tx_sites == "both":
             return True
         is_met = deme_idx >= self.n_primary_demes
@@ -1474,12 +1432,11 @@ class GenotypeTumor:
         return div * m
 
     def _state_protection(self, rep):
-        """Drug protection conferred by the carried resistance STATE (DESIGN_phenotype_plasticity.md
-        §3.3): the cell's state level x the configured ``resistance_state_effect``. Folded into the
+        """Drug protection conferred by the carried resistance STATE: the cell's state level x the
+        configured ``resistance_state_effect``. Folded into the
         ``max(treatment_resistance, drug_tolerance, ...)`` protection everywhere the drug's
         ``(1 - protection)`` factor is computed. Returns 0.0 when the feature is off (effect 0.0) or the
-        cell is not in the state, so every ``max(tr, dt, self._state_protection(rep))`` is byte-identical
-        to ``max(tr, dt)`` when off."""
+        cell is not in the state, so the max then reduces to ``max(tr, dt)``."""
         return getattr(rep, "resistance_state", 0.0) * self.selection.resistance_state_effect
 
     def _kill_amount(self, rep, intensity, treatment=None):
@@ -1497,15 +1454,7 @@ class GenotypeTumor:
         ``net = b(1 - kill_rate) - death``: at kill_rate 1.0 every clone declines at exactly its death
         rate regardless of fitness, and above 1.0 the FASTER clones die faster. Dividing quickly stops
         being an escape and starts being a liability -- which is also the biology, since cytotoxic
-        chemotherapy damages cells as they replicate (hence its sparing of quiescent tissue).
-
-        NOTE the CELL engine is a THIRD model, not either of these: ``Chemotherapy._apply``
-        (iscc/treatment/chemotherapy.py) does ``death *= rate_multiplier ** (1 - treatment_resistance)``
-        -- multiplicative on the death rate, with no division-rate term at all. So a clone's hazard
-        there scales with how fast it was ALREADY dying, not with how fast it divides, and neither
-        count-engine mode reproduces it. The two engines therefore do NOT agree under treatment;
-        "proliferation" is a new model rather than a restoration of parity. (An earlier version of
-        this docstring claimed the cell engine already did the proliferation scaling. It does not.)"""
+        chemotherapy damages cells as they replicate (hence its sparing of quiescent tissue)."""
         tx = treatment if treatment is not None else self._tx_treatment
         kill_rate = getattr(tx, "kill_rate", 0.8)
         if getattr(tx, "kill_mode", "additive") == "proliferation":
@@ -1560,8 +1509,8 @@ class GenotypeTumor:
     def _target_table(self, tx):
         """Per-tumour memo for an expression-targeted drug: its flat gene indices, the founding clone's
         expression of them (the reference that sets the nominal dose), and the per-genotype levels.
-        Keyed by the gene list, so two drugs on the same genes share it. Created lazily, so a tumour
-        pickled before the mechanistic mode existed still loads."""
+        Keyed by the gene list, so two drugs on the same genes share it. Created lazily, so an older
+        pickled tumour without the memo still loads."""
         key = tuple(tx.target_genes)
         cache = self.__dict__.setdefault("_mech_expr", {})
         table = cache.get(key)
@@ -1618,7 +1567,7 @@ class GenotypeTumor:
         ``max(treatment_resistance, drug_tolerance)`` protection, same ``kill_rate - death_rate``
         intensity), so a memoised entry and an on-demand one are identical -- a newborn clone and its
         already-registered siblings take the same hazard. Returns 0.0 (and memoises nothing) when no
-        death-rate dose is active, so untreated / immunotherapy-only runs are byte-identical."""
+        death-rate dose is active, so untreated / immunotherapy-only runs pay nothing."""
         val = self._tx_death_add.get(gid)
         if val is not None:
             return val
@@ -1634,7 +1583,7 @@ class GenotypeTumor:
                 target = self._is_treatment_target(tx, rep)
                 tr = max(rep.evolutionary_parameters["treatment_resistance"],
                          rep.evolutionary_parameters.get("drug_tolerance", 0.0),
-                         self._state_protection(rep))            # §3.3 carried resistance state
+                         self._state_protection(rep))            # carried resistance state
                 p = tx.effectiveness if target else tx.toxicity
             else:
                 tr, p = 0.0, tx.toxicity
@@ -1649,8 +1598,7 @@ class GenotypeTumor:
         """The immunotherapy-stripped immune resistance for ``gid``: the stored override, or -- for a
         genotype minted after this step's rebuild -- the same ``ir * (1 - intensity)`` computed on
         demand and memoised. Mirrors ``_apply_treatment``'s immune_resistance branch. Returns the
-        clone's untouched ``base_ir`` (and memoises nothing) when no immunotherapy dose reaches it, so
-        untreated / death-rate-therapy runs are byte-identical to the old ``.get(gid, base_ir)``."""
+        clone's untouched ``base_ir`` (and memoises nothing) when no immunotherapy dose reaches it."""
         val = self._tx_immune_resist.get(gid)
         if val is not None:
             return val
@@ -1679,18 +1627,18 @@ class GenotypeTumor:
     def _death_rate(self, gid, deme_idx, total=None, comp=None):
         """Cancer death rate = crowding-modulated baseline + local immune killing + treatment.
 
-        Mirrors the corrected Deme.get_cancer_death_rate: immune killing is additive contact
-        pressure (more local immune cells -> higher death, attenuated by immune resistance),
+        Immune killing is additive contact pressure (more local immune cells -> higher death, attenuated by immune resistance),
         and active therapy adds a death hazard (chemo/targeted) or strips immune resistance
         (immunotherapy, via the per-step _tx_* overrides). ``total`` (the deme's cell count) may be
         passed in when the caller already computed it, so a per-deme loop doesn't recompute it once
         per genotype.
 
         ``comp`` is the deme's precomputed composition tuple from ``_deme_comp``
-        ``(total, n_normal, n_immune, n_epithelial, n_stromal, n_host)``. When given, the immune /
-        compartment fractions and ``n_normal`` are read from it in O(1) instead of re-scanning the
-        deme per genotype; the numbers are identical, so this is byte-identical to ``comp=None`` (the
-        old per-call scans) but drops the per-deme cost from O(#genotypes²) to O(#genotypes)."""
+        ``(total, n_normal, n_immune, n_epithelial, n_stromal, n_host, b_bar, d_bar)``. When given,
+        the immune / compartment fractions and ``n_normal`` are read from it in O(1) instead of
+        re-scanning the deme per genotype; the numbers are identical to ``comp=None``, but the
+        per-deme cost drops from O(#genotypes²) to O(#genotypes). The lottery law computes it itself
+        when it is not passed, since it needs the deme's mean cancer rates."""
         rep = self.genotypes[gid]
         deme = self.demes[deme_idx]
         if comp is None and self._lottery:
@@ -1701,10 +1649,11 @@ class GenotypeTumor:
             total = sum(deme.values())
         base = rep.evolutionary_parameters["death_rate"]
         if self._crowding:
-            # Density-dependent death split into two crowding sources (DESIGN_crowding.md).
+            # Legacy "own" law (the final else below): density-dependent death split into two
+            # crowding sources.
             #
-            # (1) Co-resident CANCER cells crowd RELATIVE to this clone's OWN evolved division rate
-            #     (Option A): the slope is the clone's net growth (div - base) steepened by
+            # (1) Co-resident CANCER cells crowd RELATIVE to this clone's OWN evolved division rate:
+            #     the slope is the clone's net growth (div - base) steepened by
             #     (1 + crowding_margin), so a cancer-only deme caps at K/(1+margin) INDEPENDENT of
             #     fitness — no overfill even for a clone evolved up to max_birth_rate.
             # (2) The deme's immortal NORMAL cells (epithelial/stromal) crowd at a FIXED reference
@@ -1714,34 +1663,30 @@ class GenotypeTumor:
             #     THRESHOLD rising with the resident count. Only fitter cancer survives (and then
             #     disperses onward from) a normal-occupied gland deme; the normal cells never die.
             #
-            # A cancer-only deme has n_normal = 0, so term (2) vanishes and the result is byte-
-            # identical to the previous `slope * (total / K)` form.
+            # A cancer-only deme has n_normal = 0, so term (2) vanishes.
             div = self._div_rate(gid, deme_idx, rep)
             steep = 1.0 + self.crowding_margin
-            # Per-deme carrying capacity (DESIGN_ductal_field.md §3): duct demes cap at K_duct, stroma
-            # at K_stroma. Uniform (= carrying_capacity) reproduces the scalar law byte-identically.
+            # Per-deme carrying capacity: duct demes cap at K_duct, stroma at K_stroma, otherwise the
+            # scalar carrying_capacity.
             K = self.carrying_capacity if self._deme_capacity is None else self._deme_capacity[deme_idx]
             if self._crowding_mode == "lottery":
-                # Structural-cap law (DESIGN_crowding_v2.md §3.1). The crowding pressure is UNIFORM
-                # over the deme's cancer clones — it carries no `div`, so it cannot cancel out of
-                # net = div - death, and the selection differential between two clones in the deme is
-                # their bare (b_i - d_i) - (b_k - d_k), the SAME at the front as in the packed
-                # interior. It is deliberately set BELOW the deme's mean net growth (rho < 1), so the
-                # rate law alone would overfill and the STRUCTURAL slot cap is what sets density.
+                # Structural-cap law. The crowding pressure is UNIFORM over the deme's cancer clones —
+                # it carries no `div`, so it cannot cancel out of net = div - death, and the selection
+                # differential between two clones in the deme is their bare (b_i - d_i) - (b_k - d_k),
+                # the SAME at the front as in the packed interior. The STRUCTURAL slot cap (see
+                # `_slot_cap_of`) is what bounds density; the rate law sets turnover.
                 if self._crowding_reference == "fixed":
                     slope = max(0.0, self._crowding_ref - base)
                 else:
                     slope = max(0.0, b_bar_c - d_bar_c)
-                # Density term. Below K it is linear in occupancy; ABOVE K it accelerates, so an
-                # over-capacity deme is pushed back rather than merely held. Crucially this stays
-                # UNIFORM over the deme's cancer clones (it carries no `div`), so it cannot cancel
-                # out of net = div - death and clone-vs-clone competition survives — the shape of
-                # the density response and the preservation of selection are independent properties.
+                # Density term. It stays UNIFORM over the deme's cancer clones (it carries no `div`),
+                # so it cannot cancel out of net = div - death and clone-vs-clone competition
+                # survives — the shape of the density response and the preservation of selection
+                # are independent properties.
                 if self._crowding_law == "noble":
-                    # Two-valued step (see __init__): no density term at or below K; above it a
-                    # fixed rate chosen to exceed any attainable division rate. `death` then falls
-                    # through to the resident / immune / treatment terms and the clamp below,
-                    # exactly as the logistic branch does.
+                    # demon's two-valued step (see __init__): d0 at or below K; above it a fixed d1
+                    # chosen to exceed any attainable division rate. `death` then falls through to the
+                    # resident / immune / treatment terms and the clamp below.
                     if total <= K:
                         death = base if self._crowding_d0 is None else float(self._crowding_d0)
                     else:
@@ -1749,14 +1694,13 @@ class GenotypeTumor:
                               else float(self._crowding_d1))
                         death = max(base, d1)
                 else:
-                    # float(): K may be a numpy scalar (per-deme capacity array), and the old
-                    # `min(1.0, total/K)` returned a PYTHON float at the cap. Keeping the type
-                    # identical matters — a numpy float here turns downstream `is True` comparisons
-                    # into numpy.bool_ identity checks that silently fail.
+                    # float(): K may be a numpy scalar (per-deme capacity array); a numpy float here
+                    # turns downstream `is True` comparisons into numpy.bool_ identity checks that
+                    # silently fail.
                     x = float(total) / float(K)
                     death = base + self._crowding_turnover * slope * min(1.0, x)
-                # Resident pressure is UNCHANGED: it is the fitness gate on entering normal-occupied
-                # tissue, and it does not cancel either (it carries no `div`).
+                # Resident pressure: the fitness gate on entering normal-occupied tissue. It does not
+                # cancel either (it carries no `div`).
                 n_normal = (n_normal_c if comp is not None
                             else sum(deme.get(nm, 0) for nm in normal_names))
                 if n_normal:
@@ -1780,7 +1724,7 @@ class GenotypeTumor:
         death = min(death, self.maximum_death_rate)
 
         # Immune resistance may be transiently stripped by immunotherapy; that override is gated to the
-        # treated compartment(s) (R9), so an untreated site keeps the clone's baseline resistance.
+        # treated compartment(s), so an untreated site keeps the clone's baseline resistance.
         base_ir = rep.evolutionary_parameters["immune_resistance"]
         ir = self._tx_immune_resist_for(gid, rep, base_ir) if self._tx_applies(deme_idx) else base_ir
         ir = min(max(ir, 0.0), 1.0)
@@ -1788,10 +1732,9 @@ class GenotypeTumor:
                     else self._immune_fraction(deme, total))
         death += self._immune_prob_kill * imm_frac * (1.0 - ir)
 
-        # Compartment-dependent selection (v1): each resident compartment adds a local hazard,
+        # Compartment-dependent selection: each resident compartment adds a local hazard,
         # attenuated by the clone's matching heritable trait — the exact shape of the immune term.
-        # The trait is clamped to [0,1] like `ir`. Both coefficients default to 0.0 (off), so these
-        # additions are `+= 0.0` and the death rate is byte-identical to before.
+        # The trait is clamped to [0,1] like `ir`. Both coefficients default to 0.0 (off).
         if self._epithelial_barrier:
             b = min(max(rep.evolutionary_parameters["breach"], 0.0), 1.0)
             epi_frac = ((n_epi_c / total if total else 0.0) if comp is not None
@@ -1802,18 +1745,17 @@ class GenotypeTumor:
             stro_frac = ((n_stro_c / total if total else 0.0) if comp is not None
                          else self._stromal_fraction(deme, total))
             death += self._stromal_hazard * stro_frac * (1.0 - ss)
-        # Metastatic host-tissue hazard (R9): the met analogue of the stromal hazard — the deposit's
+        # Metastatic host-tissue hazard: the met analogue of the stromal hazard — the deposit's
         # immortal host parenchyma adds a local death hazard to invading cancer, attenuated by the
-        # clone's heritable met_survival trait (clamped [0,1] like the others). Default 0.0 -> += 0.0
-        # -> byte-identical whether met is off or on-with-hazard-0.
+        # clone's heritable met_survival trait (clamped [0,1] like the others). Default 0.0 (off).
         if self._met_hazard:
             ms = min(max(rep.evolutionary_parameters["met_survival"], 0.0), 1.0)
             host_frac = ((n_host_c / total if total else 0.0) if comp is not None
                          else self._host_fraction(deme, total))
             death += self._met_hazard * host_frac * (1.0 - ms)
 
-        # Chemo/targeted death hazard, gated to the treated compartment(s) (R9): systemic ('both')
-        # hits everywhere, 'met'/'primary' only their site. 'both' is byte-identical to before.
+        # Chemo/targeted death hazard, gated to the treated compartment(s): systemic ('both')
+        # hits everywhere, 'met'/'primary' only their site.
         # A genotype minted mid-step is absent from _tx_death_add (frozen by this step's
         # _apply_treatment); _tx_death_add_for computes and memoises its hazard on demand rather than
         # letting a bare `.get(..., 0.0)` grant it a drug-free step.
@@ -1826,7 +1768,7 @@ class GenotypeTumor:
 
     def _run_rng(self, seed, offset, purpose):
         """A per-run random stream. Under ``rng_streams="offset"`` it is ``default_rng(seed +
-        offset)``, the historical scheme, in which neighbouring seeds share streams shifted by one
+        offset)``, in which neighbouring seeds share streams shifted by one
         unit of ``offset``. Under ``"independent"`` it is keyed by ``(seed, purpose, offset)`` through
         a ``SeedSequence``, so no two seeds, purposes or steps share a stream."""
         if self.rng_streams == "independent":
@@ -1888,7 +1830,7 @@ class GenotypeTumor:
     def _deme_rate(self, deme_idx):
         """Total event rate of a deme. Cancer genotypes are always dynamic; NORMAL genotypes become
         (death-only) dynamic in a treated compartment under the off-target chemo toxicity hazard.
-        Untreated (``_tx_death_add`` empty) -> the normal term vanishes -> byte-identical."""
+        Untreated (``_tx_death_add`` empty) -> the normal term vanishes."""
         deme = self.demes[deme_idx]
         comp = self._deme_comp(deme)                # ONE composition scan reused by every genotype
         total = comp[0]
@@ -1908,17 +1850,15 @@ class GenotypeTumor:
     def _active_demes(self):
         """Ascending indices of the demes a tau substep can draw an event in.
 
-        A deme with no cancer cell and no treatment-sensitive resident draws NOTHING in
-        ``_tau_substep`` — the genotype loop is empty — yet the old ``range(len(self.demes))``
-        still paid a ``_deme_comp`` scan for each of them. In the ductal field EVERY deme is
-        non-empty (it is pre-filled with normal tissue), so that was ~grid_size**2 wasted scans
-        per substep whatever the lesion's size, and a lesion confined to ONE acinus paid all
-        28,900 of them at grid 170. Iterating the cancer-occupied set instead makes the per-substep
-        cost O(occupied demes). Purely an omission of no-op work: the skipped demes consume no rng
-        draw and change no state, so the trajectory is unchanged.
+        A deme with no cancer cell and no treatment-sensitive resident draws NOTHING in a tau
+        substep — the genotype loop is empty — but would still pay a ``_deme_comp`` scan. In the
+        ductal field EVERY deme is non-empty (it is pre-filled with normal tissue), so iterating all
+        of them costs ~grid_size**2 scans per substep whatever the lesion's size. Iterating the
+        cancer-occupied set instead makes the per-substep cost O(occupied demes). Purely an omission
+        of no-op work: the skipped demes consume no rng draw and change no state.
 
         Under an active therapy normal cells DO die (``_tx_death_add``), so every deme is live and
-        the full range is returned — byte-identical to the old behaviour on the treated path.
+        the full range is returned.
         """
         if self._tx_death_add:
             return range(len(self.demes))
@@ -1948,9 +1888,9 @@ class GenotypeTumor:
         return dict(prim), dict(met)
 
     def _trace_snapshot(self):
-        """One trace snapshot: the global genotype counts (back-compat) plus, when the met is enabled,
-        the per-compartment counts. Met-off snapshots keep the single `genotypes_counts` key, so
-        existing plot_muller / write / traces consumers are byte-identical."""
+        """One trace snapshot: the global genotype counts plus, when the met is enabled, the
+        per-compartment counts (``primary_counts`` / ``met_counts``). Met-off snapshots carry only the
+        `genotypes_counts` key."""
         snap = dict(genotypes_counts=dict(self.genotypes_counts))
         if self._met_enabled:
             snap["primary_counts"], snap["met_counts"] = self._compartment_counts()
@@ -2094,7 +2034,7 @@ class GenotypeTumor:
             for gid in gids
         ]
         # NORMAL cells become death-only candidates under off-target chemo toxicity in a treated deme.
-        # tox_gids is empty unless a therapy is active, so this is byte-identical to before untreated.
+        # tox_gids is empty unless a therapy is active.
         tox_gids = []
         if self._tx_death_add and self._tx_applies(di):
             tox_gids = sorted((g for g in deme if g in self._tx_death_add and not self._is_cancer(g)),
@@ -2128,7 +2068,7 @@ class GenotypeTumor:
             if rng.random() < mut_prob:
                 # Under the structural cap the slot is contested BEFORE the mutation is drawn: a
                 # mutation-branch birth that cannot get a slot must never reach mutate(), or the
-                # registry would accumulate genotypes with no cells (DESIGN_crowding_v2.md §3.3).
+                # registry would accumulate genotypes with no cells.
                 if self._lottery and not self._can_place(di, total):
                     pass                                       # birth fails; the division is consumed
                 else:
@@ -2157,7 +2097,7 @@ class GenotypeTumor:
                 # The daughter set out but the intact acinus holds it in: it stays put and competes
                 # for a slot in its own deme, exactly like a failed basement-membrane crossing.
                 # Unreachable (no rng draw, no branch) whenever the escape factor is 1.0, i.e.
-                # always when origin confinement is absent or released -> byte-identical.
+                # always when origin confinement is absent or released.
                 self._place_one(di, gid, rng)
             else:
                 # dispersal. Three routes, mutually exclusive by SOURCE compartment:
@@ -2165,7 +2105,7 @@ class GenotypeTumor:
                 #    of daughters attempt the hop to the metastatic deposit;
                 #  - cross-gland island hop (gland-resident cell): a fraction ~cross_gland_kappa;
                 #  - local: a uniformly random von-Neumann neighbour in the same compartment.
-                # Each guarded branch short-circuits before its rng draw when off -> byte-identical.
+                # Each guarded branch short-circuits before its rng draw when off.
                 src_g = self.gland_id[di] if self.gland_id is not None else -1
                 took_met = False
                 # Met seeding is eligible ONLY from a primary stromal deme (src_g == -1 and di in the
@@ -2194,7 +2134,7 @@ class GenotypeTumor:
                     # `breach`. It succeeds with probability = the clone's breach trait; a cell that fails
                     # stays confined in its duct (DCIS). Off unless breach_gated_invasion is set, and only
                     # for the duct->stroma direction (intraductal/cross-gland and stroma->stroma hops are
-                    # untouched), so it is byte-identical when the flag is off.
+                    # untouched).
                     if (self._breach_gated_invasion and self.gland_id is not None
                             and self.gland_id[di] >= 0 and self.gland_id[tgt] < 0):
                         b = min(max(rep.evolutionary_parameters["breach"], 0.0), 1.0)
@@ -2231,8 +2171,8 @@ class GenotypeTumor:
 
         Treatment is a transient, dose-dependent modifier, not a genotype property, so the
         effect lives in self._tx_* (refreshed every treated step) rather than mutating the
-        shared genotype. The per-cell stochastic effectiveness/toxicity of the cell engine
-        becomes an expected, dose-scaled intensity over the exchangeable count.
+        shared genotype. The per-cell stochastic effectiveness/toxicity becomes an expected,
+        dose-scaled intensity over the exchangeable count.
         """
         self._tx_death_add = {}
         self._tx_immune_resist = {}
@@ -2272,7 +2212,7 @@ class GenotypeTumor:
             # receives, the same (1 - tr) factor `_kill_amount` uses, instead of handing every clone
             # in a treated compartment the full multiplier. Under "uniform" a clone taking ZERO drug
             # still mutates `mutagenicity`x faster forever — which mostly serves to multiply the CNA
-            # rate that deletes its own resistance allele. Default "uniform" -> byte-identical.
+            # rate that deletes its own resistance allele. Default "uniform".
             dose_scaled = getattr(treatment, "mutagenicity_mode", "uniform") == "dose"
             snv_only = getattr(treatment, "mutagenicity_target", "all") == "snv"
             for gid in exposed:
@@ -2292,7 +2232,7 @@ class GenotypeTumor:
                 elif dose_scaled:
                     tr = max(rep.evolutionary_parameters["treatment_resistance"],
                              rep.evolutionary_parameters.get("drug_tolerance", 0.0),
-                             self._state_protection(rep))    # §3.3 carried resistance state
+                             self._state_protection(rep))    # carried resistance state
                     factor = 1.0 + (mutagenicity - 1.0) * (1.0 - min(max(tr, 0.0), 1.0))
                 if factor == 1.0:
                     # Fully protected: no drug reaches the DNA, so no mutator phenotype -- and NO
@@ -2342,7 +2282,7 @@ class GenotypeTumor:
                 # `toxicity` (one knob: toxicity = off-target anything). Normal cells carry no treatment
                 # resistance; giving them a `_tx_death_add` is what makes chemo's systemic toxicity kill
                 # normal tissue (they become death-only participants in the dynamics -- see _deme_rate /
-                # update / _tau_substep). Cancer entries are unchanged, so the cancer path is byte-identical.
+                # update / _tau_substep).
                 if is_cancer and mech:
                     # No labels, so no persister cost either: drug tolerance is not consulted.
                     p, x = self._mech_dose(treatment, gid, rep)
@@ -2354,7 +2294,7 @@ class GenotypeTumor:
                     target = self._is_treatment_target(treatment, rep)
                     tr = max(rep.evolutionary_parameters["treatment_resistance"],
                              rep.evolutionary_parameters.get("drug_tolerance", 0.0),
-                             self._state_protection(rep))    # §3.3 carried resistance state
+                             self._state_protection(rep))    # carried resistance state
                     p = treatment.effectiveness if target else treatment.toxicity
                 else:
                     tr, p = 0.0, treatment.toxicity
@@ -2382,7 +2322,7 @@ class GenotypeTumor:
                 self._tx_death_add[gid] = self._kill_amount(rep, intensity, treatment)
 
     def _resect(self, site="primary", region=None, margin=0):
-        """Surgical resection (R9): remove EVERY cell (cancer + immortal residents) from the target
+        """Surgical resection: remove EVERY cell (cancer + immortal residents) from the target
         compartment's demes and refresh their rates to 0, so the shared-deme_rates Gillespie fires only
         the remaining compartment afterward (and primary->met seeding stops with no primary cancer
         left). Deterministic — no rng draw. The genealogy is NOT pruned, so a 2-band Muller still shows
@@ -2489,8 +2429,8 @@ class GenotypeTumor:
     def _clear_treatment_overrides(self):
         """Drop any residual per-step treatment overrides left by a PRIOR treated grow, so a subsequent
         grow with no active treatment (or an inactive window) sees no stale hazard on cancer OR normal
-        tissue. Refreshes the rate vector only when it actually clears something, so it is a byte-
-        identical no-op whenever there was nothing left over (e.g. a fresh or never-treated tumour)."""
+        tissue. Refreshes the rate vector only when it actually clears something, so it is a no-op
+        whenever there was nothing left over (e.g. a fresh or never-treated tumour)."""
         if self._tx_death_add or self._tx_immune_resist or self._tx_div_mult:
             self._tx_death_add, self._tx_immune_resist, self._tx_sites = {}, {}, "both"
             self._tx_div_mult = {}
@@ -2543,7 +2483,7 @@ class GenotypeTumor:
             self._clock = self.step + local_step
             rng = self._run_rng(seed, self.step + local_step, _STREAM_GROW)
             if treatment is not None:
-                treatment.discrete_event(self, self.step + local_step)  # e.g. surgical resection (R9)
+                treatment.discrete_event(self, self.step + local_step)  # e.g. surgical resection
                 dose = treatment.get_dosage(self.step + local_step, self.get_tumor_size())
                 self._apply_treatment(treatment, dose)
                 # death rates changed for every genotype while a dose is on (or just turned
@@ -2565,10 +2505,10 @@ class GenotypeTumor:
 
     # --- demon's invasion rule (dispersal_law="noble") ------------------------
     def _route_one(self, di, rep, rng):
-        """Where ONE dispersing cell of ``rep`` leaving deme ``di`` lands, by the same three routes as
-        the default dispersal branch of ``update``: metastatic seeding from a primary stromal deme,
-        an island hop to another gland's lumen, or a random neighbour behind the basement-membrane
-        gate. Returns ``(target, is_met)``, or ``None`` when the cell dies in transit to the met."""
+        """Where ONE dispersing cell of ``rep`` leaving deme ``di`` lands, by one of three routes:
+        metastatic seeding from a primary stromal deme (only a primary stromal deme can seed, so
+        DCIS confined to glands cannot), an island hop to another gland's lumen, or a random
+        von Neumann neighbour behind the basement-membrane gate. Returns ``(target, is_met)``, or ``None`` when the cell dies in transit to the met."""
         src_g = self.gland_id[di] if self.gland_id is not None else -1
         if (self._met_enabled and self._met_seed_kappa > 0 and di < self.n_primary_demes
                 and src_g == -1
@@ -2658,7 +2598,7 @@ class GenotypeTumor:
                 self.events.append(dict(step=self.step, time=self.time, event="seeding",
                                         from_deme=int(di), genotype=placed, n=1))
 
-    # --- tau-leaping (generation-batched clonal update, DESIGN §7) -----------
+    # --- tau-leaping (generation-batched clonal update) -----------------------
     def _tau_substep(self, rng, dt):
         """One synchronous tau-leap of length `dt`.
 
@@ -2709,7 +2649,7 @@ class GenotypeTumor:
                         mutants.append((di, gid, n_mut))
                     if n_disp and esc < 1.0:
                         # Confined: only an `esc` fraction gets out; the rest stay and take a slot
-                        # at home. Skipped entirely (no draw) when esc == 1.0 -> byte-identical.
+                        # at home. Skipped entirely (no draw) when esc == 1.0.
                         n_out = int(rng.binomial(n_disp, esc)) if esc > 0.0 else 0
                         if n_disp - n_out:
                             stayers.append((di, gid, n_disp - n_out))
@@ -2717,7 +2657,7 @@ class GenotypeTumor:
                     if n_disp:
                         dispersals.append((di, gid, n_disp))
             # NORMAL cells die under off-target chemo toxicity in a treated compartment (they are
-            # otherwise static). Empty unless a therapy is active -> no extra draws -> byte-identical.
+            # otherwise static). Empty unless a therapy is active -> no extra draws.
             if self._tx_death_add and self._tx_applies(di):
                 for gid in sorted((g for g in deme if g in self._tx_death_add and not self._is_cancer(g)),
                                   key=lambda g: self.genotypes[g].ord):
@@ -2739,7 +2679,7 @@ class GenotypeTumor:
         # mutate() spawns a new genotype (count 1) unless it breaches the viability limits, in
         # which case nothing is born; a saturated allele grows the parent in place.
         # This per-mutation genotype creation is intrinsic to the infinite-sites model and costs
-        # exactly the same as in the exact engine (the separate #genotypes concern of §3).
+        # exactly the same as in the exact engine.
         fmask = self._func_bits if self.coarsen_passengers else None
         for di, gid, n in mutants:
             rep = self.genotypes[gid]
@@ -2765,12 +2705,12 @@ class GenotypeTumor:
                 self._n_folded += n_fold
         # dispersal-branch births: same genotype. A low fraction (~kappa) of gland-resident daughters
         # take an island hop to another gland's lumen; the rest go to a uniformly random neighbour.
-        # kappa=0 draws no binomial and leaves the neighbour draw untouched -> byte-identical.
+        # kappa=0 draws no binomial and leaves the neighbour draw untouched.
         for di, gid, n in dispersals:
             src_g = self.gland_id[di] if self.gland_id is not None else -1
             # met seeding: a fraction (~met_seed_kappa) of daughters from a primary STROMAL deme attempt
             # the hop to the met, each surviving transit w.p. _transit_prob(met_survival). A disabled met
-            # (or a non-stromal / met source) draws no binomial and leaves n untouched -> byte-identical.
+            # (or a non-stromal / met source) draws no binomial and leaves n untouched.
             n_met = 0
             if self._met_enabled and self._met_seed_kappa > 0 and di < self.n_primary_demes and src_g == -1:
                 n_met = int(rng.binomial(n, self._met_seed_kappa / (1.0 + self._met_seed_kappa)))
@@ -2800,7 +2740,7 @@ class GenotypeTumor:
                         tgt = nbrs[int(k)]; cnt = int(cnt)
                         # Basement-membrane gate: a duct->stroma hop is an INVASION event needing breach.
                         # A Binomial(cnt, breach) fraction cross into the stroma; the rest stay confined
-                        # in the duct (DCIS). Off / non-duct->stroma hops -> add all cnt as before.
+                        # in the duct (DCIS). Off / non-duct->stroma hops -> add all cnt.
                         if gate and self.gland_id[tgt] < 0:
                             if b is None:
                                 b = min(max(self.genotypes[gid].evolutionary_parameters["breach"], 0.0), 1.0)
@@ -2818,7 +2758,7 @@ class GenotypeTumor:
                     tgt = nbrs[int(rng.integers(0, len(nbrs)))] if nbrs else di
                 self._add(tgt, gid, 1)
         # dispersal_law="noble": mutated daughters that leave, and parent copies that leave while the
-        # mutant takes their place. Both lists are empty under the default law -> no draws.
+        # mutant takes their place. Both lists are empty under dispersal_law="compete" -> no draws.
         for di, gid, n in mut_disp:
             routes, _ = self._route_births(di, gid, n, rng)
             for tgt, cnt, is_met in routes:
@@ -2927,7 +2867,7 @@ class GenotypeTumor:
             self._remove(di, gid, m)
             self._realise_mutation_births(di, gid, m, rng)
 
-    # --- tau-leaping under the structural cap (DESIGN_crowding_v2.md §3.3) ---
+    # --- tau-leaping under the structural cap (lottery crowding) ------------
     def _realise_mutation_births(self, di, gid, n, rng):
         """Realise ``n`` accepted mutation-branch births of ``gid`` in deme ``di``: each is one
         division that attempts a mutation, spawning a new genotype (unless it breaches the viability
@@ -2961,13 +2901,15 @@ class GenotypeTumor:
         probability ``b_i c_i / sum_k b_k c_k``. Tau-leaping cannot block individual events, so it
         needs one, in four phases:
 
-        0/1. draw births and deaths per (deme, clone) from the PRE-step state exactly as the
-             unconstrained substep does, and apply the DEATHS first;
+        0/1. draw births ~ Poisson(division_rate*c*dt) and deaths ~ Poisson(death_rate*c*dt) per
+             (deme, clone) from the PRE-step state, split the births by the division law, and apply
+             the DEATHS first;
         2.   route every candidate birth to its TARGET deme (in place for the mutation branch; the
              drawn neighbour / cross-gland lumen / metastatic vessel for the dispersal branch, and
              back to the source duct for a failed basement-membrane crossing), accumulating a
              per-target candidate vector keyed by (channel, genotype);
-        3.   per target, in ascending deme order, allocate the ``S = floor(K) - n`` free slots among
+        3.   per target, in ascending deme order, allocate the ``S`` free slots (``_slot_cap_of``
+             minus the current occupancy) among
              the candidates with a MULTIVARIATE HYPERGEOMETRIC draw, then offer the leftovers a
              second, nested draw for the slots that displacing residents would free;
         4.   realise ONLY the accepted births — so a mutation-branch birth that loses the lottery
@@ -3016,7 +2958,7 @@ class GenotypeTumor:
                         mutants.append((di, gid, n_mut))
                     if n_disp and esc < 1.0:
                         # Confined: only an `esc` fraction gets out, the rest stay and compete for a
-                        # slot at home. No draw at all when esc == 1.0 -> byte-identical.
+                        # slot at home. No draw at all when esc == 1.0.
                         n_out = int(rng.binomial(n_disp, esc)) if esc > 0.0 else 0
                         if n_disp - n_out:
                             stayers.append((di, gid, n_disp - n_out))
@@ -3155,8 +3097,7 @@ class GenotypeTumor:
 
     def _state_twin(self, gid, target_state):
         """Get-or-create the genotype with ``gid``'s genome but ``resistance_state == target_state`` —
-        the (genotype x epistate) sublineage the state feature needs (DESIGN_phenotype_plasticity.md §3,
-        §3.3).
+        the (genotype x epistate) sublineage the state feature needs.
 
         A state transition cannot be derived from the genome (the whole point), so it MINTS A NEW
         GENOTYPE ID: two cells with identical genomes and different states are different engine entities.
@@ -3186,7 +3127,7 @@ class GenotypeTumor:
 
     def _apply_state_transitions(self, rng):
         """Drug-induced ENTRY into, and off-drug EXIT from, the carried resistance state — once per
-        generation (DESIGN_phenotype_plasticity.md §3.3). Only called when ``resistance_state_on``.
+        generation. Only called when ``resistance_state_on``.
 
         ENTRY (plasticity): while a death-rate dose reaches a deme, each sensitive (state 0) cell has a
         per-generation probability ``induction * intensity`` of being reprogrammed into the state, where
@@ -3279,9 +3220,8 @@ class GenotypeTumor:
         self._clock = self.step
         for _ in range(n_sub):
             self._tau_substep(rng, dt)
-        # Drug-induced resistance-state entry/exit (DESIGN_phenotype_plasticity.md §3.3), once per
-        # generation on the settled counts, before the snapshot. Gated: no draw / no genotype minted
-        # when the feature is off, so the growth stream is byte-identical.
+        # Drug-induced resistance-state entry/exit, once per generation on the settled counts, before
+        # the snapshot. Gated: no draw / no genotype minted when the feature is off.
         if self.selection.resistance_state_on:
             self._apply_state_transitions(rng)
         self.step += 1
@@ -3297,8 +3237,8 @@ class GenotypeTumor:
     def _grow_tau(self, n_steps=1000, seed=None, treatment=None, tau=None, materialize=True,
                   **kwargs):
         """Tau-leaping growth: `n_steps` is the number of generations to advance. A full per-clone
-        snapshot is recorded every `snapshot_every` generations, so plot_muller/plot_grid keep
-        working unchanged -- now on a REAL-TIME x-axis (self.trace_times, in generation units).
+        snapshot is recorded every `snapshot_every` generations, so plot_muller/plot_grid work on a
+        REAL-TIME x-axis (self.trace_times, in generation units).
         `materialize=False` skips the closing `make_cell_data` and marks the tables stale (see
         `grow`)."""
         if seed is None:
@@ -3316,7 +3256,7 @@ class GenotypeTumor:
             if self.get_cancer_size() == 0:
                 break
             if treatment is not None:
-                treatment.discrete_event(self, self.step)  # e.g. surgical resection (R9)
+                treatment.discrete_event(self, self.step)  # e.g. surgical resection
                 dose = treatment.get_dosage(self.step, self.get_tumor_size())
                 self._apply_treatment(treatment, dose)
                 prev_dose = dose
@@ -3327,11 +3267,9 @@ class GenotypeTumor:
             self._cell_data_stale = True
         return self.traces
 
-    # --- F8 microenvironment fields (DESIGN_features §H) ---------------------
-    # All operate on the regular grid_size x grid_size deme lattice (deme i at
-    # (i//G, i%G)); computed once per make_cell_data (a snapshot), so tau-leaping-compatible.
-    # NOTE (future extension): these modulate the expression READOUT only. Coupling the
-    # microenvironment to FITNESS (hypoxia slowing division, etc.) is deliberately left for later.
+    # --- microenvironment fields ------------------------------------------------
+    # Computed once per make_cell_data (a snapshot), so tau-leaping-compatible. These modulate the
+    # expression READOUT only; the microenvironment does not feed back into fitness.
     def _deme_density(self):
         """Per-deme occupancy = total cells / carrying capacity (drives O2 consumption)."""
         cc = self._cap
@@ -3341,9 +3279,8 @@ class GenotypeTumor:
         """Per-deme density of a ligand-emitting cell type (e.g. immune).
 
         ``weight`` (a ``gid -> per-cell level`` map) turns the bare count into per-deme LIGAND
-        availability: each emitter cell contributes its ligand EXPRESSION instead of 1 (W3,
-        DESIGN_cci_spatial.md). ``None`` keeps the original count fraction — the O2 perfusion source
-        and the field/emitter tests use it, so those stay byte-identical."""
+        availability: each emitter cell contributes its ligand EXPRESSION instead of 1. ``None``
+        gives the plain count fraction, which the O2 perfusion source uses."""
         cc = self._cap
         out = np.zeros(len(self.demes))
         for i, deme in enumerate(self.demes):
@@ -3369,7 +3306,7 @@ class GenotypeTumor:
             margin, because the vasculature does not live inside the tumour.
         """
         # The metastatic deposit (met_grid_size > 0) is a second lattice appended after the primary
-        # demes, so each lattice gets its own field; with the met off there is one block, as before.
+        # demes, so each lattice gets its own field; with the met off there is one block.
         dens_all = self._deme_density()
         perf_all = (np.clip(1.0 - self._emitter_density("cancer"), 0.0, 1.0)
                     if source == "perfused" else None)
@@ -3403,7 +3340,7 @@ class GenotypeTumor:
     def _cci_field(self, emitter_type="immune", lengthscale=2.0, weight=None):
         """Per-deme ligand signal = neighbourhood-averaged emitter LIGAND availability (Gaussian
         `lengthscale`). ``weight`` (gid -> ligand level) weights each emitter by its ligand
-        expression rather than its bare density (W3); ``None`` -> the original density field."""
+        expression rather than its bare density; ``None`` -> the plain density field."""
         emit = self._emitter_density(emitter_type, weight=weight)
         coords = np.array(self.deme_coords, dtype=float)
         diff = coords[:, None, :] - coords[None, :, :]
@@ -3414,11 +3351,12 @@ class GenotypeTumor:
         return np.divide(W @ emit, wsum, out=np.zeros_like(emit), where=wsum > 0)
 
     def _microenv_deme_mod(self, exp_cache=None):
-        """F8 expression modifier: the HYPOXIA per-deme x gene matrix (n_demes x n_genes), or None.
+        """Microenvironment expression modifier: the HYPOXIA per-deme x gene matrix
+        (n_demes x n_genes), or None.
 
         Hypoxia stays a genuine per-deme row: `mod[deme, hypoxia_genes] *= 1 + strength·hypoxia[deme]`.
 
-        CCI (W3, DESIGN_cci_spatial.md) is now RECEPTOR-DEPENDENT, so it is NOT folded into this
+        CCI is RECEPTOR-DEPENDENT, so it is NOT folded into this
         matrix — its multiplier is per-(deme, GENOTYPE) and is applied at materialisation. Here we
         compute the two inputs that multiplier needs and stash them on `self.microenv_truth`:
           * ``cci`` — ligand availability per deme: the smoothed emitter field, but each emitter
@@ -3428,14 +3366,14 @@ class GenotypeTumor:
         multiplier on its target genes is ``1 + strength·received``.
 
         NORMALISATION (a definition, not a knob — getting it wrong silently rescales the calibrated
-        ``strength``). ``_cci_field`` returned a density in [0,1] (a fraction of carrying capacity),
-        which is what gives ``strength`` a stable meaning; weighting by RAW ligand expression and
-        multiplying by RAW receptor expression breaks that bound. So each term is divided by its
-        population mean: the ligand weight by the emitter cells' mean ligand expression (so ``cci``
-        reduces EXACTLY to the old density field when ligand is uniform across genotypes), the
-        receptor by ALL cells' mean receptor expression (so ``receptor_level`` averages ~1). Both
-        then average to ~1 and ``1 + strength·received`` recovers the old ``1 + strength·cci_signal``
-        in magnitude, so the existing ``strength`` calibration still applies.
+        ``strength``). The unweighted ``_cci_field`` is a density in [0,1] (a fraction of carrying
+        capacity), which is what gives ``strength`` a stable meaning; weighting by RAW ligand
+        expression and multiplying by RAW receptor expression breaks that bound. So each term is
+        divided by its population mean: the ligand weight by the emitter cells' mean ligand
+        expression (so ``cci`` reduces EXACTLY to the unweighted density field when ligand is uniform
+        across genotypes), the receptor by ALL cells' mean receptor expression (so ``receptor_level``
+        averages ~1). Both then average to ~1, so ``strength`` keeps the magnitude it has on the
+        unweighted density field.
         """
         mp = self.microenv_params
         if not mp:
@@ -3452,16 +3390,16 @@ class GenotypeTumor:
                                      source=hyp.get("o2_source", "uniform"))
             mod[:, self._hypoxia_genes] *= (1.0 + float(hyp["strength"]) * hypoxia[:, None])
 
-        # --- W3 CCI: receptor-dependent channel (the wired pair) ------------------------------
+        # --- CCI: receptor-dependent channel (the wired pair) ---------------------------------
         cci_signal = np.zeros(n_demes)                    # per-deme ligand availability (normalised)
         receptor_level = {}
         cci_strength = float(cci.get("strength", 0.0))
         etype = cci.get("emitter_type", "immune")         # bound even when the channel is off
         # AMBIENT level of the ligand gene: the highest baseline any cell type has for it. The sender
         # is lifted ABOVE this rather than multiplied from its own baseline — otherwise whether the
-        # channel is visible depends on the drawn gene's luck. (Measured: a gene whose immune baseline
-        # was 7 and epithelial baseline 58 left the "sender" at 64 vs 58 after a 9x boost — no marker
-        # at all.) `strength` is the margin over ambient.
+        # channel is visible depends on the drawn gene's luck (a sender whose own baseline is far
+        # below another type's stays unmarked even after a large boost). `strength` is the margin
+        # over ambient.
         lig_ref = 1.0
         if self._cci_ligand is not None and self.celltype_exps:
             lig_ref = float(max(float(e[self._cci_ligand]) for e in self.celltype_exps.values()))
@@ -3494,7 +3432,7 @@ class GenotypeTumor:
             hypoxia_genes=np.asarray(self._hypoxia_genes),
             cci_target_genes=np.asarray(self._cci_target_genes),
             hypoxia=hypoxia, cci=cci_signal,
-            # W0/W3 ground truth: the candidate L-R database, which pair is wired, and the
+            # Ground truth: the candidate L-R database, which pair is wired, and the
             # per-genotype receptor level that (with `cci`) makes the received signal per cell.
             cci_pairs=np.asarray(self._cci_pairs, dtype=int),
             cci_wired_pair=(0 if len(self._cci_pairs) else -1),
@@ -3512,8 +3450,7 @@ class GenotypeTumor:
 
     def _reconstruct_passengers(self, snv_mat, types):
         """Overlay a LINEAGE-CONSISTENT, allele-resolved neutral (passenger) SNV layer on the sampled
-        cells, replacing the old per-cell-independent reconstruction (DESIGN_snv_coalescent.md v1,
-        "star-at-founding").
+        cells.
 
         For each cancer clone ``Y`` whose subtree is a PROPER subset of the sample (a split between
         sampled cells) we place a set of STEM passengers "born on ``Y``'s founding edge"
@@ -3521,22 +3458,19 @@ class GenotypeTumor:
         finite neutral-site budget spreads across splits). This layer is deliberately SUBCLONAL only:
         the clonal (truncal) burden of a tumour is carried by the founder genome itself (see
         ``founder_mutations``), so that it is present whether or not passengers are coarsened. A
-        marker picks a
-        neutral position (globally unique so clades stay homoplasy-free in the collapsed view), a
+        marker picks a neutral position (globally unique so clades stay homoplasy-free in the collapsed view), a
         homolog ∝ its copy number, and starts at multiplicity 1. Its multiplicity is then propagated
         down every descendant clone through the exact per-clone allele-specific CN events (WGD ×2;
-        amplification +1 w.p. mult/cn; deletion −1 w.p. mult/cn, lost at 0 — the §4.3 marginal of the
+        amplification +1 w.p. mult/cn; deletion −1 w.p. mult/cn, lost at 0 — the marginal of the
         engine's per-copy process). A materialised cell of clone ``Z`` therefore carries the stem
         passengers of ``Z`` AND all its ancestors (each at its propagated multiplicity) plus a private
-        per-cell tail (``Poisson((1−F_STEM)·load/count)`` singletons). Cells in the same clade now
-        SHARE passenger SNVs, so a passenger-only tree recovers the clone-tree clades — which the old
-        independent draw (≈ noise) could not.
+        per-cell tail (``Poisson((1−F_STEM)·load/count)`` singletons). Cells in the same clade
+        SHARE passenger SNVs, so a passenger-only tree recovers the clone-tree clades.
 
-        Modifies ``snv_mat`` in place (the collapsed VAF = total variant copies / seg_cn, so existing
-        readers are unchanged in shape/semantics) and RETURNS the allele-resolved ``(snv_p, snv_m)``
-        homolog-VAF frames (the primary truth; ``snv_p + snv_m == snv_mat``), or ``None`` for the
-        byte-identical no-op fallback (coarsening off / nothing folded / no neutral sites / no sampled
-        cancer). Dedicated seeded rng -> reproducible."""
+        Modifies ``snv_mat`` in place (the collapsed VAF = total variant copies / seg_cn) and RETURNS
+        the allele-resolved ``(snv_p, snv_m)`` homolog-VAF frames (the primary truth;
+        ``snv_p + snv_m == snv_mat``), or ``None`` when there is nothing to overlay (coarsening off /
+        nothing folded / no neutral sites / no sampled cancer). Dedicated seeded rng -> reproducible."""
         if (not self.coarsen_passengers or not self._pass_load or not len(self._neutral_gene_ids)
                 or snv_mat.shape[0] == 0):
             return None
@@ -3544,8 +3478,7 @@ class GenotypeTumor:
         # Keep the somatic overlay off the loci that are already spoken for: the patient's inherited
         # (germline) variants, and the mutations the founder cell carried when it transformed (which
         # are in every cancer cell and form the clonal peak). A reconstructed passenger never shares a
-        # position with either, so a caller can tell the layers apart. Neither present -> the pool is
-        # untouched -> byte-identical to a run without them.
+        # position with either, so a caller can tell the layers apart.
         for taken in (getattr(self, "germline_sites", None), getattr(self, "seeded_truncal_sites", None)):
             if taken is not None and len(taken):
                 neutral = neutral[~np.isin(neutral, taken)]
@@ -3651,7 +3584,7 @@ class GenotypeTumor:
             load = self._pass_load.get(g, 0)
             _mark(g, min(max(int(round(f_stem * load)), STEM_FLOOR), STEM_CAP), n_neutral)
 
-        # ---- propagate stem multiplicity down the closure (§4.3), record per-clone stem genome ----
+        # ---- propagate stem multiplicity down the closure, record per-clone stem genome ----------
         # A stem SNV is (pos, hom, seg, mult). At each clone we hold the surviving inherited SNVs +
         # those born there (mult 1); each child edge applies that edge's exact CN event to every
         # active SNV on the affected (seg, hom). clone_stem[Z] is the shared stem layer of clone Z.
@@ -3806,8 +3739,8 @@ class GenotypeTumor:
     def _materialize_plan(self, max_cells, region=None, depth_frac=None):
         """Per-deme ``{gid: n_to_materialise}`` for ``make_cell_data``.
 
-        With no cap (or a tumour under it) every cell in scope is materialised (``n = count``), so
-        output is unchanged. Above the cap, each (deme, genotype) bucket keeps ``Binomial(count,
+        With no cap (or a tumour under it) every cell in scope is materialised (``n = count``).
+        Above the cap, each (deme, genotype) bucket keeps ``Binomial(count,
         cap/total)`` cells — a representative subsample preserving spatial + clonal + cell-type
         proportions in expectation, the biopsy an assay actually takes — so the dense per-cell frames
         never exceed ~``max_cells`` rows regardless of tumour size. Deterministic (dedicated seeded
@@ -3955,7 +3888,7 @@ class GenotypeTumor:
             Cap on the number of cells materialised (defaults to the tumour's ``self.max_cells``).
             When the tumour is larger, a representative subsample is materialised instead of every
             cell (see ``_materialize_plan``) so the dense frames stay memory-bounded at cm-scale.
-            ``None`` materialises every cell (byte-identical to before this cap existed).
+            ``None`` materialises every cell.
         region : iterable of int, optional
             Deme indices to restrict materialisation to, at FULL local density (subject to
             ``max_cells``). Use this for a SPATIAL assay (e.g. a Visium slide) that samples a small
@@ -4026,13 +3959,12 @@ class GenotypeTumor:
         # evolutionary parameters with their driver tallies, and the program drive) are kept for all
         # genotypes; the gene-wide rows are built per chunk of cells and written straight into the
         # requested frames. Every per-genotype function here is deterministic, so a genotype seen
-        # again in a later chunk gives the same row, and the frames are byte-identical to stacking
-        # every row at once.
+        # again in a later chunk gives the same row, and the frames equal stacking every row at once.
         def genotype_exp(gid):
             """(exp, exp_p, exp_m) of genotype ``gid``; the allele split is None without programs."""
             rep = self.genotypes[gid]
             if P is None:
-                # legacy path — untouched, so output is bit-identical when the layer is off
+                # no program layer: cancer reads `get_exp`, normals their type baseline
                 if rep.type == "cancer":
                     rep.baseline_exp = self.celltype_exps["cancer"]
                     return rep.get_exp(self.selection.mut_effects), None, None
@@ -4058,9 +3990,9 @@ class GenotypeTumor:
                     rep.baseline_exp = self.celltype_exps["cancer"]
             else:
                 rep.baseline_exp = self.celltype_exps[rep.type]
-                # R13 route 1 reads the EVOLVED per-clone phenotype, so whatever moved fitness —
-                # CINner drivers, and R14's epistasis multiplier — propagates into the programs by
-                # construction. Route 2 reads the clone's SNV VAFs. Normal cells carry no drive.
+                # The clone drive reads the EVOLVED per-clone phenotype, so whatever moved fitness —
+                # CINner drivers, and the epistasis multiplier — propagates into the programs by
+                # construction; it also reads the clone's SNV VAFs. Normal cells carry no drive.
                 drive = (P.clone_drive(rep.evolutionary_parameters, rep.baseline_rates, snv)
                          if rep.type == "cancer" else np.zeros(P.n_programs))
                 drive_cache[gid] = drive + P.celltype_bias(rep.type)
@@ -4077,15 +4009,15 @@ class GenotypeTumor:
             evo["n_mut_dt"] = int((snv[dt_idx] > 0).sum())
             evo_cache[gid] = evo
 
-        # F8: per-deme expression modifier (None -> disabled -> exp is bit-identical to the base
-        # engine). The CCI ligand/receptor levels (W3) are the only part of each genotype's
-        # expression it reads, so only those two genes are kept per genotype.
+        # Microenvironment: per-deme expression modifier (None -> layer off). The CCI ligand/receptor
+        # levels are the only part of each genotype's expression it reads, so only those two genes
+        # are kept per genotype.
         lig, rec = self._cci_ligand, self._cci_receptor
         cci_levels = ({} if lig is None or rec is None else
                       {g: {lig: e[lig], rec: e[rec]} for g in mat_gids for e in (genotype_exp(g)[0],)})
         deme_mod = self._microenv_deme_mod(cci_levels)
-        # W3 CCI is receptor-dependent, so its multiplier is per-(deme, genotype), not a column of
-        # `deme_mod` (which now carries hypoxia only). Extract the pieces the loop needs: the target
+        # CCI is receptor-dependent, so its multiplier is per-(deme, genotype), not a column of
+        # `deme_mod` (which carries hypoxia only). Extract the pieces the loop needs: the target
         # genes, the calibrated strength, the per-deme ligand availability and the per-genotype
         # receptor level. `None` when no CCI channel is wired -> the loop applies hypoxia alone.
         cci_apply = None
@@ -4100,18 +4032,17 @@ class GenotypeTumor:
                              self.microenv_truth["cci_emitter_type"],
                              float(self.microenv_truth.get("cci_ligand_ref", 1.0)))
 
-        # R13 route 3 — niche -> program: the F8 fields drive per-deme program activity, generalising
-        # F8's hard-wired hypoxia/CCI gene sets (which still apply via `deme_mod`; the two routes
-        # compose, see DESIGN_expression.md §3.1). The COMPARTMENT (epithelial / stromal live
-        # fraction) is a niche field too (DESIGN_phenotype_plasticity.md §2 Part D): mapping it to the
+        # Niche -> program: the microenvironment fields drive per-deme program activity, generalising
+        # the hard-wired hypoxia/CCI gene sets (which still apply via `deme_mod`; the two compose).
+        # The COMPARTMENT (epithelial / stromal live fraction) is a niche field too: mapping it to the
         # seeded invasive/emt program in `niche_program_map` makes the SAME clone express the invasive
         # program more at the epithelial front than in the stroma — the genetic-vs-niche confound.
-        # OFF-BY-DEFAULT: `niche_drive` is a zeros matrix (or None) unless `niche_program_map` names a
-        # field, so this is byte-identical to before when route-3 is unconfigured.
+        # `niche_drive` is a zeros matrix (or None) unless `niche_program_map` names a field.
         niche_drive = None
         if P is not None:
             fields = {}
-            # `deme_mod is not None` is the F8 signal (microenv_truth then carries hypoxia/cci).
+            # `deme_mod is not None` means the microenvironment layer is on (microenv_truth then
+            # carries hypoxia/cci).
             if deme_mod is not None:
                 fields["hypoxia"] = self.microenv_truth["hypoxia"]
                 fields["cci"] = self.microenv_truth["cci"]
@@ -4119,7 +4050,8 @@ class GenotypeTumor:
                 epi_frac, stro_frac = self._compartment_fields()
                 fields["epithelial"] = epi_frac
                 fields["stromal"] = stro_frac
-                # Record the compartment field as ground truth (create microenv_truth if F8 is off).
+                # Record the compartment field as ground truth (create microenv_truth if the
+                # microenvironment layer is off).
                 if getattr(self, "microenv_truth", None) is None:
                     self.microenv_truth = {}
                 self.microenv_truth["epithelial"] = epi_frac
@@ -4142,7 +4074,7 @@ class GenotypeTumor:
                     names.append(f"{cell_prefix}{i}"); i += 1
         n_cells, n_genes = i, self.n_genes
 
-        # R13: the per-CELL program activity. `z` is per-cell (cycling is a cell state, not a clone
+        # The per-CELL program activity. `z` is per-cell (cycling is a cell state, not a clone
         # constant) while the genotype drive is per-clone — so the drive sets each clone's MEAN and
         # `activity_noise` supplies the within-clone spread. Drawn for all cells at once, so the stream
         # does not depend on how the expression below is chunked.
@@ -4174,8 +4106,8 @@ class GenotypeTumor:
         em_mat = np.empty((n_cells, n_genes)) if allele and "cell_exp_m" in layers else None
         baf_mat = np.empty((n_cells, n_genes)) if allele and "cell_rna_baf" in layers else None
         want_exp = any(m is not None for m in (exp_mat, ep_mat, em_mat, baf_mat))
-        # The program multiplier exp(z · loading). By default it is one matrix product over all cells,
-        # exactly as before chunking existed: a product over a chunk of rows may take a different BLAS
+        # The program multiplier exp(z · loading). By default it is one matrix product over all
+        # cells: a product over a chunk of rows may take a different BLAS
         # path (a single row is a matrix-vector product) and round the last bit differently, so a
         # chunked product cannot promise the same bytes. `low_memory` accepts that and builds it per
         # chunk, summing over programs in a fixed order so the result does not depend on the chunk.
@@ -4214,7 +4146,7 @@ class GenotypeTumor:
                 if not want_exp:
                     continue
                 exp_g, ep_g, em_g = got["exp"]
-                # W3: the receptor-dependent CCI multiplier for this (deme, genotype) — the same
+                # The receptor-dependent CCI multiplier for this (deme, genotype) — the same
                 # scalar for every cell of the clone here (ligand availability at the deme × the
                 # clone's own receptor level). `deme_mod` carries hypoxia; this carries CCI.
                 cci_f = None
@@ -4255,9 +4187,9 @@ class GenotypeTumor:
                 else:
                     mod_row = 1.0 if deme_mod is None else deme_mod[deme_idx]
                     ep_row, em_row = ep_g * mod_row, em_g * mod_row
-                    if cci_f is not None:                              # keep alleles in step (§L3200)
+                    if cci_f is not None:                              # keep alleles in step
                         ep_row[_ct] *= cci_f; em_row[_ct] *= cci_f
-                        # The L-R signal, as in the legacy path above, split across the two alleles.
+                        # The L-R signal, as in the no-program path above, split across the alleles.
                         if rep.type == _etype:
                             half = 0.5 * _lref * (1.0 + _cs)
                             ep_row[_lig] = em_row[_lig] = half
@@ -4287,7 +4219,7 @@ class GenotypeTumor:
                 # BAF in RNA: the fraction of a gene's expression coming from the `p` homolog. 0.5 at
                 # a balanced diploid locus; an allelic imbalance (an amplified or lost homolog, or an
                 # NMD SNV in cis) pushes it away from 0.5. This is the layer Numbat / CalicoST read,
-                # and it is exactly what summing p+m in `get_exp` used to destroy.
+                # and summing p+m (as `get_exp` does) loses it.
                 baf_mat[s:e] = np.divide(buf, tot, out=np.full_like(tot, 0.5, dtype=float), where=tot > 0)
 
         idx = pd.Index(names)
@@ -4309,24 +4241,23 @@ class GenotypeTumor:
                                                   columns=["row", "col"]).astype(int)
         self.cell_data["cell_type"] = pd.DataFrame(types, index=idx, columns=["cell_id"])
         self.cell_data["cell_deme"] = pd.DataFrame(demes_col, index=idx, columns=["deme_id"])
-        # Allele-resolved neutral SNV layer (the PRIMARY truth of the coalescent passenger overlay,
-        # DESIGN_snv_coalescent.md §4.5): per-homolog VAF frames whose sum is exactly `cell_snv`.
-        # Only present when the overlay actually ran (coarsening on + folded burden + neutral sites),
-        # so the base schema is unchanged otherwise — the F8 off-by-default discipline.
+        # Allele-resolved neutral SNV layer (the PRIMARY truth of the coalescent passenger overlay):
+        # per-homolog VAF frames whose sum is exactly `cell_snv`. Only present when the overlay
+        # actually ran (coarsening on + folded burden + neutral sites).
         if snv_alleles is not None:
             snv_p, snv_m = snv_alleles
             if "cell_snv_p" in layers:
                 self.cell_data["cell_snv_p"] = _frame(snv_p, np.float64)
             if "cell_snv_m" in layers:
                 self.cell_data["cell_snv_m"] = _frame(snv_m, np.float64)
-        # cell_rna_vaf (F7b): the EXPECTED allele FRACTION in RNA (not an observed VAF). With m
+        # cell_rna_vaf: the EXPECTED allele FRACTION in RNA (not an observed VAF). With m
         # mutant + w wt copies at a locus and per-locus expression effect e (selection.mut_effects:
         # oncogene=2, TSG=0.5, else 1), the fraction of expression from mutant alleles is
         # (m·e·base)/(m·e·base + w·base) = (m·e)/(m·e + w) = (v·e)/(v·e + (1-v)) with v = DNA-VAF
         # (cell_snv). The per-gene baseline expression CANCELS in this fraction, which is why at a
         # neutral locus (e=1) the *expected fraction* equals DNA-VAF; e>1 inflates, e<1 deflates.
         # This is NOT what a caller observes: the OBSERVED scRNA-VAF is this fraction SAMPLED at a
-        # depth equal to the gene's expression (the F3 UMI count, which carries the per-gene
+        # depth equal to the gene's expression (the UMI count, which carries the per-gene
         # baseline + cell-type + CNV + SNV-effect scaling). Per-gene expression varies enormously,
         # so most loci drop out or are noisy and the observed VAF does NOT match DNA-VAF at neutral
         # loci — the read layer (reads/rna.py) does the depth-aware sampling and the obs_fidelity
@@ -4342,28 +4273,26 @@ class GenotypeTumor:
                 rna_vaf[s:s + step] = np.divide(num, denom, out=np.zeros_like(v, dtype=float),
                                                 where=denom > 0)
             self.cell_data["cell_rna_vaf"] = _frame(rna_vaf, np.float64)
-        # WGD ground truth (DESIGN_focal_cna.md v1): the per-genotype `is_wgd` flag surfaced per cell,
-        # so downstream CNA / BAF benchmarks (e.g. Numbat) can score WGD detection against the truth.
-        # Gated on WGD being enabled — off -> the frame is absent and the base schema is unchanged
-        # (the F8 discipline, mirroring cell_microenv below). `types` is the per-cell genotype id.
+        # WGD ground truth: the per-genotype `is_wgd` flag surfaced per cell, so downstream CNA / BAF
+        # benchmarks (e.g. Numbat) can score WGD detection against the truth. Present only when WGD
+        # is enabled. `types` is the per-cell genotype id.
         if self._cancer_params is not None and self._cancer_params.get("wgd_rate", 0):
             self.cell_data["cell_wgd"] = pd.DataFrame(
                 {"is_wgd": [bool(self.genotypes[g].is_wgd) for g in types]}, index=idx)
-        # Drug-induced resistance-state ground truth (DESIGN_phenotype_plasticity.md §3.3): the
-        # per-genotype carried state level surfaced per cell, so a downstream method can be scored on
+        # Drug-induced resistance-state ground truth: the per-genotype carried state level surfaced per cell, so a downstream method can be scored on
         # telling a non-genetic tolerant STATE from a resistance DRIVER (the Whiting & Graham
-        # plasticity-vs-genetic split, with iscc's lineage tracing as ground truth). Gated on the
-        # feature being on, so off -> the frame is absent and the base schema is unchanged.
+        # plasticity-vs-genetic split, with iscc's lineage tracing as ground truth). Present only when
+        # the feature is on.
         if self.selection.resistance_state_on:
             self.cell_data["cell_resistance_state"] = pd.DataFrame(
                 {"resistance_state": [float(getattr(self.genotypes[g], "resistance_state", 0.0))
                                       for g in types]}, index=idx)
-        # F8: surface the per-cell cell-extrinsic levels (ground truth for the intrinsic-vs-extrinsic
-        # decomposition benchmark). Only added when F8 is enabled, so the base schema is unchanged.
-        # `cci_level` is now the per-cell RECEIVED signal (W3): ligand availability at the cell's
-        # deme × the cell's own receptor level — so it varies cell-to-cell by clone within a deme,
-        # not just deme-to-deme. It is exactly the quantity the CCI target-gene fold-change reads
-        # (fold = 1 + strength·cci_level), and the ground truth W4 scores a CCI method against.
+        # Microenvironment: surface the per-cell cell-extrinsic levels (ground truth for the
+        # intrinsic-vs-extrinsic decomposition benchmark). Present only when the layer is on.
+        # `cci_level` is the per-cell RECEIVED signal: ligand availability at the cell's deme × the
+        # cell's own receptor level — so it varies cell-to-cell by clone within a deme, not just
+        # deme-to-deme. It is exactly the quantity the CCI target-gene fold-change reads
+        # (fold = 1 + strength·cci_level), and the ground truth a CCI method is scored against.
         if deme_mod is not None:
             dcol = np.asarray(demes_col, dtype=int)
             hyp, lig = self.microenv_truth["hypoxia"], self.microenv_truth["cci"]
@@ -4376,15 +4305,15 @@ class GenotypeTumor:
                 {"hypoxia_level": hyp[dcol] if dcol.size else np.array([]),
                  "cci_level": recv}, index=idx)
 
-        # Ductal-field ground truth (DESIGN_ductal_field.md §2): the gland each cell sits in (-1 for
-        # stroma). Only added when a gland field was seeded, so the base schema is unchanged otherwise.
+        # Ductal-field ground truth: the gland each cell sits in (-1 for stroma). Only added when a
+        # gland field was seeded.
         if self.gland_id is not None:
             gcol = np.asarray(demes_col, dtype=int)
             self.cell_data["cell_gland"] = pd.DataFrame(
                 {"gland_id": self.gland_id[gcol] if gcol.size else np.array([], dtype=int)}, index=idx)
 
-        # Metastasis ground truth (R9): the compartment each cell sits in (0 = primary, 1 = met). Only
-        # added when the met is enabled (base schema unchanged otherwise). Flows through the sample/data
+        # Metastasis ground truth: the compartment each cell sits in (0 = primary, 1 = met). Only
+        # added when the met is enabled. Flows through the sample/data
         # glob loaders automatically, so an assay can subset to a single site.
         if self._met_enabled:
             ccol = np.asarray(demes_col, dtype=int)
@@ -4392,8 +4321,8 @@ class GenotypeTumor:
                 {"compartment": ((ccol >= self.n_primary_demes).astype(int) if ccol.size
                                  else np.array([], dtype=int))}, index=idx)
 
-        # R13: the allele layers + the RNA BAF, and the per-cell program activity. Only added when
-        # the program layer is on, so the base schema is unchanged.
+        # The allele layers + the RNA BAF, and the per-cell program activity. Only added when the
+        # program layer is on.
         if P is not None:
             for name, mat in (("cell_exp_p", ep_mat), ("cell_exp_m", em_mat), ("cell_rna_baf", baf_mat)):
                 if mat is not None:
@@ -4484,11 +4413,11 @@ class GenotypeTumor:
 
     def _stage_colors(self):
         """{gid -> rgba} colouring each CANCER genotype by its STAGE-DOMINANT driver — the highest arc
-        stage it has activated (from its heritable traits), on the SAME 7-stage scheme + colours as the
-        landing hero: 1 proliferation (division rate raised by an onc/TSG mutation), 2 breach (duct escape),
+        stage it has activated (from its heritable traits), on the 7-stage scheme of ``_stage_of``:
+        1 proliferation (division rate raised by an onc/TSG mutation), 2 breach (duct escape),
         3 stromal survival, 4 met survival, 5 drug tolerance, 6 chemo resistance; 0 = no driver. Normal
-        cells keep their type colours. This is the todo #14 categorical view: a few colours tracking the
-        selection cascade.
+        cells keep their type colours. A categorical view: a few colours tracking the selection
+        cascade.
 
         Returns the map plus the sorted set of stages actually present, for the legend."""
         from .. import viz
@@ -4504,8 +4433,8 @@ class GenotypeTumor:
         return out, sorted(present)
 
     def _stage_of(self, rep):
-        """Stage-dominant driver of one CANCER genotype, on the SAME 7-stage scheme as the landing hero
-        (``iscc.tumor.arc.stage_of``): 0 none, 1 proliferation (division raised above baseline), 2 breach
+        """Stage-dominant driver of one CANCER genotype, on the SAME 7-stage scheme as
+        ``iscc.tumor.arc.stage_of``: 0 none, 1 proliferation (division raised above baseline), 2 breach
         (duct escape), 3 stromal survival, 4 met survival, 5 drug tolerance, 6 chemo resistance — the
         highest arc stage its heritable traits have activated. The return value INDEXES
         ``viz.STAGE_PALETTE`` / ``viz.STAGE_NAMES``. Robust to missing evo keys."""
@@ -4546,8 +4475,8 @@ class GenotypeTumor:
             heatmap. ``"clone"``: colour each cancer deme by its dominant clone's DRIVER-clone colour
             (the same driver-collapsed palette as ``plot_muller(by_drivers=True)`` and
             ``plot_phylogeny``), on a pale-stroma background. ``"stage"``: colour each cancer deme by
-            the STAGE-dominant trait of its dominant clone (none / proliferation / invasion / …) — the
-            same scheme (and palette) as the landing-animation hero — on a pale-stroma background.
+            the STAGE-dominant trait of its dominant clone (none / proliferation / invasion / …; see
+            ``_stage_of``) on a pale-stroma background.
         min_freq : float, optional
             For ``color="clone"``, the size threshold (fraction of the cancer population) below which
             driver clones are merged into their nearest surviving ancestor before colouring — matched
@@ -4882,7 +4811,7 @@ class GenotypeTumor:
     def get_gene_data(self, **kwargs):
         return self.selection.get_gene_data(**kwargs)
 
-    # --- epistasis ground truth (R14, DESIGN_epistasis.md §4) ----------------
+    # --- epistasis ground truth -----------------------------------------------
     def epistasis_ground_truth(self):
         """The planted network — the answer key for MHN/TreeMHN/CBN/REVOLVER edge + order recovery.
 
@@ -4920,7 +4849,7 @@ class GenotypeTumor:
                              event_groups=tuple(rep.event_groups)))
         return pd.DataFrame(rows, columns=cols)
 
-    # --- operating-envelope QC (read-only; DESIGN_operating_envelope.md) ------
+    # --- operating-envelope QC (read-only) ------------------------------------
     def diagnose(self, thresholds=None, verbose=False):
         """Flag degenerate ("crappy") tumour regimes after growth, with actionable hints.
 
@@ -4940,7 +4869,7 @@ class GenotypeTumor:
         if self.traces:
             pd.DataFrame([t["genotypes_counts"] for t in self.traces]).fillna(0).to_csv(
                 os.path.join(output_path, "trace_counts.csv"))
-            # Per-compartment abundance (R9): only present when the met is enabled (the snapshots then
+            # Per-compartment abundance: only present when the met is enabled (the snapshots then
             # carry primary_counts / met_counts). Both share the one parents.csv genealogy -> the
             # 2-band Muller.
             if self._met_enabled and "primary_counts" in self.traces[0]:

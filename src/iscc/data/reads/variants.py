@@ -1,13 +1,13 @@
-"""Shared variant-injection seam (DESIGN_features §C, §E `reads/variants.py`).
+"""Shared variant-injection seam.
 
 The one genuinely modality-agnostic piece of read realism: given the molecules at a locus
 and a per-locus alt-fraction, partition them into **alt-carrying** vs **ref-carrying**
 counts, **preserving the total exactly**. Keyed on a generic ``(total, alt_fraction)`` so it
-is reused unchanged by both read backends:
+is reused as is by both read backends:
 
-    DNA  — ``total`` = coverage at the locus (∝ copy number, from the C1 model),
+    DNA  — ``total`` = coverage at the locus (∝ copy number, from the DNA depth model),
            ``alt_fraction`` = DNA-VAF (`cell_snv`, the true alt fraction).
-    RNA  — ``total`` = UMI count from the F3 expression matrix (conserved),
+    RNA  — ``total`` = UMI count from the scRNA count matrix (conserved),
            ``alt_fraction`` = observed RNA-VAF (`cell_rna_vaf` × `obs_fidelity`).
 
 Only the count split lives here; the sequence-level placement (which base, which read) is the

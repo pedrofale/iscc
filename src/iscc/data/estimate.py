@@ -56,8 +56,7 @@ from .rna import PROTOCOL_PRESETS, resolve_protocol
 # Fields the batch model owns but a counts-only estimate cannot identify (need empty droplets /
 # demultiplexing / the wet-lab plate map); carried from the protocol preset, never claimed as
 # "fit". The plate layout belongs here too: a count matrix does not say how many wells a plate had,
-# how many plates the cells were spread over, or how much depth the cells on one plate shared —
-# dropping them silently turned a fitted Smart-seq3 estimate into a plate-less one.
+# how many plates the cells were spread over, or how much depth the cells on one plate shared.
 _PRIOR_ONLY = ("ambient_frac", "doublet_rate", "kappa",
                "well_sigma", "n_wells", "n_plates", "plate_sigma")
 
@@ -298,11 +297,13 @@ def estimate_rna(adata, protocol="10x", batch_key=None, count_model="nb", fit_dr
         supplies priors for the fields counts-only data cannot identify (ambient, doublets).
     batch_key : str | None
         ``adata.obs`` column with batch labels. With >=2 batches, ``sigma_batch`` and
-        ``depth_batch_sigma`` are fit; otherwise they default to 0 (single-batch data).
+        ``depth_batch_sigma`` are fit; otherwise they are carried from the protocol preset.
     fit_dropout : bool
         Fit the logistic dropout curve (default False). The negative binomial already draws the
         zeros of UMI data, and the dropout is applied on top of it, so fitting it double-counts
         zeros and shrinks the simulated library sizes (see the module notes).
+    count_model : str
+        Not used by the fit; the fitted dispersion is the negative-binomial one.
 
     Returns
     -------
@@ -349,7 +350,7 @@ def estimate_rna(adata, protocol="10x", batch_key=None, count_model="nb", fit_dr
 
     # The whole plate layer (well spread, wells per plate, plates, shared per-plate depth) comes
     # from the protocol preset: a bare count matrix carries no plate map. Smart-seq3 therefore keeps
-    # its 384-well layout instead of silently degrading to a plate-less protocol.
+    # its 384-well layout.
     hypers = RNABatchHyperParams(
         protocol=proto,
         sigma_batch=sigma_batch,

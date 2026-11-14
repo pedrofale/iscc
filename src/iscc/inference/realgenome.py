@@ -1,19 +1,19 @@
-"""Real-genome (per-arm) ABC wiring for fit-to-real PCAWG + Charm (DESIGN_inference A.4.2-3).
+"""Real-genome (per-arm) ABC wiring for fitting to real PCAWG data + the Charm comparison.
 
-The flagship CINner-parity result: infer the per-arm selection vector ``s_arm`` so that the
+As in CINner: infer the per-arm selection vector ``s_arm`` so that the
 simulated per-arm copy-number gain/loss landscape reproduces a real cancer type's, then show the
 inferred ``s_arm`` correlates with an independent biological signal (Davoli 2013 Charm scores).
 
 This module mirrors ``inference.tumor`` but for the per-arm copy-number model:
   * :func:`arm_cna_summary` / :func:`arm_summary_vector` — the observed summary is the per-arm
     gain frequency and loss frequency (the directly-PCAWG-comparable statistics; SNV summaries are
-    dropped because the v1 arm model has SNV drivers off).
+    dropped because the arm model has SNV drivers off).
   * :class:`RealGenomeSimulator` — ``theta`` (a dict ``s0..s{n-1}`` of per-arm coefficients) ->
     arm summary vector, by running a short ``GenotypeTumor(genome_mode="real")``. Picklable so the
     ABC engine can parallelise it with ``multiprocessing``.
   * :func:`s_arm_prior` — a Uniform prior over the per-arm coefficients (CINner uses U(0.1, 2.0)).
 
-**Identifiability (A.3):** the CNA *rate* is fixed in the base config and only ``s_arm`` is
+**Identifiability:** the CNA *rate* is fixed in the base config and only ``s_arm`` is
 inferred, exactly as CINner fixes the missegregation probability to identify selection.
 """
 import warnings
@@ -170,7 +170,7 @@ def s_arm_prior(n_arms, low=0.5, high=1.6):
 
 
 class PerArmRegressor:
-    """Infer the per-arm selection vector by a *pooled* per-arm regression (the M3b estimator).
+    """Infer the per-arm selection vector by a *pooled* per-arm regression.
 
     The arm-CN fitness is a product over arms (``prod_seg s[seg]**(cn/ploidy - 1)``), coupled only
     through the genome-wide ploidy, so each arm's gain/loss frequency is governed mainly by its own
@@ -219,8 +219,8 @@ class RealGenomeSimulator:
     same ``s_arm`` and returns the cohort's per-arm gain/loss frequencies (the PCAWG-comparable
     summary). Picklable so the ABC engine can parallelise it with multiprocessing.
 
-    Set ``update_mode="tau"`` (the default) to grow each cohort tumour with **tau-leaping**
-    (DESIGN_scalability §7): the whole tumour is advanced one generation of length ``tau`` per
+    Set ``update_mode="tau"`` (the default) to grow each cohort tumour with **tau-leaping**:
+    the whole tumour is advanced one generation of length ``tau`` per
     ``grow`` step (Poisson births/deaths per clone) instead of one event per update, so a cohort
     that reaches a developed copy-number landscape costs ``#clones x #generations`` rather than
     ``#cells`` events — ~250x faster than the exact one-event engine at the production size. The

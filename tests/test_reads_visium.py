@@ -1,11 +1,11 @@
-"""F6 Visium-reads tests (reuses F7b; DESIGN_features §D / F6 reads bullet).
+"""Visium-reads tests (reusing the scRNA read path).
 
 Visium reads ARE scRNA reads barcoded by SPOT, so the SAME invariants as scRNA must hold:
   * spot UMI totals conserved exactly (alt + ref == spot count; reads never invent coverage);
   * the read count equals the conserved spot UMI total;
   * one spatial barcode per spot;
   * per-base sequencing error is the SINGLE read-error source (non-ref fraction ~ e, not ~2e);
-plus the NEW spatial piece:
+plus the spatial piece:
   * the spot-level RNA-VAF is the expression-weighted clone mixture of its member cells — a 2-clone
     spot lands BETWEEN the two cells' VAFs (the clone-mixture signal deconvolution must untangle).
 """

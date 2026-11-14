@@ -1,18 +1,18 @@
-"""Single-cell spatial (imaging-based) transcriptomics assay — F9 (DESIGN_features milestone).
+"""Single-cell spatial (imaging-based) transcriptomics assay.
 
 Imaging platforms (MERFISH / Xenium / seqFISH) measure a **targeted gene panel** at **single-cell
 resolution** in situ. This assay sits between the two existing spatial/expression modalities:
 
-  * unlike **Visium** (F6, `visium.py`) there is NO spot aggregation — each cell is its own
+  * unlike **Visium** (`visium.py`) there is NO spot aggregation — each cell is its own
     observation, with its own `cell_crd` coordinates;
-  * unlike **scRNA** (F3, `rna.py`) only a `panel` subset of the transcriptome is measured
+  * unlike **scRNA** (`rna.py`) only a `panel` subset of the transcriptome is measured
     (*transcriptome coverage*), at higher per-molecule sensitivity (near-zero dropout) but lower
     total depth.
 
-It reuses the F3 scRNA count machinery unchanged (`batch.Batch`: per-gene factor, per-cell library,
+It reuses the scRNA count machinery (`batch.Batch`: per-gene factor, per-cell library,
 NB/DM count draw, ambient soup), restricted to the panel genes, keeping each cell's coordinates.
 
-Two knobs the caller sets (per the design):
+Two knobs the caller sets:
   * **transcriptome coverage** — `panel` (explicit gene list) or `n_panel_genes` (top-N by mean
     expression); default = whole transcriptome (high-plex imaging).
   * **data distribution** — `mu_counts` (per-cell total molecules over the panel), `dispersion`,

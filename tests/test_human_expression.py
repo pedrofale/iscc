@@ -1,4 +1,4 @@
-"""Human-gene expression from atlas baselines and Hallmark programmes (L3), and the program bound.
+"""Human-gene expression from atlas baselines and Hallmark programmes, and the program bound.
 
 What must hold:
 
@@ -13,7 +13,7 @@ What must hold:
 4. **Per-type pooling is exact.** A Visium spot's pooled expression equals the sum of its cells'
    expression computed one by one.
 5. **The assays run on it.** scRNA counts come out sparse over the human genes; Visium spots too.
-6. **Shuffled programmes move only the programme factor** (`permute_programmes`, Fig 5's P2). Off the
+6. **Shuffled programmes move only the programme factor** (`permute_programmes`). Off the
    programme genes a cell's expression is unchanged; on them it changes by exactly the ratio of the
    shuffled to its own programme factor; the shuffle stays within each cell type, is fixed per
    sample and per seed, and Visium pools agree with it.

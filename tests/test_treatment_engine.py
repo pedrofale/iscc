@@ -1,9 +1,8 @@
 """Treatment on the genotype (count-based) engine, plus the corrected immune-death model.
 
 Covers, on the default GenotypeTumor:
-  * the fixed immune-death formula (immune presence *raises* cancer death; immune
-    resistance attenuates it) -- the old formula could only lower it and made
-    immune-free demes immortal;
+  * the immune-death formula (immune presence *raises* cancer death; immune
+    resistance attenuates it), so immune-free demes are not immortal;
   * chemotherapy suppressing growth and selecting for treatment-resistant clones;
   * immunotherapy stripping immune resistance so the local immune cells kill more;
   * adaptive vs continuous dosing;
@@ -17,7 +16,7 @@ from iscc.treatment.immunotherapy import Immunotherapy
 
 GENOME = {"n_segments": 6, "segment_size": 100}
 # Seed an established micro-lesion (initial_cancer_cells) so the founder survives crowding +
-# immune pressure instead of stochastically dying out (DESIGN_crowding.md founder bottleneck).
+# immune pressure instead of stochastically dying out (the founder bottleneck).
 DEME = {"carrying_capacity": 5, "initial_cancer_cells": 5}
 CANCER = {"division_rate": 0.4, "death_rate": 0.02, "max_birth_rate": 0.8,
           "mutation_rate": 0.5, "dispersal_rate": 0.2}
@@ -53,7 +52,7 @@ def _mean_param(t, key):
     return float((w * v).sum() / w.sum())
 
 
-# --- corrected immune-death formula (unit) ----------------------------------
+# --- immune-death formula (unit) --------------------------------------------
 def test_immune_presence_raises_cancer_death():
     center = (21 // 2) * 21 + (21 // 2)
     no_immune = _build(SEL_IR, seed=0, immune_density=0.0)
@@ -62,8 +61,8 @@ def test_immune_presence_raises_cancer_death():
     d_none = no_immune._death_rate(fid, center)
     d_immune = with_immune._death_rate(with_immune.founder_id, center)
     assert d_immune > d_none            # immune cells increase cancer death
-    # no immune -> baseline death PLUS density-dependent crowding (DESIGN_crowding.md), and
-    # crucially NOT the old degenerate 0 (immortal cancer). Crowding only adds, so d_none >= baseline.
+    # no immune -> baseline death PLUS density-dependent crowding, and crucially NOT 0 (immortal
+    # cancer). Crowding only adds, so d_none >= baseline.
     assert d_none >= CANCER["death_rate"] > 0
 
 
@@ -116,8 +115,8 @@ def test_chemo_suppresses_growth_and_selects_resistance():
 
 # --- immunotherapy (integration) --------------------------------------------
 def test_immunotherapy_reduces_growth():
-    # Under density-dependent crowding (DESIGN_crowding.md) immune cells add to a deme's occupancy
-    # as well as killing, so strong immune pressure now drives most micro-lesions extinct; the
+    # Under density-dependent crowding immune cells add to a deme's occupancy as well as killing,
+    # so strong immune pressure drives most micro-lesions extinct; the
     # survivors are the lineages that evolved immune resistance. We use a moderate immune density
     # (so a handful of seeds establish) and many seeds, then check immunotherapy — which strips that
     # evolved resistance — reduces the survivors' growth.

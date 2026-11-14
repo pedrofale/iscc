@@ -1,14 +1,14 @@
-"""Assay batch-effect model (DESIGN_features.md §B).
+"""Assay batch-effect model.
 
 A **batch** is one realization of an assay instance — a single reaction / lane / plate
 keyed by a seed. The *hyper-parameters* (`RNABatchHyperParams`) are protocol-typical
 magnitudes; one seed draws a concrete *realization* (`Batch`) whose technical signature
 is applied consistently across every cell of that instance and is reproducible from the
 seed. Two `Batch`es with identical hyper-parameters but different seeds = same biology,
-two technical signatures (§B.3).
+two technical signatures.
 
-The hyper-parameter names here are exactly what `estimate()` (DESIGN_inference.md §B / M2)
-will fit from real data, so they are named for that purpose:
+The hyper-parameter names here are exactly what `estimate()` fits from real data, so they
+are named for that purpose:
 
     sigma_batch       per-gene batch-factor LogNormal sd  (Splatter `batch.facScale`)
     mu_lib            mean library size (counts / cell)    -> sequencing depth
@@ -25,7 +25,7 @@ will fit from real data, so they are named for that purpose:
     depth_batch_sigma per-batch depth-shift LogNormal sd (so batches differ in depth)
     kappa             Dirichlet concentration (only for the `dm` count model)
 
-The **count emission is a pluggable step** (§B.2): everything above (biology -> library ->
+The **count emission is a pluggable step**: everything above (biology -> library ->
 batch) is shared and only the final draw is swapped via ``COUNT_MODELS``.
 """
 from dataclasses import dataclass, asdict
@@ -315,7 +315,7 @@ def assign_plates_from_map(cells, plate_map, n_wells, n_plates=0):
 
 
 # --------------------------------------------------------------------------------------
-# Pluggable count-emission step (DESIGN_features §B.2).
+# Pluggable count-emission step.
 #
 # Each emitter has the signature  emit(rng, comp, lib, batch) -> counts (n_cells, n_genes)
 # where `comp` is the per-cell normalized composition (rows sum to 1, already carrying the
@@ -352,7 +352,7 @@ def _emit_dm(rng, comp, lib, batch):
 
     `kappa` (= `RNABatchHyperParams.kappa` / `VisiumBatchHyperParams.kappa`) is the Dirichlet
     concentration: large kappa -> p≈comp (multinomial/Poisson-like); small kappa -> lumpy,
-    over-dispersed proportions. NB stays the default for scRNA (what M2 fits); DM is the
+    over-dispersed proportions. NB is the default for scRNA (the model `estimate()` fits); DM is the
     default-eligible model for the Visium assay (compositional per-spot capture).
     """
     comp = np.asarray(comp, dtype=float)
@@ -426,10 +426,10 @@ class RNABatchHyperParams:
     # mu_lib / sigma_lib CALIBRATED to real 10x PBMC3k (`estimate(sc.datasets.pbmc3k())`) — the
     # scale-free library-size magnitudes transfer. `dispersion` and the dropout curve are NOT taken
     # from PBMC3k: they are gene-set / cell-type-heterogeneity dependent (PBMC's fit ~0.6 is inflated
-    # by cross-cell-type variance unreachable by a clonal tumour, see M2), so iscc-scale values stay.
+    # by cross-cell-type variance unreachable by a clonal tumour), so iscc-scale values are used.
     protocol: str = "10x"
     sigma_batch: float = 0.10
-    mu_lib: float = 2400.0      # real PBMC3k ~2,367 UMIs/cell; was 4,000
+    mu_lib: float = 2400.0      # real PBMC3k ~2,367 UMIs/cell
     sigma_lib: float = 0.43     # real PBMC3k 0.431
     dispersion: float = 0.30
     ambient_frac: float = 0.05
@@ -577,22 +577,22 @@ class Batch:
 
 
 # ======================================================================================
-# DNA assay batch model (DESIGN_features.md §C / §D) — shared by bulk and single-cell.
+# DNA assay batch model — shared by bulk and single-cell.
 #
-# The physics of DNA coverage differ from scRNA expression, so the pluggable choices flip
-# (§C C1): the *depth* default is **Dirichlet-Multinomial** (compositional — a fixed read
+# The physics of DNA coverage differ from scRNA expression, so the pluggable choices flip:
+# the *depth* default is **Dirichlet-Multinomial** (compositional — a fixed read
 # budget partitioned across loci, proportions driven by COPY NUMBER) rather than NB, and
 # the *allele* layer is a separate binomial/beta-binomial draw with explicit ADO for
 # single-cell. The unifying knob across bulk vs single-cell is **kappa = the amplification
 # regime**: large kappa  ≈ multinomial/Poisson (un-amplified BULK), small kappa = lumpy
 # (whole-cell-amplified SINGLE-CELL).
 #
-# All hyper-parameter names here are M4 `estimate()` targets (DESIGN_inference): `kappa`
+# All hyper-parameter names here are `estimate_dna()` targets: `kappa`
 # (amplification regime), `capture_sigma` (per-target/amplicon efficiency), `ado_rate`,
 # `beta_binom_conc`, the GC-curve params, and `error_rate`.
 # ======================================================================================
 
-# ---- Pluggable DNA depth-emission step (DESIGN_features §C C1) ------------------------
+# ---- Pluggable DNA depth-emission step ------------------------------------------------
 # Each emitter has the signature  emit(rng, weights, N, h) -> counts (n_loci,)  where
 # `weights` are non-negative per-locus relative coverage drivers (∝ CN · length · GC /
 # mappability efficiency), `N` is the total read budget, and `h` is the hyper-parameters.
@@ -715,7 +715,7 @@ class DNABatchHyperParams:
 class DNABatch:
     """One seeded realization of a DNA assay instance (a library / run / chip).
 
-    Mirrors `Batch` (scRNA) for DNA (DESIGN_features §D): draws the run-level technical
+    Mirrors `Batch` (scRNA) for DNA: draws the run-level technical
     state shared across the assay — a **per-batch GC->coverage curve**, a per-locus
     mappability multiplier, a systematic **per-target/amplicon capture efficiency**, a
     per-batch **depth shift**, and a per-locus **error rate** (+ optional FFPE C>T) — then
@@ -832,7 +832,7 @@ class DNABatch:
 
 
 # ======================================================================================
-# Visium (spatial transcriptomics) batch model (DESIGN_features.md §D "spatial" row / F6).
+# Visium (spatial transcriptomics) batch model.
 #
 # The distinctive requirement of the spatial assay is that the technical noise is SPATIALLY
 # CORRELATED: neighbouring spots share capture efficiency. So the headline component is a
@@ -842,12 +842,12 @@ class DNABatch:
 # the realized per-spot depth carries positive spatial autocorrelation (Moran's I > 0) — the
 # signal `estimate_visium()` inverts and `validate_visium.py` checks.
 #
-# Everything else is shared with the scRNA batch model (§B.2): the per-gene LogNormal batch
+# Everything else is shared with the scRNA batch model: the per-gene LogNormal batch
 # factor (`sigma_batch`), ambient soup (`ambient_frac`), and the pluggable NB/DM count draw
 # (`COUNT_MODELS`). `VisiumBatch` therefore subclasses `Batch` and reuses `composition` /
-# `emit` / `add_ambient` unchanged; only the realization (per-gene factor + spatial field) and
-# the per-spot library draw are spatial-specific. All hyper-parameter names here are the M4
-# `estimate_visium()` targets (DESIGN_inference §C.2).
+# `emit` / `add_ambient` as is; only the realization (per-gene factor + spatial field) and
+# the per-spot library draw are spatial-specific. All hyper-parameter names here are the
+# `estimate_visium()` targets.
 # ======================================================================================
 @dataclass
 class VisiumBatchHyperParams:
@@ -881,7 +881,7 @@ class VisiumBatchHyperParams:
     edge_sigma : float
         Tissue-boundary capture-efficiency falloff (0 = none; <1 keeps it positive).
     edge_reference : str
-        What the falloff is measured from: ``"grid"`` (the spot grid's bounding box, the historical
+        What the falloff is measured from: ``"grid"`` (the spot grid's bounding box, the
         default) or ``"tissue"`` (the nearest spot without tissue, so the tissue's own edge is dimmed
         whatever the slide's size).
     diffusion_sigma : float
@@ -914,9 +914,9 @@ class VisiumBatchHyperParams:
     protocol: str = "visium"
     spot_pitch: float = 2.0
     spot_radius: float = 1.0
-    mu_counts: float = 20000.0       # real ~21,815 UMIs/spot (deep Visium); was 5,000
+    mu_counts: float = 20000.0       # real ~21,815 UMIs/spot (deep Visium)
     sigma_counts: float = 0.45       # real 0.455
-    field_lengthscale: float = 18.0  # real ~9 spots x spot_pitch 2.0 (coord units); was 4.0
+    field_lengthscale: float = 18.0  # real ~9 spots x spot_pitch 2.0 (coord units)
     field_sigma: float = 0.70        # real 0.697 (capture-field strength)
     edge_sigma: float = 0.30
     edge_reference: str = "grid"
@@ -937,11 +937,11 @@ class VisiumBatchHyperParams:
 class VisiumBatch(Batch):
     """One seeded realization of a Visium section (a slide / capture area).
 
-    Mirrors `Batch` (scRNA) for spatial transcriptomics (DESIGN_features §D): draws the per-gene
-    batch factor + ambient soup (shared §B.2 machinery) AND the spatial-specific piece — a smooth
+    Mirrors `Batch` (scRNA) for spatial transcriptomics: draws the per-gene
+    batch factor + ambient soup (shared with `Batch`) AND the spatial-specific piece — a smooth
     positive **capture-efficiency field** over the spot coordinates (a squared-exponential GP times
     a tissue-boundary falloff). It reuses `composition` / `emit` / `add_ambient` from `Batch`
-    unchanged; only `realize` (which now also samples the spatial field) and `spot_library` (the
+    as is; only `realize` (which also samples the spatial field) and `spot_library` (the
     per-spot depth, scaled by the field) are overridden. Reproducible from `seed`.
     """
 
@@ -961,7 +961,7 @@ class VisiumBatch(Batch):
         """
         n = len(genes)
         self.genes = list(genes)
-        # per-gene batch factor beta_g ~ LogNormal(0, sigma_batch^2), shared across spots (§B.2)
+        # per-gene batch factor beta_g ~ LogNormal(0, sigma_batch^2), shared across spots
         self.beta = self.rng.lognormal(mean=0.0, sigma=self.h.sigma_batch, size=n)
         # NB dispersion (used only when count_model="nb"; exposed via the `dispersion` property)
         self._phi = float(self.h.nb_dispersion)
