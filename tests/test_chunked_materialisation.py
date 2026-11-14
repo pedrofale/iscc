@@ -12,7 +12,7 @@ genotypes and inside demes.
 import numpy as np
 import pytest
 
-import iscc.tumor.models.count as count
+import iscc.tumor.models.materialise as count   # the chunk sizes and layer names live here
 from iscc.data import Visium
 from iscc.sample import Resection
 from iscc.tumor.components.cell import Cell
