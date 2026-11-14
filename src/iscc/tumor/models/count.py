@@ -1548,7 +1548,8 @@ class GenotypeTumor:
             else:
                 ep, em = rep.get_exp_alleles(dosage_sensitivity=P.dosage_sensitivity,
                                              snv_exp_effect=P.snv_exp_effect,
-                                             dosage_saturation=P.dosage_saturation)
+                                             dosage_saturation=P.dosage_saturation,
+                                             dosage_law=getattr(P, "dosage_law", "haplotype"))
                 drive = (P.clone_drive(rep.evolutionary_parameters, rep.baseline_rates,
                                        rep.get_snvs()) + P.celltype_bias("cancer"))
                 exp = (ep + em) * P.gene_multiplier(P.mean_z(drive)[None, :])[0]
@@ -4029,7 +4030,8 @@ class GenotypeTumor:
             if rep.type == "cancer":
                 ep, em = rep.get_exp_alleles(dosage_sensitivity=P.dosage_sensitivity,
                                              snv_exp_effect=P.snv_exp_effect,
-                                             dosage_saturation=P.dosage_saturation)
+                                             dosage_saturation=P.dosage_saturation,
+                                             dosage_law=getattr(P, "dosage_law", "haplotype"))
             else:
                 # Normal cells are diploid and unmutated: a flat allele split.
                 half = self.celltype_exps[rep.type] / 2.0
