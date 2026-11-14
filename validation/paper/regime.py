@@ -71,7 +71,11 @@ ORIGIN_CONFINEMENT = dict(RR._CFG["spatial_params"]["origin_confinement"], gener
 CROWDING_OVERFILL, CROWDING_D1 = 1.5, 5.0
 # `force_snv` off: an SNV event whose Poisson draws all come up 0 leaves the genome unchanged, as in
 # demon and CINner, instead of placing one SNV anyway (vault: paper1-sprint, decisions).
-CANCER = {"mutation_rate": 0.15, "force_snv": False}
+# `wgd_rate` 0.005 (the ER+ preset is 0.001): the R5 sweep puts 35% of tumours past a whole-genome
+# duplication at 0.005, inside PCAWG's 30-50%, against 5% at 0.001. It is an effective rate for this
+# lesion size, whose lineages are a few doublings shallower than a real lesion's (vault:
+# decision-paper-regime-wgd-rate).
+CANCER = {"mutation_rate": 0.15, "force_snv": False, "wgd_rate": 0.005}
 DEME = {"dispersal_law": "noble", "crowding_mode": "lottery", "crowding_law": "noble",
         "crowding_overfill": CROWDING_OVERFILL, "crowding_d1": CROWDING_D1,
         "maximum_death_rate": CROWDING_D1}
