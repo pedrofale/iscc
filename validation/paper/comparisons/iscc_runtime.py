@@ -29,6 +29,9 @@ def main():
     ap.add_argument("seed", type=int)
     ap.add_argument("scale", choices=["small", "mid", "cm"])
     ap.add_argument("--layer", action="store_true")
+    ap.add_argument("--low-memory", action="store_true")
+    ap.add_argument("--layers", default=None,
+                    help="make_cell_data(layers=...) for the section, e.g. visium (needs the chunked engine)")
     a = ap.parse_args()
     if a.layer:
         raise NotImplementedError("the human genome layer is not merged yet")
@@ -39,18 +42,20 @@ def main():
     from iscc.data import Visium
     from iscc.tumor.models import GenotypeTumor
 
-    RG.GenotypeTumor = functools.partial(GenotypeTumor, rng_streams="independent")
+    lm = {"low_memory": True} if a.low_memory else {}
+    RG.GenotypeTumor = functools.partial(GenotypeTumor, rng_streams="independent", **lm)
     origin = dict(copy.deepcopy(RG.ORIGIN_CONFINEMENT), clock="generations", generations=200)
     t0 = time.time()
     t = RG.grow(a.seed, a.scale, a.n_cancer, deme={"dispersal_law": "noble"},
                 spatial={"origin_confinement": origin}, max_steps=100_000, chunk=2)
     t1 = time.time()
-    sec = RR.resect(t).slice(depth_frac=0.5, max_cells=2 * a.n_cancer)
+    kw = {} if a.layers is None else {"layers": a.layers}
+    sec = RR.resect(t).slice(depth_frac=0.5, max_cells=2 * a.n_cancer, **kw)
     t2 = time.time()
     vis = Visium(seed=300 + a.seed).run(sec, grid_side=t.grid_size)
     t3 = time.time()
     total = int(sum(sum(d.values()) for d in t.demes))
-    rec = dict(tool="iscc", scale=a.scale, seed=a.seed, n_cancer=int(t.get_cancer_size()), n_total=total,
+    rec = dict(tool="iscc", layers=a.layers, low_memory=a.low_memory, scale=a.scale, seed=a.seed, n_cancer=int(t.get_cancer_size()), n_total=total,
                reached=bool(t.reached_target), section_cells=int(len(sec["cell_type"])),
                spots=int(vis.spot_counts.shape[0]), genes=int(vis.spot_counts.shape[1]),
                grow_s=t1 - t0, section_s=t2 - t1, visium_s=t3 - t2, total_s=t3 - t0)

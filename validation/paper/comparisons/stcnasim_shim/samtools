@@ -1,0 +1,19 @@
+#!/bin/bash
+# samtools for stCNASim 0.6.0: its BAM merge (xlib/xsam.py, sam_cat_from_file) always passes
+# "--threads N" to `samtools cat`, which samtools 1.24's cat does not accept; for `cat` only, drop that
+# option (it changes nothing but threading) and run the real samtools: the next one on PATH, else
+# $STCNASIM_SAMTOOLS, else the stcnasim environment of the cluster layout (scripts/ beside envs/).
+self=$(readlink -f "$0")
+skip="$(cd "$(dirname "$0")" && pwd):$(dirname "$self")"
+real=$(PATH=$(echo "$PATH" | tr ':' '\n' | grep -v -x -F -e "${skip%%:*}" -e "${skip##*:}" | paste -sd:) \
+       command -v samtools || true)
+[ -n "$real" ] || real=${STCNASIM_SAMTOOLS:-$(dirname "$self")/../../envs/stcnasim/bin/samtools}
+if [ "${1:-}" = "cat" ]; then
+  args=()
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in --threads|-@) shift 2;; --threads=*) shift;; *) args+=("$1"); shift;; esac
+  done
+  exec "$real" cat "${args[@]}"
+fi
+exec "$real" "$@"
