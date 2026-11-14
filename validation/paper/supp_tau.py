@@ -36,12 +36,11 @@ TARGET = 5_000
 
 def grow(mode, seed):
     from iscc.tumor.models import GenotypeTumor
-    cfg = RG.config(RG.T["sweep_scale"], spatial={"origin_confinement": None})
     tau = RR.TAU if mode == "tau" else (float(mode[3:]) if mode.startswith("tau") else RR.TAU)
     engine = "tau" if mode.startswith("tau") else "exact"
-    t = GenotypeTumor(seed=seed, update_mode=engine, tau=tau, coarsen_passengers=RR.COARSEN,
-                      max_cells=1, founder_mutations=RR.FOUNDER_MUTATIONS, germline_params=RR.GERMLINE,
-                      **cfg)
+    cfg = RG.config(RG.T["sweep_scale"], spatial={"origin_confinement": None}, update_mode=engine,
+                    tau=tau)
+    t = GenotypeTumor(seed=seed, max_cells=1, **cfg)
     if engine == "tau":
         steps = 0
         while 0 < t.get_cancer_size() < TARGET and steps < 8_000:

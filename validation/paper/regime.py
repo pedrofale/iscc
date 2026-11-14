@@ -131,16 +131,28 @@ def expression():
     return e
 
 
-def config(scale, selection=None, cancer=None, deme=None, spatial=None, genome=None):
-    """The parameter blocks of the paper regime at ``scale``, with a variant's overrides on top."""
+def config(scale, selection=None, cancer=None, deme=None, spatial=None, genome=None,
+           update_mode="tau", tau=RR.TAU, coarsen=RR.COARSEN):
+    """Every :class:`GenotypeTumor` keyword of the paper regime at ``scale`` except the seed and the
+    readout layers, with a variant's overrides on top.
+
+    This is the regime's one source: :func:`grow` builds from it, and so must any script that grows a
+    paper-regime tumour another way (``supp_tau.py`` runs the exact engine through ``update_mode``).
+    ``coarsen`` sets ``coarsen_passengers`` (R2 runs it off)."""
     sp = {"origin_confinement": dict(ORIGIN_CONFINEMENT), **(spatial or {})}
-    return RR.config_for(scale, genome=genome, selection={**SELECTION, **(selection or {})},
-                         cancer={**CANCER, **(cancer or {})}, deme={**DEME, **(deme or {})}, spatial=sp)
+    blocks = RR.config_for(scale, genome=genome, selection={**SELECTION, **(selection or {})},
+                           cancer={**CANCER, **(cancer or {})}, deme={**DEME, **(deme or {})},
+                           spatial=sp)
+    # low_memory: the program multiplier is materialised per chunk too, so a large section never holds
+    # a cells x genes float64 table beyond the ones returned (decision-chunked-materialisation).
+    return dict(blocks, update_mode=update_mode, tau=tau, coarsen_passengers=coarsen,
+                rng_streams=RNG_STREAMS, low_memory=True, founder_mutations=RR.FOUNDER_MUTATIONS,
+                germline_params=RR.GERMLINE)
 
 
 def grow(seed, scale, target_cancer, spatial_snapshot_every=0, max_steps=3_000, chunk=20,
          expression_params="default", microenv_params="default", coarsen=RR.COARSEN,
-         rng_streams=RNG_STREAMS, on_chunk=None, **overrides):
+         on_chunk=None, **overrides):
     """Grow one paper-regime tumour to ``target_cancer`` cancer cells (counts only).
 
     Returns the tumour without materialised cell data; sample it with :mod:`realistic_regime`'s
@@ -149,16 +161,13 @@ def grow(seed, scale, target_cancer, spatial_snapshot_every=0, max_steps=3_000, 
     is 1,500 generations: the acinus opens 200 generations after it is half full, and invasion
     normally follows within tens of generations, so a tumour still below target by then has stayed in
     situ, which the manifest records.
+    ``overrides`` are :func:`config`'s (the variant's blocks, ``update_mode``, ``tau``).
     ``on_chunk(t)``, if given, is called after every chunk, for monitoring."""
-    cfg = config(scale, **overrides)
+    cfg = config(scale, coarsen=coarsen, **overrides)
     expr = expression() if expression_params == "default" else expression_params
     menv = copy.deepcopy(MICROENV) if microenv_params == "default" else microenv_params
-    # low_memory: the program multiplier is materialised per chunk too, so a large section never holds
-    # a cells x genes float64 table beyond the ones returned (decision-chunked-materialisation).
-    t = GenotypeTumor(seed=seed, update_mode="tau", tau=RR.TAU, coarsen_passengers=coarsen,
-                      max_cells=1, low_memory=True, founder_mutations=RR.FOUNDER_MUTATIONS,
-                      germline_params=RR.GERMLINE, expression_params=expr, microenv_params=menv,
-                      spatial_snapshot_every=spatial_snapshot_every, rng_streams=rng_streams, **cfg)
+    t = GenotypeTumor(seed=seed, max_cells=1, expression_params=expr, microenv_params=menv,
+                      spatial_snapshot_every=spatial_snapshot_every, **cfg)
     steps = 0
     while 0 < t.get_cancer_size() < target_cancer and steps < max_steps:
         t.grow(n_steps=chunk, seed=seed)
