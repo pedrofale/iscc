@@ -92,3 +92,20 @@ def test_growth_is_identical_whatever_the_prior():
     np.testing.assert_array_equal(a.cell_data["cell_snv"].values, b.cell_data["cell_snv"].values)
     np.testing.assert_array_equal(a.cell_data["cell_cnv"].values, b.cell_data["cell_cnv"].values)
     assert not np.array_equal(a.programs.dosage_sensitivity, b.programs.dosage_sensitivity)
+
+
+def test_law_reaches_the_materialised_expression():
+    # same prior, different law: the s_g draws, the growth and the programs are identical, so the
+    # expression frames differ only where the law does (copy losses), and only if make_cell_data's
+    # chunked path passes the law on
+    def build(dosage):
+        t = GenotypeTumor(seed=2, genome_params=GENOME, selection_params=SELECTION,
+                          cancer_cell_params=CANCER, deme_params=DEME, spatial_params=SPATIAL,
+                          expression_params={"dosage_params": dosage})
+        t.grow(n_steps=40, seed=2)
+        t.make_cell_data(layers=["cell_cnv", "cell_exp"])
+        return t
+    a, b = build(DEFAULT), build(dict(DEFAULT, dosage_law="total"))
+    np.testing.assert_array_equal(a.programs.dosage_sensitivity, b.programs.dosage_sensitivity)
+    assert (a.cell_data["cell_cnv"].values < 2).any()           # the tumour carries a loss
+    assert not np.array_equal(a.cell_data["cell_exp"].values, b.cell_data["cell_exp"].values)

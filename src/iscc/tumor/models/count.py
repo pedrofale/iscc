@@ -58,6 +58,53 @@ PASSENGER_RNG_OFFSET = 909090
 # Purpose keys of the per-run streams under ``rng_streams="independent"`` (see ``_run_rng``).
 _STREAM_GROW, _STREAM_PASSENGERS, _STREAM_DEPTH, _STREAM_SUBSAMPLE = 0, 1, 2, 3
 
+# The gene-wide per-cell frames (cells × genes) that `make_cell_data` can build, and the ones each of
+# iscc's assay classes reads (`layers=` takes either). The reads layer additionally reads
+# `cell_rna_vaf` (scRNA and Visium reads) and `cell_snv`.
+CELL_LAYERS = ("cell_snv", "cell_cnv", "cell_exp", "cell_snv_p", "cell_snv_m", "cell_rna_vaf",
+               "cell_exp_p", "cell_exp_m", "cell_rna_baf")
+ASSAY_LAYERS = {
+    "visium": ("cell_exp",),
+    "imaging": ("cell_exp",),
+    "scrna": ("cell_exp", "cell_snv", "cell_rna_vaf"),
+    "scdna": ("cell_snv", "cell_cnv"),
+}
+# Gene-wide rows are built per chunk of cells of about this many float64 bytes (and at least this
+# many cells), so the transient working set of materialisation stays small whatever the number of cells.
+_MATERIALISE_CHUNK_BYTES = 64 << 20
+_MATERIALISE_MIN_ROWS = 256
+
+
+def _resolve_layers(layers):
+    """The set of gene-wide frames ``make_cell_data(layers=...)`` builds (see ``CELL_LAYERS``)."""
+    if layers is None:
+        return frozenset(CELL_LAYERS)
+    if isinstance(layers, str):
+        layers = (layers,)
+    out = set()
+    for name in layers:
+        if name in ASSAY_LAYERS:
+            out.update(ASSAY_LAYERS[name])
+        elif name in CELL_LAYERS:
+            out.add(name)
+        else:
+            raise ValueError(f"unknown layer {name!r}: give frames from {CELL_LAYERS} "
+                             f"or assays from {tuple(ASSAY_LAYERS)}")
+    return frozenset(out)
+
+
+def _program_multiplier(P, Z):
+    """``exp(Z · loading)`` for a chunk of cells, summed over programs one at a time, so each value
+    is the same whichever chunk its cell falls in (``low_memory``; see ``make_cell_data``)."""
+    if P.dictionary is None or Z.shape[1] == 0:
+        return np.ones((Z.shape[0], P.n_genes))
+    loading = P.dictionary.loading
+    acc = np.zeros((Z.shape[0], loading.shape[1]))
+    for k in range(Z.shape[1]):
+        acc += Z[:, k:k + 1] * loading[k]
+    return np.exp(acc)
+
+
 # --- Breast-cancer subtype presets ------------------------------------------------------------
 # Selected with ``cell_params.cancer.subtype`` (absent -> no preset -> nothing changes). A preset
 # only supplies DEFAULTS: any of the three knobs written explicitly in the config still wins, so a
@@ -176,6 +223,12 @@ class GenotypeTumor:
         Cap on the number of cells materialised as cell data (default None, no cap). Above it, a
         representative subsample that preserves spatial, clonal and cell-type proportions is
         materialised instead.
+    low_memory : bool, default False
+        Materialise the program layer's per-cell expression multiplier chunk by chunk instead of for
+        all cells at once, so materialisation never holds a cells × genes float64 table beyond the
+        frames it returns. The chunked product sums in a fixed order and so differs from the
+        all-at-once matrix product in the last bits of some values; ``False`` keeps the output
+        byte-identical to earlier versions. No effect without the program layer.
     microenv_params : dict, optional
         Microenvironment layer (hypoxia field + cell-cell communication). Off by
         default; a pure readout that never changes growth.
@@ -216,7 +269,7 @@ class GenotypeTumor:
                  layout_seed=None, expression_params=None, coarsen_passengers=False,
                  max_cells=None, germline_params=None, founder_mutations=None,
                  spatial_snapshot_every=0, spatial_snapshot_budget=5_000_000,
-                 rng_streams="offset"):
+                 rng_streams="offset", low_memory=False):
         self.seed = seed
         # Per-run stream derivation (see ``rng_streams`` above and ``_run_rng``). "offset" is the
         # historical seed + step / seed + constant scheme, kept as the default so every existing run is
@@ -286,6 +339,8 @@ class GenotypeTumor:
         # tissue, which is exactly what an assay samples. ``None`` (default) materialises all cells, so
         # every existing small-tumour run/test is byte-identical. The re-scaled example_config sets it.
         self.max_cells = max_cells
+        # See `low_memory` above and `make_cell_data`: chunk the program multiplier too.
+        self.low_memory = bool(low_memory)
 
         # Germline (inherited) variants: the patient's constant genetic background, carried by every
         # cell — tumour and normal alike — and so the purity / cancer-cell-fraction anchor a DNA
@@ -340,6 +395,7 @@ class GenotypeTumor:
                                                        spatial_snapshot_budget))
             self.coarsen_passengers = bool(cfg.get("coarsen_passengers", coarsen_passengers))
             self.max_cells = cfg.get("max_cells", max_cells)
+            self.low_memory = bool(cfg.get("low_memory", low_memory))
             self.germline_params = cfg.get("germline_params", germline_params)
             self.founder_mutations = cfg.get("founder_mutations", founder_mutations)
             self.rng_streams = cfg.get("rng_streams", rng_streams)
@@ -3869,7 +3925,8 @@ class GenotypeTumor:
         c0 = min(max(0, int(cc) - n_c // 2), G - n_c)
         return [r * G + c for r in range(r0, r0 + n_r) for c in range(c0, c0 + n_c)]
 
-    def make_cell_data(self, cell_prefix="C", max_cells=None, region=None, depth_frac=None, **kwargs):
+    def make_cell_data(self, cell_prefix="C", max_cells=None, region=None, depth_frac=None,
+                       layers=None, low_memory=None, **kwargs):
         """Expand the per-deme genotype counts into per-cell ground-truth tables.
 
         Materialises one row per cell (each genotype's count becomes that many identical
@@ -3900,6 +3957,17 @@ class GenotypeTumor:
             for the deme's 3-D column, this is a thin histology/Visium SLICE of a tissue block — the
             whole 2-D field, one thin layer. ``None`` keeps the full column; ``0.5`` is a half-depth
             slice. Composes with ``region`` (an in-plane cut) and ``max_cells``.
+        layers : str or iterable of str, optional
+            Which gene-wide frames (cells × genes) to build: names from ``CELL_LAYERS`` (``"cell_exp"``,
+            ``"cell_snv"``, ``"cell_cnv"``, ...) and/or assay names from ``ASSAY_LAYERS``
+            (``"visium"``, ``"scrna"``, ``"scdna"``, ``"imaging"``), which stand for the frames that
+            assay reads. These frames dominate memory, so a Visium section that needs only
+            expression is several times smaller with ``layers="visium"``. The small per-cell frames
+            (coordinates, types, demes, evolutionary parameters, and the optional truth layers) are
+            always built. ``None`` (default) builds every frame.
+        low_memory : bool, optional
+            Chunk the program layer's expression multiplier too (see the constructor's
+            ``low_memory``); ``None`` (default) uses the tumour's setting.
 
         Returns
         -------
@@ -3923,6 +3991,7 @@ class GenotypeTumor:
                 f"The cap, not depth_frac, is setting the cell density. Pass a larger max_cells "
                 f"(~{int(want * 1.2):,}) to let the physical section govern.",
                 stacklevel=2)
+        layers = _resolve_layers(layers)
         gene_names = self.selection.get_gene_names()
         onc_idx, tsg_idx = self.selection.get_oncogenes(), self.selection.get_tsgs()
         disp_idx, ir_idx, tr_idx = (self.selection.get_dispersal_genes(),
@@ -3931,49 +4000,59 @@ class GenotypeTumor:
         breach_idx, ss_idx = self.selection.get_breach(), self.selection.get_stromal_survival()
         ms_idx = self.selection.get_met_survival()
         dt_idx = self.selection.get_drug_tolerance()
-        snv_cache, cnv_cache, exp_cache, evo_cache = {}, {}, {}, {}
-        # R13: per-genotype allele-resolved expression + the per-clone program drive (routes 1+2).
-        # Both are per-CLONE, so they belong in this cache; the per-CELL `z` is drawn later.
-        exp_p_cache, exp_m_cache, drive_cache = {}, {}, {}
         P = self.programs
-        # Build per-genotype caches ONLY for genotypes that will be materialised — the whole plan
-        # without a cap, the subsample's genotypes under one. At cm-scale iterating every genotype
-        # here is itself an O(#genotypes × n_genes) memory/time wall, so the cap must bound it too.
+        # Genotypes that will be materialised — the whole plan without a cap, the subsample's
+        # genotypes under one. At cm-scale iterating every genotype here is itself an
+        # O(#genotypes × n_genes) memory/time wall, so the cap must bound it too.
         mat_gids = set()
         for keep in mat_plan:
             mat_gids.update(keep)
-        for gid in mat_gids:
+
+        # MEMORY. A section of a cm-scale tumour holds nearly as many genotypes as cells, so caching
+        # every genotype's gene-wide rows (SNV, copy number, expression and its allele split) up front
+        # costs as much as the cell tables themselves, and stacking per-cell rows in float64 before
+        # the final cast costs several times more. Only the SMALL per-genotype quantities (the
+        # evolutionary parameters with their driver tallies, and the program drive) are kept for all
+        # genotypes; the gene-wide rows are built per chunk of cells and written straight into the
+        # requested frames. Every per-genotype function here is deterministic, so a genotype seen
+        # again in a later chunk gives the same row, and the frames are byte-identical to stacking
+        # every row at once.
+        def genotype_exp(gid):
+            """(exp, exp_p, exp_m) of genotype ``gid``; the allele split is None without programs."""
             rep = self.genotypes[gid]
-            snv = rep.get_snvs()
-            snv_cache[gid] = snv
-            cnv_cache[gid] = rep.get_cnvs()
             if P is None:
                 # legacy path — untouched, so output is bit-identical when the layer is off
                 if rep.type == "cancer":
                     rep.baseline_exp = self.celltype_exps["cancer"]
-                    exp_cache[gid] = rep.get_exp(self.selection.mut_effects)
-                else:
-                    exp_cache[gid] = self.celltype_exps[rep.type]
+                    return rep.get_exp(self.selection.mut_effects), None, None
+                return self.celltype_exps[rep.type], None, None
+            rep.baseline_exp = self.celltype_exps[rep.type]
+            if rep.type == "cancer":
+                ep, em = rep.get_exp_alleles(dosage_sensitivity=P.dosage_sensitivity,
+                                             snv_exp_effect=P.snv_exp_effect,
+                                             dosage_saturation=P.dosage_saturation,
+                                             dosage_law=getattr(P, "dosage_law", "haplotype"))
+            else:
+                # Normal cells are diploid and unmutated: a flat allele split.
+                half = self.celltype_exps[rep.type] / 2.0
+                ep, em = half.copy(), half.copy()
+            return ep + em, ep, em
+
+        evo_cache, drive_cache = {}, {}
+        for gid in mat_gids:
+            rep = self.genotypes[gid]
+            snv = rep.get_snvs()
+            if P is None:
+                if rep.type == "cancer":
+                    rep.baseline_exp = self.celltype_exps["cancer"]
             else:
                 rep.baseline_exp = self.celltype_exps[rep.type]
-                if rep.type == "cancer":
-                    ep, em = rep.get_exp_alleles(dosage_sensitivity=P.dosage_sensitivity,
-                                                 snv_exp_effect=P.snv_exp_effect,
-                                                 dosage_saturation=P.dosage_saturation,
-                                                 dosage_law=getattr(P, "dosage_law", "haplotype"))
-                    # Route 1 reads the EVOLVED per-clone phenotype, so whatever moved fitness —
-                    # CINner drivers, and now R14's epistasis multiplier — propagates into the
-                    # programs by construction. Route 2 reads the clone's SNV VAFs.
-                    drive_cache[gid] = P.clone_drive(rep.evolutionary_parameters,
-                                                     rep.baseline_rates, snv)
-                else:
-                    # Normal cells are diploid and unmutated: a flat allele split, no genotype drive.
-                    half = self.celltype_exps[rep.type] / 2.0
-                    ep, em = half.copy(), half.copy()
-                    drive_cache[gid] = np.zeros(P.n_programs)
-                drive_cache[gid] = drive_cache[gid] + P.celltype_bias(rep.type)
-                exp_p_cache[gid], exp_m_cache[gid] = ep, em
-                exp_cache[gid] = ep + em
+                # R13 route 1 reads the EVOLVED per-clone phenotype, so whatever moved fitness —
+                # CINner drivers, and R14's epistasis multiplier — propagates into the programs by
+                # construction. Route 2 reads the clone's SNV VAFs. Normal cells carry no drive.
+                drive = (P.clone_drive(rep.evolutionary_parameters, rep.baseline_rates, snv)
+                         if rep.type == "cancer" else np.zeros(P.n_programs))
+                drive_cache[gid] = drive + P.celltype_bias(rep.type)
             # per-genotype evolutionary parameters + unique-mutated-driver tallies
             evo = dict(rep.evolutionary_parameters)
             evo["n_mut_onc"] = int((snv[onc_idx] > 0).sum())
@@ -3988,10 +4067,12 @@ class GenotypeTumor:
             evo_cache[gid] = evo
 
         # F8: per-deme expression modifier (None -> disabled -> exp is bit-identical to the base
-        # engine). Cache the modified expression per (deme, genotype) since many cells share both.
-        # `exp_cache` is passed so the CCI ligand/receptor levels (W3) can be read per genotype.
-        deme_mod = self._microenv_deme_mod(exp_cache)
-        mod_exp_cache = {}
+        # engine). The CCI ligand/receptor levels (W3) are the only part of each genotype's
+        # expression it reads, so only those two genes are kept per genotype.
+        lig, rec = self._cci_ligand, self._cci_receptor
+        cci_levels = ({} if lig is None or rec is None else
+                      {g: {lig: e[lig], rec: e[rec]} for g in mat_gids for e in (genotype_exp(g)[0],)})
+        deme_mod = self._microenv_deme_mod(cci_levels)
         # W3 CCI is receptor-dependent, so its multiplier is per-(deme, genotype), not a column of
         # `deme_mod` (which now carries hypoxia only). Extract the pieces the loop needs: the target
         # genes, the calibrated strength, the per-deme ligand availability and the per-genotype
@@ -4035,14 +4116,93 @@ class GenotypeTumor:
             if fields:
                 niche_drive = P.niche_drive(fields)
 
-        rows_snv, rows_cnv, rows_exp, rows_evo, crd, types, demes_col, names = [], [], [], [], [], [], [], []
-        rows_exp_p, rows_exp_m, rows_drive = [], [], []
+        # The cell plan: one run per (deme, genotype), each `count` identical cells from `start` on.
+        runs, rows_evo, crd, types, demes_col, names = [], [], [], [], [], []
         i = 0
         for deme_idx, keep in enumerate(mat_plan):
             if not keep:
                 continue
             r, c = self.deme_coords[deme_idx]
             for gid in sorted(keep.keys(), key=lambda g: self.genotypes[g].ord):
+                runs.append((deme_idx, gid, i, keep[gid]))
+                for _ in range(keep[gid]):
+                    rows_evo.append(evo_cache[gid])
+                    crd.append((r, c)); types.append(gid); demes_col.append(deme_idx)
+                    names.append(f"{cell_prefix}{i}"); i += 1
+        n_cells, n_genes = i, self.n_genes
+
+        # R13: the per-CELL program activity. `z` is per-cell (cycling is a cell state, not a clone
+        # constant) while the genotype drive is per-clone — so the drive sets each clone's MEAN and
+        # `activity_noise` supplies the within-clone spread. Drawn for all cells at once, so the stream
+        # does not depend on how the expression below is chunked.
+        Z = None
+        if P is not None and n_cells:
+            drive = np.empty((n_cells, P.n_programs))
+            for deme_idx, gid, start, count in runs:
+                drive_row = drive_cache[gid]
+                if niche_drive is not None:
+                    drive_row = drive_row + niche_drive[deme_idx]
+                drive[start:start + count] = drive_row
+            Z = P.sample_z(drive, P.activity_rng())
+
+        # The gene-wide frames, allocated at their final dtype and filled chunk by chunk.
+        # DTYPES. These frames are (n_cells x n_genes) and dominate the memory at cm-scale, so they
+        # are stored no wider than the values need. Copy number is a small non-negative integer
+        # (int16 covers 0..32767 against a realistic ceiling of ~10): LOSSLESS at a quarter of int64.
+        # Expression is float32 — a level, nowhere near float64's 15 significant digits.
+        # `cell_snv` STAYS float64 on purpose. Several suites pin a golden md5 of its raw bytes to
+        # assert that turning a feature off leaves the growth stream byte-identical; narrowing it
+        # would force those baselines to be regenerated, and a re-blessed baseline is exactly how a
+        # real perturbation would slip past them.
+        allele = P is not None and P.allele_specific
+        want_snv = bool(layers & {"cell_snv", "cell_snv_p", "cell_snv_m", "cell_rna_vaf"})
+        snv_mat = np.empty((n_cells, n_genes)) if want_snv else None
+        cnv_mat = np.empty((n_cells, n_genes), dtype=np.int16) if "cell_cnv" in layers else None
+        exp_mat = np.empty((n_cells, n_genes), dtype=np.float32) if "cell_exp" in layers else None
+        ep_mat = np.empty((n_cells, n_genes)) if allele and "cell_exp_p" in layers else None
+        em_mat = np.empty((n_cells, n_genes)) if allele and "cell_exp_m" in layers else None
+        baf_mat = np.empty((n_cells, n_genes)) if allele and "cell_rna_baf" in layers else None
+        want_exp = any(m is not None for m in (exp_mat, ep_mat, em_mat, baf_mat))
+        # The program multiplier exp(z · loading). By default it is one matrix product over all cells,
+        # exactly as before chunking existed: a product over a chunk of rows may take a different BLAS
+        # path (a single row is a matrix-vector product) and round the last bit differently, so a
+        # chunked product cannot promise the same bytes. `low_memory` accepts that and builds it per
+        # chunk, summing over programs in a fixed order so the result does not depend on the chunk.
+        low_memory = self.low_memory if low_memory is None else bool(low_memory)
+        prog_all = (P.gene_multiplier(Z) if P is not None and n_cells and want_exp and not low_memory
+                    else None)
+        step = max(_MATERIALISE_MIN_ROWS, _MATERIALISE_CHUNK_BYTES // (8 * max(n_genes, 1)))
+        first = 0                                       # first run that can overlap the chunk
+        for s in range(0, n_cells, step):
+            e = min(n_cells, s + step)
+            rows = {}                                   # this chunk's per-genotype rows
+            if want_exp:
+                buf = np.empty((e - s, n_genes))        # float64, as the stacked rows were
+                if P is not None:
+                    buf_m = np.empty((e - s, n_genes))
+            while runs[first][2] + runs[first][3] <= s:
+                first += 1
+            for deme_idx, gid, start, count in runs[first:]:
+                if start >= e:
+                    break
+                lo, hi = max(s, start), min(e, start + count)
+                if hi <= lo:
+                    continue
+                rep = self.genotypes[gid]
+                # A genotype spans many demes, so its rows are built once per chunk, not once per run.
+                got = rows.get(gid)
+                if got is None:
+                    got = rows[gid] = dict(
+                        snv=rep.get_snvs() if want_snv else None,
+                        cnv=rep.get_cnvs() if cnv_mat is not None else None,
+                        exp=genotype_exp(gid) if want_exp else None)
+                if want_snv:
+                    snv_mat[lo:hi] = got["snv"]
+                if cnv_mat is not None:
+                    cnv_mat[lo:hi] = got["cnv"]
+                if not want_exp:
+                    continue
+                exp_g, ep_g, em_g = got["exp"]
                 # W3: the receptor-dependent CCI multiplier for this (deme, genotype) — the same
                 # scalar for every cell of the clone here (ligand availability at the deme × the
                 # clone's own receptor level). `deme_mod` carries hypoxia; this carries CCI.
@@ -4050,14 +4210,13 @@ class GenotypeTumor:
                 if cci_apply is not None:
                     _ct, _cs, _la, _rl, _lig, _rec, _etype, _lref = cci_apply
                     cci_f = 1.0 + _cs * float(_la[deme_idx]) * float(_rl.get(gid, 0.0))
-                if deme_mod is None:
-                    exp_row = exp_cache[gid]
-                else:
-                    exp_row = mod_exp_cache.get((deme_idx, gid))
-                    if exp_row is None:
-                        exp_row = exp_cache[gid] * deme_mod[deme_idx]     # fresh array (hypoxia)
+                if P is None:
+                    if deme_mod is None:
+                        exp_row = exp_g
+                    else:
+                        exp_row = exp_g * deme_mod[deme_idx]           # fresh array (hypoxia)
                         if cci_f is not None:
-                            exp_row[_ct] *= cci_f                          # receptor-dependent CCI
+                            exp_row[_ct] *= cci_f                      # receptor-dependent CCI
                             # THE L-R SIGNAL ITSELF, split by WHO SENDS AND WHO RECEIVES. Every CCI
                             # tool scores a pair from the ligand's and receptor's own expression, and
                             # CellChat's gene filter is a DIFFERENTIAL-EXPRESSION test BETWEEN CELL
@@ -4076,89 +4235,79 @@ class GenotypeTumor:
                             # to ~1.8x and the pair is rejected on the ligand.
                             # The RECEPTOR is up-regulated where signal ARRIVES, so it stays graded
                             # by the local field.
-                            if self.genotypes[gid].type == _etype:
+                            if rep.type == _etype:
                                 exp_row[_lig] = _lref * (1.0 + _cs)   # sender clears ambient by margin
                                 exp_row[_rec] /= (1.0 + _cs)          # and is not listening to itself
                             else:
                                 exp_row[_rec] *= (1.0 + _cs)
-                        mod_exp_cache[(deme_idx, gid)] = exp_row
-                if P is not None:
+                    buf[lo - s:hi - s] = exp_row
+                else:
                     mod_row = 1.0 if deme_mod is None else deme_mod[deme_idx]
-                    ep_row, em_row = exp_p_cache[gid] * mod_row, exp_m_cache[gid] * mod_row
-                    if cci_f is not None:                                  # keep alleles in step (§L3200)
+                    ep_row, em_row = ep_g * mod_row, em_g * mod_row
+                    if cci_f is not None:                              # keep alleles in step (§L3200)
                         ep_row[_ct] *= cci_f; em_row[_ct] *= cci_f
-                        # The L-R signal must be applied HERE TOO. When the programs layer is on,
-                        # `rows_exp` is overwritten by `ep + em` below, so a boost written only into
-                        # `exp_row` is silently discarded and the channel vanishes from the totals.
-                        if self.genotypes[gid].type == _etype:
-                            half = 0.5 * _lref * (1.0 + _cs)          # split across the two alleles
+                        # The L-R signal, as in the legacy path above, split across the two alleles.
+                        if rep.type == _etype:
+                            half = 0.5 * _lref * (1.0 + _cs)
                             ep_row[_lig] = em_row[_lig] = half
                             ep_row[_rec] /= (1.0 + _cs); em_row[_rec] /= (1.0 + _cs)
                         else:
                             ep_row[_rec] *= (1.0 + _cs); em_row[_rec] *= (1.0 + _cs)
-                    drive_row = drive_cache[gid]
-                    if niche_drive is not None:
-                        drive_row = drive_row + niche_drive[deme_idx]
-                for _ in range(keep[gid]):
-                    rows_snv.append(snv_cache[gid]); rows_cnv.append(cnv_cache[gid])
-                    rows_exp.append(exp_row); rows_evo.append(evo_cache[gid])
-                    crd.append((r, c)); types.append(gid); demes_col.append(deme_idx)
-                    names.append(f"{cell_prefix}{i}"); i += 1
-                    if P is not None:
-                        rows_exp_p.append(ep_row); rows_exp_m.append(em_row)
-                        rows_drive.append(drive_row)
-
-        # R13: apply the per-CELL program activity. `z` is per-cell (cycling is a cell state, not a
-        # clone constant) while the genotype drive is per-clone — so the drive sets each clone's MEAN
-        # and `activity_noise` supplies the within-clone spread. One matmul over all cells keeps this
-        # affordable despite breaking the per-(deme, genotype) expression sharing.
-        Z = None
-        if P is not None and rows_exp_p:
-            drive = np.asarray(rows_drive, dtype=float)
-            Z = P.sample_z(drive, P.activity_rng())
-            prog_mult = P.gene_multiplier(Z)                      # (n_cells, n_genes)
-            ep = np.asarray(rows_exp_p) * prog_mult
-            em = np.asarray(rows_exp_m) * prog_mult
-            rows_exp_p, rows_exp_m = ep, em
-            rows_exp = ep + em
+                    buf[lo - s:hi - s] = ep_row
+                    buf_m[lo - s:hi - s] = em_row
+            if not want_exp:
+                continue
+            if P is None:
+                exp_mat[s:e] = buf
+                continue
+            # The per-cell program activity scales both alleles; total expression is their sum.
+            prog_mult = (prog_all[s:e] if prog_all is not None
+                         else _program_multiplier(P, Z[s:e]))   # (chunk cells, n_genes)
+            buf *= prog_mult
+            buf_m *= prog_mult
+            tot = buf + buf_m
+            if exp_mat is not None:
+                exp_mat[s:e] = tot
+            if ep_mat is not None:
+                ep_mat[s:e] = buf
+            if em_mat is not None:
+                em_mat[s:e] = buf_m
+            if baf_mat is not None:
+                # BAF in RNA: the fraction of a gene's expression coming from the `p` homolog. 0.5 at
+                # a balanced diploid locus; an allelic imbalance (an amplified or lost homolog, or an
+                # NMD SNV in cis) pushes it away from 0.5. This is the layer Numbat / CalicoST read,
+                # and it is exactly what summing p+m in `get_exp` used to destroy.
+                baf_mat[s:e] = np.divide(buf, tot, out=np.full_like(tot, 0.5, dtype=float), where=tot > 0)
 
         idx = pd.Index(names)
-        empty = np.empty((0, self.n_genes))
         # SNV matrix, with coarsened-away passenger SNVs re-emitted per cell (no-op when coarsening is
-        # off or nothing was folded). Built once and reused for cell_rna_vaf below.
-        snv_mat = np.array(rows_snv) if rows_snv else empty
-        snv_alleles = self._reconstruct_passengers(snv_mat, types)
-        # DTYPES. These frames are (n_cells x n_genes) and dominate the memory at cm-scale, so they
-        # are stored no wider than the values need. Copy number is a small non-negative integer
-        # (int16 covers 0..32767 against a realistic ceiling of ~10): LOSSLESS at a quarter of int64.
-        # Expression is float32 — a level, nowhere near float64's 15 significant digits.
-        # `cell_snv` STAYS float64 on purpose. Several suites pin a golden md5 of its raw bytes to
-        # assert that turning a feature off leaves the growth stream byte-identical; narrowing it
-        # would force those baselines to be regenerated, and a re-blessed baseline is exactly how a
-        # real perturbation would slip past them. It is also the layer that least needs it — 1.4%
-        # non-zero, and a pure function of the genotype, so sparsity or de-duplication beat a
-        # narrower dtype without touching the digests.
+        # off or nothing was folded). It modifies `snv_mat` in place, so cell_rna_vaf reads it after.
+        snv_alleles = self._reconstruct_passengers(snv_mat, types) if want_snv else None
+
         def _frame(mat, dtype):
             return pd.DataFrame(np.asarray(mat, dtype=dtype), index=idx, columns=gene_names)
 
-        self.cell_data = dict(
-            cell_evo=pd.DataFrame(rows_evo, index=idx),
-            cell_snv=_frame(snv_mat, np.float64),
-            cell_cnv=_frame(np.array(rows_cnv) if rows_cnv else empty, np.int16),
-            # NB `len(...)`, not truthiness: with the program layer on, `rows_exp` is an ndarray.
-            cell_exp=_frame(np.array(rows_exp) if len(rows_exp) else empty, np.float32),
-            cell_crd=pd.DataFrame(crd if crd else np.empty((0, 2)), index=idx, columns=["row", "col"]).astype(int),
-            cell_type=pd.DataFrame(types, index=idx, columns=["cell_id"]),
-            cell_deme=pd.DataFrame(demes_col, index=idx, columns=["deme_id"]),
-        )
+        self.cell_data = dict(cell_evo=pd.DataFrame(rows_evo, index=idx))
+        if "cell_snv" in layers:
+            self.cell_data["cell_snv"] = _frame(snv_mat, np.float64)
+        if cnv_mat is not None:
+            self.cell_data["cell_cnv"] = _frame(cnv_mat, np.int16)
+        if exp_mat is not None:
+            self.cell_data["cell_exp"] = _frame(exp_mat, np.float32)
+        self.cell_data["cell_crd"] = pd.DataFrame(crd if crd else np.empty((0, 2)), index=idx,
+                                                  columns=["row", "col"]).astype(int)
+        self.cell_data["cell_type"] = pd.DataFrame(types, index=idx, columns=["cell_id"])
+        self.cell_data["cell_deme"] = pd.DataFrame(demes_col, index=idx, columns=["deme_id"])
         # Allele-resolved neutral SNV layer (the PRIMARY truth of the coalescent passenger overlay,
         # DESIGN_snv_coalescent.md §4.5): per-homolog VAF frames whose sum is exactly `cell_snv`.
         # Only present when the overlay actually ran (coarsening on + folded burden + neutral sites),
         # so the base schema is unchanged otherwise — the F8 off-by-default discipline.
         if snv_alleles is not None:
             snv_p, snv_m = snv_alleles
-            self.cell_data["cell_snv_p"] = _frame(snv_p, np.float64)
-            self.cell_data["cell_snv_m"] = _frame(snv_m, np.float64)
+            if "cell_snv_p" in layers:
+                self.cell_data["cell_snv_p"] = _frame(snv_p, np.float64)
+            if "cell_snv_m" in layers:
+                self.cell_data["cell_snv_m"] = _frame(snv_m, np.float64)
         # cell_rna_vaf (F7b): the EXPECTED allele FRACTION in RNA (not an observed VAF). With m
         # mutant + w wt copies at a locus and per-locus expression effect e (selection.mut_effects:
         # oncogene=2, TSG=0.5, else 1), the fraction of expression from mutant alleles is
@@ -4171,13 +4320,17 @@ class GenotypeTumor:
         # so most loci drop out or are noisy and the observed VAF does NOT match DNA-VAF at neutral
         # loci — the read layer (reads/rna.py) does the depth-aware sampling and the obs_fidelity
         # distortion; both deliberately live outside the engine.
-        flat_eff = (np.concatenate(self.selection.mut_effects)
-                    if self.selection.mut_effects else np.ones(self.n_genes))
-        v = self.cell_data["cell_snv"].values
-        num = v * flat_eff
-        denom = num + (1.0 - v)
-        rna_vaf = np.divide(num, denom, out=np.zeros_like(v, dtype=float), where=denom > 0)
-        self.cell_data["cell_rna_vaf"] = _frame(rna_vaf, np.float64)
+        if "cell_rna_vaf" in layers:
+            flat_eff = (np.concatenate(self.selection.mut_effects)
+                        if self.selection.mut_effects else np.ones(n_genes))
+            rna_vaf = np.empty((n_cells, n_genes))
+            for s in range(0, n_cells, step):
+                v = snv_mat[s:s + step]
+                num = v * flat_eff
+                denom = num + (1.0 - v)
+                rna_vaf[s:s + step] = np.divide(num, denom, out=np.zeros_like(v, dtype=float),
+                                                where=denom > 0)
+            self.cell_data["cell_rna_vaf"] = _frame(rna_vaf, np.float64)
         # WGD ground truth (DESIGN_focal_cna.md v1): the per-genotype `is_wgd` flag surfaced per cell,
         # so downstream CNA / BAF benchmarks (e.g. Numbat) can score WGD detection against the truth.
         # Gated on WGD being enabled — off -> the frame is absent and the base schema is unchanged
@@ -4231,18 +4384,9 @@ class GenotypeTumor:
         # R13: the allele layers + the RNA BAF, and the per-cell program activity. Only added when
         # the program layer is on, so the base schema is unchanged.
         if P is not None:
-            if P.allele_specific:
-                ep = np.asarray(rows_exp_p) if len(rows_exp_p) else empty
-                em = np.asarray(rows_exp_m) if len(rows_exp_m) else empty
-                tot = ep + em
-                # BAF in RNA: the fraction of a gene's expression coming from the `p` homolog. 0.5 at
-                # a balanced diploid locus; an allelic imbalance (an amplified or lost homolog, or an
-                # NMD SNV in cis) pushes it away from 0.5. This is the layer Numbat / CalicoST read,
-                # and it is exactly what summing p+m in `get_exp` used to destroy.
-                baf = np.divide(ep, tot, out=np.full_like(tot, 0.5, dtype=float), where=tot > 0)
-                self.cell_data["cell_exp_p"] = pd.DataFrame(ep, index=idx, columns=gene_names)
-                self.cell_data["cell_exp_m"] = pd.DataFrame(em, index=idx, columns=gene_names)
-                self.cell_data["cell_rna_baf"] = pd.DataFrame(baf, index=idx, columns=gene_names)
+            for name, mat in (("cell_exp_p", ep_mat), ("cell_exp_m", em_mat), ("cell_rna_baf", baf_mat)):
+                if mat is not None:
+                    self.cell_data[name] = pd.DataFrame(mat, index=idx, columns=gene_names)
             if Z is not None and P.n_programs:
                 self.cell_data["cell_program"] = pd.DataFrame(
                     Z, index=idx, columns=list(P.dictionary.program_names))

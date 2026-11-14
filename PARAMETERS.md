@@ -41,6 +41,7 @@ Defaults are those in `notebooks/example_config.yaml`. Set them under the matchi
 | `mutation_rate` | 0.3 | ~0.05–2; **[0, 1]** under `dispersal_law: noble`, where it is the per-division probability of a mutation | **low** → monoclonal (no subclones); **high** → hypermutated mush (broken 1/f tail) |
 | `n_snvs_per_allele` | 0.02 | ~0.1–3 | **low** → no SNV diversity; **high** → hypermutated mush |
 | `snv_prob` / `cnv_prob` | 0.5 / 0.02 | relative weights (SNV vs CNA event) | all-SNV → no CNAs (inferCNV/clonealign demos degrade); all-CNA → no SNV phylogeny |
+| `force_snv` | `true` | `true` \| `false` | `true` places one SNV when every per-allele Poisson draw of an SNV event is 0, which raises the SNV supply (about 4% at the paper regime's rate, 25% at `n_snvs_per_allele` 0.05); `false` leaves such a division's genome unchanged, as demon and CINner do |
 
 ### Growth & survival — `cell_params.cancer` + `deme_params`
 | Knob | Default | Valid range | Outside the range |
@@ -430,6 +431,15 @@ Three opt-in corrections to the genotype engine. Each default reproduces earlier
 | `deme_params.dispersal_law` | `"compete"` | `"compete"`: each division either attempts a mutation, with probability `mutation_rate / (mutation_rate + dispersal_rate)`, or disperses, so a dispersing daughter never mutates and raising `dispersal_rate` lowers the mutation supply. `"noble"`: demon's invasion rule (Noble et al. 2022) — a division attempts a mutation with probability `mutation_rate` and, independently, one of its two daughters, picked at random, disperses with probability `dispersal_rate` | under `"noble"` both rates must lie in [0, 1], or construction fails; any other value raises |
 | `rng_streams` (top level) | `"offset"` | `"offset"`: per-run streams are `seed + step` (and `seed + constant` for passenger re-emission and materialisation), so seed `s` at step `k` replays seed `s + 1` at step `k − 1`. `"independent"`: every stream is keyed by `(seed, purpose, step)` through a `SeedSequence`, so different seeds never share a stream | any other value raises |
 | `spatial_params.origin_confinement.clock` | `"steps"` | `"steps"`: the tau engine's confinement clock ticks once per tau step, so `generations` counts tau steps (at `tau: 0.5`, `generations: 400` is 200 generations). `"generations"`: it ticks by `tau`, so `generations` means generations at any `tau`. The exact engine is unaffected | any other value raises |
+
+### Materialisation memory (optional; defaults unchanged)
+`make_cell_data` builds the per-cell tables chunk by chunk, so its working set no longer grows with the number of cells beyond the tables it returns.
+Two further savings are chosen by the caller.
+
+| Knob | Default | Valid range | Outside the range |
+|---|---|---|---|
+| `make_cell_data(layers=...)`, also on `Resection.slice` / `dissociate` | `None` (every table) | table names (`"cell_exp"`, `"cell_snv"`, `"cell_cnv"`, `"cell_rna_vaf"`, `"cell_snv_p"`, `"cell_snv_m"`, `"cell_exp_p"`, `"cell_exp_m"`, `"cell_rna_baf"`) and/or assay names standing for the tables that assay reads (`"visium"` and `"imaging"`: expression; `"scrna"`: expression, SNVs and RNA VAF; `"scdna"`: SNVs and copy number). The small per-cell tables are always built. Values are byte-identical to a full build | an unknown name raises |
+| `low_memory` (top level) | `false` | `true` also builds the program layer's expression multiplier per chunk, summing over programs in a fixed order, so it never holds a cells × genes float64 table beyond the returned ones. Values differ from the default only in the last bits (float64 relative difference below 1e-12) | no effect without the program layer |
 
 ---
 
