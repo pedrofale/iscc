@@ -48,7 +48,7 @@ def test_well_mixed_regime_has_no_slot_cap():
     t = _tumour(deme={"carrying_capacity": None},
                 cancer={"dispersal_rate": 0.0, "mutation_rate": 0.0},
                 spatial={"grid_size": 1}, update_mode="tau", tau=1.0)
-    assert t._crowding is False and t._lottery is False
+    assert t._crowding is False
     t.grow(n_steps=15, seed=1)
     assert t.get_cancer_size() > 500
 

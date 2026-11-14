@@ -698,8 +698,6 @@ class GenotypeTumor:
         if not 0.0 <= _mu <= 1.0:
             raise ValueError(
                 f"mutation_rate is a per-division probability, but it is {_mu:g}; give a value in [0, 1]")
-        # The well-mixed regime (carrying_capacity None/0) has no capacity, hence no slots.
-        self._lottery = self._crowding
         self.structure_radius = spatial_params.get("structure_radius", 0)
         # Ductal-field substrate: the structured case is a FIELD of many small epithelial-ring glands
         # at 2D positions in moderate-density stroma (an island model). The defaults (n_glands=1,
@@ -1163,7 +1161,7 @@ class GenotypeTumor:
         is consumed, no cell is added), exactly like a daughter that breaches the viability limits.
         There is deliberately NO redraw of a rejected dispersal target — that would be free-space-
         biased directional dispersal, a different model."""
-        if not self._lottery:
+        if not self._crowding:
             self._add(deme_idx, gid, 1)
             return True
         if sum(self.demes[deme_idx].values()) >= self._slot_cap_of(deme_idx) and not self._evict(deme_idx, 1, rng):
@@ -1548,7 +1546,7 @@ class GenotypeTumor:
         per-deme cost drops from O(#genotypes²) to O(#genotypes)."""
         rep = self.genotypes[gid]
         deme = self.demes[deme_idx]
-        if comp is None and self._lottery:
+        if comp is None and self._crowding:
             comp = self._deme_comp(deme)
         if comp is not None:
             total, n_normal_c, n_immune_c, n_epi_c, n_stro_c, n_host_c = comp
@@ -2269,37 +2267,62 @@ class GenotypeTumor:
             self._cell_data_stale = True
         return self.traces
 
-    # --- demon's invasion rule ------------------------------------------------
+    # --- dispersal routes -----------------------------------------------------
+    # A dispersing daughter leaves deme ``di`` by one of three routes: metastatic seeding (only from a
+    # primary stromal deme, so DCIS confined to glands cannot seed), an island hop to another gland's
+    # lumen, or a random von Neumann neighbour behind the basement-membrane gate. The exact engine
+    # routes one cell at a time (``_route_one``), tau-leaping routes a count (``_route_births``); the
+    # probabilities below are shared, and each router keeps its own draws.
+    def _p_met_seed(self, di, src_g):
+        """Probability that a daughter leaving ``di`` attempts to seed the met (0 when it cannot)."""
+        if self._met_enabled and self._met_seed_kappa > 0 and di < self.n_primary_demes and src_g == -1:
+            return self._met_seed_kappa / (1.0 + self._met_seed_kappa)
+        return 0.0
+
+    def _p_cross_gland(self, src_g):
+        """Probability that a daughter leaving gland ``src_g`` hops to another gland's lumen."""
+        if self.cross_gland_kappa > 0 and src_g != -1:
+            return self.cross_gland_kappa / (1.0 + self.cross_gland_kappa)
+        return 0.0
+
+    def _gated(self, di, tgt):
+        """Whether a hop from ``di`` to ``tgt`` crosses the basement membrane (duct to stroma)."""
+        return (self._breach_gated_invasion and self.gland_id is not None
+                and self.gland_id[di] >= 0 and self.gland_id[tgt] < 0)
+
+    @staticmethod
+    def _trait(rep, name):
+        """A heritable trait of ``rep`` clamped to [0, 1]."""
+        return min(max(rep.evolutionary_parameters[name], 0.0), 1.0)
+
     def _route_one(self, di, rep, rng):
         """Where ONE dispersing cell of ``rep`` leaving deme ``di`` lands, by one of three routes:
         metastatic seeding from a primary stromal deme (only a primary stromal deme can seed, so
         DCIS confined to glands cannot), an island hop to another gland's lumen, or a random
-        von Neumann neighbour behind the basement-membrane gate. Returns ``(target, is_met)``, or ``None`` when the cell dies in transit to the met."""
+        von Neumann neighbour behind the basement-membrane gate. Returns ``(target, is_met)``, or
+        ``None`` when the cell dies in transit to the met."""
         src_g = self.gland_id[di] if self.gland_id is not None else -1
-        if (self._met_enabled and self._met_seed_kappa > 0 and di < self.n_primary_demes
-                and src_g == -1
-                and rng.random() < self._met_seed_kappa / (1.0 + self._met_seed_kappa)):
-            ms = min(max(rep.evolutionary_parameters["met_survival"], 0.0), 1.0)
+        p_met = self._p_met_seed(di, src_g)
+        if p_met and rng.random() < p_met:
+            ms = self._trait(rep, "met_survival")
             return (self.met_vessel_idx, True) if rng.random() < self._transit_prob(ms) else None
         tgt = None
-        if (self.cross_gland_kappa > 0 and src_g != -1
-                and rng.random() < self.cross_gland_kappa / (1.0 + self.cross_gland_kappa)):
+        p_cross = self._p_cross_gland(src_g)
+        if p_cross and rng.random() < p_cross:
             tgt = self._cross_gland_target(src_g, rng)
         if tgt is None:
             nbrs = self._neighbors(di)
             tgt = nbrs[int(rng.choice(len(nbrs)))] if nbrs else di
-        if (self._breach_gated_invasion and self.gland_id is not None
-                and self.gland_id[di] >= 0 and self.gland_id[tgt] < 0):
-            b = min(max(rep.evolutionary_parameters["breach"], 0.0), 1.0)
-            if rng.random() >= b:
-                tgt = di
+        if self._gated(di, tgt) and rng.random() >= self._trait(rep, "breach"):
+            tgt = di
         return tgt, False
 
-    def _realise_one_mutant(self, tgt, gid, rng):
-        """Realise ONE mutated daughter of ``gid`` in deme ``tgt``, where the caller has already made
-        sure a slot can be had: a functional daughter becomes a new genotype unless it breaches the
-        viability limits, a purely neutral one folds into the parent, and a saturated allele grows the
-        parent. Returns the genotype the cell joined, or ``None`` when nothing was born."""
+    def _mutate_daughter(self, gid, rng):
+        """Divide ``gid`` and mutate the daughter. Returns ``(joins, folded)``: the genotype the
+        daughter joins (``gid`` for a purely neutral daughter, which folds into the parent and adds
+        its passenger burden, or for a saturated allele; a newly registered genotype for a functional
+        daughter; ``None`` for a daughter that breaches the viability limits and is never born) and
+        whether it was folded."""
         rep = self.genotypes[gid]
         child = rep.divide()
         res = child.mutate(rng, self.selection,
@@ -2307,14 +2330,24 @@ class GenotypeTumor:
         if res == "passenger":
             self._pass_load[gid] += child._n_new_snv
             self._n_folded += 1
-            return gid if self._place_one(tgt, gid, rng) else None
+            return gid, True
         if res:
             if not self._is_viable(child):
-                return None
+                return None, False
             self._register(child)
             self.genotypes_parents[child.genotype_id] = rep.genotype_id
-            return child.genotype_id if self._place_one(tgt, child.genotype_id, rng) else None
-        return gid if self._place_one(tgt, gid, rng) else None
+            return child.genotype_id, False
+        return gid, False
+
+    def _realise_one_mutant(self, tgt, gid, rng):
+        """Realise ONE mutated daughter of ``gid`` in deme ``tgt``, where the caller has already made
+        sure a slot can be had: a functional daughter becomes a new genotype unless it breaches the
+        viability limits, a purely neutral one folds into the parent, and a saturated allele grows the
+        parent. Returns the genotype the cell joined, or ``None`` when nothing was born."""
+        joins, _ = self._mutate_daughter(gid, rng)
+        if joins is None:
+            return None
+        return joins if self._place_one(tgt, joins, rng) else None
 
     def _divide_noble(self, di, gid, rep, rng, affected):
         """One division under demon's invasion rule.
@@ -2336,7 +2369,7 @@ class GenotypeTumor:
             move = False                                   # held in by the intact acinus
         if not move:
             if mutate:
-                if not self._lottery or self._can_place(di):
+                if not self._crowding or self._can_place(di):
                     self._realise_one_mutant(di, gid, rng)
             else:
                 self._place_one(di, gid, rng)
@@ -2350,7 +2383,7 @@ class GenotypeTumor:
             return
         tgt, is_met = route
         if mutant_leaves:
-            if self._lottery and not self._can_place(tgt):
+            if self._crowding and not self._can_place(tgt):
                 return
             placed = self._realise_one_mutant(tgt, gid, rng)
         else:
@@ -2405,18 +2438,20 @@ class GenotypeTumor:
         src_g = self.gland_id[di] if self.gland_id is not None else -1
         rep = self.genotypes[gid]
         n_met = n_lost = 0
-        if self._met_enabled and self._met_seed_kappa > 0 and di < self.n_primary_demes and src_g == -1:
-            n_met = int(rng.binomial(n, self._met_seed_kappa / (1.0 + self._met_seed_kappa)))
+        p_met = self._p_met_seed(di, src_g)
+        if p_met:
+            n_met = int(rng.binomial(n, p_met))
         if n_met:
-            ms = min(max(rep.evolutionary_parameters["met_survival"], 0.0), 1.0)
+            ms = self._trait(rep, "met_survival")
             n_survive = int(rng.binomial(n_met, self._transit_prob(ms)))
             if n_survive:
                 routes.append((self.met_vessel_idx, n_survive, True))
             n_lost = n_met - n_survive
         n_rest = n - n_met
         n_cross = 0
-        if self.cross_gland_kappa > 0 and src_g != -1:
-            n_cross = int(rng.binomial(n_rest, self.cross_gland_kappa / (1.0 + self.cross_gland_kappa)))
+        p_cross = self._p_cross_gland(src_g)
+        if p_cross:
+            n_cross = int(rng.binomial(n_rest, p_cross))
         n_local = n_rest - n_cross
         if n_local > 0:
             nbrs = self._neighbors(di)
@@ -2425,14 +2460,10 @@ class GenotypeTumor:
             else:
                 idx = rng.integers(0, len(nbrs), size=n_local)
                 u, cnts = np.unique(idx, return_counts=True)
-                gate = (self._breach_gated_invasion and self.gland_id is not None
-                        and self.gland_id[di] >= 0)
-                b = None
+                b = self._trait(rep, "breach")
                 for k, cnt in zip(u, cnts):
                     tgt = nbrs[int(k)]; cnt = int(cnt)
-                    if gate and self.gland_id[tgt] < 0:
-                        if b is None:
-                            b = min(max(rep.evolutionary_parameters["breach"], 0.0), 1.0)
+                    if self._gated(di, tgt):
                         n_ok = int(rng.binomial(cnt, b)) if b > 0 else 0
                         if n_ok:
                             routes.append((tgt, n_ok, False))
@@ -2461,25 +2492,15 @@ class GenotypeTumor:
         division that attempts a mutation, spawning a new genotype (unless it breaches the viability
         limits, in which case nothing is born), folding into the parent when the daughter is purely
         neutral, or growing the parent in place on a saturated allele. Adds AT MOST ``n`` cells."""
-        rep = self.genotypes[gid]
-        fmask = self._func_bits if self.coarsen_passengers else None
         n_fold = 0
         for _ in range(n):
-            child = rep.divide()
-            res = child.mutate(rng, self.selection, func_mask=fmask)
-            if res == "passenger":
-                n_fold += 1
-                self._pass_load[gid] += child._n_new_snv
-            elif res:
-                if self._is_viable(child):
-                    self._register(child)
-                    self.genotypes_parents[child.genotype_id] = rep.genotype_id
-                    self._add(di, child.genotype_id, 1)
-            else:
-                self._add(di, gid, 1)
+            joins, folded = self._mutate_daughter(gid, rng)
+            if folded:
+                n_fold += 1                              # folds join the parent in one batch below
+            elif joins is not None:
+                self._add(di, joins, 1)
         if n_fold:
             self._add(di, gid, n_fold)
-            self._n_folded += n_fold
 
     def _tau_substep(self, rng, dt):
         """One synchronous tau-leap of length `dt`.
@@ -2561,50 +2582,13 @@ class GenotypeTumor:
         # exactly like a failed basement-membrane crossing. Always empty without confinement.
         for di, gid, n in stayers:
             _cand(di, ("plain", gid), n)
+        # Dispersing daughters: a failed basement-membrane crossing leaves the daughter in its own
+        # duct, where it still has to win a slot; seeding the met has its own channel, keyed by
+        # source, so the event log reports the cells that WON a slot in the vessel deme.
         for di, gid, n in dispersals:
-            src_g = self.gland_id[di] if self.gland_id is not None else -1
-            n_met = 0
-            if self._met_enabled and self._met_seed_kappa > 0 and di < self.n_primary_demes and src_g == -1:
-                n_met = int(rng.binomial(n, self._met_seed_kappa / (1.0 + self._met_seed_kappa)))
-            if n_met:
-                ms = min(max(self.genotypes[gid].evolutionary_parameters["met_survival"], 0.0), 1.0)
-                n_survive = int(rng.binomial(n_met, self._transit_prob(ms)))
-                # Own channel, keyed by source, so the seeding event log can report the number that
-                # actually WON a slot in the vessel deme rather than the number that set out.
-                _cand(self.met_vessel_idx, ("met", di, gid), n_survive)
-            n_rest = n - n_met
-            n_cross = 0
-            if self.cross_gland_kappa > 0 and src_g != -1:
-                n_cross = int(rng.binomial(n_rest, self.cross_gland_kappa / (1.0 + self.cross_gland_kappa)))
-            n_local = n_rest - n_cross
-            if n_local > 0:
-                nbrs = self._neighbors(di)
-                if not nbrs:
-                    _cand(di, ("plain", gid), n_local)
-                else:
-                    idx = rng.integers(0, len(nbrs), size=n_local)
-                    u, cnts = np.unique(idx, return_counts=True)
-                    gate = (self._breach_gated_invasion and self.gland_id is not None
-                            and self.gland_id[di] >= 0)
-                    b = None
-                    for k, cnt in zip(u, cnts):
-                        tgt = nbrs[int(k)]; cnt = int(cnt)
-                        if gate and self.gland_id[tgt] < 0:
-                            if b is None:
-                                b = min(max(self.genotypes[gid].evolutionary_parameters["breach"], 0.0), 1.0)
-                            n_ok = int(rng.binomial(cnt, b)) if b > 0 else 0
-                            _cand(tgt, ("plain", gid), n_ok)
-                            # A failed crossing leaves the daughter in its own duct — where it still
-                            # has to win a slot like everyone else.
-                            _cand(di, ("plain", gid), cnt - n_ok)
-                        else:
-                            _cand(tgt, ("plain", gid), cnt)
-            for _ in range(n_cross):
-                tgt = self._cross_gland_target(src_g, rng)
-                if tgt is None:
-                    nbrs = self._neighbors(di)
-                    tgt = nbrs[int(rng.integers(0, len(nbrs)))] if nbrs else di
-                _cand(tgt, ("plain", gid), 1)
+            routes, _ = self._route_births(di, gid, n, rng)
+            for tgt, cnt, is_met in routes:
+                _cand(tgt, ("met", di, gid) if is_met else ("plain", gid), cnt)
         # A leaving mutant competes for a slot where it lands
         # and is realised only if it wins one; a leaving parent copy competes the same way, and only
         # when it wins does the mutant take its place at home. A parent copy that dies in transit has
