@@ -10,8 +10,11 @@ so scaling the copy-number events per division by ``f`` while holding the SNV an
 division fixed is::
 
     cnv_prob      = 0.045 * f                          (ER+ preset 0.045, snv_prob 0.5)
-    mutation_rate = 0.15 * (1 - p + f * p)             (p = 0.045 / 0.545, the copy-number share)
-    wgd_rate      = 0.001 / (1 - p + f * p)
+    mutation_rate = mu * (1 - p + f * p)               (p = 0.045 / 0.545, the copy-number share)
+    wgd_rate      = omega / (1 - p + f * p)
+
+with ``mu`` and ``omega`` the paper regime's (0.15 and, since decision-paper-regime-wgd-rate, 0.005;
+stages 1 and 2 ran at omega 0.001).
 
 ``f = 39 / 12`` restores the genome altered per division, to first order.
 
@@ -56,14 +59,22 @@ OUT = os.path.join(REG.OUT, "calibration-arm")
 
 def rates(f):
     k = 1.0 - P_CNV + f * P_CNV
-    return {"cnv_prob": 0.045 * f, "mutation_rate": 0.15 * k, "wgd_rate": 0.001 / k}
+    return {"cnv_prob": 0.045 * f, "mutation_rate": RG.CANCER["mutation_rate"] * k,
+            "wgd_rate": RG.CANCER["wgd_rate"] / k}
 
 
 def _tasks():
     """Stage 1: f in FACTORS, seeds 1-3, every design. Stage 2 (``CAL_STAGE=2``), added after stage 1
     met no criterion set: f 3.5 and 3.75, and seeds 4-5 for the R1 designs at every f from 39/12 to 4
-    (R0 has three full-tier seeds in the reference)."""
+    (R0 has three full-tier seeds in the reference). Stage 3 (``CAL_STAGE=3``) checks the chosen f = 39/12
+    again after the regime moved to wgd_rate 0.005, against the regrown registry: every design at the
+    seeds of stage 2, linear and arm."""
     out = []
+    if os.environ.get("CAL_STAGE") == "3":
+        for d in DESIGNS:
+            for s in ((1, 2, 3) if d == "R0" else (1, 2, 3, 4, 5)):
+                out += [("linear", d, s, None), ("arm", d, s, 39 / 12)]
+        return out
     if os.environ.get("CAL_STAGE", "1") == "1":
         for d in DESIGNS:
             for s in SEEDS:

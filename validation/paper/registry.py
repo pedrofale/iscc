@@ -114,7 +114,10 @@ def _runs():
     f = 39 / 12
     p = 0.045 / (0.045 + 0.5)                      # the ER+ preset's copy-number share of a mutating division
     k = 1.0 - p + f * p
-    arm_rates = {"cnv_prob": 0.045 * f, "mutation_rate": RG.CANCER["mutation_rate"] * k, "wgd_rate": 0.001 / k}
+    # wgd_rate follows the regime's (0.005, about 0.0042 here), so a duplication per division stays the
+    # regime's (vault: decision-paper-regime-wgd-rate); it was 0.001 / k before the regime moved to 0.005.
+    arm_rates = {"cnv_prob": 0.045 * f, "mutation_rate": RG.CANCER["mutation_rate"] * k,
+                 "wgd_rate": RG.CANCER["wgd_rate"] / k}
     arm = dict(genome=ag["genome_params"], selection=ag["selection_params"])
     runs["R11"] = ([("seed1", dict(seed=1, scale=SHOW, target_cancer=T["showcase_target"],
                                    spatial_snapshot_every=2, cancer=dict(arm_rates), **arm))]
