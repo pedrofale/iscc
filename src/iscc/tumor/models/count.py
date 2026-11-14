@@ -3368,13 +3368,24 @@ class GenotypeTumor:
             a hypoxic core from the O2 diffusion limit (comedonecrosis in DCIS) even with no empty
             margin, because the vasculature does not live inside the tumour.
         """
-        G = self.grid_size
-        dens = self._deme_density().reshape(G, G)
-        if source == "perfused":
-            perfusion = np.clip(1.0 - self._emitter_density("cancer"), 0.0, 1.0).reshape(G, G)
-            supply = s * perfusion
-        else:
-            supply = s
+        # The metastatic deposit (met_grid_size > 0) is a second lattice appended after the primary
+        # demes, so each lattice gets its own field; with the met off there is one block, as before.
+        dens_all = self._deme_density()
+        perf_all = (np.clip(1.0 - self._emitter_density("cancer"), 0.0, 1.0)
+                    if source == "perfused" else None)
+        blocks = [(0, self.grid_size)]
+        if getattr(self, "_met_enabled", False):
+            blocks.append((self.n_primary_demes, self.met_grid_size))
+        out = []
+        for base, G in blocks:
+            sl = slice(base, base + G * G)
+            supply = s * perf_all[sl].reshape(G, G) if perf_all is not None else s
+            out.append(self._o2_relax(dens_all[sl].reshape(G, G), supply, G, D, k, n_iter, tol))
+        return np.concatenate(out)
+
+    @staticmethod
+    def _o2_relax(dens, supply, G, D, k, n_iter, tol):
+        """Jacobi relaxation of one lattice's O2 field (see `_o2_field`); returns hypoxia, raveled."""
         nn = np.full((G, G), 4.0)
         nn[0, :] -= 1; nn[-1, :] -= 1; nn[:, 0] -= 1; nn[:, -1] -= 1
         O2 = np.ones((G, G))

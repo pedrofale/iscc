@@ -386,3 +386,18 @@ def test_clone_tree_renders(met_tumor):
     # empty degrades gracefully
     ax3 = viz.plot_clone_tree([{"genotypes_counts": {}}], {}, min_freq=0.1)
     assert ax3 is not None
+
+
+def test_o2_field_solved_per_lattice():
+    """The hypoxia field with the met lattice on (paper1 met smoke, 2026-11-14: it reshaped primary +
+    met demes into one grid and failed). Each lattice gets its own field: one value per deme, and the
+    primary block equals the field solved on the primary lattice alone."""
+    t = _grow_to_met(_build({**SPATIAL, **MET}), target=5)
+    G, n = t.grid_size, t.n_primary_demes
+    for source in ("uniform", "perfused"):
+        h = t._o2_field(source=source)
+        assert h.shape == (len(t.demes),) and (h >= 0).all() and (h <= 1).all()
+        dens = t._deme_density()[:n].reshape(G, G)
+        perf = np.clip(1.0 - t._emitter_density("cancer")[:n], 0.0, 1.0).reshape(G, G)
+        supply = 0.2 * perf if source == "perfused" else 0.2
+        np.testing.assert_array_equal(h[:n], t._o2_relax(dens, supply, G, 1.0, 1.0, 500, 1e-5))
