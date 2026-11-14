@@ -9,7 +9,6 @@ Inspired by Noble et al, 2019 (demon); selection follows CINner's copy-number mo
 per-arm variant CINner and SISTEM share in real-genome mode.
 """
 from .models.glandular import GlandularTumor
-from .models.mixed import MixedTumor
 from .models.count import GenotypeTumor
 from . import arc as arc_mod
 from ..treatment.chemotherapy import Chemotherapy
@@ -24,7 +23,6 @@ import yaml
 # Map the `mode` field in the sim-config to a tumor model.
 TUMOR_MODELS = {
     "glandular": GlandularTumor,      # cell-level agent-based engine
-    "mixed": MixedTumor,
     "genotype": GenotypeTumor,        # fast genotype-level (count-based) engine
 }
 
@@ -102,10 +100,6 @@ def main(sim_config, steps, random_seed, batch_size, treatment_kind, adaptive,
     if mode not in TUMOR_MODELS:
         raise click.ClickException(
             f"Unknown mode '{mode}'. Choose one of: {sorted(TUMOR_MODELS)}."
-        )
-    if mode == "mixed":
-        raise click.ClickException(
-            "The 'mixed' (non-spatial) model is not yet implemented; use 'genotype' or 'glandular'."
         )
 
     # A config-driven timed treatment SCHEDULE (metastasis module): a multi-phase clinical arc

@@ -178,13 +178,8 @@ class Cell(object):
             self.baseline_rates['dispersal_rate'] * selection.update_dispersal_rate(gs), 1.0)
         self.evolutionary_parameters['immune_resistance'] = max(
             0.0, 1.0 - 1.0 / selection.update_immune_resistance(gs))
-        # All-or-nothing resistance (Selection.treatment_resistance_binary): any mutated copy makes
-        # the cell FULLY resistant -- trait exactly 1.0, so the drug's (1 - trait) factor is exactly
-        # 0 and chemotherapy does not touch it, at any dose and any ploidy.
-        self.evolutionary_parameters['treatment_resistance'] = (
-            1.0 if (getattr(selection, "treatment_resistance_binary", False)
-                    and gs.get('n_mut_tr', 0) > 0)
-            else max(0.0, 1.0 - 1.0 / selection.update_treatment_resistance(gs)))
+        self.evolutionary_parameters['treatment_resistance'] = max(
+            0.0, 1.0 - 1.0 / selection.update_treatment_resistance(gs))
         # Drug tolerance (persister axis): same [0,1) mapping. It attenuates the drug the same way
         # resistance does, but its go-or-grow cost is what makes it a WAITING state rather than a
         # regrowing one -- see Selection.prop_drug_tolerance.

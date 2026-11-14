@@ -497,13 +497,6 @@ class bulkDNA(DNA):
                 pass
 
 
-class cfDNA(DNA):
-    """Cell-free DNA (liquid biopsy) — placeholder (DESIGN_features §A liquid biopsy / F2)."""
-
-    def run(self, cell_data, **kwargs):
-        raise NotImplementedError("cfDNA (liquid biopsy) is not implemented yet (see §A).")
-
-
 class scDNA(DNA):
     """Single-cell DNA-seq: per-cell low budget, small-kappa (lumpy amplification) depth
     nested in the run batch, Beta-Binomial alleles + explicit ADO + doublets.

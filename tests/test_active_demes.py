@@ -86,7 +86,7 @@ def test_index_matches_the_demes_through_growth(gens):
 
 
 def test_index_survives_the_lottery_crowding_law():
-    T = advance(make(deme=dict(crowding_mode="lottery")), 25)
+    T = advance(make(deme=dict(crowding_mode="lottery", crowding_law="noble")), 25)
     assert T._deme_cancer_n == recomputed(T)
 
 

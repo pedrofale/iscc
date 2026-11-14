@@ -325,10 +325,10 @@ import sweep_score as SS  # noqa: E402
 #: copies count, so a CNA is judged on its driver content alone.
 TRAIT_SOURCE = ("dosage", "mutation")
 
-#: B. Crowding law. "own" (engine default) scales the cancer crowding term by the clone's OWN division
-#: rate, so the fitness term cancels and a cancer-only deme caps independently of fitness. "fixed"
-#: measures crowding death against a fixed reference, so survival under crowding is fitness-dependent.
-CROWDING_MODE = ("own", "fixed")
+#: B. Crowding law. "own" scales the cancer crowding term by the clone's OWN division rate, so the
+#: fitness term cancels and a cancer-only deme caps independently of fitness. (The "fixed" law this
+#: sweep also tried was rejected and has been removed from the engine.)
+CROWDING_MODE = ("own",)
 
 #: C. Fitness headroom: the founder division rate against max_birth_rate 0.95. At 0.7 a clone can only
 #: ever be 1.36x the founder before saturating the cap.
@@ -556,8 +556,7 @@ def stage_diagnose():
     """The per-compartment breakdown of the interesting core cells (run through :func:`diagnose`)."""
     return [spec(),
             spec(division_rate=0.25),
-            spec(trait_source="mutation", division_rate=0.4),
-            spec(trait_source="mutation", crowding_mode="fixed", division_rate=0.25)]
+            spec(trait_source="mutation", division_rate=0.4)]
 
 
 def stage_churn():

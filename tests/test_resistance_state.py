@@ -72,7 +72,7 @@ def test_resistance_state_on_is_false_by_default():
 @pytest.mark.parametrize("knob,val", [
     ("resistance_state_genetic", True), ("resistance_state_effect", 0.9),
     ("resistance_state_cost", 0.2), ("resistance_state_induction", 0.5),
-    ("resistance_state_relax", 0.3), ("resistance_state_noise", 0.01),
+    ("resistance_state_relax", 0.3),
 ])
 def test_any_knob_turns_the_feature_on(knob, val):
     sel = Selection(n_segments=N_SEGMENTS, segment_size=SEGMENT_SIZE, **{**SELECTION_PARAMS, knob: val})
@@ -87,7 +87,7 @@ def test_explicit_inert_state_matches_absent_keys(seed):
     a = _count(seed, steps=120)
     inert = {**SELECTION_PARAMS, "resistance_state_genetic": False, "resistance_state_effect": 0.0,
              "resistance_state_cost": 0.0, "resistance_state_induction": 0.0,
-             "resistance_state_relax": 0.0, "resistance_state_noise": 0.0}
+             "resistance_state_relax": 0.0}
     b = _count(seed, steps=120, selection=inert)
     assert a.get_tumor_size() == b.get_tumor_size()
     assert _snv_hash(a) == _snv_hash(b)

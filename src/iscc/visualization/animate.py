@@ -16,7 +16,6 @@ from celluloid import Camera
 
 import click
 import os
-from pathlib import Path
 
 from pymuller import muller
 

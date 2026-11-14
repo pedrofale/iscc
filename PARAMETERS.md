@@ -117,9 +117,8 @@ knob defaults to its inert value; `Selection.resistance_state_on` is then `False
 | `resistance_state_cost` | 0.0 | 0–1 | division × `(1 − cost × state)`, charged **always**, on *and* off drug. It **stacks multiplicatively** with `treatment_resistance_cost`, so setting both to *c* charges an allele-anchored cell twice and an exited revertant not at all. To price the two routes equally, set `treatment_resistance_cost = 0` and charge the state only |
 | `resistance_state_induction` | 0.0 | 0–1 | per-generation P(a sensitive cell is reprogrammed) = `induction × intensity`, where `intensity` is the dose the cell actually receives — a cell the drug cannot reach is not reprogrammed by it. **Never yet exercised at figure level** |
 | `resistance_state_relax` | 0.0 | 0–1 | per-generation P(exit), i.e. τ = 1/`relax` generations. Applies **only** to cells with `n_mut_tr == 0` — a cell still carrying the allele keeps its genetic attractor and never relaxes. `0` is the permanent (τ→∞) limit |
-| `resistance_state_noise` | 0.0 | 0–1 | environment-independent switching, in both directions |
 
-!!! note "`induction`, `relax` and `noise` are TAU-ENGINE ONLY"
+!!! note "`induction` and `relax` are TAU-ENGINE ONLY"
     The reversible transitions live in `_tau_generation`. The *genetic* entry clause and the
     drug-protection term are in shared code and so are active under the exact engine too, but on an
     exact-engine run a non-zero `relax` is silently inert. Check `update_mode` before concluding that
@@ -135,7 +134,6 @@ knob defaults to its inert value; `Selection.resistance_state_on` is then `False
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|
 | `trait_source` | `"dosage"` | `"dosage"` \| `"mutation"` | what moves a dissemination/niche trait. `"dosage"` (historical, bit-for-bit) counts copy number *and* mutation; `"mutation"` divides out the wild-type dosage term so **only mutated copies move the trait**. The two agree on what a single heterozygous SNV is worth and differ only on what a copy-number change is worth |
-| `treatment_resistance_binary` | `False` | bool | `True` → **any** resistance mutation sets the trait to exactly 1.0 (the cell takes zero drug). **Not recommended**: it is unnecessary (a graded one-copy clone expands fine under a proliferation-scaled kill) and it *breaks* escape modes II and III by letting a rare pre-existing clone blunt the whole tumour's response. It also flattens the copy-number gradient, so nothing selects for amplifying the resistance locus |
 | `selection_mode` | `"gene"` | `"gene"` \| `"arm"` | `"arm"` switches to the per-arm copy-number fitness of CINner and SISTEM, `∏_seg s_arm[seg] ** (cn[seg]/ploidy − 1)`, read from the per-segment copy numbers iscc already maintains. Dosage is relative to the genome-wide mean ploidy, so a whole-genome doubling leaves fitness unchanged; the `− 1` only rescales every genome by the same constant so the diploid genome has fitness 1 |
 | `s_arm` | `None` (→ all 1.0) | length-`n_segments` array | per-arm selection coefficients. `s_arm[seg] > 1` → amplifying that arm is beneficial (oncogene-dominated); `< 1` → deleting it is (TSG-dominated). All 1.0 = arm selection off. Same scale as CINner's arm `s` and SISTEM's `1 + δ` |
 | `rng` | `None` | — | **internal.** A `numpy` Generator for the layout draw; pass `layout_seed` instead if you want a reproducible gene layout |

@@ -14,10 +14,9 @@ class Selection(object):
                  drug_tolerance_effects=1.1,
                  breach_cost=0.0, stromal_survival_cost=0.0, met_survival_cost=0.0,
                  treatment_resistance_cost=0.0, drug_tolerance_cost=0.0, trait_source="dosage",
-                 treatment_resistance_binary=False,
                  resistance_state_genetic=False, resistance_state_effect=0.0,
                  resistance_state_cost=0.0, resistance_state_induction=0.0,
-                 resistance_state_relax=0.0, resistance_state_noise=0.0,
+                 resistance_state_relax=0.0,
                  selection_mode="gene", s_arm=None,
                  max_ploidy=6, max_cn=12, max_nullisomy=2, max_mut_drivers=1000, rng=None,
                  epistasis_params=None, dependency_params=None, layout_seed=None,
@@ -111,16 +110,6 @@ class Selection(object):
         self.stromal_survival_cost = stromal_survival_cost
         self.met_survival_cost = met_survival_cost
         self.treatment_resistance_cost = treatment_resistance_cost
-        # ALL-OR-NOTHING resistance. The graded map (trait = 1 - 1/effects^(2*n_mut/ploidy)) means a
-        # cell with one mutated copy at the shipped effects 2.8 is only 64% resistant -- it still
-        # absorbs 36% of the kill and dies alongside the sensitive bulk, just slower, so a
-        # "resistant" clone cannot expand DURING treatment. It also leaks resistance back on a
-        # whole-genome doubling, which halves the exponent (one mutated copy at effects 20 falls from
-        # 0.95 to 0.78). With this flag ANY resistance mutation sets the trait to exactly 1.0: the
-        # drug term (1 - trait) becomes exactly zero -- the cell is untouched by chemotherapy -- and
-        # the clone pays the FULL treatment_resistance_cost, so resistance is a clean all-or-nothing
-        # trade instead of a sliding scale. Default False -> the graded map.
-        self.treatment_resistance_binary = bool(treatment_resistance_binary)
         # Tolerance is COSTLY by construction: that is what keeps persisters rare before therapy
         # (out-competed in a crowded deme) instead of taking over the tumour.
         self.drug_tolerance_cost = drug_tolerance_cost
@@ -129,7 +118,7 @@ class Selection(object):
         # so a CNA that deletes the triggering resistance allele does NOT restore sensitivity, whereas
         # genomic-only resistance is losable by copy-number accident. The state is carried on the cell (Cell.resistance_state),
         # NOT in genome_summary; a state transition MINTS A NEW GENOTYPE ID (the engine's _state_twin).
-        # Whiting & Graham's plasticity+noise categories, the two iscc's four (all-genetic) escape modes
+        # Whiting & Graham's plasticity category, the two iscc's four (all-genetic) escape modes
         # lack. ALL knobs default to the inert value; ``resistance_state_on`` is then False and every
         # resistance-state code path is skipped.
         #   genetic   : acquiring n_mut_tr>0 SETS the state (beta_bias); retained if the allele is later lost.
@@ -139,13 +128,11 @@ class Selection(object):
         #   induction : per-generation drug-induced entry probability scale (plasticity, tau engine).
         #   relax     : per-generation OFF-drug exit probability = 1/tau_relax. >0 => exit is possible
         #               (relax->inf-tau is permanent resistance; short tau is a classical persister).
-        #   noise     : env-independent stochastic switching (sigma_noise).
         self.resistance_state_genetic = bool(resistance_state_genetic)
         self.resistance_state_effect = float(resistance_state_effect)
         self.resistance_state_cost = float(resistance_state_cost)
         self.resistance_state_induction = float(resistance_state_induction)
         self.resistance_state_relax = float(resistance_state_relax)
-        self.resistance_state_noise = float(resistance_state_noise)
 
         # What a dissemination/niche TRAIT reads off the genome — breach, stromal_survival,
         # met_survival, immune_resistance and treatment_resistance only. The oncogene/TSG DRIVER
@@ -265,8 +252,7 @@ class Selection(object):
                     or self.resistance_state_effect > 0.0
                     or self.resistance_state_cost > 0.0
                     or self.resistance_state_induction > 0.0
-                    or self.resistance_state_relax > 0.0
-                    or self.resistance_state_noise > 0.0)
+                    or self.resistance_state_relax > 0.0)
 
     def get_evolutionary_parameters(self):
         return list(self.update_dict.keys())

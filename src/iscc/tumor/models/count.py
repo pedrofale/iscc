@@ -675,16 +675,10 @@ class GenotypeTumor:
         # below) is uniform across the clones of a deme, so the fitness term cannot cancel out of
         # net growth: the rate law sets TURNOVER, the slot cap sets DENSITY, and clones compete
         # inside full demes.
-        # Legacy modes: "own" = own-division cancer term + fixed-ref resident term. "fixed" = crowding
-        # death rises with TOTAL occupancy relative to a FIXED reference (`crowding_ref`, default
-        # max_birth_rate), NOT the clone's own division; normals count in `total`.
+        # Legacy mode: "own" = own-division cancer term + fixed-ref resident term.
         self._crowding_mode = deme_params.get("crowding_mode", "own")
-        self._crowding_ref = deme_params.get(
-            "crowding_ref", getattr(self.genotypes[self.founder_id], "max_birth_rate", 0.98))
-        # rho: the uniform crowding pressure as a FRACTION of the deme's mean net growth. Must be < 1
-        # -- the rate law alone has to want to overfill, otherwise the structural cap never binds and
-        # the whole law is inert.
-        self._crowding_turnover = float(deme_params.get("crowding_turnover", 0.6))
+        if self._crowding_mode not in ("own", "lottery"):
+            raise ValueError("crowding_mode must be 'own' or 'lottery'")
         # Deme-model crowding (Noble et al. 2022, Nat Ecol Evol, "Within-deme dynamics"): the
         # within-deme death rate is a TWO-VALUED STEP, not a continuous function of density —
         #   "When the deme population size is less than or equal to the carrying capacity, the death
@@ -700,14 +694,15 @@ class GenotypeTumor:
         self._crowding_law = str(deme_params.get("crowding_law", "logistic"))
         if self._crowding_law not in ("logistic", "noble"):
             raise ValueError("crowding_law must be 'logistic' or 'noble'")
-        # d0 defaults to the clone's own baseline death rate (Noble uses a single global constant,
-        # and sets it to 0 in the spatial simulations); d1 to maximum_death_rate, which the shipped
+        # d0 is the clone's own baseline death rate (Noble uses a single global constant, and sets
+        # it to 0 in the spatial simulations); d1 defaults to maximum_death_rate, which the shipped
         # configs hold above max_birth_rate.
-        self._crowding_d0 = deme_params.get("crowding_d0")          # None -> the clone's own base
         self._crowding_d1 = deme_params.get("crowding_d1")          # None -> maximum_death_rate
         self._crowding_overfill = float(deme_params.get("crowding_overfill", 1.0))
         if self._crowding_overfill < 1.0:
             raise ValueError("crowding_overfill must be >= 1 (1 = the slot cap sits exactly on K)")
+        if self._crowding_mode == "lottery" and self._crowding_law != "noble":
+            raise ValueError("crowding_mode='lottery' runs with crowding_law='noble'")
         if self._crowding_law == "noble":
             # d1 MUST exceed the largest attainable division rate, which is what makes the cap
             # unbreakable however far selection pushes birth rates up; below it, demes overfill by
@@ -749,23 +744,9 @@ class GenotypeTumor:
                 raise ValueError(
                     f"dispersal_law='noble' reads mutation_rate as a per-division probability, but "
                     f"it is {_mu:g}; give a value in [0, 1]")
-        # Which rate the uniform pressure references: the deme's own cell-weighted mean cancer
-        # division rate ("deme_mean", RELATIVE purifying selection -- a costly clone is disadvantaged,
-        # not lethal) or a fixed config scalar ("fixed" = `crowding_ref`, ABSOLUTE purifying selection).
-        self._crowding_reference = deme_params.get("crowding_reference", "deme_mean")
-        # Cancer replaces normal tissue: a birth with no free slot evicts one resident. Without this a
-        # duct WALL deme (seeded full of immortal epithelium at K_duct) has zero slots forever and the
-        # DCIS->IDC arc is structurally impossible. Immune cells hold slots but are NOT evictable by
-        # default (that would make immune escape structurally free).
-        self._evict_residents = bool(deme_params.get("evict_residents", True))
-        self._evict_immune = bool(deme_params.get("evict_immune", False))
         # The well-mixed regime (carrying_capacity None/0) has no capacity, hence no slots: it stays
         # unbounded whatever crowding_mode says.
         self._lottery = bool(self._crowding and self._crowding_mode == "lottery")
-        if self._lottery and not 0.0 < self._crowding_turnover < 1.0:
-            raise ValueError("crowding_turnover must be in (0, 1) — at rho >= 1 the uniform crowding "
-                             "pressure exceeds the deme's mean net growth and demes UNDER-fill; at "
-                             "rho <= 0 there is no turnover and nothing ever competes.")
         self.structure_radius = spatial_params.get("structure_radius", 0)
         # Ductal-field substrate: the structured case is a FIELD of many small epithelial-ring glands
         # at 2D positions in moderate-density stroma (an island model). The defaults (n_glands=1,
@@ -1162,7 +1143,8 @@ class GenotypeTumor:
     # --- structural density cap: slots + eviction (lottery crowding) --------------------------
     #: Resident cell types a cancer birth may DISPLACE to take a slot. Invasive carcinoma replaces
     #: normal tissue — a duct effaced by DCIS is the canonical picture — so epithelium, stroma and
-    #: metastatic host parenchyma are evictable. Immune cells are not (see `evict_immune`): letting a
+    #: metastatic host parenchyma are evictable. Without eviction a duct wall seeded full of immortal
+    #: epithelium would have no slot for cancer, ever. Immune cells are not evictable: letting a
     #: tumour structurally clear its own immune pressure would trivialise immune escape.
     _EVICTABLE = ("epithelial", "stromal", "host")
 
@@ -1184,28 +1166,22 @@ class GenotypeTumor:
 
     def _evictable_gids(self, deme_idx):
         """The deme's displaceable resident genotypes, in creation-ordinal order (deterministic)."""
-        if not self._evict_residents:
-            return []
         deme = self.demes[deme_idx]
-        types = self._EVICTABLE + (("immune",) if self._evict_immune else ())
-        return sorted((g for g in deme if self.genotypes[g].type in types),
+        return sorted((g for g in deme if self.genotypes[g].type in self._EVICTABLE),
                       key=lambda g: self.genotypes[g].ord)
 
     def _n_evictable(self, deme_idx):
-        """How many cells in this deme a birth could displace. Zero when eviction is off — the slot
-        allocator sizes its second (eviction) draw from this, so it MUST agree with ``_evict``."""
-        if not self._evict_residents:
-            return 0
+        """How many cells in this deme a birth could displace. The slot allocator sizes its second
+        (eviction) draw from this, so it MUST agree with ``_evict``."""
         deme = self.demes[deme_idx]
-        types = self._EVICTABLE + (("immune",) if self._evict_immune else ())
-        return sum(c for g, c in deme.items() if self.genotypes[g].type in types)
+        return sum(c for g, c in deme.items() if self.genotypes[g].type in self._EVICTABLE)
 
     def _evict(self, deme_idx, n, rng):
         """Displace ``n`` resident cells from ``deme_idx``, drawn across the resident genotypes in
         proportion to their counts. Returns the number actually removed (< n only if the deme runs
         out of residents). One resident genotype — the overwhelmingly common case — costs no rng
         draw."""
-        if n <= 0 or not self._evict_residents:
+        if n <= 0:
             return 0
         gids = self._evictable_gids(deme_idx)
         if not gids:
@@ -1230,7 +1206,7 @@ class GenotypeTumor:
             total = sum(self.demes[deme_idx].values())
         if total < self._slot_cap_of(deme_idx):
             return True
-        return self._evict_residents and self._n_evictable(deme_idx) > 0
+        return self._n_evictable(deme_idx) > 0
 
     def _place_one(self, deme_idx, gid, rng):
         """Place ONE newborn cell, taking a free slot or displacing one resident. Returns whether it
@@ -1344,12 +1320,7 @@ class GenotypeTumor:
     def _deme_comp(self, deme):
         """One O(#genotypes-in-deme) pass over a deme returning the per-compartment cell counts a
         death-rate evaluation needs:
-        ``(total, n_normal, n_immune, n_epithelial, n_stromal, n_host, b_bar, d_bar)``.
-
-        ``b_bar`` / ``d_bar`` are the deme's cell-weighted mean CANCER division and baseline death
-        rates — the reference the ``"lottery"`` crowding law's uniform pressure is scaled by. They
-        are accumulated in this same pass (two extra floats, no
-        extra scan) and left at 0.0 under every other crowding mode, which never reads them.
+        ``(total, n_normal, n_immune, n_epithelial, n_stromal, n_host)``.
 
         Passing the result into ``_death_rate`` (via its ``comp`` argument) lets every genotype in a
         deme reuse ONE composition scan instead of each re-running the O(#genotypes) immune /
@@ -1359,18 +1330,11 @@ class GenotypeTumor:
         ``n_normal`` matches ``sum(deme.get(nm, 0) for nm in normal_names)`` because a normal
         genotype's id IS its type name."""
         total = n_normal = n_immune = n_epi = n_stro = n_host = 0
-        b_sum = d_sum = 0.0
-        lottery = self._lottery
         G = self.genotypes
         for gid, c in deme.items():
             total += c
-            rep = G[gid]
-            tp = rep.type
+            tp = G[gid].type
             if tp == "cancer":
-                if lottery:
-                    ep = rep.evolutionary_parameters
-                    b_sum += c * ep["division_rate"]
-                    d_sum += c * ep["death_rate"]
                 continue
             n_normal += c
             if tp == "immune":
@@ -1381,12 +1345,7 @@ class GenotypeTumor:
                 n_stro += c
             elif tp == "host":
                 n_host += c
-        if lottery:
-            n_cancer = total - n_normal
-            if n_cancer > 0:
-                b_sum /= n_cancer
-                d_sum /= n_cancer
-        return (total, n_normal, n_immune, n_epi, n_stro, n_host, b_sum, d_sum)
+        return (total, n_normal, n_immune, n_epi, n_stro, n_host)
 
     def _compartment_fields(self):
         """Per-deme epithelial / stromal LIVE fractions, as two (n_demes,) arrays — the compartment
@@ -1634,17 +1593,16 @@ class GenotypeTumor:
         per genotype.
 
         ``comp`` is the deme's precomputed composition tuple from ``_deme_comp``
-        ``(total, n_normal, n_immune, n_epithelial, n_stromal, n_host, b_bar, d_bar)``. When given,
+        ``(total, n_normal, n_immune, n_epithelial, n_stromal, n_host)``. When given,
         the immune / compartment fractions and ``n_normal`` are read from it in O(1) instead of
         re-scanning the deme per genotype; the numbers are identical to ``comp=None``, but the
-        per-deme cost drops from O(#genotypes²) to O(#genotypes). The lottery law computes it itself
-        when it is not passed, since it needs the deme's mean cancer rates."""
+        per-deme cost drops from O(#genotypes²) to O(#genotypes)."""
         rep = self.genotypes[gid]
         deme = self.demes[deme_idx]
         if comp is None and self._lottery:
-            comp = self._deme_comp(deme)        # the lottery law needs the deme's mean cancer rates
+            comp = self._deme_comp(deme)
         if comp is not None:
-            total, n_normal_c, n_immune_c, n_epi_c, n_stro_c, n_host_c, b_bar_c, d_bar_c = comp
+            total, n_normal_c, n_immune_c, n_epi_c, n_stro_c, n_host_c = comp
         elif total is None:
             total = sum(deme.values())
         base = rep.evolutionary_parameters["death_rate"]
@@ -1675,42 +1633,21 @@ class GenotypeTumor:
                 # differential between two clones in the deme is their bare (b_i - d_i) - (b_k - d_k),
                 # the SAME at the front as in the packed interior. The STRUCTURAL slot cap (see
                 # `_slot_cap_of`) is what bounds density; the rate law sets turnover.
-                if self._crowding_reference == "fixed":
-                    slope = max(0.0, self._crowding_ref - base)
+                # demon's two-valued step (see __init__): d0 at or below K; above it a fixed d1
+                # chosen to exceed any attainable division rate. `death` then falls through to the
+                # resident / immune / treatment terms and the clamp below.
+                if total <= K:
+                    death = base
                 else:
-                    slope = max(0.0, b_bar_c - d_bar_c)
-                # Density term. It stays UNIFORM over the deme's cancer clones (it carries no `div`),
-                # so it cannot cancel out of net = div - death and clone-vs-clone competition
-                # survives — the shape of the density response and the preservation of selection
-                # are independent properties.
-                if self._crowding_law == "noble":
-                    # demon's two-valued step (see __init__): d0 at or below K; above it a fixed d1
-                    # chosen to exceed any attainable division rate. `death` then falls through to the
-                    # resident / immune / treatment terms and the clamp below.
-                    if total <= K:
-                        death = base if self._crowding_d0 is None else float(self._crowding_d0)
-                    else:
-                        d1 = (self.maximum_death_rate if self._crowding_d1 is None
-                              else float(self._crowding_d1))
-                        death = max(base, d1)
-                else:
-                    # float(): K may be a numpy scalar (per-deme capacity array); a numpy float here
-                    # turns downstream `is True` comparisons into numpy.bool_ identity checks that
-                    # silently fail.
-                    x = float(total) / float(K)
-                    death = base + self._crowding_turnover * slope * min(1.0, x)
+                    d1 = (self.maximum_death_rate if self._crowding_d1 is None
+                          else float(self._crowding_d1))
+                    death = max(base, d1)
                 # Resident pressure: the fitness gate on entering normal-occupied tissue. It does not
                 # cancel either (it carries no `div`).
                 n_normal = (n_normal_c if comp is not None
                             else sum(deme.get(nm, 0) for nm in normal_names))
                 if n_normal:
                     death += max(0.0, self._resident_ref - base) * steep * (n_normal / K)
-            elif self._crowding_mode == "fixed":
-                # Unified fixed-reference law: death ~ TOTAL occupancy relative to a fixed reference
-                # (not the clone's own division), so survival under crowding is fitness-DEPENDENT
-                # everywhere. Near-neutral at low density; at the crowded border only clones with
-                # div near the reference persist. No overfill (nothing exceeds the reference).
-                death = base + max(0.0, self._crowding_ref - base) * steep * (total / K)
             else:
                 n_normal = (n_normal_c if comp is not None
                             else sum(deme.get(nm, 0) for nm in normal_names))
@@ -3136,8 +3073,7 @@ class GenotypeTumor:
         reprogrammed by it. EXIT (relaxation): where no dose reaches, each state cell with NO genetic
         anchor (``n_mut_tr == 0``) relaxes back to sensitive with probability ``relax`` (= 1/tau_relax);
         a cell that still carries the resistance allele keeps its genetic attractor and does not relax
-        (which also stops the genetic-entry clause from re-firing on an exit twin). NOISE:
-        env-independent switching at ``noise``. Every transition moves cells between the source genotype
+        (which also stops the genetic-entry clause from re-firing on an exit twin). Every transition moves cells between the source genotype
         and its ``_state_twin`` (a new/reused genotype id). Moves are collected first and applied after,
         mirroring the substep's death/mutation batching, so the deme/count dicts are not mutated mid-scan.
 
@@ -3145,8 +3081,7 @@ class GenotypeTumor:
         term live in shared code and so are active under the exact engine too, but the reversible
         induction/relaxation transitions are not."""
         sel = self.selection
-        induction, relax, noise = (sel.resistance_state_induction,
-                                   sel.resistance_state_relax, sel.resistance_state_noise)
+        induction, relax = sel.resistance_state_induction, sel.resistance_state_relax
         tx = self._tx_treatment
         dose_active = (tx is not None and self._tx_dosage > 0.0
                        and getattr(tx, "affects", "death_rate") != "immune_resistance")
@@ -3163,8 +3098,8 @@ class GenotypeTumor:
                 s = getattr(rep, "resistance_state", 0.0)
                 if s <= 0.0:
                     # ENTRY: a sensitive cell is reprogrammed only where the drug actually reaches it
-                    # (plus env-independent noise), scaled by the dose it receives.
-                    p_in = noise
+                    # scaled by the dose it receives.
+                    p_in = 0.0
                     if treated and induction > 0.0 and self._is_mechanistic(tx):
                         # the dose the clone takes by its genotype and expression, not its labels
                         p_eff, x = self._mech_dose(tx, gid, rep)
@@ -3185,8 +3120,8 @@ class GenotypeTumor:
                 elif rep.genome_summary.get("n_mut_tr", 0) == 0:
                     # EXIT: only a cell with the resistance allele already gone can relax back (a
                     # still-anchored cell keeps its genetic attractor). Relaxation only where the drug
-                    # is not reaching it; noise switches regardless.
-                    p_out = noise + (relax if (not treated and relax > 0.0) else 0.0)
+                    # is not reaching it.
+                    p_out = relax if (not treated and relax > 0.0) else 0.0
                     p_out = min(max(p_out, 0.0), 1.0)
                     if p_out > 0.0:
                         n = int(rng.binomial(c, p_out))
