@@ -60,12 +60,24 @@ def rates(f):
 
 
 def _tasks():
+    """Stage 1: f in FACTORS, seeds 1-3, every design. Stage 2 (``CAL_STAGE=2``), added after stage 1
+    met no criterion set: f 3.5 and 3.75, and seeds 4-5 for the R1 designs at every f from 39/12 to 4
+    (R0 has three full-tier seeds in the reference)."""
     out = []
+    if os.environ.get("CAL_STAGE", "1") == "1":
+        for d in DESIGNS:
+            for s in SEEDS:
+                out.append(("linear", d, s, None))
+                for f in FACTORS:
+                    out.append(("arm", d, s, f))
+        return out
     for d in DESIGNS:
-        for s in SEEDS:
-            out.append(("linear", d, s, None))
-            for f in FACTORS:
-                out.append(("arm", d, s, f))
+        new_seeds = (1, 2, 3) if d == "R0" else (1, 2, 3, 4, 5)
+        for f in (3.5, 3.75):
+            out += [("arm", d, s, f) for s in new_seeds]
+        if d != "R0":
+            out += [("linear", d, s, None) for s in (4, 5)]
+            out += [("arm", d, s, f) for f in (39 / 12, 4.0) for s in (4, 5)]
     return out
 
 
