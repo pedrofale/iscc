@@ -49,11 +49,34 @@ T = TIERS[TIER]
 # an open modelling item, and the figures do not claim it.
 SELECTION = {"prop_breach": 0.002, "prop_stromal_survival": 0.002, "breach_effects": 1.01}
 
-# The founding acinus stays closed for this many tau steps after it is half full (the tau engine ticks
-# the confinement clock once per step, so at tau 0.5 this is about 200 generations; issues note N8):
-# long enough for a truncal copy-number layer, short enough that the in-situ phase is not one deme for
-# most of the run.
-ORIGIN_CONFINEMENT = dict(RR._CFG["spatial_params"]["origin_confinement"], generations=400)
+# The founding acinus stays closed for 200 generations after it is half full: long enough for a
+# truncal copy-number layer, short enough that the in-situ phase is not one deme for most of the run.
+# The clock counts generations (the default counts tau steps, so the earlier `generations: 400` at tau
+# 0.5 was this same window; issues note N8).
+ORIGIN_CONFINEMENT = dict(RR._CFG["spatial_params"]["origin_confinement"], generations=200,
+                          clock="generations")
+
+# The cell law (vault: decision-cell-law-from-reference-simulators). Division follows demon's invasion
+# rule: a division attempts a mutation with probability `mutation_rate` and, independently, one of its
+# daughters disperses with probability `dispersal_rate`. Crowding is demon's two-valued death step,
+# the same for every clone in a deme: the baseline death rate up to the capacity K, and `crowding_d1`
+# above it, so clones in a full deme keep competing through their division rates. The slot cap sits at
+# `crowding_overfill` x K, which has to exceed 1 for a deme to pass K and meet the step at all, and
+# `maximum_death_rate` clamps every death rate, so it is raised with `crowding_d1`.
+# The values were chosen on preview runs against criteria registered before any run (vault:
+# exp-regime-v2-tuning): overfill 1.5 and d1 5 keep the in-situ phase, breach-gated invasion and the
+# cost; d1 20 doubles the cost (tau substeps scale with it) and lets genome doubling sweep. Selection
+# now acts inside full demes, so the same mutation supply alters more of the genome: `mutation_rate`
+# 0.15 (the ER+ preset is 0.30) brings the fraction of genome altered back to the old law's.
+CROWDING_OVERFILL, CROWDING_D1 = 1.5, 5.0
+# `force_snv` off: an SNV event whose Poisson draws all come up 0 leaves the genome unchanged, as in
+# demon and CINner, instead of placing one SNV anyway (vault: paper1-sprint, decisions).
+CANCER = {"mutation_rate": 0.15, "force_snv": False}
+DEME = {"dispersal_law": "noble", "crowding_mode": "lottery", "crowding_law": "noble",
+        "crowding_overfill": CROWDING_OVERFILL, "crowding_d1": CROWDING_D1,
+        "maximum_death_rate": CROWDING_D1}
+# Per-run random streams keyed by (seed, purpose, step), so neighbouring seeds never share a stream.
+RNG_STREAMS = "independent"
 
 # Oxygen. The calibrated programs config supplies O2 uniformly at a rate (0.3) far below consumption
 # (1.5), so every dense deme, normal or cancer, sits near the same equilibrium and the hypoxia field
@@ -74,6 +97,9 @@ def expression():
     """The program layer with both niche arms and allele-specific dosage (a fresh copy per call)."""
     e = PC.expression_params(scatter=1.0)
     e["dosage_params"]["allele_specific"] = True
+    # Cancer cells start from the baseline of the epithelium they transformed from, and differ from it
+    # only by what evolution did (vault: decision-cancer-cell-of-origin-baseline). Readout only.
+    e["cell_of_origin"] = "epithelial"
     cp = e["coupling_params"]
     cp["niche_program_map"] = {"epithelial": "emt", "hypoxia": "hypoxia"}
     cp["niche_program_strength"] = 3.0
@@ -85,29 +111,34 @@ def config(scale, selection=None, cancer=None, deme=None, spatial=None, genome=N
     """The parameter blocks of the paper regime at ``scale``, with a variant's overrides on top."""
     sp = {"origin_confinement": dict(ORIGIN_CONFINEMENT), **(spatial or {})}
     return RR.config_for(scale, genome=genome, selection={**SELECTION, **(selection or {})},
-                         cancer=cancer, deme=deme, spatial=sp)
+                         cancer={**CANCER, **(cancer or {})}, deme={**DEME, **(deme or {})}, spatial=sp)
 
 
 def grow(seed, scale, target_cancer, spatial_snapshot_every=0, max_steps=3_000, chunk=20,
-         expression_params="default", microenv_params="default", coarsen=RR.COARSEN, **overrides):
+         expression_params="default", microenv_params="default", coarsen=RR.COARSEN,
+         rng_streams=RNG_STREAMS, on_chunk=None, **overrides):
     """Grow one paper-regime tumour to ``target_cancer`` cancer cells (counts only).
 
     Returns the tumour without materialised cell data; sample it with :mod:`realistic_regime`'s
     ``resect`` / ``dissociated`` / ``section`` or ``t.make_cell_data(max_cells=...)``. Growth stops
     early, with ``t.reached_target`` False, if the cancer dies out or ``max_steps`` pass. 3,000 steps
-    is 1,500 generations: the acinus opens at 400 and invasion normally follows within ~50, so a
-    tumour still below target by then has stayed in situ, which the manifest records."""
+    is 1,500 generations: the acinus opens 200 generations after it is half full, and invasion
+    normally follows within tens of generations, so a tumour still below target by then has stayed in
+    situ, which the manifest records.
+    ``on_chunk(t)``, if given, is called after every chunk, for monitoring."""
     cfg = config(scale, **overrides)
     expr = expression() if expression_params == "default" else expression_params
     menv = copy.deepcopy(MICROENV) if microenv_params == "default" else microenv_params
     t = GenotypeTumor(seed=seed, update_mode="tau", tau=RR.TAU, coarsen_passengers=coarsen,
                       max_cells=1, founder_mutations=RR.FOUNDER_MUTATIONS,
                       germline_params=RR.GERMLINE, expression_params=expr, microenv_params=menv,
-                      spatial_snapshot_every=spatial_snapshot_every, **cfg)
+                      spatial_snapshot_every=spatial_snapshot_every, rng_streams=rng_streams, **cfg)
     steps = 0
     while 0 < t.get_cancer_size() < target_cancer and steps < max_steps:
         t.grow(n_steps=chunk, seed=seed)
         steps += chunk
+        if on_chunk is not None:
+            on_chunk(t)
     t.reached_target = t.get_cancer_size() >= target_cancer
     t.max_cells = T["max_cells"]
     t.cell_data = None

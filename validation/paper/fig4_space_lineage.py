@@ -42,7 +42,7 @@ import style as S  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(HERE))
 CACHE = os.path.join(C.DERIVED, "petracer_v2")
-DISPS = (0.1, 0.3, 0.9, 2.0, 4.0)
+DISPS = REG.R1_DISPERSAL
 VAULT = os.path.join(os.path.dirname(REPO), "iscc-markdown")
 HARALD_CSV = "experiments/data/cn-evolution-local-run-1.csv"
 
