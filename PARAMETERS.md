@@ -431,6 +431,15 @@ Three opt-in corrections to the genotype engine. Each default reproduces earlier
 | `rng_streams` (top level) | `"offset"` | `"offset"`: per-run streams are `seed + step` (and `seed + constant` for passenger re-emission and materialisation), so seed `s` at step `k` replays seed `s + 1` at step `k − 1`. `"independent"`: every stream is keyed by `(seed, purpose, step)` through a `SeedSequence`, so different seeds never share a stream | any other value raises |
 | `spatial_params.origin_confinement.clock` | `"steps"` | `"steps"`: the tau engine's confinement clock ticks once per tau step, so `generations` counts tau steps (at `tau: 0.5`, `generations: 400` is 200 generations). `"generations"`: it ticks by `tau`, so `generations` means generations at any `tau`. The exact engine is unaffected | any other value raises |
 
+### Materialisation memory (optional; defaults unchanged)
+`make_cell_data` builds the per-cell tables chunk by chunk, so its working set no longer grows with the number of cells beyond the tables it returns.
+Two further savings are chosen by the caller.
+
+| Knob | Default | Valid range | Outside the range |
+|---|---|---|---|
+| `make_cell_data(layers=...)`, also on `Resection.slice` / `dissociate` | `None` (every table) | table names (`"cell_exp"`, `"cell_snv"`, `"cell_cnv"`, `"cell_rna_vaf"`, `"cell_snv_p"`, `"cell_snv_m"`, `"cell_exp_p"`, `"cell_exp_m"`, `"cell_rna_baf"`) and/or assay names standing for the tables that assay reads (`"visium"` and `"imaging"`: expression; `"scrna"`: expression, SNVs and RNA VAF; `"scdna"`: SNVs and copy number). The small per-cell tables are always built. Values are byte-identical to a full build | an unknown name raises |
+| `low_memory` (top level) | `false` | `true` also builds the program layer's expression multiplier per chunk, summing over programs in a fixed order, so it never holds a cells × genes float64 table beyond the returned ones. Values differ from the default only in the last bits (float64 relative difference below 1e-12) | no effect without the program layer |
+
 ---
 
 ## Diagnosing a tumour
