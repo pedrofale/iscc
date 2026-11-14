@@ -8,7 +8,6 @@ Stage 1 of the iscc pipeline: grow a tumor and write its ground-truth state
 Inspired by Noble et al, 2019 (demon); selection follows CINner's copy-number model, with the
 per-arm variant CINner and SISTEM share in real-genome mode.
 """
-from .models.glandular import GlandularTumor
 from .models.count import GenotypeTumor
 from . import arc as arc_mod
 from ..treatment.chemotherapy import Chemotherapy
@@ -22,7 +21,6 @@ import yaml
 
 # Map the `mode` field in the sim-config to a tumor model.
 TUMOR_MODELS = {
-    "glandular": GlandularTumor,      # cell-level agent-based engine
     "genotype": GenotypeTumor,        # fast genotype-level (count-based) engine
 }
 
@@ -63,7 +61,6 @@ def build_treatment(kind, tumor, adaptive, start, duration, max_tumor_size):
 )
 @click.option("-s", "--steps", default=1000, help="Number of simulation steps.")
 @click.option("-r", "--random-seed", default=42, help="Random seed.")
-@click.option("--batch-size", default=1, help="Number of demes updated per step.")
 @click.option(
     "--treatment", "treatment_kind", default="none",
     type=click.Choice(["none", "chemo", "targeted", "immuno"]),
@@ -85,7 +82,7 @@ def build_treatment(kind, tumor, adaptive, start, duration, max_tumor_size):
                    "disk (measured on configs/landing.yaml: 68 min / 5 GB with them, 21 min / "
                    "317 MB without).")
 @click.option("-o", "--output-path", default="./sim_out", help="Output directory.")
-def main(sim_config, steps, random_seed, batch_size, treatment_kind, adaptive,
+def main(sim_config, steps, random_seed, treatment_kind, adaptive,
          treatment_start, treatment_duration, max_tumor_size, log, no_diagnose, no_tables,
          output_path):
     logging.basicConfig(
@@ -95,7 +92,6 @@ def main(sim_config, steps, random_seed, batch_size, treatment_kind, adaptive,
     with open(sim_config) as f:
         config = yaml.safe_load(f)
 
-    # Default to the fast genotype-level engine; 'glandular' is the cell-level engine.
     mode = config.get("mode", "genotype")
     if mode not in TUMOR_MODELS:
         raise click.ClickException(
@@ -145,7 +141,7 @@ def main(sim_config, steps, random_seed, batch_size, treatment_kind, adaptive,
                          treatment_kind, adaptive, treatment_start)
 
         logging.info("Growing for %d steps (seed=%d)", steps, random_seed)
-        tumor.grow(n_steps=steps, seed=random_seed, batch_size=batch_size, treatment=treatment)
+        tumor.grow(n_steps=steps, seed=random_seed, treatment=treatment)
 
         tumor.write(output_path)
         logging.info("Saved tumor (size=%d) to %s", tumor.get_tumor_size(), output_path)

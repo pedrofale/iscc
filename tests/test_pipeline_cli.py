@@ -14,7 +14,7 @@ from iscc.sample.main import main as sample_main
 from iscc.data.main import main as data_main
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TUMORCFG = os.path.join(REPO_ROOT, "src/iscc/tumor/tumorconfigs/glandular.yaml")
+TUMORCFG = os.path.join(REPO_ROOT, "src/iscc/tumor/tumorconfigs/genotype.yaml")
 ASSAYCFG = os.path.join(REPO_ROOT, "src/iscc/data/assayconfigs")
 
 
@@ -54,7 +54,7 @@ def sample_dir(tmp_path, tumor_dir):
 def test_isccsim_writes_canonical_layout(tumor_dir):
     files = set(os.listdir(tumor_dir))
     assert {"cell_data", "gene_data", "genotypes.csv", "parents.csv",
-            "trace_counts.csv", "grid.csv"} <= files
+            "trace_counts.csv", "genotype_births.csv"} <= files
     cd = set(os.listdir(os.path.join(tumor_dir, "cell_data")))
     assert {"cell_snv.csv", "cell_cnv.csv", "cell_exp.csv", "cell_crd.csv",
             "cell_type.csv", "cell_deme.csv", "cell_evo.csv"} <= cd

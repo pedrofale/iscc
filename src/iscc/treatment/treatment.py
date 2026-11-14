@@ -1,5 +1,3 @@
-import numpy as np
-
 class Treatment(object):
     """Shared base for the therapies; defines the dosing schedule and per-cell effect.
 
@@ -62,8 +60,7 @@ class Treatment(object):
         ``toxicity`` as before. With ``target_genes`` its dose also scales with its expression
         of those genes, and with ``kill_mode="proliferation"`` a broad drug kills in proportion
         to division rate. Under ``mutagenicity_mode="dose"`` the mutator follows the same
-        expression scaling instead of ``1 - treatment_resistance``. The per-cell engine
-        ([`GlandularTumor`][iscc.tumor.GlandularTumor]) implements only ``"label"``.
+        expression scaling instead of ``1 - treatment_resistance``.
     target_genes : list, optional
         Mechanistic mode only: genes the drug acts through, as ``(segment, position)``
         coordinates or flat gene indices. An on-target clone's dose is multiplied by its mean
@@ -176,9 +173,6 @@ class Treatment(object):
                                         else int(amplification_threshold))
         self.dosage_trace = []  # list of (step, dosage) for every queried step
 
-    def _apply(self, cell):
-        pass
-
     def discrete_event(self, tumor, step):
         """One-shot state edits that are NOT rate modifiers (e.g. surgical resection). The base
         treatment does nothing; `Surgery` overrides this. The engine calls it once per step; the base
@@ -188,11 +182,6 @@ class Treatment(object):
 
     def is_target(self, cell, **kwargs):
         pass
-
-    def apply(self, cell, **kwargs):
-        if self.is_target(cell, **kwargs) or (not self.is_target(cell, **kwargs) and np.random.binomial(1, self.toxicity)):
-            if np.random.binomial(1, self.effectiveness):
-                self._apply(cell)
 
     def get_dosage(self, step, tumor_size):
         in_window = step >= self.start

@@ -372,7 +372,6 @@ def test_mechanistic_dose_scaled_mutator_follows_the_exposure():
 
 def test_mechanistic_knobs_are_validated():
     from iscc.treatment.treatment import Treatment
-    from iscc.tumor.tumor import Tumor
     with pytest.raises(ValueError, match="response must be"):
         Treatment(response="bogus")
     with pytest.raises(ValueError, match="only apply with response='mechanistic'"):
@@ -386,6 +385,3 @@ def test_mechanistic_knobs_are_validated():
     with pytest.raises(ValueError, match="not on the genome"):
         t.grow(n_steps=2, seed=3,
                treatment=Chemotherapy(response="mechanistic", target_genes=[(9, 0)]))
-    # the per-cell engines read the labels in Treatment.apply: refuse rather than run them
-    with pytest.raises(NotImplementedError, match="GenotypeTumor only"):
-        Tumor.grow(None, treatment=Chemotherapy(response="mechanistic"))

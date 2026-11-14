@@ -21,7 +21,7 @@ from conftest import (
     GENOME_PARAMS, SELECTION_PARAMS, CANCER_CELL_PARAMS, N_SEGMENTS, SEGMENT_SIZE,
     EPITHELIAL_CELL_PARAMS, STROMAL_CELL_PARAMS, IMMUNE_CELL_PARAMS, DEME_PARAMS,
 )
-from iscc.tumor.models import GenotypeTumor, GlandularTumor
+from iscc.tumor.models import GenotypeTumor
 from iscc.tumor.components.cell import CancerCell
 from iscc.tumor.components.selection import Selection
 
@@ -33,17 +33,6 @@ def _count(seed, steps, cancer=NO_DEATH, selection=SELECTION_PARAMS, **kw):
     t = GenotypeTumor(
         seed=seed, genome_params=GENOME_PARAMS, selection_params=selection,
         cancer_cell_params=cancer, deme_params=DEME_PARAMS, spatial_params=SPATIAL, **kw,
-    )
-    t.grow(n_steps=steps, seed=seed)
-    return t
-
-
-def _cell(seed, steps, cancer=NO_DEATH, selection=SELECTION_PARAMS):
-    t = GlandularTumor(
-        seed=seed, genome_params=GENOME_PARAMS, selection_params=selection,
-        cancer_cell_params=cancer, epithelial_cell_params=EPITHELIAL_CELL_PARAMS,
-        stromal_cell_params=STROMAL_CELL_PARAMS, immune_cell_params=IMMUNE_CELL_PARAMS,
-        deme_params=DEME_PARAMS, grid_size=SPATIAL["grid_size"], structure_radius=0,
     )
     t.grow(n_steps=steps, seed=seed)
     return t
@@ -206,13 +195,13 @@ def test_ploidy_advisory_is_non_failing():
 
 
 def test_both_engines_produce_and_surface_wgd():
-    """Grown under a plausible wgd_rate + a generous ploidy cap, BOTH engines produce surviving
-    WGD clones and surface the ``is_wgd`` ground truth in cell_data."""
+    """Grown under a plausible wgd_rate + a generous ploidy cap, the exact and the tau-leaping
+    engines both produce surviving WGD clones and surface the ``is_wgd`` ground truth."""
     cancer = {**NO_DEATH, "mutation_rate": 0.7, "wgd_rate": 0.15}
     selection = {**SELECTION_PARAMS, "max_ploidy": 8, "max_cn": 16}
 
     tc = _count(2, steps=180, cancer=cancer, selection=selection)
-    tg = _cell(2, steps=140, cancer=cancer, selection=selection)
+    tg = _count(2, steps=1500, cancer=cancer, selection=selection, update_mode="exact")
     for t in (tc, tg):
         assert "cell_wgd" in t.cell_data
         wgd_col = t.cell_data["cell_wgd"]["is_wgd"]

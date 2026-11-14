@@ -1,9 +1,8 @@
-"""Tests for the genotype-level (count-based) engine, GenotypeTumor (DESIGN phase 3b).
+"""Tests for the genotype-level (count-based) engine, GenotypeTumor.
 
 Validates: builds/grows/materialises the standard schema, is reproducible (seed -> identical
-matrices), and is *statistically equivalent* to the cell-level GlandularTumor (it is NOT
-byte-identical — it draws different random variables — so we check survival and survivor-size
-distributions match, not exact values).
+matrices), caps demes, enforces the viability limits, and that the exact engine and tau-leaping
+realise the same process (compared by distribution, since they draw different random variables).
 """
 import hashlib
 
@@ -11,10 +10,9 @@ import numpy as np
 import pytest
 
 from conftest import (
-    GENOME_PARAMS, SELECTION_PARAMS, CANCER_CELL_PARAMS, N_SEGMENTS, SEGMENT_SIZE,
-    EPITHELIAL_CELL_PARAMS, STROMAL_CELL_PARAMS, IMMUNE_CELL_PARAMS, DEME_PARAMS,
+    GENOME_PARAMS, SELECTION_PARAMS, CANCER_CELL_PARAMS, N_SEGMENTS, SEGMENT_SIZE, DEME_PARAMS,
 )
-from iscc.tumor.models import GenotypeTumor, GlandularTumor
+from iscc.tumor.models import GenotypeTumor
 
 SPATIAL = {"grid_size": 15, "n_structures": 1, "structure_radius": 0}
 # death_rate 0 -> the founder can never stochastically die out, so schema/reproducibility
@@ -23,21 +21,10 @@ NO_DEATH = {**CANCER_CELL_PARAMS, "death_rate": 0.0}
 LOW_DEATH = {**CANCER_CELL_PARAMS, "death_rate": 0.05}
 
 
-def _count(seed, steps, cancer=NO_DEATH):
+def _count(seed, steps, cancer=NO_DEATH, **kw):
     t = GenotypeTumor(
         seed=seed, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
-        cancer_cell_params=cancer, deme_params=DEME_PARAMS, spatial_params=SPATIAL,
-    )
-    t.grow(n_steps=steps, seed=seed)
-    return t
-
-
-def _cell(seed, steps, cancer=NO_DEATH):
-    t = GlandularTumor(
-        seed=seed, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
-        cancer_cell_params=cancer, epithelial_cell_params=EPITHELIAL_CELL_PARAMS,
-        stromal_cell_params=STROMAL_CELL_PARAMS, immune_cell_params=IMMUNE_CELL_PARAMS,
-        deme_params=DEME_PARAMS, grid_size=SPATIAL["grid_size"], structure_radius=0,
+        cancer_cell_params=cancer, deme_params=DEME_PARAMS, spatial_params=SPATIAL, **kw,
     )
     t.grow(n_steps=steps, seed=seed)
     return t
@@ -101,27 +88,35 @@ def test_well_mixed_disables_crowding():
     assert t.get_cancer_size() > 500
 
 
-def test_statistically_equivalent_to_cell_engine():
-    seeds, steps = range(10), 150
-    cnt = [_count(s, steps, cancer=LOW_DEATH).get_tumor_size() for s in seeds]
-    cell = [_cell(s, steps, cancer=LOW_DEATH).get_tumor_size() for s in seeds]
+def test_exact_and_tau_agree_on_survival_and_size():
+    """Exact and tau-leaping growth of the same tumour over the same time: the same low extinction
+    probability (death/birth = 0.1) and survivor sizes in the same range. The exact engine fires
+    one event per update, so it runs until its clock reaches the tau run's elapsed time."""
+    seeds, gens = range(10), 15
+    tau = [_count(s, gens, cancer=LOW_DEATH, update_mode="tau", tau=1.0).get_tumor_size()
+           for s in seeds]
+    exact = []
+    for s in seeds:
+        t = GenotypeTumor(seed=s, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
+                          cancer_cell_params=LOW_DEATH, deme_params=DEME_PARAMS,
+                          spatial_params=SPATIAL)
+        rng = np.random.default_rng(s)
+        elapsed = 0.0
+        while elapsed < gens and not t.is_extinct():
+            rate = t.deme_rates.sum()
+            elapsed += rng.exponential(1.0 / rate)
+            t.update(rng)
+        exact.append(t.get_tumor_size())
 
-    # both engines have the same low extinction probability (death/birth = 0.1)
-    assert sum(s > 0 for s in cnt) >= 6
-    assert sum(s > 0 for s in cell) >= 6
-
-    # survivor sizes in the same ballpark (net birth-death drift per step is identical)
-    cnt_mean = np.mean([s for s in cnt if s > 0])
-    cell_mean = np.mean([s for s in cell if s > 0])
-    assert 0.5 < cnt_mean / cell_mean < 2.0
+    assert sum(s > 0 for s in tau) >= 6
+    assert sum(s > 0 for s in exact) >= 6
+    tau_mean = np.mean([s for s in tau if s > 0])
+    exact_mean = np.mean([s for s in exact if s > 0])
+    assert 0.6 < tau_mean / exact_mean < 1.6, (tau, exact)
 
 
 # --- viability limits (CINner max_ploidy / max_cn / max_nullisomy / max_mut_drivers) ---------
-# These were enforced ONLY in the cell-level engine (Deme.sample_event) and were never ported to
-# this one, so they were silently inert here: genotypes breaching them stayed alive and dividing.
-# See GenotypeTumor._is_viable for the reject-at-birth semantics. Both engines now use that rule
-# (the cell engine's counterpart is exercised further down, under "the CELL engine enforces the
-# same limits, the same way").
+# A daughter that breaches a limit is rejected at birth (GenotypeTumor._is_viable).
 
 # A genome that mutates hard and amplifies/deletes aggressively, so the limits are actually
 # REACHED within a short run (the shipped defaults never get near them -- see

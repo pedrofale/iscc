@@ -7,7 +7,7 @@ their defaults, you will get a realistic multi-clone tumour.
 
 Two safety nets back this up:
 
-- The shipped configs (`notebooks/example_config.yaml`, `src/iscc/tumor/tumorconfigs/{glandular,mixed}.yaml`)
+- The shipped configs (`notebooks/example_config.yaml`, `src/iscc/tumor/tumorconfigs/genotype.yaml`)
   are inside every valid range below.
 - After growing, call **`tumor.diagnose()`** — a read-only quality-control check that flags degenerate
   ("crappy") tumours and tells you which knob to turn (see [§ Diagnosing a tumour](#diagnosing-a-tumour)).
@@ -520,7 +520,7 @@ one is overridable via `thresholds={...}`.
 ---
 
 ## See also
-- **Defaults to copy:** `notebooks/example_config.yaml`, `src/iscc/tumor/tumorconfigs/{glandular,mixed}.yaml`
+- **Defaults to copy:** `notebooks/example_config.yaml`, `src/iscc/tumor/tumorconfigs/genotype.yaml`
 - **The characterization:** `analysis/characterize_regimes.py`, `validation/validate_operating_envelope.py`
   → `manuscript/figures/validation_operating_envelope.png`
 - **Design rationale:** `DESIGN_operating_envelope.md`

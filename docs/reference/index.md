@@ -7,15 +7,13 @@ as `import iscc`; see the [Overview](../overview.md) for how the stages connect.
 ## Tumor
 
 Grow a selection-driven tumor on a grid of **demes** — small tissue patches, each holding up to a
-carrying capacity of cells. Both engines are spatially explicit at the deme level and simulate the
-same process (birth, death, mutation, and dispersal under a CINner fitness model); they differ only
-in how the cell population is represented.
+carrying capacity of cells. Each deme is held as genotype counts, and the process (birth, death,
+mutation and dispersal under a CINner fitness model) runs either event by event (exact) or by
+tau-leaping.
 
 | | |
 |---|---|
-| [`iscc.tumor.GenotypeTumor`](GenotypeTumor.md) | Represents each deme as genotype **counts**. Fast and scalable — the default. |
-| [`iscc.tumor.GlandularTumor`](GlandularTumor.md) | Represents each cell as its own **object**. Exact, but does not scale to large tumors. |
-| [`iscc.tumor.Tumor`](Tumor.md) | Shared base of the two engines — the common construction parameters. |
+| [`iscc.tumor.GenotypeTumor`](GenotypeTumor.md) | The tumour engine: per-deme genotype **counts**, exact or tau-leaping. |
 
 ## Treatment
 

@@ -29,7 +29,7 @@ from ..components.selection import Selection
 from ..components.epistasis import bits_to_events
 from ..components.cell import CancerCell, EpithelialCell, StromalCell, ImmuneCell, HostCell
 from ..germline import draw_germline_sites, apply_germline, seed_founder_mutations
-from .glandular import bresenham_circumference, get_inside
+from ..geometry import bresenham_circumference, get_inside
 from ..programs import ProgramModel
 from ...constants import normal_names, DEFAULT_LAYOUT_SEED, LAYOUT_OFFSET_F8_PROGRAMS, LAYOUT_OFFSET_MET
 

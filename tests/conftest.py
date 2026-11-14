@@ -53,30 +53,8 @@ def cancer_cell(selection):
 
 
 @pytest.fixture
-def glandular_tumor():
-    from iscc.tumor.models.glandular import GlandularTumor
-    return GlandularTumor(
-        genome_params=GENOME_PARAMS,
-        selection_params=SELECTION_PARAMS,
-        cancer_cell_params=CANCER_CELL_PARAMS,
-        epithelial_cell_params=EPITHELIAL_CELL_PARAMS,
-        stromal_cell_params=STROMAL_CELL_PARAMS,
-        immune_cell_params=IMMUNE_CELL_PARAMS,
-        deme_params=DEME_PARAMS,
-        grid_size=5,
-        structure_radius=0,
-    )
-
-
-@pytest.fixture
-def grown_tumor(glandular_tumor):
-    glandular_tumor.grow(n_steps=10, seed=0)
-    return glandular_tumor
-
-
-@pytest.fixture
 def synthetic_cell_data():
-    """Minimal cell_data dict matching Tumor.make_cell_data() output."""
+    """Minimal cell_data dict matching GenotypeTumor.make_cell_data() output."""
     rng = np.random.default_rng(0)
     n_cells = 20
     cell_names = [f"C{i}" for i in range(n_cells)]
