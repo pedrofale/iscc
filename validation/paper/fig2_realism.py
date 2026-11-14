@@ -4,15 +4,16 @@ Top row, the evolution front's tests (registry tumours):
   (a) evolutionary-mode space (Noble's n, D) against real multi-region tumours, at the full census and
       at the 5% detection limit of Noble et al. (drivers below it removed, clones merged into parents);
   (b) copy number follows oncogenic content under selection, not under neutrality (R2);
-  (c) whole-genome-duplication prevalence across rates against the PCAWG range (R5);
-  (d) the fit to the PCAWG breast-cancer arm landscape: pending its rerun under the corrected model.
+  (c) whole-genome-duplication prevalence across rates against the PCAWG range (R5).
 No 1/f panel: the 6,000-gene genome saturates at tumour scale, so the infinite-sites test does not apply.
+No PCAWG arm-landscape panel: fitting arm selection to PCAWG is CINner's result, and iscc takes its cell
+law from CINner (decision-pcawg-fit-out-of-paper1).
 Bottom row, the data front's tests, each fit on a real reference and re-simulated on the showcase
 tumour (R0):
-  (e) scRNA against PBMC3k: library size, mean-variance, zero fraction;
-  (f) DNA against GIAB HG002 (bulk), Tapestri and DLP+ (single cell): coverage dispersion by copy
+  (d) scRNA against PBMC3k: library size, mean-variance, zero fraction;
+  (e) DNA against GIAB HG002 (bulk), Tapestri and DLP+ (single cell): coverage dispersion by copy
       number, and Tapestri allelic dropout;
-  (g) Visium against a real breast-cancer section: per-spot depth and its spatial autocorrelation.
+  (f) Visium against a real breast-cancer section: per-spot depth and its spatial autocorrelation.
 
 Run from the iscc repository root (scanpy's data cache is ./data):
     python validation/paper/fig2_realism.py
@@ -47,7 +48,7 @@ def pending(ax, msg="pending: registry run not grown yet"):
     S.despine(ax, False, False)
 
 
-# --- a-d read the cached per-tumour summaries (summaries.py), never the tumours themselves ---------
+# --- a-c read the cached per-tumour summaries (summaries.py), never the tumours themselves ---------
 import summaries as SM  # noqa: E402
 
 
@@ -79,7 +80,7 @@ def panel_a(ax):
                 D_median_census=float(sim.D0.median()), D_median_real=float(emp.D.median()))
 
 
-def panel_c(ax):
+def panel_b(ax):
     out = {}
     for name, col in (("neutral", S.SOURCE["real"]), ("selected", S.SOURCE["iscc"])):
         rows = [r for r in SM.load("R2") if r["task"].startswith(name)]
@@ -98,7 +99,7 @@ def panel_c(ax):
     return out
 
 
-def panel_d(ax):
+def panel_c(ax):
     rows = SM.load("R5")
     if not rows:
         return pending(ax)
@@ -113,38 +114,7 @@ def panel_d(ax):
     return dict(prevalence=prev.round(2).to_dict(), n_per_rate=int(df.groupby("rate").size().min()))
 
 
-def panel_pcawg(ax):
-    """(d) The fit to the PCAWG breast-cancer arm landscape (real-genome mode, ploidy-relative arm
-    model): per-arm gain and loss frequencies re-simulated with the fitted selection against the
-    observed ones. Reads the JSON that ``validation/validate_inference_realgenome.py --out-json``
-    writes into the derived cache as ``fig2/pcawg_fit.json``."""
-    p = os.path.join(C.DERIVED, "fig2", "pcawg_fit.json")
-    if not os.path.exists(p):
-        pending(ax, "PCAWG arm-landscape fit:\npending rerun under the\nploidy-relative arm model")
-        return "pending"
-    with open(p) as f:
-        r = json.load(f)
-    for kind, col in (("gain", "#A81B20"), ("loss", "#2F479E")):    # the ends of style.DIVERGING
-        obs = np.array([np.nan if v is None else v for v in r[f"observed_{kind}"]], dtype=float)
-        fit = np.array([np.nan if v is None else v for v in r[f"fit_{kind}"]], dtype=float)
-        ax.scatter(obs, fit, s=4, color=col, edgecolors="none", label=kind)
-    vals = [v for k in ("observed_gain", "observed_loss", "fit_gain", "fit_loss") for v in r[k] if v is not None]
-    lim = max(0.05, max(vals) * 1.05)
-    ax.plot([0, lim], [0, lim], color=S.INK, lw=0.5, ls=":")
-    ax.set_xlim(0, lim)
-    ax.set_ylim(0, lim)
-    ax.set_xlabel("PCAWG arm frequency")
-    ax.set_ylabel("Re-simulated frequency")
-    st = r["stats"]
-    ax.text(0.04, 0.96, f"r = {st['r_fit']:.2f}\nCharm r = {st['r_charm']:.2f}", transform=ax.transAxes,
-            fontsize=4.8, va="top")
-    ax.legend(fontsize=4.5, loc="lower right", frameon=False)
-    return dict(r_fit=round(st["r_fit"], 3), rmse=round(st["rmse"], 3), r_charm=round(st["r_charm"], 3),
-                rho_charm=round(st["rho_charm"], 3), r_content=round(st["r_content"], 3),
-                n_ref=r["n_ref"], cohort_size=r["cohort_size"], target_size=r["target_size"])
-
-
-# --- f, g, h: the data front's fit-and-resimulate loops ---------------------------------------------
+# --- d, e, f (cached as parts f, g, h): the data front's fit-and-resimulate loops ---------------------------------------------
 # Each is computed in its own process (``--part f|g|h``) and cached as small JSON (histograms, binned
 # curves, statistics), so no process holds a real reference and a tumour at once for longer than it
 # must, and the render step reads only the caches.
@@ -368,22 +338,18 @@ def render():
     # No site-frequency-spectrum (1/f) panel: passengers live on the 6,000-gene genome, which
     # saturates at tumour scale (nearly every site is hit in some lineage), so the spectrum of sites
     # is not a spectrum of mutations and the infinite-sites 1/f test does not apply (issues, B13).
-    xs = [12, 58, 104, 150]
-    for i, (L, fn) in enumerate(zip("abcd", (panel_a, panel_c, panel_d, None))):
-        S.panel_letter(fig, L, xs[i] - 9, 8)
-        ax = S.ax_mm(fig, xs[i], 11, 30, 27 if i < 3 else 22)
-        if fn is None:
-            out[L] = panel_pcawg(ax)
-        else:
-            out[L] = fn(ax)
+    xs = [12, 73, 134]
+    for x, L, fn in zip(xs, "abc", (panel_a, panel_b, panel_c)):
+        S.panel_letter(fig, L, x - 9, 8)
+        out[L] = fn(S.ax_mm(fig, x, 11, 40, 27))
     S.text_mm(fig, 2, 57.5, "The data front's tests: fit to a real reference, re-simulate on the tumour",
               fontsize=7, va="top", fontweight="bold")
-    S.panel_letter(fig, "e", 2, 63)
-    out["e"] = render_f(fig, 10, 67)
-    S.panel_letter(fig, "f", 92, 63)
-    out["f"] = render_g(S.ax_mm(fig, 100, 67, 28, 21))
-    S.panel_letter(fig, "g", 137, 63)
-    out["g"] = render_h(fig, 145, 67)
+    S.panel_letter(fig, "d", 2, 63)
+    out["d"] = render_f(fig, 10, 67)
+    S.panel_letter(fig, "e", 92, 63)
+    out["e"] = render_g(S.ax_mm(fig, 100, 67, 28, 21))
+    S.panel_letter(fig, "f", 137, 63)
+    out["f"] = render_h(fig, 145, 67)
     path = S.save(fig, "fig2_realism")
     print("wrote", path)
     for k, v in out.items():
