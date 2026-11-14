@@ -100,16 +100,25 @@ def _runs():
     # R11: the human genome layer's tool figure (Fig 5) on an arm-homologous growth genome: one segment
     # per autosomal arm, 6,000 growth genes shared in proportion to each arm's genes, and 240 drivers
     # placed per arm from Cancer Gene Census content (driver_scale 0.4 keeps today's prop_driver 0.04
-    # load). The same three designs as R0 seed1 and R1 seed1 at dispersal 0.1 and 0.9, so the layer's
-    # copy-number segments follow real arms (vault: design-human-genome-layout, G; paper1-sprint).
+    # load). A copy-number event alters about one segment, so 1/39 of this genome against 1/12 of the
+    # regime's; the copy-number events per division are scaled by 39/12, with the SNV and WGD events per
+    # division held fixed (cnv_prob is a weight against snv_prob inside a mutating division, mutation_rate
+    # the chance a division mutates at all, wgd_rate per mutating division). Calibrated on three to five
+    # seeds per design (vault: exp-r11-arm-calibration). The designs are R0 seed1 and R1 at dispersal 0.9
+    # and 0.1; at 0.1, seed 1 is swept by a genome doubling on this genome, so seed 2 is grown beside it.
     from iscc.data.human import arm_genome
     ag = arm_genome(total_genes=6000, driver_scale=0.4)
+    f = 39 / 12
+    p = 0.045 / (0.045 + 0.5)                      # the ER+ preset's copy-number share of a mutating division
+    k = 1.0 - p + f * p
+    arm_rates = {"cnv_prob": 0.045 * f, "mutation_rate": RG.CANCER["mutation_rate"] * k, "wgd_rate": 0.001 / k}
     arm = dict(genome=ag["genome_params"], selection=ag["selection_params"])
     runs["R11"] = ([("seed1", dict(seed=1, scale=SHOW, target_cancer=T["showcase_target"],
-                                   spatial_snapshot_every=2, **arm))]
-                   + [(f"disp{d}_seed1", dict(seed=1, scale=SWEEP, target_cancer=T["sweep_target"],
-                                              spatial_snapshot_every=8, cancer={"dispersal_rate": d}, **arm))
-                      for d in (0.1, 0.9)])
+                                   spatial_snapshot_every=2, cancer=dict(arm_rates), **arm))]
+                   + [(f"disp{d}_seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
+                                                spatial_snapshot_every=8,
+                                                cancer={**arm_rates, "dispersal_rate": d}, **arm))
+                      for d, s in ((0.1, 1), (0.1, 2), (0.9, 1))])
     return runs
 
 
