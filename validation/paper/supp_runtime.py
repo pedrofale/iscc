@@ -11,7 +11,8 @@ cancer cells). Its own benchmark size (``n_cancer`` 0, 1,600 spots) is in the CS
 iscc is shown as the paper regime runs it (``make_cell_data(layers="visium")`` in low-memory mode,
 variant ``visium-low``). The runs before chunked materialisation (variant ``before``) are drawn
 faintly in the memory panel only, since its wall time did not change. Failed attempts are left out;
-they are kept in the CSV with ``ok`` False.
+they are kept in the CSV with ``ok`` False. A run cancelled before it finished is drawn in the wall-time
+panel as a hollow upward triangle at the lower bound of its wall time (``wall_lower_s``).
 
 Usage::
 
@@ -48,8 +49,10 @@ def _series(ax, sub, col, colour, **kw):
 
 def main():
     S.setup()
-    df = pd.read_csv(os.path.join(RES, "runtime.csv"))
-    df = df[df.ok.astype(bool) & (df.n_cancer > 0)]   # failed attempts and stCNASim's own size
+    runs = pd.read_csv(os.path.join(RES, "runtime.csv"))
+    df = runs[runs.ok.astype(bool) & (runs.n_cancer > 0)]   # failed attempts and stCNASim's own size
+    lower = runs["wall_lower_s"] if "wall_lower_s" in runs else pd.Series(np.nan, index=runs.index)
+    unfinished = runs[lower.notna()]
     fig = S.figure("double", 58)
     axes = [S.ax_mm(fig, 14, 8, 62, 40), S.ax_mm(fig, 96, 8, 62, 40)]
     for ax, col, ylab in zip(axes, ("wall_s", "peak_mb"), ("wall time (s)", "peak memory (MB)")):
@@ -63,6 +66,10 @@ def main():
             if sub.empty:
                 continue
             _series(ax, sub, col, colour, marker=MARKER.get(tool, "o"), label=LABEL[tool])
+            lb = unfinished[unfinished.tool == tool].groupby("n_cancer").wall_lower_s.min()
+            if col == "wall_s" and len(lb):
+                ax.plot(lb.index, lb.values, ls="none", marker="^", ms=4, mfc="white", mec=colour,
+                        label=f"{tool} not finished: at least")
         ax.set_xscale("log")
         ax.set_yscale("log")
         ax.set_xlabel("cancer cells")

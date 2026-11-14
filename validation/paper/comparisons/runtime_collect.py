@@ -1,10 +1,12 @@
 """Collect the runtime logs of ``runtime_job.sh`` into ``results/runtime.csv``.
 
-    python runtime_collect.py <log dir> <out.csv>
+    python runtime_collect.py <out.csv> <log dir> [<log dir> ...]
 
-One row per log: tool, cancer cells, seed, node, CPU, wall time and peak memory as ``/usr/bin/time -v``
-measured them, and whether the run completed. A tool's own JSON line, when it printed one, adds its
-stage times (for iscc: grow, section, Visium; for SISTEM: growth).
+One row per log (``*.out``, or ``*.out.gz`` once compressed): tool, cancer cells, seed, node, CPU, wall
+time and peak memory as ``/usr/bin/time -v`` measured them, and whether the run completed. A tool's own
+JSON line, when it printed one, adds its stage times (for iscc: grow, section, Visium; for SISTEM:
+growth). A run that Slurm cancelled has no ``/usr/bin/time`` block; ``wall_lower_s`` then holds the time
+from its first log timestamp to the cancellation, a lower bound on its wall time.
 
 iscc runs carry a variant: ``before`` (dense cell tables, the runs before chunked materialisation),
 ``full``, ``visium`` or ``visium-low`` (``make_cell_data(layers="visium")``, plus ``low_memory``),
@@ -13,6 +15,7 @@ read from the ``VARIANT=`` header of the chunked-materialisation benchmark's log
 than once, the latest log counts; other tools keep every attempt (a failed one has ``ok`` False).
 """
 import glob
+import gzip
 import json
 import os
 import re
@@ -27,7 +30,8 @@ def _seconds(s):
 
 
 def parse(path):
-    text = open(path, errors="replace").read()
+    with (gzip.open if path.endswith(".gz") else open)(path, "rt", errors="replace") as f:
+        text = f.read()
     head = re.search(r"(TOOL|VARIANT)=(\S+) N_CANCER=(\d+) SEED=(\d+) NODE=(\S+) CPU=(.*)", text)
     if not head:
         return None
@@ -38,6 +42,10 @@ def parse(path):
     rss = re.findall(r"Maximum resident set size \(kbytes\): (\d+)", text)
     codes = re.findall(r"Exit status: (\d+)", text)
     rec["wall_s"] = _seconds(walls[-1]) if walls else float("nan")
+    stop = re.search(r"CANCELLED AT (\d{4}-\d\d-\d\dT[\d:]+)", text)
+    start = re.search(r"\[(\d{4}-\d\d-\d\d[ T][\d:]+)", text)
+    if not walls and stop and start:
+        rec["wall_lower_s"] = (pd.Timestamp(stop.group(1)) - pd.Timestamp(start.group(1))).total_seconds()
     rec["peak_mb"] = int(rss[-1]) / 1024 if rss else float("nan")
     rec["ok"] = bool(codes) and codes[-1] == "0" and "FAILED" not in text
     for line in text.splitlines():
@@ -57,7 +65,8 @@ def parse(path):
 def main():
     """runtime_collect.py <out.csv> <log dir> [<log dir> ...]"""
     out, dirs = sys.argv[1], sys.argv[2:]
-    rows = [r for d in dirs for r in (parse(p) for p in sorted(glob.glob(os.path.join(d, "*.out")))) if r]
+    logs = [p for d in dirs for p in sorted(glob.glob(os.path.join(d, "*.out")) + glob.glob(os.path.join(d, "*.out.gz")))]
+    rows = [r for r in map(parse, logs) if r]
     df = pd.DataFrame(rows).sort_values("mtime")
     iscc = df[df.tool == "iscc"].drop_duplicates(["variant", "n_cancer", "seed"], keep="last")
     df = pd.concat([iscc, df[df.tool != "iscc"]]).drop(columns="mtime")
