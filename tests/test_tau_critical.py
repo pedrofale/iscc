@@ -1,4 +1,5 @@
-"""Tau-leaping with critical reactions (``tau_step="cgp_critical"``; Cao, Gillespie and Petzold 2005).
+"""Tau-leaping with critical reactions (``tau_step="cgp_critical"``; Cao, Gillespie and Petzold 2005)
+and the engine's ``target_cancer`` stop.
 
 Under the two-valued crowding step (d0 up to K, d1 above), plain tau-leaping lets a full deme overshoot
 K and then lose several cells where the exact process loses one. Firing the channels of demes at or
@@ -79,3 +80,26 @@ def test_needs_a_carrying_capacity():
                       deme_params=dict(carrying_capacity=0, initial_cancer_cells=1,
                                        tau_step="cgp_critical"),
                       spatial_params=dict(grid_size=1), update_mode="tau")
+
+
+@pytest.mark.parametrize("step", ["fixed", "cgp", "cgp_critical"])
+def test_target_stop_tau(step):
+    """Growth stops at the first sub-step reaching the target, before the generation ends, and a target
+    that is never reached leaves the run unchanged."""
+    A = build(K=12, n0=3, grid=6, disp=0.3, seed=5, step=step)
+    A.grow(n_steps=30, seed=5, materialize=False)
+    Bt = build(K=12, n0=3, grid=6, disp=0.3, seed=5, step=step)
+    Bt.grow(n_steps=30, seed=5, materialize=False, target_cancer=10 ** 9)
+    assert _state(A) == _state(Bt) and A.time == Bt.time
+    target = A.get_cancer_size() // 2
+    C = build(K=12, n0=3, grid=6, disp=0.3, seed=5, step=step)
+    C.grow(n_steps=30, seed=5, materialize=False, target_cancer=target)
+    assert C.get_cancer_size() >= target
+    assert C.time < A.time
+    assert C.get_cancer_size() < A.get_cancer_size()
+
+
+def test_target_stop_exact():
+    A = build(K=12, n0=10, grid=6, disp=0.3, seed=6, step="fixed", mode="exact")
+    A.grow(n_steps=3000, seed=6, materialize=False, target_cancer=60)
+    assert A.get_cancer_size() == 60

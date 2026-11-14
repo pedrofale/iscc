@@ -993,7 +993,8 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
                 self._refresh_rate(idx)
 
     # --- growth --------------------------------------------------------------
-    def grow(self, n_steps=1000, seed=None, treatment=None, materialize=True, **kwargs):
+    def grow(self, n_steps=1000, seed=None, treatment=None, materialize=True, target_cancer=None,
+             **kwargs):
         """Advance the tumour by ``n_steps`` update steps and materialise the result.
 
         Runs the birth / death / mutation / dispersal process (exact Gillespie or
@@ -1020,6 +1021,11 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
             [`ensure_cell_data`][iscc.tumor.GenotypeTumor.ensure_cell_data] before sampling.
             Materialisation draws only from its own seeded generators and writes nothing the
             dynamics read, so the trajectory is the same either way.
+        target_cancer : int, optional
+            Stop as soon as the cancer population reaches this size: after the event that reaches
+            it (exact) or the sub-step or leap that reaches it (tau), with ``self.time`` advanced
+            only by the time simulated. Growth below the target is unchanged (the check draws
+            nothing).
 
         Returns
         -------
@@ -1028,14 +1034,18 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         """
         if self.update_mode == "tau":
             return self._grow_tau(n_steps=n_steps, seed=seed, treatment=treatment,
-                                  materialize=materialize, **kwargs)
+                                  materialize=materialize, target_cancer=target_cancer, **kwargs)
         if seed is None:
             seed = self.seed
         self._clear_treatment_overrides()
         self.traces.append(self._trace_snapshot())
         self._spatial_snapshot()
         prev_dose = 0.0
+        done = n_steps
         for local_step in range(n_steps - 1):
+            if target_cancer is not None and self.get_cancer_size() >= target_cancer:
+                done = local_step
+                break
             self._clock = self.step + local_step
             rng = self._run_rng(seed, self.step + local_step, _STREAM_GROW)
             if treatment is not None:
@@ -1051,7 +1061,7 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
             self.update(rng)
             self.traces.append(self._trace_snapshot())
             self._spatial_snapshot()
-        self.step += n_steps
+        self.step += done
         self._clock = self.step
         if materialize:
             self.make_cell_data()
@@ -1389,10 +1399,11 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
             self._crit_rate[di] = 0.0
             self._crit.discard(di)
 
-    def _tau_leaps_critical(self, rng, tau):
+    def _tau_leaps_critical(self, rng, tau, target_cancer=None):
         """One generation of length ``tau`` by explicit tau-leaping with critical reactions (Cao,
         Gillespie and Petzold 2005, J Chem Phys 123:054104, "Avoiding negative populations in explicit
-        Poisson tau-leaping"). Returns the time simulated.
+        Poisson tau-leaping"). Returns the time simulated (``tau`` unless ``target_cancer`` stops it
+        after a leap).
 
         The channels (division and death of every cancer clone, and toxicity deaths of residents under
         therapy) of a deme whose total is at or above K, where the d1 crowding channel acts, are
@@ -1448,18 +1459,25 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
                 for di in self._dirty:
                     self._classify_critical(di)
                 self._dirty.clear()
+                if target_cancer is not None and self.get_cancer_size() >= target_cancer:
+                    break
         finally:
             self._dirty = None
             del self._crit_rate, self._crit
         return elapsed if left > 1e-12 else tau
 
-    def _tau_generation(self, rng, tau):
+    def _tau_generation(self, rng, tau, target_cancer=None):
         """Advance the whole tumour by one generation of length `tau`, sub-stepped by the
         ``tau_step`` rule (see ``_init_tau``): equal sub-steps that keep the largest single-cell event
         probability per sub-step at most 0.34 (``"fixed"``), the Cao-Gillespie-Petzold step
         (``"cgp"``), or tau-leaping with critical reactions (``"cgp_critical"``). Death rates are
         re-read every sub-step. Records a full per-clone snapshot every `snapshot_every`
-        generations."""
+        generations.
+
+        ``target_cancer``, if given, stops the generation after the first sub-step (or leap) at which
+        the cancer population reaches it; ``self.time`` then advances only by the time simulated, and
+        the once-per-generation resistance-state transitions are skipped. The check draws nothing, so a
+        generation that does not reach the target is unchanged."""
         ACCURACY = 0.34  # keep rate*dt <= this so Poisson tau-leaping stays accurate
         if self.coarsen_passengers:
             # incremental monotone upper bound (see _max_div_disp) — avoids the O(#genotypes) scan
@@ -1473,8 +1491,12 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
                                         ep["division_rate"] + ep["dispersal_rate"])
             max_cell_rate += self.maximum_death_rate
         self._clock = self.step
+        reached = (lambda: target_cancer is not None and self.get_cancer_size() >= target_cancer)
+        stopped = None                  # the time simulated when the target stopped the generation
         if self._tau_step == "cgp_critical":
-            self._tau_leaps_critical(rng, tau)
+            elapsed = self._tau_leaps_critical(rng, tau, target_cancer)
+            if reached():
+                stopped = elapsed
         elif self._tau_step == "cgp":
             left = tau
             while left > 1e-12:
@@ -1482,19 +1504,26 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
                 self._tau_substep(rng, dt)
                 self._n_substeps = getattr(self, "_n_substeps", 0) + 1
                 left -= dt
+                if reached():
+                    stopped = tau - left if left > 1e-12 else tau
+                    break
         else:
             n_sub = max(1, int(np.ceil(max_cell_rate * tau / ACCURACY)))
             dt = tau / n_sub
-            for _ in range(n_sub):
+            for k in range(n_sub):
                 self._tau_substep(rng, dt)
+                if reached():
+                    stopped = (k + 1) * dt if k + 1 < n_sub else tau
+                    break
+        partial = stopped is not None and stopped < tau
         # Drug-induced resistance-state entry/exit, once per generation on the settled counts, before
         # the snapshot. Gated: no draw / no genotype minted when the feature is off.
-        if self.selection.resistance_state_on:
+        if self.selection.resistance_state_on and not partial:
             self._apply_state_transitions(rng)
         self.step += 1
-        self.time += tau
+        self.time += stopped if partial else tau
         if self._origin_confined:
-            self._origin_tick(tau)
+            self._origin_tick(stopped if partial else tau)
         self._clock = self.step
         if self.step % self.snapshot_every == 0:
             self.traces.append(self._trace_snapshot())
@@ -1502,12 +1531,12 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
             self._spatial_snapshot()
 
     def _grow_tau(self, n_steps=1000, seed=None, treatment=None, tau=None, materialize=True,
-                  **kwargs):
+                  target_cancer=None, **kwargs):
         """Tau-leaping growth: `n_steps` is the number of generations to advance. A full per-clone
         snapshot is recorded every `snapshot_every` generations, so plot_muller/plot_grid work on a
         REAL-TIME x-axis (self.trace_times, in generation units).
         `materialize=False` skips the closing `make_cell_data` and marks the tables stale (see
-        `grow`)."""
+        `grow`). `target_cancer` stops growth at the first sub-step reaching it (see `grow`)."""
         if seed is None:
             seed = self.seed
         if tau is None:
@@ -1522,12 +1551,14 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         for _ in range(n_steps):
             if self.get_cancer_size() == 0:
                 break
+            if target_cancer is not None and self.get_cancer_size() >= target_cancer:
+                break
             if treatment is not None:
                 treatment.discrete_event(self, self.step)  # e.g. surgical resection
                 dose = treatment.get_dosage(self.step, self.get_tumor_size())
                 self._apply_treatment(treatment, dose)
                 prev_dose = dose
-            self._tau_generation(rng, tau)
+            self._tau_generation(rng, tau, target_cancer=target_cancer)
         if materialize:
             self.make_cell_data()
         else:

@@ -154,6 +154,9 @@ def grow(seed, scale, target_cancer, spatial_snapshot_every=0, max_steps=3_000, 
     is 1,500 generations: the acinus opens 200 generations after it is half full, and invasion
     normally follows within tens of generations, so a tumour still below target by then has stayed in
     situ, which the manifest records.
+    Growth stops at the first event (exact) or tau leap that reaches ``target_cancer``, not at the end
+    of a chunk, so ``t.get_cancer_size()`` is the size reached, just past the target, and ``t.time``
+    the time it took.
     ``overrides`` are :func:`config`'s (the variant's blocks, ``update_mode``, ``tau``).
     ``on_chunk(t)``, if given, is called after every chunk, for monitoring."""
     cfg = config(scale, coarsen=coarsen, **overrides)
@@ -163,7 +166,7 @@ def grow(seed, scale, target_cancer, spatial_snapshot_every=0, max_steps=3_000, 
                       spatial_snapshot_every=spatial_snapshot_every, **cfg)
     steps = 0
     while 0 < t.get_cancer_size() < target_cancer and steps < max_steps:
-        t.grow(n_steps=chunk, seed=seed)
+        t.grow(n_steps=chunk, seed=seed, target_cancer=target_cancer)
         steps += chunk
         if on_chunk is not None:
             on_chunk(t)
