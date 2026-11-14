@@ -14,7 +14,7 @@ Two safety nets back this up:
 
 The ranges below come from the operating-envelope characterization: `analysis/characterize_regimes.py`
 (the sweep) → `manuscript/figures/validation_operating_envelope.png` (phase diagrams) →
-`DESIGN_operating_envelope.md` (design) and the manuscript "Operating regimes" section.
+and the manuscript "Operating regimes" section.
 
 ---
 
@@ -57,14 +57,14 @@ Defaults are those in `notebooks/example_config.yaml`. Set them under the matchi
 | `grid_size` × `carrying_capacity` | 170 × 30 | the tumour caps at ~`grid_size² × carrying_capacity`; size the grid **above** the target so it can spread (≳ 10⁴ demes for a 10⁵-cell tumour) | too small → no room to spread / no O₂ gradient / too few clones |
 | `dispersal_rate` | 0.9 | **[0, 1]**: the per-division probability that a daughter disperses, independently of whether the division mutates | ≫ division → well-mixed, **no clonal territories** (silently breaks the PEtracer and multi-region benchmarks) |
 | `structure_radius` / `n_structures` | 4 / 1 | glandular geometry (duct size / count); the cancer founds inside and spreads across the gland | — |
-| `n_glands` | **8** | ductal-field substrate: number of small epithelial-ring glands scattered in stroma (DESIGN_ductal_field.md); `1` reproduces the single central ring | needs `structure_radius > 0`; too many for the grid → rejection sampling can't place them all |
+| `n_glands` | **8** | ductal-field substrate: number of small epithelial-ring glands scattered in stroma; `1` reproduces the single central ring | needs `structure_radius > 0`; too many for the grid → rejection sampling can't place them all |
 | `gland_radius` | = `structure_radius` | ring radius of each gland (`structure_radius` 4 → 9 demes across, ~450 µm: lumen + wall) | too large × many glands → they don't fit / overlap |
 | `min_gland_sep` | 14 (default `2·gland_radius + 2`) | minimum centre-to-centre spacing between glands | too small → glands touch (no stroma gap) |
 | `K_duct` / `K_stroma` | 60 / 30 | per-compartment carrying capacity (a deme is a 3D column, so K is **moderate-to-large**, capturing depth — not a handful) | ST spot resolution is a **grid-spacing** constraint, not a K bound |
 | `stroma_fill_frac` | 0.3 | baseline stromal occupancy as a fraction of `K_stroma` (stroma is less dense than epithelium but **not empty** — real fibroblast/immune/endothelial cells that the assays capture and that carry the stromal hazard; seed at a **moderate** 0.3–0.5, leaving headroom for an invasive mass) | `1.0` = the old dense fill (byte-identical); too sparse → the live stromal fraction (and its hazard) is negligible |
 | `cross_gland_kappa` | 0.06 (0.0 = off) | island (intraductal) dispersal weight: a fraction ~`κ/(1+κ)` of a gland-resident clone's dispersing daughters seed **another gland's lumen** (bypassing the wall → confined DCIS, no breach), rate `κ·dispersal_rate` | stroma cells never hop; `0` → no cross-gland spread |
 | `cross_gland_lambda` | 30 (`None` = uniform) | distance kernel for cross-gland targeting (prob ∝ `exp(−d/λ)` over gland centres); `None` = uniform (zero extra parameter) | 2D-section distance is only a proxy for ductal-tree proximity |
-| `epithelial_barrier` | 10.0 (0.0 = off in the bare engine) | compartment-selection hazard: the epithelial ring adds `epithelial_barrier · epithelial_fraction(deme) · (1 − breach)` to a cancer cell's death (v1, DESIGN_phenotype_plasticity.md §2) | needs `structure_radius > 0`; too high → the ring is impassable and cancer stays in the lumen (raise `breach` fitness or lower the barrier) |
+| `epithelial_barrier` | 10.0 (0.0 = off in the bare engine) | compartment-selection hazard: the epithelial ring adds `epithelial_barrier · epithelial_fraction(deme) · (1 − breach)` to a cancer cell's death | needs `structure_radius > 0`; too high → the ring is impassable and cancer stays in the lumen (raise `breach` fitness or lower the barrier) |
 | `stromal_hazard` | 0.6 (0.0 = off in the bare engine) | compartment-selection hazard: the stroma adds `stromal_hazard · stromal_fraction(deme) · (1 − stromal_survival)` to death | needs `structure_radius > 0`; the stromal analogue of `epithelial_barrier` |
 
 !!! note "`carrying_capacity` is a real per-deme cap (demon's two-valued death step under a slot cap)"
@@ -82,6 +82,13 @@ Defaults are those in `notebooks/example_config.yaml`. Set them under the matchi
 |---|---|---|---|
 | `crowding_overfill` | 1.5 | ≥ 1 | the slot cap as a multiple of `K`; at 1 a deme never passes `K` and never meets `crowding_d1` |
 | `crowding_d1` | `maximum_death_rate` | > `max_birth_rate` (after the clamp) | the death rate above `K`; lower raises at construction |
+
+The paper regime (`validation/paper/regime.py`) runs `crowding_overfill` 1.5 and `crowding_d1` =
+`maximum_death_rate` = 5, with demon's division rule (a division mutates with probability
+`mutation_rate` and, independently, sends a daughter out with probability `dispersal_rate`), random
+streams keyed by (seed, purpose, step), and origin confinement counted in generations. These are the
+engine's only laws; a config that names a removed one (`crowding_mode`, `crowding_law`,
+`dispersal_law` other than the above, or a `"steps"` confinement clock) raises.
 
 ### Selection — `selection_params`
 | Knob | Default | Valid range | Outside the range |
@@ -112,7 +119,7 @@ Defaults are those in `notebooks/example_config.yaml`. Set them under the matchi
 #### Drug-induced resistance STATE — `selection_params` (optional; **all off by default**)
 
 Resistance as a **carried cell state** rather than (only) a genomic allele, so that a CNA deleting
-the triggering allele does not restore sensitivity (`DESIGN_phenotype_plasticity.md` §3.3–3.4). Every
+the triggering allele does not restore sensitivity. Every
 knob defaults to its inert value; `Selection.resistance_state_on` is then `False` and division is
 **byte-identical** to the no-state engine.
 
@@ -133,7 +140,7 @@ knob defaults to its inert value; `Selection.resistance_state_on` is then `False
 !!! note "τ→∞ is a figure choice, not a requirement"
     Measured on the mode-IV rig: at `relax = 0.02` with fair single-charge pricing the relapse is
     97.7% resistant with the clean start intact, versus 100.0000% at `relax = 0`. The permanence buys
-    the last ~2 percentage points. See `DESIGN_phenotype_plasticity.md` §3.4 for the 2×2.
+    the last ~2 percentage points.
 
 #### Trait and selection model — `selection_params`
 
@@ -266,7 +273,7 @@ inside those genes, drawn heterozygous at 2·AF·(1 − AF) and phased exactly o
 | `amp_prob` | 0.5 | 0.2–0.8 | high → copy-number-heavy genome (viability-capped) |
 | `wgd_rate` | 0.0005 (0.0 = off in the bare engine) | 0.0–~0.05 | drives genome doubling; a separate per-division channel (leaves `snv_prob`/`cnv_prob` intact). Too high → most tumours WGD and pile against `max_ploidy` (doubled genomes are viability-capped); interacts directly with `max_ploidy`/`max_cn` |
 
-`wgd_rate` is the per-(mutating-)division probability of a **whole-genome duplication** (DESIGN_focal_cna.md v1):
+`wgd_rate` is the per-(mutating-)division probability of a **whole-genome duplication**:
 every copy on both homologs of every segment is doubled at once, so ploidy jumps 2→4 (then loss erodes it
 back to a non-integer mean — the doubling+loss signature). A WGD daughter that breaches `max_ploidy`/`max_cn`
 is **rejected at birth** like any other non-viable daughter, so `max_ploidy` (default 6) sets how much
@@ -280,7 +287,7 @@ Selection is **additive** by default (fitness reads the *count* of mutated drive
 event×event dependency network is empty. These knobs **plant a known network** — the answer key the
 cohort progression models (MHN, TreeMHN, CBN/H-CBN, REVOLVER) are scored against. With
 `epistasis_params` absent, or `n_events: 0`, nothing is built and the engine is **bit-identical** to
-the additive model. See `DESIGN_epistasis.md` and `validation/validate_epistasis.py`.
+the additive model. See `validation/validate_epistasis.py`.
 
 An **event** is a disjoint module of `event_size` driver genes; it fires when ≥1 SNV lands anywhere in
 the module, and is **monotone** (once acquired, never lost — the assumption MHN/CBN are defined under).
@@ -306,9 +313,9 @@ Fitness gains `exp(Σᵢ βᵢxᵢ + Σᵢ<ⱼ Eᵢⱼxᵢxⱼ)` as a multiplier
 | `lethal_death_rate` | 1.0 | ≥ `max_birth_rate` | death rate of a synthetic-lethal genotype |
 
 **Trap — a strongly negative `E` does NOT produce mutual exclusivity on its own.** It only suppresses
-the *division* rate, and the crowding law uses `slope = max(0, division − death_rate)`: a clone that
-has stopped dividing therefore takes **no density-dependent death at all**, is never purged, and still
-reads as co-occurring — the opposite of the signal you meant to plant. `mutual_exclusivity_lethal`
+the *division* rate: a clone that has stopped dividing still dies only at its baseline rate (or at
+`crowding_d1` in a deme above `K`), so it lingers and still reads as co-occurring — the opposite of the
+signal you meant to plant. `mutual_exclusivity_lethal`
 (default on) gives the combination `lethal_death_rate` so it is actually removed.
 
 **And even then, exclusivity is not recoverable by MHN from a cross-sectional matrix in the regimes we
@@ -366,15 +373,14 @@ with `epistasis_params`:
   this. If recovery looks flat, check the observable's marginals before concluding anything about the
   method.
 
-### Gene programs / expression realism (R13, optional; **off by default**) — `expression_params`
+### Gene programs / expression realism (optional; **off by default**) — `expression_params`
 
 By default expression is the legacy model: genes are **independent** draws, a CNA adds ~1×baseline per
 copy (**linear dosage**), the SNV effect **reuses the fitness knob**, and the `p`/`m` alleles are
 **summed**. That is approximately the law the DNA↔RNA tools (clonealign, inferCNV, Numbat, cardelino)
 *invert*, so benchmarking them against it is partly circular. `expression_params` replaces all four.
 With it absent the engine is **unchanged**, and growth never reads it either way — programs are a
-**readout**, never fitness (that loop is R8b/R12-v3). See `DESIGN_expression.md`,
-`validation/validate_programs.py`.
+**readout**, never fitness. See `validation/validate_programs.py`.
 
 ```
 exp_{g,a} = base_{type,g}/2 · exp(Σ_k z_k·loading_{k,g}) · dosage(CN_{g,a}; s_g) · snv(class_{g,a}) · niche_g
@@ -431,7 +437,7 @@ targeted therapy, the target-expression check that reads it). For the ductal fie
 | `prop_program_regulator` | 2 | 0.0 | 0–0.1 | fraction of genes that shift `z` with **no** fitness change (R12 plasticity). Keep **sparse**: high → every clone is its own expression state |
 | `program_bias_strength` | 2 | 0.5 | 0–2 | how hard a mutated regulator shifts its program (graded by VAF) |
 | `n_programs_per_regulator` | 2 | 1 | 1–3 | how many programs one regulator touches |
-| `niche_program_map` / `niche_program_strength` | 3 | none / 1.0 | field→program names | generalises F8: `{hypoxia: hypoxia}` makes the O₂ field drive the hypoxia **program**. Composes with F8's own gene-level modifier |
+| `niche_program_map` / `niche_program_strength` | 3 | none / 1.0 | field→program names | generalises the microenvironment layer: `{hypoxia: hypoxia}` makes the O₂ field drive the hypoxia **program**. Composes with that layer's own gene-level modifier |
 
 #### `dosage_params` — axis A (CNA → expression)
 | Knob | Default | Valid range | Outside the range |
@@ -446,12 +452,12 @@ targeted therapy, the target-expression check that reads it). For the ductal fie
 |---|---|---|---|
 | `p_silent` / `p_missense` / `p_splice` / `p_lof` | 0.55 / 0.30 / 0.05 / 0.10 | normalised to 1 | class drawn per site (infinite-sites ⇒ one class per site, shared by every clone carrying it) |
 | `nmd_strength` | 0.2 | 0–1 | expression **retained** on a LoF allele (nonsense-mediated decay). With a CNA loss of the other homolog this gives a biallelic **two-hit** TSG for free |
-| `snv_expression_effect` | 0.5 | 0–2 | the splice-class expression shift. **Kept separate from the fitness effect** — they were one knob before R13, which entangled "advantageous" with "over-expressed" |
+| `snv_expression_effect` | 0.5 | 0–2 | the splice-class expression shift. **Kept separate from the fitness effect**, so "advantageous" and "over-expressed" are not the same knob |
 
 Silent and missense leave mRNA abundance alone (a missense changes protein *activity*, not
 abundance — which is exactly why it is invisible to expression-based clone assignment).
 
-### Microenvironment (F8, optional; off by default) — `microenv_params`
+### Microenvironment (optional; off by default) — `microenv_params`
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|
 | hypoxia `D` / `k` vs. tumour size | — | O₂ diffusion length **<** tumour radius | length ≫ tumour → uniform O₂, no gradient |
@@ -511,7 +517,7 @@ tumor.diagnose(thresholds={"shannon_min": 1.0})
 | **demes over-filling** | mean cells/occupied-deme vs `carrying_capacity` (> 3×K) | raise `maximum_death_rate` to ≥ `max_birth_rate` (crowding cap not binding); skipped in the well-mixed regime |
 | **no O₂ gradient** | hypoxia core–rim contrast (< 0.05) | grow a larger tumour, raise consumption `k`, or lower diffusion `D` |
 | **CNA runaway** | fraction-genome-altered (> 0.95) | lower `amp_prob` / copy-number event rate |
-| **clone == cell state** (R13; skipped when programs are off) | within-clone share of program-activity variance (< 0.05) | raise `activity_noise` / `activity_sd`, or set `n_active_programs_per_cell` < `n_programs` — with all three off `z` collapses to the per-clone drive |
+| **clone == cell state** (skipped when programs are off) | within-clone share of program-activity variance (< 0.05) | raise `activity_noise` / `activity_sd`, or set `n_active_programs_per_cell` < `n_programs` — with all three off `z` collapses to the per-clone drive |
 | **trivial genome** | gene count (< 100) | raise `n_segments` × `segment_size` |
 
 Thresholds are deliberately lenient — they flag the clearly broken, not the merely unusual — and every
@@ -523,5 +529,4 @@ one is overridable via `thresholds={...}`.
 - **Defaults to copy:** `notebooks/example_config.yaml`, `src/iscc/tumor/tumorconfigs/genotype.yaml`
 - **The characterization:** `analysis/characterize_regimes.py`, `validation/validate_operating_envelope.py`
   → `manuscript/figures/validation_operating_envelope.png`
-- **Design rationale:** `DESIGN_operating_envelope.md`
 - **Output layout (not parameters):** `SCHEMA.md`
