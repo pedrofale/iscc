@@ -63,7 +63,59 @@ The engine is split by concern into mixins of `GenotypeTumor`, all in `tumor/mod
 
 ## Simulation algorithms
 
-Written separately (decision-standard-simulation-algorithms).
+`iscc` simulates its tumour model with two standard algorithms and introduces none of its own (vault: `decision-standard-simulation-algorithms`).
+This section is written for a reader who knows CINner's or demon's algorithm; the model (the rates) is described elsewhere in this document and is kept apart from the algorithm that steps it.
+
+### The process
+
+The state is, for every deme, the number of cells of each genotype (`GenotypeTumor.demes`, a list of `{genotype id: count}`), over a registry of genotypes shared by all demes (`genotypes`).
+Every cancer clone in every deme has two event channels with per-cell rates: division at `b` and death at `d` (`_div_rate`, `_death_rate` in `count.py`).
+Mutation and dispersal are not channels of their own: they are outcomes of a division, decided when it fires (demon's invasion rule: `_divide_noble` in the exact mode, `_split_births_noble` in the tau mode, and `_mutate_daughter` for the new genome in both), and a dispersing daughter is routed by `_route_one` (exact) or `_route_births` (tau) in `tissue.py`.
+The rates depend on the clone's genome and on its deme (crowding, the resident and stromal hazards, the compartment), so the population is a continuous-time Markov jump process whose propensities are piecewise constant between events.
+Time is measured in generations, the unit of the rates.
+
+### The exact mode: Gillespie's direct method, in demon's hierarchical form
+
+`update_mode="exact"`; one event per call of `update()` (`count.py`).
+
+1. A deme is chosen with probability proportional to its summed rate (`_update_event`; `deme_rates` is kept per deme by `_deme_rate` and refreshed for every deme an event touches by `_refresh_rate`).
+2. Within the deme, a clone is chosen in proportion to its count times `b + d`, and the event is death with probability `d / (b + d)`, else division (`_event_in_deme`).
+3. Time advances by an exponential waiting time with the total rate, `Exp(sum(deme_rates))`, drawn after the event (`update()`), and the founding acinus's generation clock counts that time (`_origin_tick` in `tissue.py`).
+
+This is Gillespie's direct method (Gillespie 1977, *J Phys Chem* 81:2340), organised hierarchically as demon organises it (Noble et al. 2022, `demon.cpp`): the hierarchy only factorises the choice of the next event, so the event probabilities and the waiting-time distribution are those of the direct method.
+Each event draws from its own random stream (`_run_rng`, keyed by seed, purpose and event index), so runs at different seeds never share a stream.
+The exact mode is the reference against which the tau mode is checked.
+
+### The tau mode: tau-leaping, as in CINner
+
+`update_mode="tau"`; records are taken every `tau` generations (0.5 in the paper), and each record interval is covered by one or more leaps (`_tau_generation`).
+Within a leap of length `dt`, every channel of every clone in every deme fires a random number of times at its rate at the start of the leap (Gillespie 2001, *J Chem Phys* 115:1716), in `_tau_substep`:
+
+- divisions are `Poisson(b c dt)`;
+- deaths are `Binomial(c, min(1, d dt))`, binomial tau-leaping for a first-order channel (Tian and Burrage 2004, *J Chem Phys* 121:10356; Chatterjee et al. 2005, *J Chem Phys* 122:024112), so no count goes negative.
+
+**How CINner does it, for comparison.**
+CINner (Dinh et al. 2025, `CINner_step_1.r`) uses a fixed step, draws the total number of events of each clone from a Poisson distribution (a normal one above 1,000), redraws a count that exceeds the clone, and splits it multinomially into deaths, divisions and divisions with a new genotype.
+`iscc` draws divisions and deaths as separate channels, uses the binomial for deaths instead of a redraw, and chooses the step adaptively, because of its crowding step (below).
+
+**The step.**
+In the paper's crowding law the death rate of every cancer cell in a deme jumps from `d0` to `d1` (0.05 to 5) when the deme passes its capacity `K`, so a leap that freezes the rates lets a full deme lose several cells where the process loses one.
+The step is therefore chosen by a published rule, set by `deme_params["tau_step"]` and applied in `_tau_generation` (the historical default, `"fixed"`, splits each record interval into equal sub-steps bounded by the largest per-cell rate; it is not a leap condition and goes once the paper's rule is chosen):
+
+- `"cgp"`: the species-based ε-bounded step selection of Cao, Gillespie and Petzold (2006, *J Chem Phys* 124:044109), with each clone in each deme as a species of highest reaction order 1: `dt = min over species of max(ε c, 1) / |(b - d) c|` and `max(ε c, 1)^2 / ((b + d) c)` (`_cgp_dt`, ε = `tau_epsilon`, read by `_init_tau`);
+- `"cgp_critical"`: tau-leaping with critical reactions (Cao, Gillespie and Petzold 2005, *J Chem Phys* 123:054104): the channels of demes at or above `K` are critical (`_classify_critical`); each leap takes the ε-bounded step over the other channels and an exponential time for the critical ones, and fires one critical event exactly, through the exact mode's `_event_in_deme`, when its time comes first (`_tau_leaps_critical`).
+
+Against the exact mode (small systems of the 2026-11-14 algorithm reviews): `"cgp_critical"` reproduces a deme at capacity, neutral fixation and 5,000-cell tumours, but in a paper tumour most demes are full, so it costs more than the exact mode; `"cgp"` reproduces neutral fixation and 5,000-cell tumours and holds a full deme about 1% below the exact occupancy, at about five times the cost of the historical fixed step at ε 0.01.
+**The paper's step rule: pending Pedro's choice** (vault: `paper1-autonomous-log`, question 1a).
+
+**Births and free slots.**
+A deme holds at most `ρK` cells; a birth that reaches a full deme displaces a resident normal cell if there is one, and is lost otherwise.
+In the exact mode births arrive one at a time, so the first ones take the free slots.
+In a leap, the births routed to a deme (`_tau_substep`; the cap and eviction are `_slot_cap_of`, `_evict` and `_place_one` in `tissue.py`) arrive in the same interval; conditional on their numbers, the births of independent Poisson processes arrive in a uniformly random order, so the accepted ones are a multivariate hypergeometric draw over the candidates, and the leftovers compete in the same way for the slots that eviction frees.
+This is the conditional law of the exact process, not a separate model rule.
+
+**Stopping at a size.**
+`grow(..., target_cancer=)` (and `regime.grow`, which passes it) stops after the first event (exact) or leap (tau) at which the cancer population reaches the target, and advances the clock only by the time simulated.
 
 ## The genome and the mutation process
 

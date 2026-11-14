@@ -1360,7 +1360,7 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
             self._convert_in_place(di, gid, n, rng)
 
     def _cgp_dt(self, eps, demes=None):
-        """The species-based leap of Cao, Gillespie and Petzold (2006, J Chem Phys 124:044109, eq. 33).
+        """The species-based leap of Cao, Gillespie and Petzold (2006, J Chem Phys 124:044109).
 
         Each (deme, cancer clone) count c is a species, changed by first-order channels (division at b,
         death at d, both per cell), so its highest reaction order is 1. With mean drift
