@@ -630,6 +630,7 @@ def render(a):
     ax.axhline(0, color=S.GREY, lw=0.4)
     xaxis(ax, arms_b)
     ax.set_ylabel("Mean size − exact law (% of K)")
+    ax.set_title("Mean size at capacity", loc="left")
     ax.plot([], [], "o", ms=2.4, color=S.GREY, label="K = 60")
     ax.plot([], [], "o", ms=2.4, color=S.GREY, mfc="white", label="K = 30")
     ax.legend(loc="lower left", fontsize=5)
@@ -656,13 +657,14 @@ def render(a):
         ax.axhspan(e["lo"], e["hi"], color=S.BG_CELLS, lw=0, zorder=0)
     xaxis(ax, arms_c)
     ax.set_ylabel("Time to fixation (generations)")
+    ax.set_title("Fixation time", loc="left")
 
     # (e) tumours at 5,000 cells: every statistic of every tau arm against exact
     tum = sm.get("tumours", {})
     S.panel_letter(fig, "e", 2, 63)
     ax = S.ax_mm(fig, 47, 69, 84, 98)
     arms_e = [m for m in order if m in tum and m != "exact"]
-    CLIP = 25.0
+    CLIP = 20.0
     for i, (key, lab) in enumerate(TUMOUR_STATS):
         y0 = len(TUMOUR_STATS) - 1 - i
         if i % 2 == 0:
