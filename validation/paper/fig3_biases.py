@@ -239,21 +239,30 @@ def compute_c():
             return scDNA(n_cells=len(cancer), breadth=est.breadth, depth_model=est.depth_model, seed=21,
                          target_genes=tg, **{**est.dna_kwargs(), **over}).run(diss, cell_subset=cancer)
         real_cv = _f2()._cv_by_state(np.atleast_2d(z["coverage"]), np.atleast_2d(z["cn"])).get(2)
-        cvs = []
-        for x in KAPPA_X:
-            s = run(kappa=est.hypers.kappa * x)
-            cvs.append(_f2()._cv_by_state(s.coverage.values.astype(float), s.true_cn.values).get(2))
-        rec = dict(kappa_fit=float(est.hypers.kappa), cv_real_cn2=real_cv, cv_sweep_cn2=cvs)
+        sweep = [_sc_stats(VD, run(kappa=est.hypers.kappa * x)) for x in KAPPA_X]
+        rec = dict(kappa_fit=float(est.hypers.kappa), cv_real_cn2=real_cv, cv_sweep_cn2=[c for c, _ in sweep],
+                   ado_sweep_kappa=[a for _, a in sweep], ado_setting=float(est.hypers.ado_rate),
+                   ado_fitted="ado_rate" in est.fitted)
         if name == "Tapestri":
-            ado = []
-            for a in ADO_RATES:
-                s = run(ado_rate=a)
-                ado.append(VD._ado_frac(VD._baf_at_hets(s.alt_counts.values, s.coverage.values,
-                                                        VD._het_obs_assay_sc(s))))
+            ado = [_sc_stats(VD, run(ado_rate=a))[1] for a in ADO_RATES]
             rec.update(ado_fit=float(est.hypers.ado_rate), ado_sweep=ado,
                        ado_real=VD._ado_frac(VD._baf_at_hets(z["alt"], z["coverage"], z["het_mask"])))
         out[name] = rec
+    # The package's own single-cell defaults (scDNA.mode_defaults: kappa 5, ado_rate 0.20, no kappa_loci),
+    # recorded for the report; at whole-genome breadth kappa 5 spreads very few reads over thousands of loci.
+    try:
+        cv, a = _sc_stats(VD, scDNA(n_cells=len(cancer), breadth="wgs", seed=21).run(diss, cell_subset=cancer))
+        out["sc_default"] = dict(cv_cn2=cv, ado=a)
+    except Exception as e:                       # a diagnostic only; never lose the panel over it
+        out["sc_default"] = dict(error=f"{type(e).__name__}: {e}")
     return out
+
+
+def _sc_stats(VD, s):
+    """Coverage CV at two copies (median over cells) and measured allelic dropout of an scDNA run."""
+    cv = _f2()._cv_by_state(s.coverage.values.astype(float), s.true_cn.values).get(2)
+    ado = VD._ado_frac(VD._baf_at_hets(s.alt_counts.values, s.coverage.values, VD._het_obs_assay_sc(s)))
+    return cv, ado
 
 
 # --- d. scRNA ------------------------------------------------------------------------------------
@@ -372,7 +381,7 @@ def render_a(fig, y):
     ax.hist(off, bins=bins, density=True, color=SWEEP[1], alpha=0.8,
             label="stress off")
     ax.hist(on, bins=bins, density=True, color=SWEEP[-1], alpha=0.6, label=f"stress {d['stress_strength']:g}")
-    ax.set_xlabel(f"log$_{{10}}$ UMI share in the\n{d['n_stress_genes']} stress genes")
+    ax.set_xlabel(f"log$_{{10}}$ UMI share in {d['n_stress_genes']} stress\ngenes (a random 5% of genes)")
     ax.set_ylabel("Density")
     _legend(ax, loc="upper left")
     ax.set_title("dissociation stress", fontsize=5.5)
@@ -466,25 +475,37 @@ def render_c(fig, y):
     if "Tapestri" in ado:
         S.stat(ax, f"Tapestri allelic dropout:\nreal {ado['Tapestri'][0]:.2f}, iscc {ado['Tapestri'][1]:.2f}", "upper left")
     ax = axs[1]
+    i_fit = d["kappa_x"].index(1.0)
     for name, col in (("DLP+", SWEEP[-1]), ("Tapestri", SWEEP[1])):
         r = d[name]
-        ax.plot(d["kappa_x"], r["cv_sweep_cn2"], marker="o", ms=2.5, color=col, lw=0.8, label=f"iscc, {name} fit")
-        ax.axhline(r["cv_real_cn2"], color=col, lw=0.7, ls="--")
-    ax.axvline(1.0, color=S.BG_CELLS, lw=0.5, zorder=0)
+        cv, ado_ = r["cv_sweep_cn2"], r["ado_sweep_kappa"]
+        ax.plot(cv, ado_, color=col, lw=0.6, marker="o", ms=1.4, zorder=2)          # the concentration sweep
+        ax.scatter([cv[i_fit]], [ado_[i_fit]], s=16, color=col, zorder=4, label=f"iscc, {name} fit")
+    r = d["DLP+"]
+    lumpy = d.get("sc_default", {})
+    if "cv_cn2" in lumpy:
+        # scDNA's own single-cell defaults (kappa 5, ado_rate 0.20), which the code calls lumpy MDA/MALBAC
+        ax.scatter([lumpy["cv_cn2"]], [lumpy["ado"]], s=16, facecolors="white", edgecolors=S.SOURCE["iscc"], lw=0.8,
+                   zorder=4, label="iscc, lumpy setting (scDNA\ndefaults; not a validated preset)")
+    t_ = d["Tapestri"]
+    ax.scatter([t_["cv_real_cn2"]], [t_["ado_real"]], s=16, color=S.SOURCE["real"], marker="D", zorder=5,
+               label="Tapestri, real")
+    ax.axvline(r["cv_real_cn2"], color=S.SOURCE["real"], lw=0.7, ls="--", zorder=1, label="DLP+ real\n(no allele data)")
     ax.set_xscale("log")
-    ax.set_xlabel("Amplification concentration\n(x fitted)")
-    ax.set_ylabel("Coverage CV, two copies")
-    _legend(ax, loc="upper right")
-    ax.set_title("dashed: real; MDA-like preset pending", fontsize=5)
+    ax.set_xlabel("Coverage CV, two copies")
+    ax.set_ylabel("Allelic dropout")
+    ax.set_ylim(0, 0.95)
+    _legend(ax, loc="upper left", ncol=2, fontsize=3.8, columnspacing=0.6)
+    ax.set_title("lines: amplification concentration 0.1-10x fit", fontsize=5)
     ax = axs[2]
     r = d["Tapestri"]
     ax.plot(d["ado_rates"], r["ado_sweep"], marker="o", ms=2.5, color=S.SOURCE["iscc"], lw=0.8, label="iscc")
     ax.axhline(r["ado_real"], color=S.SOURCE["real"], lw=0.8, ls="--", label="Tapestri")
     ax.axvline(r["ado_fit"], color=S.BG_CELLS, lw=0.5, zorder=0)
     ax.set_xlabel("Allelic-dropout rate setting")
-    ax.set_ylabel("Measured allelic dropout")
+    ax.set_ylabel("Allelic dropout")
     _legend(ax, loc="upper left")
-    return dict(ado=ado, DLP=d["DLP+"], Tapestri=d["Tapestri"])
+    return dict(ado=ado, DLP=d["DLP+"], Tapestri=d["Tapestri"], sc_default=d.get("sc_default"))
 
 
 def render_d(fig, y):
@@ -540,7 +561,9 @@ def render_e(fig, y):
     ax.set_xlabel("Distance to the tissue (spot pitches)")
     ax.set_ylabel("Spot total outside the tissue\n/ mean tissue spot")
     _legend(ax, loc="upper left", bbox_to_anchor=(1.02, 1.05))
-    ax.set_title("SpotClean recovery of the true counts: pending", fontsize=5)
+    ax.set_title("spot swapping (iscc: the real tissue outline, synthetic cells)", fontsize=5)
+    S.text_mm(fig, 149, y + 19, "pending: SpotClean recovering the\ntrue counts on an iscc slide\n"
+              "(not run; no result on record)", fontsize=5, va="top", color=S.GREY)
     shares = {r: st["share"] for r, st in d["sweep"].items()}
     return dict(left=left, real_share=d["real_share"], iscc_share=shares, fit=d["fit"])
 
