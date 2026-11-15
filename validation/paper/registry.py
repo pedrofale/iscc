@@ -51,9 +51,11 @@ SWEEP, SHOW = T["sweep_scale"], T["showcase_scale"]
 def _runs():
     """name -> list of (task_name, grow kwargs). Variants override the paper regime, nothing else."""
     runs = {}
-    # R0: the showcase tumour, with its spatial history (one main seed plus replicates).
+    # R0: the showcase tumour, with its spatial history (one main seed plus replicates), and the
+    # metastatic lattice on (Fig 1a, 2a). The target counts primary and metastasis together.
     runs["R0"] = [(f"seed{s}", dict(seed=s, scale=SHOW, target_cancer=T["showcase_target"],
-                                    spatial_snapshot_every=2)) for s in (1, 2, 3)]
+                                    spatial_snapshot_every=2, selection=RG.MET_SELECTION,
+                                    spatial=RG.met_spatial(SHOW))) for s in (1, 2, 3)]
     # R1: dispersal sweep, clonal territories through to intermixing.
     runs["R1"] = [(f"disp{d}_seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
                                             spatial_snapshot_every=8, cancer={"dispersal_rate": d}))
@@ -97,9 +99,29 @@ def _runs():
                   for s in range(1, 7)]
     # R10: compartment barriers on against off (the genotype-niche benchmark and Fig 3C).
     off = {"breach_gated_invasion": False, "stromal_hazard": 0.0}
+    # Spatial history every 8 steps, so the time of first invasion and the clones that reach the stroma
+    # after it can be read off (Fig 2b).
     runs["R10"] = [(f"{name}_seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
-                                            spatial=sp))
+                                            spatial_snapshot_every=8, spatial=sp))
                    for name, sp in (("barriers", {}), ("open", off)) for s in SEEDS]
+    # R12: metastatic seeding across seeds (Fig 2e): the regime with the metastatic lattice, at the sweep
+    # scale, twice the sweep's seeds.
+    runs["R12"] = [(f"seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
+                                     spatial_snapshot_every=8, selection=RG.MET_SELECTION,
+                                     spatial=RG.met_spatial(SWEEP)))
+                   for s in range(1, 2 * T["seeds"] + 1)]
+    # R13: traits are selected where they pay (Fig 2c). The metastatic regime of R12 with the selection on
+    # one trait switched off per arm, seeds 1-10 (R12's seeds 1-10 are the selected arm): the breach gate
+    # off (crossing into the stroma no longer needs the breach trait), the stromal hazard off, or the
+    # host hazard off with every seeding cell surviving transit (the met-survival trait no longer pays).
+    # Each trait still costs proliferation everywhere, so its enrichment over the control is its benefit.
+    controls = {"no_breach_sel": {"breach_gated_invasion": False},
+                "no_stromal_sel": {"stromal_hazard": 0.0},
+                "no_met_sel": {"met_hazard": 0.0, "met_transit_floor": 1.0}}
+    runs["R13"] = [(f"{name}_seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
+                                            spatial_snapshot_every=8, selection=RG.MET_SELECTION,
+                                            spatial={**RG.met_spatial(SWEEP), **ctl}))
+                   for name, ctl in controls.items() for s in SEEDS]
     # R11: the human genome layer's tool figure (Fig 5) on an arm-homologous growth genome: one segment
     # per autosomal arm, 6,000 growth genes shared in proportion to each arm's genes, and 240 drivers
     # placed per arm from Cancer Gene Census content (driver_scale 0.4 keeps today's prop_driver 0.04
@@ -119,12 +141,15 @@ def _runs():
     arm_rates = {"cnv_prob": 0.045 * f, "mutation_rate": RG.CANCER["mutation_rate"] * k,
                  "wgd_rate": RG.CANCER["wgd_rate"] / k}
     arm = dict(genome=ag["genome_params"], selection=ag["selection_params"])
-    runs["R11"] = ([("seed1", dict(seed=1, scale=SHOW, target_cancer=T["showcase_target"],
-                                   spatial_snapshot_every=2, cancer=dict(arm_rates), **arm))]
+    # On regime v3 a genome doubling sweeps the showcase design and dispersal 0.9 at seed 1 (100% of cells,
+    # calibration stage 3, 2026-11-15), so seed 2 of each is grown beside it, as seed 2 at dispersal 0.1
+    # was when seed 1 swept there; the swept tumours are kept and labelled.
+    runs["R11"] = ([(f"seed{s}", dict(seed=s, scale=SHOW, target_cancer=T["showcase_target"],
+                                      spatial_snapshot_every=2, cancer=dict(arm_rates), **arm)) for s in (1, 2)]
                    + [(f"disp{d}_seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
                                                 spatial_snapshot_every=8,
                                                 cancer={**arm_rates, "dispersal_rate": d}, **arm))
-                      for d, s in ((0.1, 1), (0.1, 2), (0.9, 1))])
+                      for d, s in ((0.1, 1), (0.1, 2), (0.9, 1), (0.9, 2))])
     return runs
 
 

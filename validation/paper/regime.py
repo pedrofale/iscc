@@ -90,6 +90,21 @@ DEME = {"crowding_overfill": CROWDING_OVERFILL, "crowding_d1": CROWDING_D1,
         "maximum_death_rate": CROWDING_D1,
         "tau_deaths": "binomial", "tau_step": "cgp", "tau_epsilon": 0.01}
 
+# The metastatic deposit (Fig 1a, 2a, 2e; vault: paper1-figure-plan): the keys of configs/landing.yaml that
+# add the heritable met-survival trait and a second lattice reached through a vessel deme, without the
+# landing's treatment resistance. A variant passes MET_SELECTION as `selection` and met_spatial(scale)
+# as `spatial`. On regime v3 the trait stays rare in the primary (1-5% of cells in the smoke of
+# 2026-11-15) and seeding follows the release of the acinus by 30-200 generations.
+MET_SELECTION = {"prop_met_survival": 0.015, "met_survival_effects": 3.0, "met_survival_cost": 0.15}
+
+
+def met_spatial(scale):
+    """The metastatic lattice at ``scale``: as large as the primary field, with the landing's host
+    tissue, vessel entry and transit floor."""
+    return {"met_grid_size": RR.SCALES[scale]["grid_size"], "K_met": 60, "host_fill_frac": 0.5,
+            "met_seed_kappa": 0.03, "met_hazard": 3.5, "met_transit_floor": 0.001}
+
+
 # Visium spot swapping, fitted to 10x's V1_Breast_Cancer_Block_A_Section_1 (vault:
 # decision-visium-spot-swapping, exp-visium-bleed): SpotClean's model with a bleeding rate of 0.31, a
 # distal share of 0.30 (the slide-wide floor, so no in-spot ambient soup) and a kernel sd of 3.25 spot

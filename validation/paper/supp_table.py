@@ -1,14 +1,19 @@
-"""S1 Table: every simulation run of the paper, generated from the registry's manifests.
+"""The supplementary data file of runs and costs: every simulation of the paper, from the registry.
 
-One row per run of the registry (``registry.RUNS``): what the variant changes against the paper
-regime, its scale and seeds, how many tumours reached their target size, CPU time, and the figures
-that read it. Peak memory is not reported: the first preview registry reused one worker process
-across tumours, so its recorded peak is a running maximum, not a per-tumour figure.
+Two CSV files, written beside the figures (the paper carries no tables):
 
-Writes ``<paper>/tables/s1_table.tex`` and the same numbers as ``<paper>/figures/paper1/s1_runs.csv``,
-which the text quotes (the paper carries no tables).
+- ``runs.csv``: one row per run of the registry (``registry.RUNS``): what the variant changes against
+  the paper regime, its scale and target size, how many tumours were grown and reached their target,
+  CPU time, peak memory, the commits that grew them, and the figures that read it;
+- ``runs_tumours.csv``: one row per tumour: run, task, seed, scale, target, cancer cells reached, time
+  in generations, CPU and wall time, peak memory, and commit.
+
+Both read the per-task records the registry writes beside each tumour (``<task>.json``), not the
+shared ``manifest.jsonl``, on which concurrent array tasks can race. Each array task is its own process,
+so peak memory is per tumour.
 Run:  python validation/paper/supp_table.py
 """
+import csv
 import json
 import os
 import sys
@@ -24,79 +29,70 @@ from _paths import paper_dir  # noqa: E402
 # What each run changes against the paper regime, and where it is used (kept beside the registry's
 # definitions; a run added there without a row here is reported, not silently dropped).
 ROWS = {
-    "R0": ("Showcase tumour, spatial snapshots every 2 steps", "Figs 1, 2e--g, 3a, 3d, 3f"),
+    "R0": ("Showcase tumour with a metastatic lattice, spatial history every 2 steps",
+           "Figs 1, 2a, 2e, 3"),
     "R1": ("Cancer dispersal probability " + ", ".join(f"{d:g}" for d in REG.R1_DISPERSAL),
-           "Figs 2a, 3b, 4; S2 Fig"),
-    "R2": ("Selection on or off (driver effect 1.0), exact passengers", "Fig 2a, 2b"),
-    "R3": ("Ductal field or free growth, selection on or off", "Figs 2a, 4"),
+           "Fig 2f; supplementary territories figure"),
+    "R2": ("Selection on or off (driver effect 1.0), passengers not folded",
+           "Fig 2f; supplementary copy-number figure"),
+    "R3": ("Ductal field or free growth, selection on or off", "Figs 2d, 2f, 4e"),
     "R4": ("Copy-number rate 0, 0.05, 0.15, 0.3; SNV burden 0.05, 0.2, 0.5 at copy-number rate 0.05",
-           "Figs 2a, 3f, 5"),
-    "R5": ("Whole-genome duplication rate " + ", ".join(f"{w:g}" for w in getattr(REG, "R5_WGD", (0, 0.01, 0.03, 0.05, 0.1))),
-           "Figs 2c, 5"),
-    "R6": ("Six patients sharing one configuration", "Fig 3e; S4 Fig"),
-    "R10": ("Compartment barriers on or off", "Fig 3c; S3 Fig"),
+           "Fig 2f; supplementary benchmark-difficulty figure"),
+    "R5": ("Whole-genome duplication rate " + ", ".join(f"{w:g}" for w in REG.R5_WGD), "Fig 2f"),
+    "R6": ("Six patients sharing one configuration", "Supplementary cohort figure"),
+    "R10": ("Compartment barriers on or off, spatial history every 8 steps",
+            "Fig 2b; supplementary cell-state figure"),
+    "R11": ("Arm-homologous growth genome, copy-number events scaled by 39/12", "Fig 4b-d"),
+    "R12": ("Metastatic lattice, twenty seeds", "Fig 2c, 2e"),
+    "R13": ("Metastatic lattice with the selection on one trait switched off per arm", "Fig 2c"),
 }
 
 
-def manifest(run):
-    p = os.path.join(REG.OUT, run, "manifest.jsonl")
-    if not os.path.exists(p):
-        return {}
-    recs = {}
-    with open(p) as f:
-        for line in f:
-            r = json.loads(line)
-            recs[r["task"]] = r                   # the last record of a task is the current tumour
-    return {k: v for k, v in recs.items() if k in set(REG.tasks(run))}
+def records(run):
+    """The per-task record of every tumour of ``run`` grown so far."""
+    out = {}
+    for task in REG.tasks(run):
+        p = os.path.splitext(REG.task_path(run, task))[0] + ".json"
+        if os.path.exists(p):
+            with open(p) as f:
+                out[task] = json.load(f)
+    return out
 
 
 def main():
-    lines = [r"\begin{tabular}{l p{5.2cm} l r r r l}", r"\toprule",
-             r"Run & Variant of the paper regime & Scale & Tumours & Reached & CPU (s) & Used in \\",
-             r"\midrule"]
+    root = os.path.join(paper_dir(), "figures", "paper1")
+    os.makedirs(root, exist_ok=True)
+    runs, tumours = [], []
     for run in REG.RUNS:
         if run not in ROWS:
-            print(f"!! {run} has no S1 Table row")
+            print(f"!! {run} has no row in supp_table.ROWS")
             continue
-        m = manifest(run)
+        m = records(run)
         if not m:
             continue
-        desc, used = ROWS[run]
-        scale = sorted({r["kwargs"]["scale"] for r in m.values()})
-        target = sorted({r["kwargs"]["target_cancer"] for r in m.values()})
         cpu = np.array([r["cpu_s"] for r in m.values()], dtype=float)
-        reached = sum(bool(r.get("reached_target", True)) for r in m.values())
-        size = ", ".join(f"{s} ({t // 1000}k)" for s, t in zip(scale, target))
-        lines.append(f"{run} & {desc} & {size} & {len(m)} & {reached} & "
-                     f"{np.median(cpu):.0f} ({cpu.min():.0f}--{cpu.max():.0f}) & {used} \\\\")
-    lines += [r"\bottomrule", r"\end{tabular}"]
-    import csv
-    csv_path = os.path.join(paper_dir(), "figures", "paper1", "s1_runs.csv")
-    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
-    with open(csv_path, "w", newline="") as f:
+        sizes = sorted({(r["kwargs"]["scale"], r["kwargs"]["target_cancer"]) for r in m.values()})
+        runs.append([run, ROWS[run][0], "; ".join(f"{s} {t}" for s, t in sizes), len(REG.tasks(run)), len(m),
+                     sum(bool(r.get("reached_target")) for r in m.values()),
+                     f"{np.median(cpu):.1f}", f"{cpu.min():.1f}", f"{cpu.max():.1f}",
+                     max(r.get("peak_mb", 0) for r in m.values()),
+                     " ".join(sorted({str(r.get("commit")) for r in m.values()})), ROWS[run][1]])
+        for task, r in m.items():
+            kw = r["kwargs"]
+            tumours.append([run, task, kw.get("seed"), kw.get("scale"), kw.get("target_cancer"), r.get("cancer"),
+                            r.get("time"), r.get("cpu_s"), r.get("wall_s"), r.get("peak_mb"),
+                            bool(r.get("reached_target")), r.get("commit")])
+    with open(os.path.join(root, "runs.csv"), "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["run", "variant", "scale_target", "tumours", "reached", "cpu_median_s", "cpu_min_s",
-                    "cpu_max_s", "peak_mb_max", "commits", "used_in"])
-        for run in REG.RUNS:
-            m = manifest(run)
-            if not m or run not in ROWS:
-                continue
-            cpu = np.array([r["cpu_s"] for r in m.values()], dtype=float)
-            scale = sorted({(r["kwargs"]["scale"], r["kwargs"]["target_cancer"]) for r in m.values()})
-            w.writerow([run, ROWS[run][0], "; ".join(f"{s} {t}" for s, t in scale), len(m),
-                        sum(bool(r.get("reached_target", True)) for r in m.values()),
-                        f"{np.median(cpu):.1f}", f"{cpu.min():.1f}", f"{cpu.max():.1f}",
-                        max(r.get("peak_mb", 0) for r in m.values()),
-                        " ".join(sorted({str(r.get("commit")) for r in m.values()})),
-                        ROWS[run][1].replace("--", "-")])
-    print("wrote", csv_path)
-    out = os.path.join(paper_dir(), "tables", "s1_table.tex")
-    os.makedirs(os.path.dirname(out), exist_ok=True)
-    with open(out, "w") as f:
-        f.write("% generated by iscc validation/paper/supp_table.py; do not edit by hand\n")
-        f.write("\n".join(lines) + "\n")
-    print("wrote", out)
-    print("\n".join(lines))
+        w.writerow(["run", "variant", "scale_target", "tumours_planned", "tumours_grown", "reached_target",
+                    "cpu_median_s", "cpu_min_s", "cpu_max_s", "peak_mb_max", "commits", "used_in"])
+        w.writerows(runs)
+    with open(os.path.join(root, "runs_tumours.csv"), "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["run", "task", "seed", "scale", "target_cancer", "cancer_reached", "time_generations",
+                    "cpu_s", "wall_s", "peak_mb", "reached_target", "commit"])
+        w.writerows(tumours)
+    print("wrote", os.path.join(root, "runs.csv"), "and runs_tumours.csv:", len(runs), "runs,", len(tumours), "tumours")
 
 
 if __name__ == "__main__":
