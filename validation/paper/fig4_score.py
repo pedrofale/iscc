@@ -143,8 +143,9 @@ def figure(c, d, path):
             ax.plot(i - 0.28, r.majority, marker="_", ms=6, mew=0.8, color=S.GREY, ls="none", zorder=1)
             ax.plot(i, r.acc_true, "o", ms=4, mfc=S.INK, mec="white", mew=0.4, zorder=3)
             ax.plot(i, r.acc_dna, "o", ms=4, mfc=DNA, mec="white", mew=0.4, zorder=3)
-            ax.text(i + 0.12, (r.acc_true + r.acc_dna) / 2, f"{r.gap:+.2f}".replace("+", "−") if r.gap > 0
-                    else f"+{-r.gap:.2f}", fontsize=5, color=S.INK, va="center")
+            change = r.acc_dna - r.acc_true                 # what the DNA step costs (negative: a loss)
+            ax.text(i + 0.12, (r.acc_true + r.acc_dna) / 2, f"{change:+.2f}".replace("-", "−"),
+                    fontsize=5, color=S.INK, va="center")
         ax.set_xticks(range(len(order)))
         ax.set_xticklabels([short[t] for t in order], rotation=20, ha="right")
         ax.set_xlim(-0.6, len(order) - 0.4)
@@ -159,7 +160,8 @@ def figure(c, d, path):
     # d: spatial clone mapping with a DNA prior
     S.panel_letter(fig, "d", 96, 3)
     ax = S.ax_mm(fig, 108, 8, 70, 38)
-    colours = {"Clonalscope": "#4C72B0", "Clonalscope, DNA prior": DNA, "CalicoST": "#31A354"}
+    # validated (dataviz validate_palette, all pairs, light): CVD and normal-vision separation pass
+    colours = {"Clonalscope": "#EB6834", "Clonalscope, DNA prior": DNA, "CalicoST": "#1BAF7A"}
     if len(d):
         names = [n for n in colours if n in set(d["tool"])]
         w = 0.22
