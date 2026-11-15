@@ -51,9 +51,11 @@ SWEEP, SHOW = T["sweep_scale"], T["showcase_scale"]
 def _runs():
     """name -> list of (task_name, grow kwargs). Variants override the paper regime, nothing else."""
     runs = {}
-    # R0: the showcase tumour, with its spatial history (one main seed plus replicates).
+    # R0: the showcase tumour, with its spatial history (one main seed plus replicates), and the
+    # metastatic lattice on (Fig 1a, 2a). The target counts primary and metastasis together.
     runs["R0"] = [(f"seed{s}", dict(seed=s, scale=SHOW, target_cancer=T["showcase_target"],
-                                    spatial_snapshot_every=2)) for s in (1, 2, 3)]
+                                    spatial_snapshot_every=2, selection=RG.MET_SELECTION,
+                                    spatial=RG.met_spatial(SHOW))) for s in (1, 2, 3)]
     # R1: dispersal sweep, clonal territories through to intermixing.
     runs["R1"] = [(f"disp{d}_seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
                                             spatial_snapshot_every=8, cancer={"dispersal_rate": d}))
@@ -100,6 +102,12 @@ def _runs():
     runs["R10"] = [(f"{name}_seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
                                             spatial=sp))
                    for name, sp in (("barriers", {}), ("open", off)) for s in SEEDS]
+    # R12: metastatic seeding across seeds (Fig 2e): the regime with the metastatic lattice, at the sweep
+    # scale, twice the sweep's seeds.
+    runs["R12"] = [(f"seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
+                                     spatial_snapshot_every=8, selection=RG.MET_SELECTION,
+                                     spatial=RG.met_spatial(SWEEP)))
+                   for s in range(1, 2 * T["seeds"] + 1)]
     # R11: the human genome layer's tool figure (Fig 5) on an arm-homologous growth genome: one segment
     # per autosomal arm, 6,000 growth genes shared in proportion to each arm's genes, and 240 drivers
     # placed per arm from Cancer Gene Census content (driver_scale 0.4 keeps today's prop_driver 0.04
