@@ -153,8 +153,7 @@ def collect(out_dir):
     return pd.DataFrame(rows_c), pd.DataFrame(rows_d)
 
 
-def _panel_c(ax, c, order, short, S, DNA, metric, legend):
-    from matplotlib.lines import Line2D
+def _panel_c(ax, c, order, short, S, DNA, metric):
     for i, tu in enumerate(order):
         r = c[c["tumour"] == tu]
         if not len(r):
@@ -166,23 +165,15 @@ def _panel_c(ax, c, order, short, S, DNA, metric, legend):
         ax.plot(i - 0.28, base, marker="_", ms=6, mew=0.8, color=S.GREY, ls="none", zorder=1)
         ax.plot(i, a_t, "o", ms=4, mfc=S.INK, mec="white", mew=0.4, zorder=3)
         ax.plot(i, a_d, "o", ms=4, mfc=DNA, mec="white", mew=0.4, zorder=3)
-        ax.text(i + 0.12, (a_t + a_d) / 2, f"{a_d - a_t:+.2f}".replace("-", "\u2212"), fontsize=5,
+        ax.text(i + 0.1, (a_t + a_d) / 2, f"{a_d - a_t:+.2f}".replace("-", "\u2212"), fontsize=4.6,
                 color=S.INK, va="center")
     ax.set_xticks(range(len(order)))
-    ax.set_xticklabels([short[t] for t in order], rotation=20, ha="right")
-    ax.set_xlim(-0.6, len(order) - 0.4)
+    ax.set_xticklabels([short[t] for t in order], fontsize=4.6)
+    ax.set_xlim(-0.6, len(order) - 0.3)
     ax.set_ylim(0, 1.02)
-    if legend:
-        h = [Line2D([], [], marker="o", ls="none", mfc=S.INK, mec="white", ms=4, label="true clones and profiles"),
-             Line2D([], [], marker="o", ls="none", mfc=DNA, mec="white", ms=4,
-                    label="clones from simulated scDNA (HMMcopy, clustering)"),
-             Line2D([], [], marker="_", ls="none", color=S.GREY, ms=6, mew=0.8,
-                    label="largest clone" if metric == "acc" else "chance")]
-        ax.legend(handles=h, loc="upper right", fontsize=4.6, frameon=False)
 
 
-def _panel_d(ax, d, order, short, S, colours, legend):
-    from matplotlib.lines import Line2D
+def _panel_d(ax, d, order, short, S, colours):
     names = [n for n in colours if n in set(d["tool"])]
     w = 0.22
     for i, tu in enumerate(order):
@@ -196,13 +187,9 @@ def _panel_d(ax, d, order, short, S, colours, legend):
                 ax.plot(i + (j - (len(names) - 1) / 2) * w, v.iat[0], "o", ms=4, mfc=colours[n], mec="white",
                         mew=0.4, zorder=3)
     ax.set_xticks(range(len(order)))
-    ax.set_xticklabels([short[t] for t in order], rotation=20, ha="right")
+    ax.set_xticklabels([short[t] for t in order], fontsize=4.6)
     ax.set_xlim(-0.6, len(order) - 0.4)
     ax.set_ylim(0, 1.02)
-    if legend:
-        h = [Line2D([], [], marker="o", ls="none", mfc=colours[n], mec="white", ms=4, label=n) for n in names]
-        h.append(Line2D([], [], color=S.GREY, lw=0.6, ls=":", label="largest clone everywhere"))
-        ax.legend(handles=h, loc="lower left", fontsize=4.6, frameon=False, ncol=2)
 
 
 def figure(c, d, path):
@@ -218,35 +205,51 @@ def figure(c, d, path):
     if len(d):
         tumours |= set(d["tumour"])
     order = sorted(tumours, key=lambda s: (0 if s.endswith("_seed1") and "disp" not in s else 1, s))
-    short = {t: t.split("_", 1)[1].replace("disp", "dispersal ").replace("_seed", ", seed ") for t in order}
+    def _short(t):
+        task = t.split("_", 1)[1]
+        if task.startswith("disp"):
+            d_, s_ = task[4:].split("_seed")
+            return f"disp. {d_}\nseed {s_}"
+        return f"showcase\nseed {task.replace('seed', '')}"
+    short = {t: _short(t) for t in order}
     swept = set()
     for frame in (c, d):
         if len(frame) and "wgd_swept" in frame:
             swept |= set(frame.loc[frame["wgd_swept"] == True, "tumour"])  # noqa: E712
-    short = {t: v + (" (WGD swept)" if t in swept else "") for t, v in short.items()}
+    short = {t: v + ("\nWGD swept" if t in swept else "") for t, v in short.items()}
     DNA = S.MODALITY["DNA"]
     # validated (dataviz validate_palette, all pairs, light): CVD and normal-vision separation pass
     colours = {"Clonalscope": "#EB6834", "Clonalscope, DNA prior": DNA, "CalicoST": "#1BAF7A"}
-    label = {"fine": "answer-key clones", "coarse": "their copy-number groups"}
-    for row, res in enumerate(("fine",)):
-        y = 8 + row * 56
-        cc = c[c["resolution"] == res] if len(c) else c
-        dd = d[d["resolution"] == res] if len(d) else d
-        for col, (metric, ylab) in enumerate((("acc", "clonealign accuracy"), ("bal", "balanced accuracy"))):
-            if row == 0 and col == 0:
-                S.panel_letter(fig, "c", 2, 3)
-            ax = S.ax_mm(fig, 14 + col * 42, y, 34, 34)
-            if len(cc):
-                _panel_c(ax, cc, order, short, S, DNA, metric, legend=(row == 0 and col == 0))
-            ax.set_ylabel(f"{ylab}\n({label[res]})")
-        if row == 0:
-            S.panel_letter(fig, "d", 110, 3)
-        ax = S.ax_mm(fig, 122, y, 56, 34)
-        if len(dd):
-            _panel_d(ax, dd, order, short, S, colours, legend=(row == 0))
-        else:
-            ax.text(0.5, 0.5, "pending", transform=ax.transAxes, ha="center", fontsize=6, color=S.GREY)
-        ax.set_ylabel(f"per-spot clone-fraction error\n({label[res]})")
+    from matplotlib.lines import Line2D
+    y, h = 12, 36
+    cc = c[c["resolution"] == "fine"] if len(c) else c
+    dd = d[d["resolution"] == "fine"] if len(d) else d
+    S.panel_letter(fig, "c", 2, 3)
+    for col, (metric, ylab, base) in enumerate((("bal", "Balanced accuracy", "chance"),
+                                               ("acc", "Accuracy", "largest clone for every cell"))):
+        ax = S.ax_mm(fig, 13 + col * 46, y, 36, h)
+        if len(cc):
+            _panel_c(ax, cc, order, short, S, DNA, metric)
+        ax.set_ylabel(f"clonealign {ylab.lower()}")
+        ax.legend(handles=[Line2D([], [], marker="_", ls="none", color=S.GREY, ms=6, mew=0.8, label=base)],
+                  loc="upper right", fontsize=4.6, frameon=False)
+    fig.legend(handles=[Line2D([], [], marker="o", ls="none", mfc=S.INK, mec="white", ms=4,
+                               label="given the true clones and profiles"),
+                        Line2D([], [], marker="o", ls="none", mfc=DNA, mec="white", ms=4,
+                               label="given the clones called from simulated scDNA (HMMcopy, clustering)")],
+               loc="upper left", bbox_to_anchor=(10 / 183, 1 - 1 / 62), ncol=1, fontsize=4.8, frameon=False)
+    S.panel_letter(fig, "d", 104, 3)
+    ax = S.ax_mm(fig, 116, y, 64, h)
+    if len(dd):
+        _panel_d(ax, dd, order, short, S, colours)
+        names = [n for n in colours if n in set(dd["tool"])]
+        hd = [Line2D([], [], marker="o", ls="none", mfc=colours[n], mec="white", ms=4, label=n) for n in names]
+        hd.append(Line2D([], [], color=S.GREY, lw=0.6, ls=":", label="largest clone everywhere"))
+        fig.legend(handles=hd, loc="upper left", bbox_to_anchor=(112 / 183, 1 - 1 / 62), ncol=2, fontsize=4.8,
+                   frameon=False)
+    else:
+        ax.text(0.5, 0.5, "pending", transform=ax.transAxes, ha="center", fontsize=6, color=S.GREY)
+    ax.set_ylabel("Per-spot clone-fraction error")
     src = os.environ.get("ISCC_PAPER_OUT", "")
     fig.text(0.995, 0.004, f"draft; R11 tumours from {os.path.basename(src.rstrip('/')) or 'the registry'}",
              ha="right", va="bottom", fontsize=4.5, color=S.GREY)
