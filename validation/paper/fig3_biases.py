@@ -7,8 +7,8 @@ value exists.
   (a) sampling: cell-type composition before and after dissociation for three settings of the recovery
       bias, the dissociation-stress signature in the recovered cells, and the clone fractions of the
       whole tumour against a section, a dissociated sample and four multi-region blocks;
-  (b) WGS: per-locus coverage of GIAB HG002 against fitted iscc, the coverage spread across the depth
-      model's concentration, and iscc's coverage against GC content across the GC-bias strength;
+  (b) WGS: per-locus coverage of GIAB HG002 (two copies) against fitted iscc at the loci of the tumour's
+      most common copy number, the coverage spread across the depth model's concentration, and iscc's coverage against GC content across the GC-bias strength;
   (c) scDNA: coverage spread per copy-number state (DLP+, Tapestri) and Tapestri allelic dropout, fitted
       against real; the spread across amplification concentration and the dropout across ``ado_rate``;
   (d) scRNA: PBMC3k against fitted iscc (library size, mean-variance, zero fraction); the 10x and
@@ -179,6 +179,7 @@ def compute_a():
 KAPPA_X = (0.1, 0.3, 1.0, 3.0, 10.0)           # multiples of the fitted DM concentration
 GC_SIGMA = (0.0, 0.1, 0.2, 0.4)
 LOW_COV = 0.1                                  # "near-empty" locus: below a tenth of the mean coverage
+CN_BAND = 0.02                                 # loci within this of the modal true copy number count as one state
 
 
 def _bulk(diss, est, seed=11, **over):
@@ -199,13 +200,20 @@ def compute_b():
     diss = RR.resect(t).dissociate(max_cells=1500, layers="scdna")
     del t
     fit = _bulk(diss, est)
-    two = np.rint(fit["true_cn"].values) == 2
-    sim = fit["coverage"].values[two].astype(float)
+    # HG002's sites are all at two copies, so its CV is the depth model's alone. The tumour's loci are
+    # compared at one copy number too: those whose true (sample-mean) copy number is within CN_BAND of the
+    # most common value. Rounding to two copies instead mixes states on a doubled tumour (on the v4
+    # showcase, 17% of loci, true copies 1.98-2.3, CV 0.49 against 0.43 at the mode).
+    cn = fit["true_cn"].values.astype(float)
+    vals, counts = np.unique(np.round(cn, 2), return_counts=True)
+    cn_mode = float(vals[np.argmax(counts)])
+    same = np.abs(cn - cn_mode) < CN_BAND
+    sim = fit["coverage"].values[same].astype(float)
     hist = dict(real=(real / real.mean()).tolist(), iscc=(sim / sim.mean()).tolist())
     sweep = []
     for x in KAPPA_X:
         o = _bulk(diss, est, kappa=est.hypers.kappa * x)
-        sweep.append(_cv(o["coverage"].values[np.rint(o["true_cn"].values) == 2]))
+        sweep.append(_cv(o["coverage"].values[np.abs(o["true_cn"].values.astype(float) - cn_mode) < CN_BAND]))
     gc = {}
     for s in GC_SIGMA:
         # several batches per strength: each batch draws its own curve (peak and curvature)
@@ -218,6 +226,7 @@ def compute_b():
     # the CVs match but the shapes do not: HG002 has a spike of near-empty loci that iscc lacks
     low = {k: float((np.asarray(v) < LOW_COV).mean()) for k, v in hist.items()}
     return dict(_tumour=REG.task_path(*TUMOUR), hist=hist, cv_real=_cv(real), cv_iscc=_cv(sim), low_frac=low,
+                cn_mode=cn_mode, share_loci_at_mode=float(same.mean()),
                 kappa_fit=float(est.hypers.kappa), kappa_x=list(KAPPA_X), cv_sweep=sweep,
                 gc_sigma_fit=float(est.hypers.gc_curve_sigma), gc_fitted="gc_curve_sigma" in est.fitted, gc=gc)
 
@@ -442,7 +451,7 @@ def render_b(fig, y):
     r, s = np.asarray(d["hist"]["real"]), np.asarray(d["hist"]["iscc"])
     bins = np.linspace(0, np.quantile(np.concatenate([r, s]), 0.995), 40)
     ax.hist(r, bins=bins, density=True, color=S.SOURCE["real"], alpha=0.6, label="GIAB HG002")
-    ax.hist(s, bins=bins, density=True, color=S.SOURCE["iscc"], alpha=0.6, label="iscc, fitted")
+    ax.hist(s, bins=bins, density=True, color=S.SOURCE["iscc"], alpha=0.6, label="iscc, fitted\n(modal copy number)")
     ax.set_xlabel("Per-locus coverage / mean")
     ax.set_ylabel("Density")
     _legend(ax, loc="upper right")
