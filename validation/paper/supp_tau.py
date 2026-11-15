@@ -1,167 +1,686 @@
-"""S1 Fig: tau-leaping against the exact engine, in the paper regime.
+"""S1 Fig: tau-leaping against Gillespie's direct method (the exact engine), in the paper regime.
 
-The paper grows every tumour with tau-leaping (one leap of all clones per tau generations). The
-exact engine realises the same birth, death, mutation and dispersal process one event at a time.
-The two are not byte-identical (they draw different random variables), so they are compared by
-distribution: each grows the small-scale paper regime to the same number of cancer cells over many
-seeds, and the clone-size distribution, clonal diversity and copy-number burden are compared.
+Every tumour in the paper is grown by tau-leaping: binomial deaths (Tian and Burrage 2004; Chatterjee
+et al. 2005) and each leap chosen by the epsilon-bounded rule of Cao, Gillespie and Petzold (2006) at
+epsilon 0.01 (``regime.DEME``; vault: decision-paper-regime-v3). This figure checks it against the
+exact engine, which realises the same continuous-time Markov jump process one event at a time and
+keeps Gillespie's clock. The comparison is built to be able to show a bias (vault:
+decision-standard-simulation-algorithms, its F4-F6):
 
-The comparison stops at 5,000 cancer cells, because the exact engine's cost grows with the number of
-events, and runs with the founding acinus's confinement switched off. The two engines advance the
-confinement clock on different scales (the tau engine by one per step of tau generations, the exact
-engine by one per event per cancer cell), so with confinement on they open the acinus at different
-times and the comparison would test the clock, not the growth algorithm (issues note, N8).
+* **it varies the leap, not the record interval.** Besides the paper's tau-leaping it runs the same
+  rule at a coarser epsilon (0.03, 0.1), the critical-channel rule (Cao, Gillespie and Petzold 2005),
+  which fires the channels of demes at or above K one at a time, and the historical leap (capped
+  Poisson deaths, a fixed sub-step), whose biases the algorithm reviews of 2026-11-14 measured. The
+  rule's bound is max(epsilon c, 1) per (deme, clone) count c, and no count exceeds the slot cap
+  floor(1.5 K) = 90 here, so every epsilon at or below 1/90 picks the same leap: epsilon 0.003 is run
+  on a few seeds only, to show that it reproduces the paper's runs exactly;
+* **it compares at matched size.** Every tumour stops at the first event (exact) or leap (tau) that
+  reaches 5,000 cancer cells (``grow(..., target_cancer=)``);
+* **it uses independent streams.** Streams are keyed by (seed, purpose, step); the exact and the tau
+  arms grow from different growth seeds (``GROW_SEED``) on the same construction seeds, so they share
+  the field, germline and founder of a seed but no random draw of growth;
+* **it runs the paper's regime, confinement on.** The founding acinus is held for 200 generations of
+  Gillespie time (exact) or simulated time (tau) after it is half full, as in every paper tumour.
 
-Writes ``figures/paper1/supp_s1_tau.pdf``; per-tumour results are cached in ``derived/supp_tau``.
-Run:  python validation/paper/supp_tau.py [--seeds 30]
+Two small systems of the algorithm reviews (``wt/audit-algorithms/audit_sim.py``) are re-run with the
+paper's rates (division 0.7, death 0.05 up to K and 5 above it, slot cap 1.5 K): one deme held at K
+(time-averaged occupancy after a burn-in), and neutral fixation in a full deme of K = 30 (one cell
+relabelled as an identical twin; by exchangeability it fixes with probability 1/N0).
+
+Per tumour, at 5,000 cells: drivers per cell and clonal diversity at the 5% detection limit and at
+full census (:func:`iscc.inference.mode_indices`), live genotypes, fraction of genome altered, the
+occupancy (cells / K) at 5,000 cells of the demes that reached K, the founding acinus's time-averaged
+occupancy while it is confined (from 10 generations after it is half full to its release), the time
+to reach 5,000 cells, the acinus's release time and the in-situ phase (release to the first cancer
+cell in a stroma deme, read every half generation in both engines), and the wall time of growth.
+
+Heavy work runs through Slurm (``wt/s1-jobs``); results are a few JSON-lines files per arm.
+Run:
+    python validation/paper/supp_tau.py run --out DIR --nproc 64 \
+        --tumours exact:300,paper:300 --deme exact:200 --fix exact:40000
+    python validation/paper/supp_tau.py render --out DIR     # figure via $ISCC_PAPER_DIR
 """
 import argparse
 import json
+import math
 import os
 import sys
+import time
 
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
-import common as C  # noqa: E402
-import regime as RG  # noqa: E402
 import realistic_regime as RR  # noqa: E402
-import style as S  # noqa: E402
+import regime as RG  # noqa: E402
 
-CACHE = os.path.join(C.DERIVED, "supp_tau_noconf")
-TARGET = 5_000
+SCALE = "small"                  # grid 48, 3 glands: the exact engine's cost grows with the events
+TARGET = 5_000                   # cancer cells at which every arm stops
+GRID = 0.5                       # generations between the reads of the in-situ phase and full demes
+SETTLE = 10.0                    # generations after the acinus is half full before its occupancy counts
+T_MAX = 1_500.0                  # generations; a tumour still below target then has stayed in situ
+GROW_SEED = {"exact": 10_000_000, "tau": 20_000_000}   # growth seed = construction seed + offset
+
+_TAU_PAPER = {k: RG.DEME[k] for k in ("tau_deaths", "tau_step", "tau_epsilon")}
+ARMS = {
+    "exact": dict(mode="exact", label="exact (Gillespie)"),
+    "paper": dict(mode="tau", deme=dict(_TAU_PAPER), label="paper: binomial, CGP ε 0.01"),
+    "eps0.003": dict(mode="tau", deme=dict(_TAU_PAPER, tau_epsilon=0.003), label="CGP ε 0.003"),
+    "eps0.03": dict(mode="tau", deme=dict(_TAU_PAPER, tau_epsilon=0.03), label="CGP ε 0.03"),
+    "eps0.1": dict(mode="tau", deme=dict(_TAU_PAPER, tau_epsilon=0.1), label="CGP ε 0.1"),
+    "critical": dict(mode="tau", deme=dict(_TAU_PAPER, tau_step="cgp_critical"),
+                     label="critical channels exact, ε 0.01"),
+    "historical": dict(mode="tau", deme=dict(tau_deaths="poisson", tau_step="fixed"),
+                       label="historical: Poisson, fixed step"),
+}
+assert ARMS["paper"]["deme"] == {"tau_deaths": "binomial", "tau_step": "cgp", "tau_epsilon": 0.01}
+
+# The small systems: the paper's cell law on one deme, no mutation, no dispersal.
+B0 = float(RR.CANCER["division_rate"])                 # 0.7
+D0 = float(RR.CANCER["death_rate"])                    # 0.05
+D1 = float(RG.CROWDING_D1)                             # 5
+OVERFILL = float(RG.CROWDING_OVERFILL)                 # 1.5
+DEME_K = (30, 60)                                      # K_stroma and K_duct
+DEME_BURN, DEME_OBS = 50.0, 200.0
+FIX_K, FIX_BURN, FIX_TMAX, FIX_BATCH = 30, 30.0, 2_000.0, 200
 
 
-def grow(mode, seed):
-    from iscc.tumor.models import GenotypeTumor
-    tau = RR.TAU if mode == "tau" else (float(mode[3:]) if mode.startswith("tau") else RR.TAU)
-    engine = "tau" if mode.startswith("tau") else "exact"
-    cfg = RG.config(RG.T["sweep_scale"], spatial={"origin_confinement": None}, update_mode=engine,
-                    tau=tau)
-    t = GenotypeTumor(seed=seed, max_cells=1, **cfg)
-    if engine == "tau":
-        steps = 0
-        while 0 < t.get_cancer_size() < TARGET and steps < 8_000:
-            t.grow(n_steps=1, seed=seed)
-            steps += 1
-    else:
-        rng, n = t.rng, 0
-        while 0 < t.get_cancer_size() < TARGET and n < 20_000_000:
-            t.update(rng)
-            t.step += 1
-            n += 1
-    return t
+# ---------------------------------------------------------------------------------- tumours
+def _tumour_config(arm):
+    a = ARMS[arm]
+    return RG.config(SCALE, deme=a.get("deme"), update_mode=a["mode"])
 
 
-def metrics(t):
-    counts = C.live_cancer_counts(t)
-    w = np.array(list(counts.values()), dtype=float)
-    if not w.sum():
-        return None
-    p = w / w.sum()
-    cn = np.array([t.genotypes[g].genome_summary["seg_cns"] for g in counts], dtype=float)
-    fga = ((cn != 2).mean(1) * w).sum() / w.sum()                     # fraction of segments altered
+def run_tumour(arm, seed):
+    """Grow one paper-regime tumour of ``arm`` from construction seed ``seed`` to TARGET cells."""
     from iscc.inference import mode_indices
-    m = mode_indices(t)
-    return dict(cancer=int(w.sum()), n_genotypes=int(len(w)), top=float(p.max()),
-                D_genotypes=float(1 / np.sum(p ** 2)), n_drivers=float(m["n"]), D_drivers=float(m["D"]),
-                fga=float(fga), fractions=np.sort(p)[::-1][:200].tolist())
+    from iscc.inference.summaries import cna_summary
+    from iscc.tumor.models import GenotypeTumor
+    from iscc.tumor.models.materialise import _STREAM_GROW
+
+    mode = ARMS[arm]["mode"]
+    t = GenotypeTumor(seed=seed, max_cells=1, **_tumour_config(arm))
+    gseed = seed + GROW_SEED[mode]
+    origin = tuple(t._origin_demes)
+    acinus = [0.0, 0.0]                         # integral of occupancy / K over time, and the time
+    k_origin = float(sum(t._cap_of(d) for d in origin))
+    ever_full, state = set(), {"first_stroma": None}
+
+    def in_window():
+        return t._origin_confined and t._origin_age is not None and t._origin_age >= SETTLE
+
+    def origin_occ():
+        return sum(sum(t.demes[d].values()) for d in origin) / k_origin
+
+    def read_grid():
+        for di in t._deme_cancer_n:
+            if sum(t.demes[di].values()) >= t._cap_of(di):
+                ever_full.add(di)
+        if state["first_stroma"] is None and any(t.gland_id[di] < 0 for di in t._deme_cancer_n):
+            state["first_stroma"] = float(t.time)
+
+    wall0, cpu0 = time.time(), time.process_time()
+    n_events = 0
+    if mode == "exact":
+        # grow()'s exact path (one update() per event on the stream keyed by the event index, the
+        # target checked before each event) without its per-event trace snapshot; the time each state
+        # is held is the waiting time update() draws, so the acinus's occupancy is a true time average.
+        next_grid = GRID
+        while True:
+            c = t.get_cancer_size()
+            if c == 0 or c >= TARGET or t.time >= T_MAX:
+                break
+            win = in_window()
+            if win:
+                occ0, t0 = origin_occ(), t.time
+            t._clock = t.step
+            t.update(t._run_rng(gseed, t.step, _STREAM_GROW))
+            t.step += 1
+            n_events += 1
+            if win:
+                acinus[0] += occ0 * (t.time - t0)
+                acinus[1] += t.time - t0
+            if t.time >= next_grid:
+                read_grid()
+                next_grid = (math.floor(t.time / GRID) + 1) * GRID
+    else:
+        orig = t._tau_substep
+
+        def substep(rng, dt, demes=None):        # records the state each leap starts from, and dt
+            if in_window():
+                acinus[0] += origin_occ() * dt
+                acinus[1] += dt
+            return orig(rng, dt) if demes is None else orig(rng, dt, demes=demes)
+        t._tau_substep = substep
+        while 0 < t.get_cancer_size() < TARGET and t.time < T_MAX:
+            t.grow(n_steps=1, seed=gseed, materialize=False, target_cancer=TARGET)
+            t.traces.clear()
+            t.trace_times.clear()
+            read_grid()
+        del t._tau_substep
+    wall, cpu = time.time() - wall0, time.process_time() - cpu0
+
+    cancer = t.get_cancer_size()
+    rec = dict(arm=arm, seed=seed, grow_seed=gseed, cancer=int(cancer), reached=bool(cancer >= TARGET),
+               time=float(t.time), wall_s=round(wall, 2), cpu_s=round(cpu, 2), events=n_events or None,
+               leaps=getattr(t, "_n_substeps", None), crit_events=getattr(t, "_n_crit_events", None))
+    rel = [e["time"] for e in t.events if e.get("event") == "origin_release"]
+    rec["release"] = float(rel[0]) if rel else None
+    rec["first_stroma"] = state["first_stroma"]
+    rec["in_situ"] = (state["first_stroma"] - rec["release"]
+                      if rec["release"] is not None and state["first_stroma"] is not None else None)
+    rec["occ_acinus"] = acinus[0] / acinus[1] if acinus[1] > 0 else None
+    rec["acinus_window"] = acinus[1]
+    if cancer == 0:
+        return rec
+    counts = [c for g, c in t.genotypes_counts.items() if c > 0 and t._is_cancer(g)]
+    p = np.asarray(counts, float) / cancer
+    m5, m0 = mode_indices(t, detection=0.05), mode_indices(t, detection=0.0)
+    occ = [sum(t.demes[d].values()) / t._cap_of(d) for d in sorted(ever_full)]
+    rec.update(genotypes=len(counts), top=float(p.max()), n5=m5["n"], D5=m5["D"], clones5=m5["n_clones"],
+               n0=m0["n"], D0=m0["D"], clones0=m0["n_clones"], fga=cna_summary(t)["fga"],
+               n_full=len(occ), occ_full=float(np.mean(occ)) if occ else None,
+               n_cancer_demes=len(t._deme_cancer_n))
+    return rec
 
 
-def run_one(job):
-    mode, seed = job
-    path = os.path.join(CACHE, f"{mode}_{seed}.json")
-    if os.path.exists(path):
-        return job, None
+# ---------------------------------------------------------------------------------- small systems
+def _small(arm, seed, n0, K):
+    """One deme of the paper's cell law: division B0, death D0 up to K and D1 above it, slot cap
+    OVERFILL x K, no mutation and no dispersal (the algorithm reviews' small system)."""
+    from iscc.tumor.models import GenotypeTumor
+    a = ARMS[arm]
+    cancer = dict(division_rate=B0, death_rate=D0, max_birth_rate=2.0, mutation_rate=0.0,
+                  n_snvs_per_allele=0.1, dispersal_rate=0.0, cnv_prob=0.0, snv_prob=1.0,
+                  wgd_rate=0.0)
+    deme = dict(carrying_capacity=K, initial_cancer_cells=n0, maximum_death_rate=D1,
+                crowding_overfill=OVERFILL, crowding_d1=D1, **(a.get("deme") or {}))
+    sel = dict(prop_driver=0.0, prop_dispersal=0.0, prop_immune_resistance=0.0, prop_met_survival=0.0,
+               prop_treatment_resistance=0.0, prop_breach=0.0, prop_stromal_survival=0.0)
+    return GenotypeTumor(seed=seed, genome_params=dict(n_segments=2, segment_size=50),
+                         selection_params=sel, cancer_cell_params=cancer, deme_params=deme,
+                         spatial_params=dict(grid_size=1), update_mode=a["mode"], tau=RR.TAU,
+                         snapshot_every=10 ** 9, coarsen_passengers=True)
+
+
+def _exact_until(T, rng, t_end, hist=None):
+    """Run the exact engine to Gillespie time ``t_end``; with ``hist``, add to hist[n] the time the
+    deme holds n cells (the waiting time update() draws is the holding time of the state before it)."""
+    while T.time < t_end and not T.is_extinct():
+        n, t0 = T.get_cancer_size(), T.time
+        T.update(rng)
+        if hist is not None:
+            hist[n] += min(T.time, t_end) - t0
+
+
+def run_deme(arm, K, rep):
+    """Time-averaged occupancy of one deme held at K, after a burn-in."""
+    seed = 1 + rep
+    T = _small(arm, seed, K, K)
+    hist = np.zeros(int(OVERFILL * K) + 2)
+    if ARMS[arm]["mode"] == "exact":
+        rng = np.random.default_rng([seed, GROW_SEED["exact"], 13])
+        _exact_until(T, rng, DEME_BURN)
+        _exact_until(T, rng, T.time + DEME_OBS, hist)
+    else:
+        gseed = seed + GROW_SEED["tau"]
+        T.grow(n_steps=int(round(DEME_BURN / RR.TAU)), seed=gseed, materialize=False)
+        orig = T._tau_substep
+
+        def substep(rng, dt, demes=None):
+            hist[T.get_cancer_size()] += dt
+            return orig(rng, dt) if demes is None else orig(rng, dt, demes=demes)
+        T._tau_substep = substep
+        T.grow(n_steps=int(round(DEME_OBS / RR.TAU)), seed=gseed, materialize=False)
+    mean = float(np.dot(np.arange(len(hist)), hist) / hist.sum())
+    return dict(arm=arm, K=K, rep=rep, mean=mean, hist=[round(x, 4) for x in hist],
+                leaps=getattr(T, "_n_substeps", None))
+
+
+def _fix_one(arm, seed):
+    """Relabel one cell of a full K = FIX_K deme as an identical twin; run until one type is lost."""
+    T = _small(arm, seed, FIX_K, FIX_K)
+    exact = ARMS[arm]["mode"] == "exact"
+    rng = np.random.default_rng([seed, GROW_SEED["exact"], 14])
+    gseed = seed + GROW_SEED["tau"]
+    if exact:
+        _exact_until(T, rng, FIX_BURN)
+    else:
+        T.grow(n_steps=int(round(FIX_BURN / RR.TAU)), seed=gseed, materialize=False)
+    gid = next(g for g in T.demes[0] if T._is_cancer(g))
+    N0 = T.demes[0][gid]
+    twin = T.genotypes[gid].divide()
+    twin.set_genotype_id()
+    T._register(twin)
+    T.genotypes_parents[twin.genotype_id] = gid
+    T._remove(0, gid, 1)
+    T._add(0, twin.genotype_id, 1)
+    T._refresh_rate(0)
+    mid, t_start = twin.genotype_id, T.time
+    while T.time - t_start < FIX_TMAX:
+        m = T.demes[0].get(mid, 0)
+        if m == 0 or m == T.get_cancer_size():
+            break
+        if exact:
+            T.update(rng)
+        else:
+            T.grow(n_steps=1, seed=gseed, materialize=False)
+    m = T.demes[0].get(mid, 0)
+    return N0, int(m > 0 and m == T.get_cancer_size()), int(m == 0), T.time - t_start
+
+
+def run_fix(arm, batch):
+    rs = [_fix_one(arm, 1 + batch * FIX_BATCH + i) for i in range(FIX_BATCH)]
+    return dict(arm=arm, batch=batch, n=len(rs), fixed=sum(r[1] for r in rs), lost=sum(r[2] for r in rs),
+                sum_inv_n0=float(sum(1.0 / r[0] for r in rs)),
+                t_fixed=[round(r[3], 3) for r in rs if r[1]])
+
+
+# ---------------------------------------------------------------------------------- driver
+def _job(job):
+    kind, arm, i = job
+    t0 = time.time()
     try:
-        t = grow(mode, seed)
-        rec = metrics(t)
-        os.makedirs(CACHE, exist_ok=True)
-        with open(path, "w") as f:
-            json.dump(dict(mode=mode, seed=seed, **(rec or {"extinct": True})), f)
-        return job, None
-    except Exception as e:
-        return job, f"{type(e).__name__}: {e}"
+        if kind == "tumours":
+            out = run_tumour(arm, i)
+        elif kind == "deme":
+            out = run_deme(arm, *i)
+        else:
+            out = run_fix(arm, i)
+        return job, out, None, time.time() - t0
+    except Exception as e:                       # noqa: BLE001 - reported, and retried on a re-run
+        import traceback
+        return job, None, f"{type(e).__name__}: {e}\n{traceback.format_exc()}", time.time() - t0
 
 
-def load():
+def _key(kind, rec):
+    if kind == "tumours":
+        return rec["seed"]
+    if kind == "deme":
+        return (rec["K"], rec["rep"])
+    return rec["batch"]
+
+
+def _done(out, kind, arm):
+    path = os.path.join(out, f"{kind}_{arm}.jsonl")
+    done = set()
+    if os.path.exists(path):
+        with open(path) as f:
+            for line in f:
+                if line.strip():
+                    done.add(_key(kind, json.loads(line)))
+    return done
+
+
+def _parse(spec):
     out = []
-    if os.path.isdir(CACHE):
-        for fn in sorted(os.listdir(CACHE)):
-            with open(os.path.join(CACHE, fn)) as f:
-                out.append(json.load(f))
-    return [r for r in out if not r.get("extinct")]
-
-
-def render():
-    import pandas as pd
-    from scipy.stats import mannwhitneyu
-    S.setup()
-    df = pd.DataFrame(load())
-    fig = S.figure("double", 52)
-    MODES = [m for m in ("exact", "tau0.25", "tau") if m in set(df["mode"])]
-    names = {"exact": "exact", "tau0.25": "τ = 0.25", "tau": f"τ = {RR.TAU:g}"}
-    col = {"exact": S.GREY, "tau0.25": S.CLONE_FAMILIES[0][2], "tau": S.SOURCE["iscc"]}
-    out = {}
-    # (a) clone-size distribution, pooled over seeds
-    S.panel_letter(fig, "a", 2, 3)
-    ax = S.ax_mm(fig, 12, 7, 34, 34)
-    for mode in MODES:
-        f = np.concatenate([r for r in df[df["mode"] == mode].fractions])
-        f = np.sort(f)
-        ax.plot(f, np.linspace(0, 1, len(f)), color=col[mode], lw=1.0, label=names[mode])
-    ax.set_xscale("log")
-    ax.set_xlabel("Genotype fraction of cancer cells")
-    ax.set_ylabel("Cumulative fraction")
-    ax.legend(fontsize=5)
-    # tested per tumour, not on the pooled fractions (which are not independent within a tumour)
-
-    out["cancer"] = df.groupby("mode").cancer.median().to_dict()
-    # (b)-(e) per-tumour summaries
-    for k, (L, key, lab) in enumerate((("b", "D_drivers", "Driver diversity, D"),
-                                       ("c", "n_drivers", "Drivers per cell, n"),
-                                       ("d", "top", "Largest genotype fraction"),
-                                       ("e", "fga", "Fraction of genome altered"))):
-        x0 = 58 + k * 31
-        S.panel_letter(fig, L, x0 - 9, 3)
-        ax = S.ax_mm(fig, x0, 7, 22, 34)
-        for j, mode in enumerate(MODES):
-            v = df[df["mode"] == mode][key].values
-            ax.scatter(j + np.random.default_rng(j).uniform(-0.15, 0.15, len(v)), v, s=3,
-                       color=col[mode], alpha=0.8)
-            ax.plot([j - 0.3, j + 0.3], [np.median(v)] * 2, color=S.INK, lw=0.8)
-        ax.set_xticks(range(len(MODES)))
-        ax.set_xticklabels([names[m] for m in MODES], fontsize=4.5)
-        ax.set_xlim(-0.6, len(MODES) - 0.4)
-        ax.set_ylabel(lab)
-        e = df[df["mode"] == "exact"][key]
-        out[key] = {"exact": round(float(e.median()), 3)}
-        for m in MODES[1:]:
-            v = df[df["mode"] == m][key]
-            out[key][m] = round(float(v.median()), 3)
-            out[key][f"p_{m}"] = round(float(mannwhitneyu(e, v).pvalue), 3)
-    out["n"] = df.groupby("mode").size().to_dict()
-    path = S.save(fig, "supp_s1_tau")
-    print("wrote", path)
-    print(out)
+    for item in (spec or "").split(","):
+        if item:
+            arm, n = item.split(":")
+            if arm not in ARMS:
+                raise SystemExit(f"unknown arm {arm!r}; arms are {sorted(ARMS)}")
+            out.append((arm, int(n)))
     return out
 
 
-def main():
+def run(a):
     import multiprocessing as mp
+    os.makedirs(a.out, exist_ok=True)
+    jobs = []
+    for arm, n in _parse(a.tumours):
+        done = _done(a.out, "tumours", arm)
+        jobs += [("tumours", arm, s) for s in range(1, n + 1) if s not in done]
+    for arm, n in _parse(a.deme):
+        done = _done(a.out, "deme", arm)
+        jobs += [("deme", arm, (K, r)) for K in DEME_K for r in range(n) if (K, r) not in done]
+    for arm, n in _parse(a.fix):
+        done = _done(a.out, "fix", arm)
+        jobs += [("fix", arm, b) for b in range(math.ceil(n / FIX_BATCH)) if b not in done]
+    # the longest jobs first, so the pool does not end on a tail of them
+    cost = {"tumours": 0, "fix": 1, "deme": 2}
+    heavy = {"critical": 0, "exact": 1, "paper": 2, "eps0.003": 2, "eps0.03": 3, "eps0.1": 4,
+             "historical": 5}
+    jobs.sort(key=lambda j: (cost[j[0]], heavy[j[1]], str(j[2])))
+    print(f"{len(jobs)} jobs on {a.nproc} processes", flush=True)
+    files = {}
+    t0, n_err = time.time(), 0
+    with mp.get_context("fork").Pool(processes=a.nproc, maxtasksperchild=8) as pool:
+        for k, (job, rec, err, dt) in enumerate(pool.imap_unordered(_job, jobs, chunksize=1)):
+            if err:
+                n_err += 1
+                print(f"ERROR {job}: {err}", flush=True)
+                continue
+            kind, arm, _ = job
+            f = files.get((kind, arm))
+            if f is None:
+                f = files[(kind, arm)] = open(os.path.join(a.out, f"{kind}_{arm}.jsonl"), "a")
+            f.write(json.dumps(rec) + "\n")
+            f.flush()
+            if kind == "tumours" or k % 50 == 0:
+                print(f"[{time.time() - t0:7.0f}s] {k + 1}/{len(jobs)} {job} {dt:.1f}s", flush=True)
+    for f in files.values():
+        f.close()
+    print(f"done in {time.time() - t0:.0f}s, {n_err} errors", flush=True)
+
+
+# ---------------------------------------------------------------------------------- statistics
+def _load(out, kind):
+    rows = {}
+    for arm in ARMS:
+        path = os.path.join(out, f"{kind}_{arm}.jsonl")
+        if os.path.exists(path):
+            with open(path) as f:
+                rows[arm] = [json.loads(x) for x in f if x.strip()]
+    return rows
+
+
+def _mean_ci(v):
+    v = np.asarray(v, float)
+    v = v[np.isfinite(v)]
+    if len(v) < 2:
+        return dict(mean=float(v.mean()) if len(v) else None, lo=None, hi=None, n=len(v))
+    h = 1.96 * v.std(ddof=1) / np.sqrt(len(v))
+    return dict(mean=float(v.mean()), lo=float(v.mean() - h), hi=float(v.mean() + h), n=len(v))
+
+
+def _rel_diff(x, y, n_boot=4000, seed=0):
+    """(mean(y) / mean(x) - 1) with a percentile bootstrap 95% CI, x and y resampled independently."""
+    x, y = np.asarray(x, float), np.asarray(y, float)
+    x, y = x[np.isfinite(x)], y[np.isfinite(y)]
+    rng = np.random.default_rng(seed)
+    bx = x[rng.integers(0, len(x), (n_boot, len(x)))].mean(1)
+    by = y[rng.integers(0, len(y), (n_boot, len(y)))].mean(1)
+    r = by / bx - 1
+    return dict(rel=float(y.mean() / x.mean() - 1), lo=float(np.quantile(r, 0.025)),
+                hi=float(np.quantile(r, 0.975)))
+
+
+def _wilson(k, n):
+    if n == 0:
+        return (float("nan"),) * 3
+    p, z = k / n, 1.96
+    c = (p + z * z / (2 * n)) / (1 + z * z / n)
+    h = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / (1 + z * z / n)
+    return p, c - h, c + h
+
+
+def stationary_exact(K):
+    """The deme's quasi-stationary law under the exact process (birth B0 n below the slot cap, death
+    D0 n at n <= K and D1 n above), by detailed balance, conditioned on n >= 1."""
+    cap = int(K * OVERFILL)
+    w = np.zeros(cap + 2)
+    w[1] = 1.0
+    for n in range(2, cap + 1):
+        w[n] = w[n - 1] * B0 * (n - 1) / ((D0 if n <= K else D1) * n)
+    return w / w.sum()
+
+
+def _sd_hist(h):
+    h = np.asarray(h, float)
+    n = np.arange(len(h))
+    m = np.dot(n, h) / h.sum()
+    return float(np.sqrt(np.dot((n - m) ** 2, h) / h.sum()))
+
+
+TUMOUR_STATS = [
+    ("n5", "drivers per cell, 5% detection"), ("n0", "drivers per cell, full census"),
+    ("D5", "clonal diversity, 5% detection"), ("D0", "clonal diversity, full census"),
+    ("genotypes", "genotypes"), ("fga", "fraction of genome altered"),
+    ("occ_full", "occupancy of demes that reached K"), ("occ_acinus", "acinus occupancy, confined"),
+    ("time", "time to 5,000 cells"), ("release", "release of the acinus"), ("in_situ", "in-situ phase"),
+]
+
+
+def summarise(out):
+    """Every number the figure shows (and the Methods quote), as one JSON-able dict."""
+    from scipy.stats import mannwhitneyu
+    S = {"target": TARGET, "scale": SCALE, "arms": {a: ARMS[a]["label"] for a in ARMS}}
+    tum = _load(out, "tumours")
+    if "exact" in tum:
+        ok = {a: [r for r in rs if r.get("reached")] for a, rs in tum.items()}
+        S["tumours"] = {}
+        ex = ok["exact"]
+        for arm, rs in ok.items():
+            walls = [r["wall_s"] for r in rs]
+            d = dict(n=len(rs), n_run=len(tum[arm]),
+                     n_extinct=sum(1 for r in tum[arm] if r["cancer"] == 0),
+                     n_in_situ=sum(1 for r in tum[arm] if 0 < r["cancer"] < TARGET),
+                     cancer=_mean_ci([r["cancer"] for r in rs]),
+                     wall_s=dict(median=float(np.median(walls)), mean=float(np.mean(walls)),
+                                 q25=float(np.quantile(walls, 0.25)), q75=float(np.quantile(walls, 0.75))))
+            if arm == "exact":
+                d["events"] = float(np.mean([r["events"] for r in rs]))
+            elif rs[0].get("leaps"):
+                d["leaps_per_gen"] = float(np.mean([r["leaps"] / r["time"] for r in rs]))
+            for key, _ in TUMOUR_STATS:
+                v = [r.get(key) for r in rs if r.get(key) is not None]
+                d[key] = _mean_ci(v)
+                if arm != "exact" and v:
+                    e = [r.get(key) for r in ex if r.get(key) is not None]
+                    d[key].update(vs_exact=_rel_diff(e, v), p=float(mannwhitneyu(e, v).pvalue))
+            S["tumours"][arm] = d
+        # every epsilon below 1/90 picks the paper's leap: are the runs identical, seed by seed?
+        if "eps0.003" in tum and "paper" in tum:
+            pp = {r["seed"]: r for r in tum["paper"]}
+            keys = ("cancer", "time", "n0", "n5", "D0", "genotypes", "fga", "release", "leaps")
+            same = [all(r.get(k) == pp[r["seed"]].get(k) for k in keys)
+                    for r in tum["eps0.003"] if r["seed"] in pp]
+            S["eps0.003_identical_to_paper"] = dict(n=len(same), identical=int(sum(same)))
+    dem = _load(out, "deme")
+    if dem:
+        S["deme"] = {}
+        for K in DEME_K:
+            st = stationary_exact(K)
+            d = S["deme"][f"K{K}"] = dict(analytic=float(np.dot(np.arange(len(st)), st)),
+                                          analytic_sd=_sd_hist(st))
+            for arm, rs in dem.items():
+                rk = [r for r in rs if r["K"] == K]
+                if rk:
+                    d[arm] = dict(_mean_ci([r["mean"] for r in rk]),
+                                  sd_of_size=_sd_hist(np.sum([r["hist"] for r in rk], axis=0)))
+    fix = _load(out, "fix")
+    if fix:
+        S["fix"] = {}
+        for arm, rs in fix.items():
+            n, k = sum(r["n"] for r in rs), sum(r["fixed"] for r in rs)
+            inv = sum(r["sum_inv_n0"] for r in rs) / n
+            p, lo, hi = _wilson(k, n)
+            tf = [x for r in rs for x in r["t_fixed"]]
+            S["fix"][arm] = dict(n=n, fixed=k, p=p, E_inv_n0=inv, ratio=p / inv, ratio_lo=lo / inv,
+                                 ratio_hi=hi / inv, t_fix=_mean_ci(tf),
+                                 unresolved=n - k - sum(r["lost"] for r in rs))
+    return S
+
+
+# ---------------------------------------------------------------------------------- figure
+def _ci_points(ax, xs, ds, cols, key=None, **kw):
+    for x, d, c in zip(xs, ds, cols):
+        if key is not None:
+            d = d[key]
+        if d.get("mean") is None:
+            continue
+        lo, hi = d.get("lo", d["mean"]), d.get("hi", d["mean"])
+        ax.errorbar(x, d["mean"], yerr=[[d["mean"] - lo], [hi - d["mean"]]], fmt="o", ms=2.2, color=c,
+                    lw=0.6, capsize=0, **kw)
+
+
+def render(a):
+    import style as S
+    sm = summarise(a.out)
+    with open(os.path.join(a.out, "s1_summary.json"), "w") as f:
+        json.dump(sm, f, indent=1)
+    S.setup()
+    col = {"exact": S.INK, "paper": S.SOURCE["iscc"], "eps0.003": S.CLONE_FAMILIES[0][2],
+           "eps0.03": S.CLONE_FAMILIES[3][1], "eps0.1": S.CLONE_FAMILIES[4][1],
+           "critical": S.CLONE_FAMILIES[1][1], "historical": S.CLONE_FAMILIES[2][1]}
+    short = {"exact": "exact", "paper": "paper, ε 0.01", "eps0.003": "ε 0.003", "eps0.03": "ε 0.03",
+             "eps0.1": "ε 0.1", "critical": "critical", "historical": "historical"}
+    order = ["exact", "paper", "eps0.03", "eps0.1", "critical", "historical"]
+    fig = S.figure("double", 170)
+
+    def xaxis(ax, arms):
+        ax.set_xticks(range(len(arms)))
+        ax.set_xticklabels([short[m] for m in arms], rotation=40, ha="right", fontsize=5)
+        ax.set_xlim(-0.6, len(arms) - 0.4)
+
+    # (a) one deme at K = 60: the time-averaged law of its size
+    dem = _load(a.out, "deme")
+    S.panel_letter(fig, "a", 2, 3)
+    ax = S.ax_mm(fig, 13, 9, 38, 33)
+    K = 60
+    st = stationary_exact(K)
+    lo_n, hi_n = 36, 70
+    nn = np.arange(lo_n, hi_n + 1)
+    ax.bar(nn, st[lo_n:hi_n + 1], width=0.9, color=S.BG_CELLS, lw=0, label="exact law")
+    for arm in order:
+        rs = [r for r in dem.get(arm, []) if r["K"] == K]
+        if not rs:
+            continue
+        h = np.sum([r["hist"] for r in rs], axis=0)
+        h = h / h.sum()
+        if arm == "exact":
+            ax.plot(nn, h[lo_n:hi_n + 1], "o", ms=1.4, color=col[arm], label=short[arm], zorder=5)
+        else:
+            ax.plot(nn, h[lo_n:hi_n + 1], "-", lw=0.7, color=col[arm], label=short[arm])
+    ax.set_yscale("log")
+    ax.set_ylim(1e-5, 1.5)
+    ax.set_xlabel("Cells in the deme (K = 60)")
+    ax.set_ylabel("Fraction of time")
+    ax.set_title("One deme at capacity", loc="left")
+    ax.legend(loc="upper left", fontsize=4.5, ncol=1, handlelength=0.8)
+
+    # (b) the mean size of a deme at K, against the exact law
+    sd = sm.get("deme", {})
+    S.panel_letter(fig, "b", 57, 3)
+    ax = S.ax_mm(fig, 67, 9, 30, 33)
+    arms_b = [m for m in order if m in dem]
+    for j, arm in enumerate(arms_b):
+        for K, mk, dx in ((30, "o", -0.15), (60, "s", 0.15)):
+            d = sd.get(f"K{K}", {}).get(arm)
+            if d is None:
+                continue
+            an = sd[f"K{K}"]["analytic"]
+            m, lo, hi = (100 * (d[x] - an) / K for x in ("mean", "lo", "hi"))
+            ax.errorbar(j + dx, m, yerr=[[m - lo], [hi - m]], fmt=mk, ms=2.2, color=col[arm],
+                        mfc=col[arm] if K == 60 else "white", lw=0.6, capsize=0)
+    ax.axhline(0, color=S.GREY, lw=0.4)
+    xaxis(ax, arms_b)
+    ax.set_ylabel("Mean size − exact law (% of K)")
+    ax.plot([], [], "s", ms=2.2, color=S.INK, label="K = 60")
+    ax.plot([], [], "o", ms=2.2, color=S.INK, mfc="white", label="K = 30")
+    ax.legend(loc="lower left", fontsize=5)
+
+    # (c) neutral fixation in a full deme of K = 30
+    fx = sm.get("fix", {})
+    S.panel_letter(fig, "c", 104, 3)
+    ax = S.ax_mm(fig, 114, 9, 26, 33)
+    arms_c = [m for m in order if m in fx]
+    _ci_points(ax, range(len(arms_c)),
+               [dict(mean=fx[m]["ratio"], lo=fx[m]["ratio_lo"], hi=fx[m]["ratio_hi"]) for m in arms_c],
+               [col[m] for m in arms_c])
+    ax.axhline(1, color=S.GREY, lw=0.4)
+    xaxis(ax, arms_c)
+    ax.set_ylabel("P(fixation) / E[1/N₀]")
+    ax.set_title("Neutral fixation, K = 30", loc="left")
+
+    # (d) time to fixation
+    S.panel_letter(fig, "d", 146, 3)
+    ax = S.ax_mm(fig, 157, 9, 24, 33)
+    _ci_points(ax, range(len(arms_c)), [fx[m] for m in arms_c], [col[m] for m in arms_c], key="t_fix")
+    if "exact" in fx:
+        e = fx["exact"]["t_fix"]
+        ax.axhspan(e["lo"], e["hi"], color=S.BG_CELLS, lw=0, zorder=0)
+    xaxis(ax, arms_c)
+    ax.set_ylabel("Time to fixation (generations)")
+
+    # (e) tumours at 5,000 cells: every statistic of every tau arm against exact
+    tum = sm.get("tumours", {})
+    S.panel_letter(fig, "e", 2, 60)
+    ax = S.ax_mm(fig, 47, 65, 64, 92)
+    arms_e = [m for m in order if m in tum and m != "exact"]
+    CLIP = 25.0
+    for i, (key, lab) in enumerate(TUMOUR_STATS):
+        y0 = len(TUMOUR_STATS) - 1 - i
+        if i % 2 == 0:
+            ax.axhspan(y0 - 0.5, y0 + 0.5, color=S.PASTEL["grey"], lw=0, zorder=0)
+        for j, arm in enumerate(arms_e):
+            d = tum[arm].get(key, {}).get("vs_exact")
+            if d is None:
+                continue
+            y = y0 + 0.3 - j * 0.6 / max(len(arms_e) - 1, 1)
+            m, lo, hi = 100 * d["rel"], 100 * d["lo"], 100 * d["hi"]
+            if abs(m) > CLIP:                        # off the scale: an arrow and the value
+                s = np.sign(m)
+                ax.annotate("", xy=(s * CLIP, y), xytext=(s * (CLIP - 3), y),
+                            arrowprops=dict(arrowstyle="-|>", lw=0.6, color=col[arm], mutation_scale=4))
+                ax.text(s * (CLIP - 3.5), y, f"{m:+.0f}%", fontsize=4.2, color=S.INK, va="center",
+                        ha="right" if s > 0 else "left")
+                continue
+            ax.plot([max(lo, -CLIP), min(hi, CLIP)], [y, y], color=col[arm], lw=0.7)
+            ax.plot(m, y, "o", ms=2.0, color=col[arm])
+    ax.axvspan(-5, 5, color=S.PASTEL["blue"], lw=0, zorder=0, alpha=0.6)
+    ax.axvline(0, color=S.INK, lw=0.5)
+    ax.set_xlim(-CLIP, CLIP)
+    ax.set_ylim(-0.5, len(TUMOUR_STATS) - 0.5)
+    ax.set_yticks(range(len(TUMOUR_STATS)))
+    ax.set_yticklabels([lab for _, lab in TUMOUR_STATS][::-1], fontsize=5.5)
+    ax.tick_params(axis="y", length=0)
+    ax.set_xlabel("Difference from exact (% of the exact mean, 95% CI)")
+    ax.set_title(f"Paper-regime tumours at {TARGET:,} cells", loc="left")
+    for arm in arms_e:
+        w = tum[arm]["wall_s"]["median"]
+        ax.plot([], [], "o-", ms=2.0, lw=0.7, color=col[arm],
+                label=f"{short[arm]}: n = {tum[arm]['n']}, {w:.0f} s")
+    if "exact" in tum:
+        ax.plot([], [], " ", label=f"exact: n = {tum['exact']['n']}, {tum['exact']['wall_s']['median']:.0f} s")
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), fontsize=5,
+              title="tumours, median wall time", title_fontsize=5)
+
+    # (f) drivers per cell at the 5% detection limit, absolute
+    S.panel_letter(fig, "f", 146, 98)
+    arms_f = [m for m in order if m in tum]
+    ax = S.ax_mm(fig, 157, 102, 24, 22)
+    _ci_points(ax, range(len(arms_f)), [tum[m] for m in arms_f], [col[m] for m in arms_f], key="n5")
+    if "exact" in tum:
+        e = tum["exact"]["n5"]
+        ax.axhspan(e["lo"], e["hi"], color=S.BG_CELLS, lw=0, zorder=0)
+    ax.set_xticks(range(len(arms_f)))
+    ax.set_xticklabels([])
+    ax.set_xlim(-0.6, len(arms_f) - 0.4)
+    ax.set_ylabel("Drivers per cell\n(5% detection)", fontsize=5.5)
+
+    # (g) wall time of growth per tumour
+    S.panel_letter(fig, "g", 146, 126)
+    ax = S.ax_mm(fig, 157, 129, 24, 22)
+    for j, arm in enumerate(arms_f):
+        w = tum[arm]["wall_s"]
+        ax.errorbar(j, w["median"], yerr=[[w["median"] - w["q25"]], [w["q75"] - w["median"]]], fmt="o",
+                    ms=2.2, color=col[arm], lw=0.6, capsize=0)
+    ax.set_yscale("log")
+    xaxis(ax, arms_f)
+    ax.set_ylabel("Wall time per\ntumour (s)", fontsize=5.5)
+    path = S.save(fig, "supp_s1_tau", stamp=False)
+    print("wrote", path)
+    return sm
+
+
+def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--seeds", type=int, default=30)
-    ap.add_argument("--render-only", action="store_true")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    r = sub.add_parser("run")
+    r.add_argument("--out", required=True)
+    r.add_argument("--nproc", type=int, default=1)
+    r.add_argument("--tumours", default="", help="arm:n_seeds,...")
+    r.add_argument("--deme", default="", help="arm:n_replicates (per K),...")
+    r.add_argument("--fix", default="", help="arm:n_replicates,...")
+    g = sub.add_parser("render")
+    g.add_argument("--out", required=True)
     a = ap.parse_args()
-    if not a.render_only:
-        jobs = [(m, s) for s in range(1, a.seeds + 1) for m in ("exact", "tau", "tau0.25")]
-        with mp.get_context("spawn").Pool(processes=1, maxtasksperchild=4) as pool:
-            for job, err in pool.imap_unordered(run_one, jobs):
-                if err:
-                    print(f"  {job}: {err}", flush=True)
-    render()
+    if a.cmd == "run":
+        run(a)
+    else:
+        render(a)
 
 
 if __name__ == "__main__":
