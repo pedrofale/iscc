@@ -689,12 +689,13 @@ def render(a):
     ax.set_xlim(-CLIP, CLIP)
     ax.set_ylim(-0.5, len(TUMOUR_STATS) - 0.5)
     ax.set_yticks(range(len(TUMOUR_STATS)))
-    ax.set_yticklabels([lab for _, lab in TUMOUR_STATS][::-1], fontsize=5.5)
+    fol = sorted({tum[m].get("in_situ_followed", 0) for m in arms_f}, reverse=True)
+    labs = [lab + (f"\n(first {' or '.join(str(x) for x in fol)} seeds)" if key == "in_situ" else "")
+            for key, lab in TUMOUR_STATS]
+    ax.set_yticklabels(labs[::-1], fontsize=5.5)
     ax.tick_params(axis="y", length=0)
     ax.set_xlabel("Difference from exact (% of the exact mean, 95% CI)")
-    fol = sorted({tum[m].get("in_situ_followed", 0) for m in arms_f}, reverse=True)
-    ax.set_title(f"Paper-regime tumours at {TARGET:,} cells (n in g); in-situ phase on the first "
-                 f"{' or '.join(str(x) for x in fol)} of each arm", loc="left")
+    ax.set_title(f"Paper-regime tumours at {TARGET:,} cells (n in g)", loc="left")
 
     # (f) drivers per cell at the 5% detection limit, absolute
     S.panel_letter(fig, "f", 146, 63)
