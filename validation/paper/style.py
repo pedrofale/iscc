@@ -52,6 +52,9 @@ TOOL = {
     "cNMF": "#937860", "HMMcopy": "#DA8BC3", "SCITE": "#CCB974", "neighbour-joining": "#8C8C8C",
     "MEDICC2": "#64B5CD", "Harmony": "#2F6D3A", "scVI": "#B07AA1", "MHN": "#A6761D",
     "TreeMHN": "#E7298A", "RCTD": "#1B9E77", "cell2location": "#7570B3", "PyClone-VI": "#66A61E",
+    # the other data simulators (supp_datasim)
+    "VISOR": "#D95F02", "CNAsim": "#E6AB02", "Splatter": "#A50026", "scDesign3": "#7B3294",
+    "SRTsim": "#01665E",
 }
 
 # Clone colours: one hue family per founding lineage, subclones from dark to light.
