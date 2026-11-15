@@ -59,7 +59,7 @@ MIN_CLONE_FRAC = 0.03       # Fig 4b's truth (make_layer_dataset --min-clone-fra
 N_DNA = 1500                # single-cell WGS libraries, a DLP+ run's order of magnitude
 RNA_MAX_CELLS = 3000        # tumour cells handed to clonealign
 RNA_GENES = 4000            # at most this many genes, the most expressed of the informative ones
-COARSE_K = 4                # the coarse truth: the answer key's clones in this many copy-number groups
+COARSE_K = 4                # --coarse: the answer key's clones in this many copy-number groups
 CLONEALIGN = dict(max_iter=200, n_repeats=2, seed=1, preprocess=1)   # Fig 5's settings + the package's
                                                                       # preprocess_for_clonealign
 NORMAL, OTHER, TRUNK = "normal", "other", "above_clades"
@@ -303,18 +303,25 @@ def cluster_cells(cn_bins, seed=0):
     return lab, emb, mcs
 
 
-def called_clones(seg_cn, lab):
-    """Clone profiles from the clusters: the rounded median per segment; clusters with the same
-    (proportional) profile merged; flat clusters (every segment at one level: diploid cells, on the
-    relative scale HMMcopy calls) set aside as normal when any other cluster remains.
+def called_clones(seg_cn, lab, ploidy=None):
+    """Clone profiles from the clusters: the median relative copy number per segment, put back on the
+    cluster's own scale (``ploidy``, each cell's median called state; the cluster's median of them) and
+    rounded; clusters with the same (proportional) profile merged; flat clusters (every segment at one
+    level: diploid cells) set aside as normal when any other cluster remains. The scale matters for a
+    doubled tumour: one copy lost from four is 1.5 on the relative scale, and rounding there erases it.
 
     Returns ``(clone_of_cluster, profiles)``: cluster id -> clone label (``"normal"`` for a flat one,
-    None for noise) and the clones x segments frame of relative copy number."""
+    None for noise) and the clones x segments frame of copy number."""
     clusters = sorted(c for c in set(lab.tolist()) if c >= 0)
+    if ploidy is None:
+        ploidy = np.full(len(lab), 2.0)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)       # a segment no cell of the cluster called
-        prof = {c: np.nan_to_num(np.rint(np.nanmedian(seg_cn[lab == c], axis=0)), nan=2.0).astype(int)
-                for c in clusters}
+        prof = {}
+        for c in clusters:
+            p = np.nanmedian(ploidy[lab == c])
+            p = 2.0 if not np.isfinite(p) or p <= 0 else p
+            prof[c] = np.nan_to_num(np.rint(np.nanmedian(seg_cn[lab == c], axis=0) * p / 2.0), nan=p).astype(int)
     flat = {c for c in clusters if np.unique(prof[c]).size == 1}
     if len(flat) == len(clusters):
         flat = set()
@@ -380,7 +387,7 @@ def dna_chain(t, layer, dis, clone_of, work, seed=0, n_cells=N_DNA, cores=1):
         lab[ok], emb[ok] = l_ok, e_ok
     else:
         mcs = None
-    clone_of_cluster, profiles = called_clones(seg_cn, lab)
+    clone_of_cluster, profiles = called_clones(seg_cn, lab, ploidy=med)
     t0 = _lap(wall, "cluster", t0)
 
     gids = _gids(dis, cells)
@@ -528,7 +535,8 @@ def run_dna_rna(a):
                tier=os.environ.get("ISCC_PAPER_TIER"), seed=a.seed, clonealign=CLONEALIGN, tumour=tinfo,
                n_rna_cells=int(len(keep)), true_clones=members, coarse_groups=sorted(set(group_of.values())),
                dna=dna["diag"], dna_mapping=dna["mapping"], dna_purity=dna["purity"])
-    for res, tt, prof in (("fine", t_fine, true_prof), ("coarse", t_coarse, coarse_prof)):
+    resolutions = (("fine", t_fine, true_prof),) + ((("coarse", t_coarse, coarse_prof),) if a.coarse else ())
+    for res, tt, prof in resolutions:
         sizes = pd.Series(tt).value_counts()
         rec[res] = dict(n_true_clones=int(len(prof)), majority=float(sizes.iat[0] / sizes.sum()),
                         chance=float(1.0 / len(prof)))
@@ -538,13 +546,15 @@ def run_dna_rna(a):
     pred_true, rec["fine"]["clonealign_true_run"] = clonealign_arm(X, rna_ids, layer, true_prof, work, "ca_true")
     rec["fine"]["truth_arm"] = score_assignment(t_fine, pred_true)
     t0 = _lap(wall, "clonealign_true", t0)
-    if len(coarse_prof) < len(true_prof):
-        pred_coarse, rec["coarse"]["clonealign_true_run"] = clonealign_arm(X, rna_ids, layer, coarse_prof, work,
-                                                                         "ca_coarse")
-    else:
-        pred_coarse = np.array([group_of[c] for c in pred_true], dtype=object)
-    rec["coarse"]["truth_arm"] = score_assignment(t_coarse, pred_coarse)
-    t0 = _lap(wall, "clonealign_coarse", t0)
+    pred_coarse = np.array([None] * len(keep), dtype=object)
+    if a.coarse:
+        if len(coarse_prof) < len(true_prof):
+            pred_coarse, rec["coarse"]["clonealign_true_run"] = clonealign_arm(X, rna_ids, layer, coarse_prof,
+                                                                             work, "ca_coarse")
+        else:
+            pred_coarse = np.array([group_of[c] for c in pred_true], dtype=object)
+        rec["coarse"]["truth_arm"] = score_assignment(t_coarse, pred_coarse)
+        t0 = _lap(wall, "clonealign_coarse", t0)
 
     # (ii) the clones called from simulated scDNA; each stands for the true clone most of its DNA cells
     # belong to, and for that clone's coarse group
@@ -555,7 +565,7 @@ def run_dna_rna(a):
         called = np.array([None] * len(keep), dtype=object)
     pred_dna = np.array([dna["mapping"].get(c) if c is not None else None for c in called], dtype=object)
     pred_dna_coarse = np.array([group_of.get(c) if c is not None else None for c in pred_dna], dtype=object)
-    for res, tt, pp in (("fine", t_fine, pred_dna), ("coarse", t_coarse, pred_dna_coarse)):
+    for res, tt, pp in (("fine", t_fine, pred_dna), ("coarse", t_coarse, pred_dna_coarse))[:len(resolutions)]:
         rec[res]["dna_arm"] = score_assignment(tt, pp)
         rec[res]["dna_arm"]["ari_unmapped"] = float(adjusted_rand_score(tt.astype(str), called.astype(str)))
         rec[res]["gap"] = rec[res]["truth_arm"]["accuracy"] - rec[res]["dna_arm"]["accuracy"]
@@ -583,7 +593,7 @@ def run_dna_rna(a):
                                                             index=False)
     with open(os.path.join(out, "score.json"), "w") as f:
         json.dump(rec, f, indent=1, default=str)
-    for res in ("fine", "coarse"):
+    for res, _, _ in resolutions:
         r = rec[res]
         print(res, json.dumps(dict(n_true_clones=r["n_true_clones"], majority=round(r["majority"], 3),
                                    truth=round(r["truth_arm"]["accuracy"], 3),
@@ -725,6 +735,8 @@ def main():
     ap.add_argument("--n-dna", type=int, default=N_DNA)
     ap.add_argument("--rna-cells", type=int, default=RNA_MAX_CELLS)
     ap.add_argument("--rna-genes", type=int, default=RNA_GENES)
+    ap.add_argument("--coarse", action="store_true",
+                    help="also run clonealign on the copy-number groups of the true clones (a diagnostic)")
     a = ap.parse_args()
     warnings.filterwarnings("ignore", category=FutureWarning)
     try:

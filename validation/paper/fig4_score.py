@@ -121,7 +121,7 @@ def collect(out_dir):
     for f in sorted(glob.glob(os.path.join(out_dir, "c", "*", "score.json"))):
         r = json.load(open(f))
         d = r.get("dna", {})
-        for res in ("fine", "coarse"):
+        for res in [x for x in ("fine", "coarse") if x in r and "truth_arm" in r[x]]:
             x = r[res]
             rows_c.append(dict(tumour=f"{r['run']}_{r['task']}", resolution=res,
                                **_tumour(out_dir, f"{r['run']}_{r['task']}"), n_rna_cells=r["n_rna_cells"],
@@ -206,14 +206,14 @@ def _panel_d(ax, d, order, short, S, colours, legend):
 
 
 def figure(c, d, path):
-    """Draft panels: 4c (clonealign accuracy and balanced accuracy, truth against DNA-called clones) and
-    4d (per-spot clone-fraction error), each against the answer key's clones (top) and their copy-number
-    groups (bottom)."""
+    """Draft panels against the answer key's clones: 4c (clonealign accuracy and balanced accuracy, given
+    the true clones against the DNA-called ones) and 4d (per-spot clone-fraction error). The coarse
+    resolution stays in the score tables only."""
     import matplotlib
     matplotlib.use("Agg")
     import style as S
     S.setup()
-    fig = S.figure("double", 118)
+    fig = S.figure("double", 62)
     tumours = set(c["tumour"]) if len(c) else set()
     if len(d):
         tumours |= set(d["tumour"])
@@ -228,7 +228,7 @@ def figure(c, d, path):
     # validated (dataviz validate_palette, all pairs, light): CVD and normal-vision separation pass
     colours = {"Clonalscope": "#EB6834", "Clonalscope, DNA prior": DNA, "CalicoST": "#1BAF7A"}
     label = {"fine": "answer-key clones", "coarse": "their copy-number groups"}
-    for row, res in enumerate(("fine", "coarse")):
+    for row, res in enumerate(("fine",)):
         y = 8 + row * 56
         cc = c[c["resolution"] == res] if len(c) else c
         dd = d[d["resolution"] == res] if len(d) else d
