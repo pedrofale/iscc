@@ -141,12 +141,15 @@ def _runs():
     arm_rates = {"cnv_prob": 0.045 * f, "mutation_rate": RG.CANCER["mutation_rate"] * k,
                  "wgd_rate": RG.CANCER["wgd_rate"] / k}
     arm = dict(genome=ag["genome_params"], selection=ag["selection_params"])
-    runs["R11"] = ([("seed1", dict(seed=1, scale=SHOW, target_cancer=T["showcase_target"],
-                                   spatial_snapshot_every=2, cancer=dict(arm_rates), **arm))]
+    # On regime v3 a genome doubling sweeps the showcase design and dispersal 0.9 at seed 1 (100% of cells,
+    # calibration stage 3, 2026-11-15), so seed 2 of each is grown beside it, as seed 2 at dispersal 0.1
+    # was when seed 1 swept there; the swept tumours are kept and labelled.
+    runs["R11"] = ([(f"seed{s}", dict(seed=s, scale=SHOW, target_cancer=T["showcase_target"],
+                                      spatial_snapshot_every=2, cancer=dict(arm_rates), **arm)) for s in (1, 2)]
                    + [(f"disp{d}_seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
                                                 spatial_snapshot_every=8,
                                                 cancer={**arm_rates, "dispersal_rate": d}, **arm))
-                      for d, s in ((0.1, 1), (0.1, 2), (0.9, 1))])
+                      for d, s in ((0.1, 1), (0.1, 2), (0.9, 1), (0.9, 2))])
     return runs
 
 
