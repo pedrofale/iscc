@@ -474,12 +474,15 @@ def summarise(out):
         ex = ok["exact"]
         for arm, rs in ok.items():
             walls = [r["wall_s"] for r in rs]
+            cpus = [r["cpu_s"] for r in rs]
             d = dict(n=len(rs), n_run=len(tum[arm]),
                      n_extinct=sum(1 for r in tum[arm] if r["cancer"] == 0),
                      n_in_situ=sum(1 for r in tum[arm] if 0 < r["cancer"] < TARGET),
                      cancer=_mean_ci([r["cancer"] for r in rs]),
                      wall_s=dict(median=float(np.median(walls)), mean=float(np.mean(walls)),
-                                 q25=float(np.quantile(walls, 0.25)), q75=float(np.quantile(walls, 0.75))))
+                                 q25=float(np.quantile(walls, 0.25)), q75=float(np.quantile(walls, 0.75))),
+                     cpu_s=dict(median=float(np.median(cpus)), mean=float(np.mean(cpus)),
+                                q25=float(np.quantile(cpus, 0.25)), q75=float(np.quantile(cpus, 0.75))))
             d["invaded_at_target"] = float(np.mean([r["invaded"] for r in rs]))
             fol = [r for r in rs if r.get("insitu_followed")]
             d["in_situ_followed"] = len(fol)
@@ -704,11 +707,13 @@ def render(a):
     ax.set_ylabel("Drivers per cell, 5% detection")
     ax.set_title("At 5,000 cells", loc="left")
 
-    # (g) wall time of growth to 5,000 cells, per tumour (median and quartiles; n above)
+    # (g) cost of growth to 5,000 cells, per tumour (median and quartiles; n above): the CPU time of
+    # the one process that grew it, which is its wall time on an unshared core (the jobs ran on shared
+    # nodes, where wall time also measures the neighbours)
     S.panel_letter(fig, "g", 146, 114)
     ax = S.ax_mm(fig, 157, 120, 24, 40)
     for j, arm in enumerate(arms_f):
-        w = tum[arm]["wall_s"]
+        w = tum[arm]["cpu_s"]
         ax.errorbar(j, w["median"], yerr=[[w["median"] - w["q25"]], [w["q75"] - w["median"]]],
                     fmt=mk[arm], ms=2.4, color=col[arm], lw=0.7, capsize=0)
         ax.text(j, w["q75"] * 1.3, f"n = {tum[arm]['n']:,}", fontsize=4.2, ha="center", va="bottom",
@@ -716,7 +721,7 @@ def render(a):
     ax.set_yscale("log")
     ax.set_ylim(top=ax.get_ylim()[1] * 6)
     xaxis(ax, arms_f)
-    ax.set_ylabel("Wall time to 5,000 cells (s)")
+    ax.set_ylabel("CPU time to 5,000 cells (s)")
     path = S.save(fig, "supp_s1_tau", stamp=False)
     print("wrote", path)
     return sm
