@@ -62,6 +62,12 @@ N_DNA = 1500                # single-cell WGS libraries, a DLP+ run's order of m
 RNA_MAX_CELLS = 3000        # tumour cells handed to clonealign
 RNA_GENES = 4000            # at most this many genes, the most expressed of the informative ones
 COARSE_K = 4                # --coarse: the answer key's clones in this many copy-number groups
+# The Visium section's cell cap. The tier's max_cells (8,000) leaves about 1.4 cells per spot, so nearly
+# every spot holds one clone; 50,000, Fig 1's section, gives about 5. The dissociated sample (scDNA,
+# scRNA) keeps the tier's cap. The section is materialised with only the frames Visium and the allele
+# counts read (expression, and expression per homolog).
+SECTION_MAX_CELLS = int(os.environ.get("ISCC_SECTION_MAX_CELLS", 50_000))
+SECTION_LAYERS = ("cell_exp", "cell_exp_p", "cell_exp_m")
 CLONEALIGN = dict(max_iter=200, n_repeats=2, seed=1, preprocess=1)   # Fig 5's settings + the package's
                                                                       # preprocess_for_clonealign
 NORMAL, OTHER, TRUNK = "normal", "other", "above_clades"
@@ -84,9 +90,11 @@ def _commit():
 # ---------------------------------------------------------------------------------------------------
 # the tumour, its samples and the answer key
 # ---------------------------------------------------------------------------------------------------
-def sample(run, task):
+def sample(run, task, section_max_cells=SECTION_MAX_CELLS):
     """The stored tumour, its human-gene layer, and the two samples of the paper's figures: the
-    dissociated half (scRNA, scDNA) and the section (Visium), cut as make_layer_dataset cuts them."""
+    dissociated half (scRNA, scDNA, at the tier's max_cells) and the section (Visium, at
+    ``section_max_cells``), cut as make_layer_dataset cuts them. Every step slices the same section,
+    since the answer key's clones are counted over both samples."""
     import realistic_regime as RR
     import regime as RG
     import registry as REG
@@ -95,7 +103,7 @@ def sample(run, task):
     layer = HumanGenomeLayer(t, allow_linear=t.genome_params.get("arms") is None)
     spec = RR.resect(t)
     dis = spec.dissociate(max_cells=RG.T["max_cells"])
-    sec = spec.slice(depth_frac=0.5, max_cells=RG.T["max_cells"])
+    sec = spec.slice(depth_frac=0.5, max_cells=int(section_max_cells), layers=SECTION_LAYERS)
     return t, layer, dis, sec
 
 
@@ -525,7 +533,7 @@ def run_oracle_set(a):
     work = os.path.join(a.work, f"c_{a.run}_{a.task}")
     os.makedirs(work, exist_ok=True)
     dna = pd.read_csv(os.path.join(out, "dna_clones.tsv"), sep="\t", index_col=0)
-    t, layer, dis, sec = sample(a.run, a.task)
+    t, layer, dis, sec = sample(a.run, a.task, a.section_max_cells)
     clone_of, true_prof, members = true_clones(t, layer, [dis, sec])
     X, rna_ids, t_fine = rna_inputs(t, layer, dis, clone_of, a)
     found = [c for c in pd.unique(dna["true_clone"]) if c in true_prof.index]
@@ -548,7 +556,7 @@ def run_dna_rna(a):
     work = os.path.join(a.work, f"c_{a.run}_{a.task}")
     os.makedirs(work, exist_ok=True)
     wall, t0 = {}, time.time()
-    t, layer, dis, sec = sample(a.run, a.task)
+    t, layer, dis, sec = sample(a.run, a.task, a.section_max_cells)
     t0 = _lap(wall, "load_and_sample", t0)
     tinfo = write_tumour_info(t, a)
     clone_of, true_prof, members = true_clones(t, layer, [dis, sec])
@@ -564,6 +572,7 @@ def run_dna_rna(a):
     segs = segment_names(layer)
     rec = dict(run=a.run, task=a.task, commit=_commit(), paper_out=os.environ.get("ISCC_PAPER_OUT"),
                tier=os.environ.get("ISCC_PAPER_TIER"), seed=a.seed, clonealign=CLONEALIGN, tumour=tinfo,
+               section_max_cells=int(a.section_max_cells),
                n_rna_cells=int(len(keep)), true_clones=members, coarse_groups=sorted(set(group_of.values())),
                dna=dna["diag"], dna_mapping=dna["mapping"], dna_purity=dna["purity"])
     resolutions = (("fine", t_fine, true_prof),) + ((("coarse", t_coarse, coarse_prof),) if a.coarse else ())
@@ -671,7 +680,7 @@ def run_spatial(a):
     if not os.path.exists(dna_tsv):
         sys.exit(f"no DNA clones at {dna_tsv}: run dna-rna first")
     wall, t0 = {}, time.time()
-    t, layer, dis, sec = sample(a.run, a.task)
+    t, layer, dis, sec = sample(a.run, a.task, a.section_max_cells)
     t0 = _lap(wall, "load_and_sample", t0)
     clone_of, true_prof, members = true_clones(t, layer, [dis, sec])
     del dis
@@ -743,8 +752,10 @@ def run_spatial(a):
     spots.to_csv(os.path.join(out, "spots.tsv.gz"), sep="\t", index=False)
     rec = dict(run=a.run, task=a.task, commit=_commit(), paper_out=os.environ.get("ISCC_PAPER_OUT"),
                tier=os.environ.get("ISCC_PAPER_TIER"), seed=a.seed, true_clones=members,
+               section_max_cells=int(a.section_max_cells), n_section_cells=int(len(placed["cell_exp"])),
                n_spots=int(len(spots)), n_tumour_spots=int((spots["n_tumour"] > 0).sum()),
                mean_cells_per_spot=float(spots["n_cells"].mean()),
+               mean_cells_per_tumour_spot=float(spots.loc[spots["n_tumour"] > 0, "n_cells"].mean()),
                prior=dict(U0=U0.round(3).to_dict(orient="index"), states=dict(zip(segment_names(layer), states))),
                runs=info, wall_s=wall)
     import fig4_score as FS
@@ -766,6 +777,8 @@ def main():
     ap.add_argument("--n-dna", type=int, default=N_DNA)
     ap.add_argument("--rna-cells", type=int, default=RNA_MAX_CELLS)
     ap.add_argument("--rna-genes", type=int, default=RNA_GENES)
+    ap.add_argument("--section-max-cells", type=int, default=SECTION_MAX_CELLS,
+                    help="cells in the Visium section (default $ISCC_SECTION_MAX_CELLS or 50,000)")
     ap.add_argument("--coarse", action="store_true",
                     help="also run clonealign on the copy-number groups of the true clones (a diagnostic)")
     a = ap.parse_args()
