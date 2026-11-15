@@ -28,11 +28,14 @@ paper's rates (division 0.7, death 0.05 up to K and 5 above it, slot cap 1.5 K):
 relabelled as an identical twin; by exchangeability it fixes with probability 1/N0).
 
 Per tumour, at 5,000 cells: drivers per cell and clonal diversity at the 5% detection limit and at
-full census (:func:`iscc.inference.mode_indices`), live genotypes, fraction of genome altered, the
-occupancy (cells / K) at 5,000 cells of the demes that reached K, the founding acinus's time-averaged
-occupancy while it is confined (from 10 generations after it is half full to its release), the time
-to reach 5,000 cells, the acinus's release time and the in-situ phase (release to the first cancer
-cell in a stroma deme, read every half generation in both engines), and the wall time of growth.
+full census (:func:`iscc.inference.mode_indices`), live genotypes, the fraction of genome altered and
+mean ploidy (``sweep_score.score_tumour``, as the regime's tuning reads them), the occupancy (cells /
+K) of the demes that reached K, the founding acinus's time-averaged occupancy while it is confined
+(from 10 generations after it is half full to its release), the time to reach 5,000 cells, the
+acinus's release time, and the wall time of growth. Most tumours are still in situ at 5,000 cells, so
+each is then grown on, in the same streams, until its first cancer cell reaches a stroma deme (at most
+300 generations after the release): the in-situ phase is that time minus the release. Full demes and
+the stroma are read every half generation in both engines.
 
 Heavy work runs through Slurm (``wt/s1-jobs``); results are a few JSON-lines files per arm.
 Run:
@@ -60,6 +63,7 @@ TARGET = 5_000                   # cancer cells at which every arm stops
 GRID = 0.5                       # generations between the reads of the in-situ phase and full demes
 SETTLE = 10.0                    # generations after the acinus is half full before its occupancy counts
 T_MAX = 1_500.0                  # generations; a tumour still below target then has stayed in situ
+INSITU_MAX = 300.0               # generations after the release that the in-situ phase is followed for
 GROW_SEED = {"exact": 10_000_000, "tau": 20_000_000}   # growth seed = construction seed + offset
 
 _TAU_PAPER = {k: RG.DEME[k] for k in ("tau_deaths", "tau_step", "tau_epsilon")}
@@ -93,11 +97,14 @@ def _tumour_config(arm):
 
 
 def run_tumour(arm, seed):
-    """Grow one paper-regime tumour of ``arm`` from construction seed ``seed`` to TARGET cells."""
+    """Grow one paper-regime tumour of ``arm`` from construction seed ``seed`` to TARGET cells, read
+    its statistics, then keep growing it until the first cancer cell reaches a stroma deme (the end of
+    the in-situ phase), at most INSITU_MAX generations after the acinus's release."""
     from iscc.inference import mode_indices
     from iscc.inference.summaries import cna_summary
     from iscc.tumor.models import GenotypeTumor
     from iscc.tumor.models.materialise import _STREAM_GROW
+    import sweep_score as SS
 
     mode = ARMS[arm]["mode"]
     t = GenotypeTumor(seed=seed, max_cells=1, **_tumour_config(arm))
@@ -105,7 +112,7 @@ def run_tumour(arm, seed):
     origin = tuple(t._origin_demes)
     acinus = [0.0, 0.0]                         # integral of occupancy / K over time, and the time
     k_origin = float(sum(t._cap_of(d) for d in origin))
-    ever_full, state = set(), {"first_stroma": None}
+    ever_full, st = set(), {"first_stroma": None, "events": 0, "next_grid": GRID}
 
     def in_window():
         return t._origin_confined and t._origin_age is not None and t._origin_age >= SETTLE
@@ -117,34 +124,10 @@ def run_tumour(arm, seed):
         for di in t._deme_cancer_n:
             if sum(t.demes[di].values()) >= t._cap_of(di):
                 ever_full.add(di)
-        if state["first_stroma"] is None and any(t.gland_id[di] < 0 for di in t._deme_cancer_n):
-            state["first_stroma"] = float(t.time)
+        if st["first_stroma"] is None and any(t.gland_id[di] < 0 for di in t._deme_cancer_n):
+            st["first_stroma"] = float(t.time)
 
-    wall0, cpu0 = time.time(), time.process_time()
-    n_events = 0
-    if mode == "exact":
-        # grow()'s exact path (one update() per event on the stream keyed by the event index, the
-        # target checked before each event) without its per-event trace snapshot; the time each state
-        # is held is the waiting time update() draws, so the acinus's occupancy is a true time average.
-        next_grid = GRID
-        while True:
-            c = t.get_cancer_size()
-            if c == 0 or c >= TARGET or t.time >= T_MAX:
-                break
-            win = in_window()
-            if win:
-                occ0, t0 = origin_occ(), t.time
-            t._clock = t.step
-            t.update(t._run_rng(gseed, t.step, _STREAM_GROW))
-            t.step += 1
-            n_events += 1
-            if win:
-                acinus[0] += occ0 * (t.time - t0)
-                acinus[1] += t.time - t0
-            if t.time >= next_grid:
-                read_grid()
-                next_grid = (math.floor(t.time / GRID) + 1) * GRID
-    else:
+    if mode == "tau":
         orig = t._tau_substep
 
         def substep(rng, dt, demes=None):        # records the state each leap starts from, and dt
@@ -153,35 +136,71 @@ def run_tumour(arm, seed):
                 acinus[1] += dt
             return orig(rng, dt) if demes is None else orig(rng, dt, demes=demes)
         t._tau_substep = substep
-        while 0 < t.get_cancer_size() < TARGET and t.time < T_MAX:
-            t.grow(n_steps=1, seed=gseed, materialize=False, target_cancer=TARGET)
-            t.traces.clear()
-            t.trace_times.clear()
-            read_grid()
-        del t._tau_substep
-    wall, cpu = time.time() - wall0, time.process_time() - cpu0
 
+    def advance(done, target):
+        """Grow until ``done()``, reading the grid every GRID generations."""
+        if mode == "exact":
+            # grow()'s exact path (one update() per event on the stream keyed by the event index, the
+            # target checked before each event) without its per-event trace snapshot; the time a state
+            # is held is the waiting time update() draws, so the acinus's occupancy is a time average.
+            while not done():
+                win = in_window()
+                if win:
+                    occ0, t0 = origin_occ(), t.time
+                t._clock = t.step
+                t.update(t._run_rng(gseed, t.step, _STREAM_GROW))
+                t.step += 1
+                st["events"] += 1
+                if win:
+                    acinus[0] += occ0 * (t.time - t0)
+                    acinus[1] += t.time - t0
+                if t.time >= st["next_grid"]:
+                    read_grid()
+                    st["next_grid"] = (math.floor(t.time / GRID) + 1) * GRID
+        else:
+            while not done():
+                t.grow(n_steps=1, seed=gseed, materialize=False, target_cancer=target)
+                t.traces.clear()
+                t.trace_times.clear()
+                read_grid()
+
+    def release():
+        rel = [e["time"] for e in t.events if e.get("event") == "origin_release"]
+        return float(rel[0]) if rel else None
+
+    # phase 1: to TARGET cells
+    wall0, cpu0 = time.time(), time.process_time()
+    advance(lambda: not 0 < t.get_cancer_size() < TARGET or t.time >= T_MAX, TARGET)
+    wall, cpu = time.time() - wall0, time.process_time() - cpu0
     cancer = t.get_cancer_size()
     rec = dict(arm=arm, seed=seed, grow_seed=gseed, cancer=int(cancer), reached=bool(cancer >= TARGET),
-               time=float(t.time), wall_s=round(wall, 2), cpu_s=round(cpu, 2), events=n_events or None,
-               leaps=getattr(t, "_n_substeps", None), crit_events=getattr(t, "_n_crit_events", None))
-    rel = [e["time"] for e in t.events if e.get("event") == "origin_release"]
-    rec["release"] = float(rel[0]) if rel else None
-    rec["first_stroma"] = state["first_stroma"]
-    rec["in_situ"] = (state["first_stroma"] - rec["release"]
-                      if rec["release"] is not None and state["first_stroma"] is not None else None)
-    rec["occ_acinus"] = acinus[0] / acinus[1] if acinus[1] > 0 else None
-    rec["acinus_window"] = acinus[1]
+               time=float(t.time), wall_s=round(wall, 2), cpu_s=round(cpu, 2),
+               events=st["events"] or None, leaps=getattr(t, "_n_substeps", None),
+               crit_events=getattr(t, "_n_crit_events", None), release=release(),
+               invaded=st["first_stroma"] is not None,
+               occ_acinus=acinus[0] / acinus[1] if acinus[1] > 0 else None, acinus_window=acinus[1])
     if cancer == 0:
         return rec
     counts = [c for g, c in t.genotypes_counts.items() if c > 0 and t._is_cancer(g)]
     p = np.asarray(counts, float) / cancer
     m5, m0 = mode_indices(t, detection=0.05), mode_indices(t, detection=0.0)
     occ = [sum(t.demes[d].values()) / t._cap_of(d) for d in sorted(ever_full)]
+    sc = SS.score_tumour(t)
     rec.update(genotypes=len(counts), top=float(p.max()), n5=m5["n"], D5=m5["D"], clones5=m5["n_clones"],
-               n0=m0["n"], D0=m0["D"], clones0=m0["n_clones"], fga=cna_summary(t)["fga"],
+               n0=m0["n"], D0=m0["D"], clones0=m0["n_clones"], fga=sc["frac_genome_altered"],
+               fga_vs2=cna_summary(t)["fga"], ploidy=sc["mean_ploidy"], pct_wgd=sc["pct_wgd"],
                n_full=len(occ), occ_full=float(np.mean(occ)) if occ else None,
                n_cancer_demes=len(t._deme_cancer_n))
+
+    # phase 2: on to the first cancer cell in the stroma (in the same stream, as one growth)
+    wall0 = time.time()
+    if rec["reached"]:
+        advance(lambda: (st["first_stroma"] is not None or t.get_cancer_size() == 0
+                         or t.time >= (release() or t.time) + INSITU_MAX or t.time >= T_MAX), None)
+    rel = release()
+    rec.update(release=rel, first_stroma=st["first_stroma"],
+               in_situ=st["first_stroma"] - rel if rel is not None and st["first_stroma"] is not None else None,
+               cancer_at_invasion=int(t.get_cancer_size()), wall_insitu_s=round(time.time() - wall0, 2))
     return rec
 
 
@@ -426,7 +445,7 @@ def _sd_hist(h):
 TUMOUR_STATS = [
     ("n5", "drivers per cell, 5% detection"), ("n0", "drivers per cell, full census"),
     ("D5", "clonal diversity, 5% detection"), ("D0", "clonal diversity, full census"),
-    ("genotypes", "genotypes"), ("fga", "fraction of genome altered"),
+    ("genotypes", "genotypes"), ("fga", "fraction of genome altered"), ("ploidy", "mean ploidy"),
     ("occ_full", "occupancy of demes that reached K"), ("occ_acinus", "acinus occupancy, confined"),
     ("time", "time to 5,000 cells"), ("release", "release of the acinus"), ("in_situ", "in-situ phase"),
 ]
@@ -449,6 +468,9 @@ def summarise(out):
                      cancer=_mean_ci([r["cancer"] for r in rs]),
                      wall_s=dict(median=float(np.median(walls)), mean=float(np.mean(walls)),
                                  q25=float(np.quantile(walls, 0.25)), q75=float(np.quantile(walls, 0.75))))
+            d["invaded_at_target"] = float(np.mean([r["invaded"] for r in rs]))
+            d["in_situ_censored"] = sum(1 for r in rs if r.get("in_situ") is None)
+            d["wall_insitu_s"] = float(np.median([r["wall_insitu_s"] for r in rs]))
             if arm == "exact":
                 d["events"] = float(np.mean([r["events"] for r in rs]))
             elif rs[0].get("leaps"):
