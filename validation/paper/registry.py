@@ -185,8 +185,12 @@ def _grow_task(run, task, kw):
     wall, cpu = time.time() - t0, _cpu_s() - c0
     path = task_path(run, task)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "wb") as f:
+    # Written beside the target and renamed into place, so a task killed mid-write (out of memory while
+    # pickling a large tumour) leaves no truncated pickle that later steps would take for a grown tumour.
+    part = path + ".part"
+    with open(part, "wb") as f:
         pickle.dump(t, f, protocol=pickle.HIGHEST_PROTOCOL)
+    os.replace(part, path)
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 ** 2 if sys.platform == "darwin" else 1024)
     # CPU time, not wall time, is the cost: a laptop that sleeps mid-run inflates wall time tenfold.
     # `commit` is the iscc commit the tumour was grown from: a git checkout reports it, and a copy without
@@ -259,6 +263,11 @@ def _apply_dosage(t):
         t.program_truth = t.programs.truth()
 
 
+def grown(run, task):
+    """True once the task's pickle and its record are both written (the record comes last)."""
+    return os.path.exists(task_path(run, task)) and os.path.exists(os.path.splitext(task_path(run, task))[0] + ".json")
+
+
 def tasks(run):
     return [name for name, _ in RUNS[run]]
 
@@ -282,7 +291,7 @@ def main():
         return
     if a.cmd == "task":
         n, task, kw = flat[a.index]
-        if not a.force and os.path.exists(task_path(n, task)):
+        if not a.force and grown(n, task):
             print(f"  {n}/{task}: already grown", flush=True)
             return
         r = _grow_task(n, task, kw)
@@ -302,7 +311,7 @@ def main():
                     f.writelines(json.dumps(r) + "\n" for r in recs)
             print(f"{n}: {len(recs)} of {len(RUNS[n])} tasks grown")
         return
-    todo = [(n, task, kw) for n, task, kw in flat if a.force or not os.path.exists(task_path(n, task))]
+    todo = [(n, task, kw) for n, task, kw in flat if a.force or not grown(n, task)]
     print(f"{len(todo)} tasks to grow ({RG.TIER}, {a.jobs} parallel)", flush=True)
     # a fresh process per tumour, so one large genotype registry is not carried into the next task
     with mp.get_context("spawn").Pool(processes=a.jobs, maxtasksperchild=1) as pool:
