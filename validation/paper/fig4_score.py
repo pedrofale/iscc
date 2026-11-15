@@ -183,7 +183,8 @@ def _panel_c(ax, c, order, short, S, DNA, metric):
         ax.text(i + 0.1, (a_t + a_d) / 2, f"{a_d - a_t:+.2f}".replace("-", "\u2212"), fontsize=4.6,
                 color=S.INK, va="center")
     ax.set_xticks(range(len(order)))
-    ax.set_xticklabels([short[t] for t in order], fontsize=4.6)
+    ax.set_xticklabels([short[t].replace("\n", " ", 1) for t in order], fontsize=4.4, rotation=40, ha="right",
+                       rotation_mode="anchor")
     ax.set_xlim(-0.6, len(order) - 0.3)
     ax.set_ylim(0, 1.02)
 
@@ -219,7 +220,7 @@ def figure(c, d, path):
     tumours = set(c["tumour"]) if len(c) else set()
     if len(d):
         tumours |= set(d["tumour"])
-    order = sorted(tumours, key=lambda s: (0 if s.endswith("_seed1") and "disp" not in s else 1, s))
+    order = sorted(tumours, key=lambda s: (0 if "disp" not in s else 1, s))
     def _short(t):
         task = t.split("_", 1)[1]
         if task.startswith("disp"):
