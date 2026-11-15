@@ -5,7 +5,8 @@ statistic function, so a competitor and ``iscc`` are measured identically:
 
   (a) WGS: per-locus coverage at the GIAB HG002 benchmark sites (copy number 2) and its CV, for VISOR
       SHORtS reads (pywgsim, aligned by minimap2) from diploid GRCh38 chr1 haplotypes at HG002's mean
-      depth (no copy-number change is implanted: Fig 3b scores copy-number-2 sites only);
+      depth (no copy-number change is implanted); iscc's loci are those at its tumour's most common
+      copy number (Fig 3b), so every source is scored at one copy-number state;
   (b) scDNA: within-cell coverage CV per copy-number state (``fig2_realism._cv_by_state``), against
       DLP+, for CNAsim in count mode with its coverage non-uniformity set from DLP+;
   (c) scRNA: library size, mean against variance and zero fraction (``fig2_realism._count_stats``),
@@ -352,7 +353,7 @@ def render():
     # a. WGS
     S.panel_letter(fig, "a", 2, 4)
     S.text_mm(fig, 10, 4, "WGS: GIAB HG002 (copy number 2 sites)", fontsize=6.5, va="top")
-    S.text_mm(fig, 10, 7.5, "VISOR SHORtS reads at HG002's mean depth, depth at the same 20,000 sites",
+    S.text_mm(fig, 10, 7.5, "VISOR reads at HG002's depth, same 20,000 sites; iscc at its modal copy number",
               fontsize=5, va="top", color=S.GREY)
     ax1, ax2 = S.ax_mm(fig, 14, 11, 38, 26), S.ax_mm(fig, 62, 11, 14, 26)
     src = _sources("wgs", d0)
