@@ -56,7 +56,7 @@ N_DNA = 1500                # single-cell WGS libraries, a DLP+ run's order of m
 RNA_MAX_CELLS = 3000        # tumour cells handed to clonealign
 RNA_GENES = 3000            # the most expressed genes among them
 CLONEALIGN = dict(max_iter=200, n_repeats=2, seed=1)   # Fig 5's settings
-NORMAL, OTHER = "normal", "other"
+NORMAL, OTHER, TRUNK = "normal", "other", "above_clades"
 
 
 def _lap(wall, name, t0):
@@ -115,7 +115,8 @@ def true_clones(t, layer, samples, min_frac=MIN_CLONE_FRAC):
     """The answer key's clones over the union of ``samples``.
 
     Returns ``(clone_of, profiles, members)``: ``clone_of`` maps a genotype id to its clone label
-    (``"other"`` for a cancer genotype above every clade, absent for normal cells), ``profiles`` is the
+    (``"above_clades"`` for a cancer genotype above every clade when those cells are as many as a clade must
+    hold, ``"other"`` when they are fewer, absent for normal cells), ``profiles`` is the
     clones x segments frame of integer copy number (the median over the clone's cells), ``members`` maps a
     merged label to the clades it holds."""
     from iscc.integrations import clones_from_clades
@@ -125,7 +126,7 @@ def true_clones(t, layer, samples, min_frac=MIN_CLONE_FRAC):
     saved = getattr(t, "cell_data", None)
     t.cell_data = {"cell_type": pd.DataFrame({"cell_id": gids}, index=[f"c{i}" for i in range(len(gids))])}
     try:
-        lab = clones_from_clades(t, min_cells=max(20, int(round(min_frac * n_t))))
+        lab = clones_from_clades(t, min_cells=max(20, int(round(min_frac * n_t))))  # Fig 4b's truth rule
     finally:
         t.cell_data = saved
     lab = lab.astype(object).to_numpy()
@@ -136,8 +137,15 @@ def true_clones(t, layer, samples, min_frac=MIN_CLONE_FRAC):
     ug = list(clade_of)
     cn = dict(zip(ug, genotype_cn(t, layer, ug)))
     segs = segment_names(layer)
+    # The cells above every clade ("other": the trunk and branches too small to be clades) have profiles
+    # every modality sees; they are one more clone here when they are as many as a clade must hold.
+    min_cells = max(20, int(round(min_frac * n_t)))
+    n_other = sum(1 for g, is_t in zip(gids, tum) if is_t and clade_of[g] == OTHER)
+    if n_other >= min_cells:
+        clade_of = {g: (TRUNK if c == OTHER else c) for g, c in clade_of.items()}
     cells = [(clade_of[g], cn[g]) for g, is_t in zip(gids, tum) if is_t and clade_of[g] != OTHER]
-    clades = sorted({c for c, _ in cells}, key=lambda c: int(c.split("_")[-1]) if c.split("_")[-1].isdigit() else 0)
+    clades = sorted({c for c, _ in cells},
+                    key=lambda c: int(c.split("_")[-1]) if c.split("_")[-1].isdigit() else 10**6)
     prof = {c: np.rint(np.median(np.stack([v for k, v in cells if k == c]), axis=0)).astype(int) for c in clades}
     groups = {}
     for c in clades:
@@ -188,8 +196,9 @@ def hmmcopy_bins(layer, dna, snv_columns):
 
 
 def run_hmmcopy(reads, bins, work, cores=1):
-    """HMMcopy per cell (validation/hmmcopy_runner.R in the r-cnv image), the cells split into ``cores``
-    chunks run side by side. Returns the bins x cells frame of HMMcopy states (NaN where a cell failed)."""
+    """HMMcopy per cell with the DLP+ single-cell parameterisation (tools/hmmcopy_dlp.R in the r-cnv
+    image), the cells split into ``cores`` chunks run side by side. Returns the bins x cells frame of
+    copy-number states (NaN where a bin or a cell was not called) and the per-cell table (multiplier)."""
     rscript = os.environ.get("ISCC_HMMCOPY_RSCRIPT")
     if not rscript:
         raise RuntimeError("set ISCC_HMMCOPY_RSCRIPT (validation/paper/tools/bin/rscript-r-cnv)")
@@ -201,21 +210,24 @@ def run_hmmcopy(reads, bins, work, cores=1):
     for k, cols in enumerate(chunks):
         rc = os.path.join(work, f"reads_{k}.csv")
         reads[list(cols)].to_csv(rc)
-        out = os.path.join(work, f"states_{k}.csv")
+        out = os.path.join(work, f"hmm_{k}")
         log = open(os.path.join(work, f"hmmcopy_{k}.log"), "w")
-        procs.append((subprocess.Popen([rscript, os.path.join(VAL, "hmmcopy_runner.R"), rc, bins_csv, out],
+        procs.append((subprocess.Popen([rscript, os.path.join(TOOLS, "hmmcopy_dlp.R"), rc, bins_csv, out],
                                        stdout=log, stderr=subprocess.STDOUT), out, log))
-    states = []
+    states, per_cell = [], []
     for p, out, log in procs:
         rc = p.wait()
         log.close()
         if rc != 0:
-            raise RuntimeError(f"hmmcopy_runner failed (exit {rc}); see {log.name}:\n"
+            raise RuntimeError(f"hmmcopy_dlp.R failed (exit {rc}); see {log.name}:\n"
                                + open(log.name).read()[-1500:])
-        states.append(pd.read_csv(out, index_col=0))
+        states.append(pd.read_csv(out + "_state.csv", index_col=0))
+        per_cell.append(pd.read_csv(out + "_cell.csv", dtype={"cell": str}))
+    print("   ", open(procs[0][2].name).read().strip().splitlines()[-1], flush=True)
     st = pd.concat(states, axis=1)
     st.index = st.index.astype(str)
-    return st.reindex(index=bins.index, columns=reads.columns)
+    st.columns = st.columns.astype(str)
+    return st.reindex(index=bins.index, columns=reads.columns), pd.concat(per_cell).set_index("cell")
 
 
 def cluster_cells(cn_bins, seed=0):
@@ -271,12 +283,12 @@ def dna_chain(t, layer, dis, clone_of, work, seed=0, n_cells=N_DNA, cores=1):
     reads.index = reads.index.astype(str)
     reads = reads.loc[bins.index].astype(int)
     reads.columns = [str(c) for c in reads.columns]
-    states = run_hmmcopy(reads, bins, os.path.join(work, "hmmcopy"), cores=cores)
+    states, hmm_cells = run_hmmcopy(reads, bins, os.path.join(work, "hmmcopy"), cores=cores)
     t0 = _lap(wall, "hmmcopy", t0)
-    # A bin can come back without a state in a cell (no corrected depth there); a cell counts as called
+    # Bins outside a cell's "ideal" set (mappability, GC, depth) carry no state; a cell counts as called
     # when it has a state on at least half its bins, and only bins called in 90% of those cells are
     # clustered on, a missing state taking the cell's median.
-    cn = (states.clip(upper=6) - 1).to_numpy(float)           # HMMcopy states 1..6 are CN 0..5+
+    cn = states.to_numpy(float)                                # states are copy numbers 0..11
     ok = np.isfinite(cn).mean(axis=0) >= 0.5
     good_bins = np.isfinite(cn[:, ok]).mean(axis=1) >= 0.9 if ok.any() else np.zeros(len(cn), bool)
     segs = segment_names(layer)
@@ -305,12 +317,19 @@ def dna_chain(t, layer, dis, clone_of, work, seed=0, n_cells=N_DNA, cores=1):
     for name in profiles.index:
         tv = pd.Series(truth[called == name]).value_counts()
         mapping[name], purity[name] = str(tv.index[0]), float(tv.iat[0] / tv.sum())
-    # how well HMMcopy called each cell, on its own relative scale (each cell's median bin is neutral)
+    # how well HMMcopy called each cell: as absolute copy number (the multiplier is its ploidy guess),
+    # and up to the cell's scale (the called states rescaled to the true median)
     true_cn = genotype_cn(t, layer, gids)[:, seg_of_bin].astype(float)            # cells x bins
-    rel = 2.0 * true_cn / np.median(true_cn, axis=1, keepdims=True)
     called_ok = cn[:, ok].T
     fin = np.isfinite(called_ok)
-    conc = float(np.mean(np.rint(rel[ok])[fin] == called_ok[fin])) if ok.any() else float("nan")
+    if ok.any():
+        conc = float(np.mean(true_cn[ok][fin] == called_ok[fin]))
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            scale = np.median(true_cn[ok], axis=1, keepdims=True) / np.nanmedian(called_ok, axis=1, keepdims=True)
+        conc_rel = float(np.mean(np.rint(called_ok * scale)[fin] == true_cn[ok][fin]))
+    else:
+        conc = conc_rel = float("nan")
     from sklearn.metrics import adjusted_rand_score
     m = (lab >= 0) & (truth != OTHER)
     diag = dict(n_cells=len(cells), n_hmmcopy_ok=int(ok.sum()), n_noise=int((lab == -1).sum()),
@@ -318,10 +337,14 @@ def dna_chain(t, layer, dis, clone_of, work, seed=0, n_cells=N_DNA, cores=1):
                 n_clusters=int(len(set(lab[lab >= 0].tolist()))), n_called_clones=int(len(profiles)),
                 n_true_clones_present=int(len(set(truth[(truth != NORMAL) & (truth != OTHER)].tolist()))),
                 cluster_ari=float(adjusted_rand_score(truth[m], lab[m])) if m.sum() > 1 else float("nan"),
-                hmmcopy_bin_concordance=conc, mean_reads_per_bin=float(reads.to_numpy().mean()),
+                hmmcopy_bin_concordance=conc, hmmcopy_bin_concordance_scaled=conc_rel,
+                hmmcopy_wrong_ploidy=float(np.mean(np.abs(scale - 1) > 0.25)) if ok.any() else float("nan"),
+                mean_reads_per_bin=float(reads.to_numpy().mean()),
                 n_bins=int(len(bins)), n_bins_clustered=int(good_bins.sum()), dlp_fit=repr(est), wall_s=wall)
     cells_tab = pd.DataFrame({"cell": cells, "genotype": [str(g) for g in gids], "true_clone": truth,
-                              "hmmcopy_ok": ok.astype(int), "cluster": lab, "called_clone": called,
+                              "hmmcopy_ok": ok.astype(int),
+                              "multiplier": hmm_cells["multiplier"].reindex(reads.columns).round(3).to_numpy(),
+                              "cluster": lab, "called_clone": called,
                               "umap1": emb[:, 0], "umap2": emb[:, 1]})
     seg_tab = pd.DataFrame(seg_cn, columns=segs)
     return dict(profiles=profiles, mapping=mapping, purity=purity, diag=diag, cells=cells_tab,
