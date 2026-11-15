@@ -32,6 +32,10 @@ The spatial step reads ``OUT/c/<run>_<task>/dna_clones.tsv``, so it runs after `
 
     python validation/paper/fig4_chain.py dna-rna --run R11 --task seed1 --out OUT --work $SNIC_TMP
     python validation/paper/fig4_chain.py spatial --run R11 --task seed1 --out OUT --work $SNIC_TMP
+    python validation/paper/fig4_chain.py info    --run R11 --task seed1 --out OUT --work $SNIC_TMP
+
+``info`` only writes ``OUT/c/<run>_<task>/tumour.json`` (cancer cells, whole-genome-doubled fraction, and
+whether the doubling swept the tumour), which ``dna-rna`` also writes.
 """
 import argparse
 import json
@@ -91,6 +95,37 @@ def sample(run, task):
     dis = spec.dissociate(max_cells=RG.T["max_cells"])
     sec = spec.slice(depth_frac=0.5, max_cells=RG.T["max_cells"])
     return t, layer, dis, sec
+
+
+def tumour_info(t, run, task):
+    """The tumour's cancer-cell count and the fraction carrying a whole-genome doubling (as summaries.py
+    counts it); a tumour with at least 95% doubled cells is marked swept."""
+    from collections import Counter
+    cnt = Counter()
+    for deme in t.demes:
+        for g, c in deme.items():
+            if t._is_cancer(g):
+                cnt[g] += c
+    tot = sum(cnt.values())
+    wgd = sum(c for g, c in cnt.items() if getattr(t.genotypes[g], "is_wgd", False)) / max(tot, 1)
+    return dict(run=run, task=task, cancer=int(tot), wgd_frac=float(wgd), wgd_swept=bool(wgd >= 0.95),
+                paper_out=os.environ.get("ISCC_PAPER_OUT"), tier=os.environ.get("ISCC_PAPER_TIER"),
+                commit=_commit())
+
+
+def write_tumour_info(t, a):
+    out = os.path.join(a.out, "c", f"{a.run}_{a.task}")
+    os.makedirs(out, exist_ok=True)
+    info = tumour_info(t, a.run, a.task)
+    with open(os.path.join(out, "tumour.json"), "w") as f:
+        json.dump(info, f, indent=1)
+    print("tumour:", json.dumps(info), flush=True)
+    return info
+
+
+def run_info(a):
+    import registry as REG
+    write_tumour_info(REG.load(a.run, a.task), a)
 
 
 def segment_names(layer):
@@ -468,6 +503,7 @@ def run_dna_rna(a):
     wall, t0 = {}, time.time()
     t, layer, dis, sec = sample(a.run, a.task)
     t0 = _lap(wall, "load_and_sample", t0)
+    tinfo = write_tumour_info(t, a)
     clone_of, true_prof, members = true_clones(t, layer, [dis, sec])
     group_of, coarse_prof = coarse_clones(true_prof)
     t0 = _lap(wall, "truth", t0)
@@ -489,7 +525,7 @@ def run_dna_rna(a):
     del sc
     segs = segment_names(layer)
     rec = dict(run=a.run, task=a.task, commit=_commit(), paper_out=os.environ.get("ISCC_PAPER_OUT"),
-               tier=os.environ.get("ISCC_PAPER_TIER"), seed=a.seed, clonealign=CLONEALIGN,
+               tier=os.environ.get("ISCC_PAPER_TIER"), seed=a.seed, clonealign=CLONEALIGN, tumour=tinfo,
                n_rna_cells=int(len(keep)), true_clones=members, coarse_groups=sorted(set(group_of.values())),
                dna=dna["diag"], dna_mapping=dna["mapping"], dna_purity=dna["purity"])
     for res, tt, prof in (("fine", t_fine, true_prof), ("coarse", t_coarse, coarse_prof)):
@@ -679,7 +715,7 @@ def run_spatial(a):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("step", choices=("dna-rna", "spatial"))
+    ap.add_argument("step", choices=("dna-rna", "spatial", "info"))
     ap.add_argument("--run", default="R11")
     ap.add_argument("--task", required=True)
     ap.add_argument("--out", required=True)
@@ -692,7 +728,7 @@ def main():
     a = ap.parse_args()
     warnings.filterwarnings("ignore", category=FutureWarning)
     try:
-        (run_dna_rna if a.step == "dna-rna" else run_spatial)(a)
+        {"dna-rna": run_dna_rna, "spatial": run_spatial, "info": run_info}[a.step](a)
     finally:
         if os.environ.get("FIG4_KEEP_WORK") != "1":
             for d in (f"c_{a.run}_{a.task}", f"d_{a.run}_{a.task}"):

@@ -107,6 +107,15 @@ def _score_spots(spots, c_dir=None, group_of=None):
     return out
 
 
+def _tumour(out_dir, tag):
+    """wgd_frac and wgd_swept of a tumour, from fig4_chain.py's tumour.json (NaN when absent)."""
+    p = os.path.join(out_dir, "c", tag, "tumour.json")
+    if not os.path.exists(p):
+        return dict(wgd_frac=np.nan, wgd_swept=np.nan)
+    r = json.load(open(p))
+    return dict(wgd_frac=r["wgd_frac"], wgd_swept=r["wgd_swept"])
+
+
 def collect(out_dir):
     rows_c, rows_d = [], []
     for f in sorted(glob.glob(os.path.join(out_dir, "c", "*", "score.json"))):
@@ -114,7 +123,8 @@ def collect(out_dir):
         d = r.get("dna", {})
         for res in ("fine", "coarse"):
             x = r[res]
-            rows_c.append(dict(tumour=f"{r['run']}_{r['task']}", resolution=res, n_rna_cells=r["n_rna_cells"],
+            rows_c.append(dict(tumour=f"{r['run']}_{r['task']}", resolution=res,
+                               **_tumour(out_dir, f"{r['run']}_{r['task']}"), n_rna_cells=r["n_rna_cells"],
                                n_true_clones=x["n_true_clones"], n_called_clones=d.get("n_called_clones"),
                                acc_true=x["truth_arm"]["accuracy"], acc_dna=x["dna_arm"]["accuracy"], gap=x["gap"],
                                bal_true=x["truth_arm"]["balanced_accuracy"],
@@ -133,7 +143,8 @@ def collect(out_dir):
                                                           ("call:clonalscope", "call:clonalscope_dna", "call:calicost")}),
                          os.path.join(out_dir, "c", tag))
         for res, r in sc.items():
-            base = dict(tumour=tag, resolution=res, n_spots=r["n_spots_scored"], n_true_clones=r["n_true_clones"],
+            base = dict(tumour=tag, resolution=res, **_tumour(out_dir, tag), n_spots=r["n_spots_scored"],
+                        n_true_clones=r["n_true_clones"],
                         mixed_spots=r["mixed_spots"])
             rows_d.append(dict(base, tool="one clone everywhere", **r["one_clone_everywhere"]))
             for tool, name in TOOLS_D.items():
@@ -208,6 +219,11 @@ def figure(c, d, path):
         tumours |= set(d["tumour"])
     order = sorted(tumours, key=lambda s: (0 if s.endswith("_seed1") and "disp" not in s else 1, s))
     short = {t: t.split("_", 1)[1].replace("disp", "dispersal ").replace("_seed", ", seed ") for t in order}
+    swept = set()
+    for frame in (c, d):
+        if len(frame) and "wgd_swept" in frame:
+            swept |= set(frame.loc[frame["wgd_swept"] == True, "tumour"])  # noqa: E712
+    short = {t: v + (" (WGD swept)" if t in swept else "") for t, v in short.items()}
     DNA = S.MODALITY["DNA"]
     # validated (dataviz validate_palette, all pairs, light): CVD and normal-vision separation pass
     colours = {"Clonalscope": "#EB6834", "Clonalscope, DNA prior": DNA, "CalicoST": "#1BAF7A"}
