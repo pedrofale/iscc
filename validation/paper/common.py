@@ -45,10 +45,13 @@ def parents_of(t):
 
 class Clones:
     """The clone partition of a tumour: clade roots, their labels and colours, and a lookup that
-    works for any genotype ever created (so snapshots of the past use the same labels)."""
+    works for any genotype ever created (so snapshots of the past use the same labels).
 
-    def __init__(self, t, min_frac=0.04):
-        counts = live_cancer_counts(t)
+    ``counts`` (``{gid: cancer cells}``, default the live state) applies the same definition to
+    another population, for example the tumour at one snapshot of its spatial history."""
+
+    def __init__(self, t, min_frac=0.04, counts=None):
+        counts = live_cancer_counts(t) if counts is None else counts
         self.parents = parents_of(t)
         depth = _depths(self.parents, counts)
         min_cells = max(1, int(min_frac * sum(counts.values())))
