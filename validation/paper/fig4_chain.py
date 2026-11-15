@@ -1,0 +1,588 @@
+"""Fig 4c and 4d on one tumour: the errors one modality hands the next, scored against the answer key.
+
+4c (``dna-rna``). clonealign assigns the tumour's scRNA cells to clones twice: once given the TRUE clones
+and their copy-number profiles, once given the clones called from SIMULATED scDNA. The DNA chain is the
+one a single-cell WGS study runs: DLP+-like libraries (``scDNA`` with ``estimate_dna`` fitted to the DLP+
+reference in ``validation/data``), HMMcopy per cell on bins of ~500 kb (one growth locus each), then
+UMAP + HDBSCAN on the called states, clusters with the same copy-number profile merged and flat (diploid)
+clusters dropped. The gap between the two accuracies is the error the RNA step inherits from the DNA step.
+
+4d (``spatial``). Clonalscope maps clones onto the tumour's Visium section without a prior (Fig 4b's run)
+and with the DNA-derived prior from 4c's scDNA chain, handed over through Clonalscope's own inputs: the
+segment table's ``states`` (the relative copy number of the DNA pseudobulk per arm, what
+``Segmentation_bulk`` gives from matched WGS) and ``U0``, its prior mean relative coverage per cluster (a
+normal row and one row per DNA clone). CalicoST runs alongside. Each tool's call per spot is scored
+against the spot's true clone fractions by ``fig4_score.py``.
+
+The true clones are the answer key's: lineage clades (``clones_from_clades``) holding at least 3% of the
+sampled tumour cells, counted over the dissociated and the sectioned cells together so that scRNA, scDNA
+and Visium share one set of labels, and clades whose arm-level profiles are proportional merged into one
+clone, since no copy-number method can tell them apart (expression and single-cell depth are both
+library-normalised).
+
+Every input a tool reads and everything it writes live under ``--work`` (a job's $SNIC_TMP); only
+per-tumour summaries reach ``--out``:
+
+    OUT/c/<run>_<task>/  score.json, true_clones.tsv, dna_clones.tsv, dna_cells.tsv.gz, rna_cells.tsv.gz
+    OUT/d/<run>_<task>/  score.json, spots.tsv.gz (truth and every tool's label per spot)
+
+The spatial step reads ``OUT/c/<run>_<task>/dna_clones.tsv``, so it runs after ``dna-rna``. Usage
+(``ISCC_PAPER_OUT`` and ``ISCC_PAPER_TIER`` locate the registry; ``ISCC_TOOLS_DIR``,
+``ISCC_CLONEALIGN_RSCRIPT`` and ``ISCC_HMMCOPY_RSCRIPT`` the tools)::
+
+    python validation/paper/fig4_chain.py dna-rna --run R11 --task seed1 --out OUT --work $SNIC_TMP
+    python validation/paper/fig4_chain.py spatial --run R11 --task seed1 --out OUT --work $SNIC_TMP
+"""
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import warnings
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+VAL = os.path.dirname(HERE)
+TOOLS = os.path.join(HERE, "tools")
+for p in (HERE, VAL, TOOLS):
+    if p not in sys.path:
+        sys.path.insert(0, p)
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+
+MIN_CLONE_FRAC = 0.03       # Fig 4b's truth (make_layer_dataset --min-clone-frac)
+N_DNA = 1500                # single-cell WGS libraries, a DLP+ run's order of magnitude
+RNA_MAX_CELLS = 3000        # tumour cells handed to clonealign
+RNA_GENES = 3000            # the most expressed genes among them
+CLONEALIGN = dict(max_iter=200, n_repeats=2, seed=1)   # Fig 5's settings
+NORMAL, OTHER = "normal", "other"
+
+
+def _lap(wall, name, t0):
+    wall[name] = round(time.time() - t0, 1)
+    print(f"  {name}: {wall[name]} s", flush=True)
+    return time.time()
+
+
+def _commit():
+    try:
+        return subprocess.run(["git", "-C", HERE, "rev-parse", "--short", "HEAD"], capture_output=True,
+                              text=True).stdout.strip() or os.environ.get("ISCC_COMMIT", "")
+    except OSError:
+        return os.environ.get("ISCC_COMMIT", "")
+
+
+# ---------------------------------------------------------------------------------------------------
+# the tumour, its samples and the answer key
+# ---------------------------------------------------------------------------------------------------
+def sample(run, task):
+    """The stored tumour, its human-gene layer, and the two samples of the paper's figures: the
+    dissociated half (scRNA, scDNA) and the section (Visium), cut as make_layer_dataset cuts them."""
+    import realistic_regime as RR
+    import regime as RG
+    import registry as REG
+    from iscc.data.human import HumanGenomeLayer
+    t = REG.load(run, task)
+    layer = HumanGenomeLayer(t, allow_linear=t.genome_params.get("arms") is None)
+    spec = RR.resect(t)
+    dis = spec.dissociate(max_cells=RG.T["max_cells"])
+    sec = spec.slice(depth_frac=0.5, max_cells=RG.T["max_cells"])
+    return t, layer, dis, sec
+
+
+def segment_names(layer):
+    return list(layer.arms) if layer.arms is not None else [f"seg{s}" for s in range(len(layer.segment_sizes))]
+
+
+def _gids(cell_data, cells=None):
+    g = cell_data["cell_type"].iloc[:, 0]
+    return (g if cells is None else g.reindex(cells)).to_numpy(dtype=object)
+
+
+def genotype_cn(t, layer, gids):
+    """Total copy number per growth segment (an arm, on an arm genome) for each genotype."""
+    cn_p, cn_m = layer.homolog_cn(list(gids), t)
+    return (cn_p + cn_m).astype(int)
+
+
+def _proportional_key(profile):
+    p = np.asarray(profile, float)
+    return tuple(np.round(p / p.mean(), 3)) if p.mean() > 0 else tuple(p)
+
+
+def true_clones(t, layer, samples, min_frac=MIN_CLONE_FRAC):
+    """The answer key's clones over the union of ``samples``.
+
+    Returns ``(clone_of, profiles, members)``: ``clone_of`` maps a genotype id to its clone label
+    (``"other"`` for a cancer genotype above every clade, absent for normal cells), ``profiles`` is the
+    clones x segments frame of integer copy number (the median over the clone's cells), ``members`` maps a
+    merged label to the clades it holds."""
+    from iscc.integrations import clones_from_clades
+    gids = np.concatenate([_gids(s) for s in samples])
+    tum = layer.is_tumour(gids, t)
+    n_t = int(tum.sum())
+    saved = getattr(t, "cell_data", None)
+    t.cell_data = {"cell_type": pd.DataFrame({"cell_id": gids}, index=[f"c{i}" for i in range(len(gids))])}
+    try:
+        lab = clones_from_clades(t, min_cells=max(20, int(round(min_frac * n_t))))
+    finally:
+        t.cell_data = saved
+    lab = lab.astype(object).to_numpy()
+    clade_of = {}
+    for g, lb, is_t in zip(gids, lab, tum):
+        if is_t:
+            clade_of[g] = OTHER if (lb is None or (isinstance(lb, float) and np.isnan(lb))) else str(lb)
+    ug = list(clade_of)
+    cn = dict(zip(ug, genotype_cn(t, layer, ug)))
+    segs = segment_names(layer)
+    cells = [(clade_of[g], cn[g]) for g, is_t in zip(gids, tum) if is_t and clade_of[g] != OTHER]
+    clades = sorted({c for c, _ in cells}, key=lambda c: int(c.split("_")[-1]) if c.split("_")[-1].isdigit() else 0)
+    prof = {c: np.rint(np.median(np.stack([v for k, v in cells if k == c]), axis=0)).astype(int) for c in clades}
+    groups = {}
+    for c in clades:
+        groups.setdefault(_proportional_key(prof[c]), []).append(c)
+    members, merged_of = {}, {}
+    for key, cs in groups.items():
+        name = "+".join(cs)
+        members[name] = cs
+        for c in cs:
+            merged_of[c] = name
+    clone_of = {g: (merged_of.get(c, OTHER)) for g, c in clade_of.items()}
+    profiles = pd.DataFrame([prof[cs[0]] for cs in members.values()], index=list(members), columns=segs)
+    return clone_of, profiles, members
+
+
+def label_cells(gids, clone_of):
+    """The answer-key label of each cell: a clone, ``"other"``, or ``"normal"``."""
+    return np.array([clone_of.get(g, NORMAL) for g in gids], dtype=object)
+
+
+# ---------------------------------------------------------------------------------------------------
+# 4c: the DNA chain (scDNA -> HMMcopy -> clusters) and clonealign
+# ---------------------------------------------------------------------------------------------------
+def dlp_estimate():
+    """``estimate_dna`` fitted to the DLP+ reference (OV2295, 500 kb bins; Laks et al. 2019)."""
+    from iscc.data import estimate_dna
+    z = np.load(os.path.join(VAL, "data", "dna_ref_dlp_sc_wgs.npz"), allow_pickle=True)
+    return estimate_dna(z["coverage"], z["alt"], z["cn"], modality="sc", breadth=str(z["breadth"]),
+                        depth_model=str(z["depth_model"]))
+
+
+def hmmcopy_bins(layer, dna, snv_columns):
+    """HMMcopy's bin table for the scDNA loci: each growth locus is a bin at its place on the human
+    chromosome (``layer.grid``), with the assay's GC and mappability. Sorted along the genome."""
+    pos = pd.Index(snv_columns).get_indexer(list(dna.genes))
+    if (pos < 0).any():
+        raise ValueError("scDNA loci not found among the growth genes")
+    first = layer.grid.sort_values(["growth_gene", "lo"]).groupby("growth_gene").first()
+    arms = layer.reference.arms
+    g = first.loc[pos]
+    chrom = arms["chrom"].to_numpy()[g["arm"].to_numpy()]
+    bins = pd.DataFrame({"chr": chrom, "start": g["lo"].to_numpy() + 1, "end": g["hi"].to_numpy(),
+                         "gc": np.asarray(dna.gc, float), "map": np.asarray(dna.mappability, float),
+                         "segment": g["segment"].to_numpy()},
+                        index=pd.Index([str(x) for x in dna.genes], name="locus"))
+    bins["_c"] = bins["chr"].str.replace("chr", "", regex=False).astype(int)
+    return bins.sort_values(["_c", "start"]).drop(columns="_c")
+
+
+def run_hmmcopy(reads, bins, work, cores=1):
+    """HMMcopy per cell (validation/hmmcopy_runner.R in the r-cnv image), the cells split into ``cores``
+    chunks run side by side. Returns the bins x cells frame of HMMcopy states (NaN where a cell failed)."""
+    rscript = os.environ.get("ISCC_HMMCOPY_RSCRIPT")
+    if not rscript:
+        raise RuntimeError("set ISCC_HMMCOPY_RSCRIPT (validation/paper/tools/bin/rscript-r-cnv)")
+    os.makedirs(work, exist_ok=True)
+    bins_csv = os.path.join(work, "bins.csv")
+    bins[["chr", "start", "end", "gc", "map"]].to_csv(bins_csv)
+    chunks = [c for c in np.array_split(np.asarray(reads.columns), max(1, cores)) if len(c)]
+    procs = []
+    for k, cols in enumerate(chunks):
+        rc = os.path.join(work, f"reads_{k}.csv")
+        reads[list(cols)].to_csv(rc)
+        out = os.path.join(work, f"states_{k}.csv")
+        log = open(os.path.join(work, f"hmmcopy_{k}.log"), "w")
+        procs.append((subprocess.Popen([rscript, os.path.join(VAL, "hmmcopy_runner.R"), rc, bins_csv, out],
+                                       stdout=log, stderr=subprocess.STDOUT), out, log))
+    states = []
+    for p, out, log in procs:
+        rc = p.wait()
+        log.close()
+        if rc != 0:
+            raise RuntimeError(f"hmmcopy_runner failed (exit {rc}); see {log.name}:\n"
+                               + open(log.name).read()[-1500:])
+        states.append(pd.read_csv(out, index_col=0))
+    st = pd.concat(states, axis=1)
+    st.index = st.index.astype(str)
+    return st.reindex(index=bins.index, columns=reads.columns)
+
+
+def cluster_cells(cn_bins, seed=0):
+    """UMAP + HDBSCAN on the called copy-number states, in the manner of the DLP+ pipeline (Laks et al.
+    2019; scgenome's umap_hdbscan_cluster). Returns labels (-1 = noise) and the embedding."""
+    import umap
+    from sklearn.cluster import HDBSCAN
+    X = np.asarray(cn_bins, float)
+    emb = umap.UMAP(n_neighbors=15, min_dist=0.1, n_components=2, random_state=seed).fit_transform(X)
+    mcs = max(15, int(round(0.02 * len(X))))
+    lab = HDBSCAN(min_cluster_size=mcs).fit_predict(emb)
+    return lab, emb, mcs
+
+
+def called_clones(seg_cn, lab):
+    """Clone profiles from the clusters: the rounded median per segment; clusters with the same
+    (proportional) profile merged; flat clusters (every segment at one level: diploid cells, on the
+    relative scale HMMcopy calls) set aside as normal when any other cluster remains.
+
+    Returns ``(clone_of_cluster, profiles)``: cluster id -> clone label (``"normal"`` for a flat one,
+    None for noise) and the clones x segments frame of relative copy number."""
+    clusters = sorted(c for c in set(lab.tolist()) if c >= 0)
+    prof = {c: np.rint(np.nanmedian(seg_cn[lab == c], axis=0)).astype(int) for c in clusters}
+    flat = {c for c in clusters if np.unique(prof[c]).size == 1}
+    if len(flat) == len(clusters):
+        flat = set()
+    groups = {}
+    for c in clusters:
+        if c not in flat:
+            groups.setdefault(_proportional_key(prof[c]), []).append(c)
+    out, rows = {c: NORMAL for c in flat}, {}
+    for i, cs in enumerate(sorted(groups.values(), key=lambda cs: -sum((lab == c).sum() for c in cs))):
+        name = f"dna_{i + 1}"
+        rows[name] = prof[cs[0]]
+        for c in cs:
+            out[c] = name
+    return out, pd.DataFrame.from_dict(rows, orient="index")
+
+
+def dna_chain(t, layer, dis, clone_of, work, seed=0, n_cells=N_DNA, cores=1):
+    from iscc.data import scDNA
+    wall, t0 = {}, time.time()
+    est = dlp_estimate()
+    cells_all = list(dis["cell_exp"].index)
+    rng = np.random.default_rng([seed, 0xD7A])
+    pick = set(rng.choice(np.arange(len(cells_all)), size=min(n_cells, len(cells_all)), replace=False).tolist())
+    cells = [c for i, c in enumerate(cells_all) if i in pick]
+    dna = scDNA(breadth=est.breadth, depth_model=est.depth_model, seed=200 + seed, **est.dna_kwargs()).run(
+        dis, cell_subset=cells)
+    t0 = _lap(wall, "scdna", t0)
+    bins = hmmcopy_bins(layer, dna, dis["cell_snv"].columns)
+    reads = dna.coverage.T.copy()
+    reads.index = reads.index.astype(str)
+    reads = reads.loc[bins.index].astype(int)
+    reads.columns = [str(c) for c in reads.columns]
+    states = run_hmmcopy(reads, bins, os.path.join(work, "hmmcopy"), cores=cores)
+    t0 = _lap(wall, "hmmcopy", t0)
+    # A bin can come back without a state in a cell (no corrected depth there); a cell counts as called
+    # when it has a state on at least half its bins, and only bins called in 90% of those cells are
+    # clustered on, a missing state taking the cell's median.
+    cn = (states.clip(upper=6) - 1).to_numpy(float)           # HMMcopy states 1..6 are CN 0..5+
+    ok = np.isfinite(cn).mean(axis=0) >= 0.5
+    good_bins = np.isfinite(cn[:, ok]).mean(axis=1) >= 0.9 if ok.any() else np.zeros(len(cn), bool)
+    segs = segment_names(layer)
+    seg_of_bin = bins["segment"].to_numpy()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)       # all-NaN segments of failed cells
+        seg_cn = np.stack([np.nanmedian(cn[seg_of_bin == s], axis=0) for s in range(len(segs))], axis=1)
+        X = cn[good_bins][:, ok].T
+        X = np.where(np.isfinite(X), X, np.rint(np.nanmedian(X, axis=1, keepdims=True)))
+
+    lab = np.full(len(cells), -2)                              # -2: HMMcopy failed
+    emb = np.full((len(cells), 2), np.nan)
+    if ok.sum() >= 2:
+        l_ok, e_ok, mcs = cluster_cells(X, seed=seed)
+        lab[ok], emb[ok] = l_ok, e_ok
+    else:
+        mcs = None
+    clone_of_cluster, profiles = called_clones(seg_cn, lab)
+    t0 = _lap(wall, "cluster", t0)
+
+    gids = _gids(dis, cells)
+    truth = label_cells(gids, clone_of)
+    called = np.array([clone_of_cluster.get(c) if c >= 0 else None for c in lab], dtype=object)
+    # each called clone stands for the true clone most of its DNA cells belong to
+    mapping, purity = {}, {}
+    for name in profiles.index:
+        tv = pd.Series(truth[called == name]).value_counts()
+        mapping[name], purity[name] = str(tv.index[0]), float(tv.iat[0] / tv.sum())
+    # how well HMMcopy called each cell, on its own relative scale (each cell's median bin is neutral)
+    true_cn = genotype_cn(t, layer, gids)[:, seg_of_bin].astype(float)            # cells x bins
+    rel = 2.0 * true_cn / np.median(true_cn, axis=1, keepdims=True)
+    called_ok = cn[:, ok].T
+    fin = np.isfinite(called_ok)
+    conc = float(np.mean(np.rint(rel[ok])[fin] == called_ok[fin])) if ok.any() else float("nan")
+    from sklearn.metrics import adjusted_rand_score
+    m = (lab >= 0) & (truth != OTHER)
+    diag = dict(n_cells=len(cells), n_hmmcopy_ok=int(ok.sum()), n_noise=int((lab == -1).sum()),
+                n_tumour=int((truth != NORMAL).sum()), hdbscan_min_cluster_size=mcs,
+                n_clusters=int(len(set(lab[lab >= 0].tolist()))), n_called_clones=int(len(profiles)),
+                n_true_clones_present=int(len(set(truth[(truth != NORMAL) & (truth != OTHER)].tolist()))),
+                cluster_ari=float(adjusted_rand_score(truth[m], lab[m])) if m.sum() > 1 else float("nan"),
+                hmmcopy_bin_concordance=conc, mean_reads_per_bin=float(reads.to_numpy().mean()),
+                n_bins=int(len(bins)), n_bins_clustered=int(good_bins.sum()), dlp_fit=repr(est), wall_s=wall)
+    cells_tab = pd.DataFrame({"cell": cells, "genotype": [str(g) for g in gids], "true_clone": truth,
+                              "hmmcopy_ok": ok.astype(int), "cluster": lab, "called_clone": called,
+                              "umap1": emb[:, 0], "umap2": emb[:, 1]})
+    seg_tab = pd.DataFrame(seg_cn, columns=segs)
+    return dict(profiles=profiles, mapping=mapping, purity=purity, diag=diag, cells=cells_tab,
+                seg_cn=seg_tab, sizes={n: int((called == n).sum()) for n in profiles.index})
+
+
+def rna_counts(t, layer, dis, seed=0):
+    """The human-gene scRNA of the dissociated cells, as make_layer_dataset draws it for Fig 4b."""
+    from iscc.data import scRNA
+    expr = layer.expression(t)
+    dcells = list(dis["cell_exp"].index)
+    sc = scRNA(n_cells=len(dcells), seed=100 + seed, dropout_mid=0.0, n_reads=10_000).run(
+        dis, cell_subset=dcells, gene_lift=expr)
+    return sc
+
+
+def score_assignment(truth, pred):
+    """Accuracy and ARI of predicted true-clone labels (None = no call) against the truth."""
+    from sklearn.metrics import adjusted_rand_score
+    truth = np.asarray(truth, dtype=object)
+    pred = np.asarray([p if p is not None else "__none__" for p in pred], dtype=object)
+    return dict(accuracy=float(np.mean(pred == truth)),
+                ari=float(adjusted_rand_score(truth.astype(str), pred.astype(str))))
+
+
+def run_dna_rna(a):
+    import integration_common as IC
+    out = os.path.join(a.out, "c", f"{a.run}_{a.task}")
+    os.makedirs(out, exist_ok=True)
+    work = os.path.join(a.work, f"c_{a.run}_{a.task}")
+    os.makedirs(work, exist_ok=True)
+    wall, t0 = {}, time.time()
+    t, layer, dis, sec = sample(a.run, a.task)
+    t0 = _lap(wall, "load_and_sample", t0)
+    clone_of, true_prof, members = true_clones(t, layer, [dis, sec])
+    t0 = _lap(wall, "truth", t0)
+    dna = dna_chain(t, layer, dis, clone_of, work, seed=a.seed, n_cells=a.n_dna, cores=a.cores)
+    t0 = _lap(wall, "dna_chain", t0)
+
+    sc = rna_counts(t, layer, dis, seed=a.seed)
+    t0 = _lap(wall, "scrna", t0)
+    cells = list(sc.obs.index)
+    truth = label_cells(_gids(dis, cells), clone_of)
+    keep = np.flatnonzero((truth != NORMAL) & (truth != OTHER))
+    rng = np.random.default_rng([a.seed, 0xCA])
+    if keep.size > a.rna_cells:
+        keep = np.sort(rng.choice(keep, size=a.rna_cells, replace=False))
+    X = sc.counts_csr[keep]
+    mean = np.asarray(X.mean(axis=0)).ravel()
+    gsel = np.sort(np.argsort(-mean)[:a.rna_genes])
+    genes = layer.genes.iloc[gsel]
+    gnames = pd.Index(genes["gene_id"].astype(str))
+    if gnames.duplicated().any():
+        gnames = pd.Index([f"{g}.{i}" for i, g in enumerate(gnames)])
+    Y = pd.DataFrame(X[:, gsel].toarray().astype(float), index=[str(cells[i]) for i in keep], columns=gnames)
+    seg = genes["segment"].to_numpy()
+    segs = segment_names(layer)
+    L_true = pd.DataFrame(true_prof.to_numpy()[:, seg].T.astype(float), index=Y.columns,
+                          columns=list(true_prof.index))
+    rec = dict(run=a.run, task=a.task, commit=_commit(), paper_out=os.environ.get("ISCC_PAPER_OUT"),
+               tier=os.environ.get("ISCC_PAPER_TIER"), n_rna_cells=int(len(keep)), n_genes=int(Y.shape[1]),
+               true_clones={k: v for k, v in members.items()}, clonealign=CLONEALIGN, seed=a.seed,
+               dna=dna["diag"], dna_mapping=dna["mapping"], dna_purity=dna["purity"])
+    t_rna = truth[keep]
+    sizes = pd.Series(t_rna).value_counts()
+    rec["majority"] = float(sizes.iat[0] / sizes.sum())
+    rec["chance"] = float(1.0 / len(true_prof))
+    rec["n_true_clones"] = int(len(true_prof))
+    t0 = _lap(wall, "inputs", t0)
+
+    # (i) the true clones and profiles
+    if len(true_prof) > 1:
+        P = IC.run_clonealign(Y, L_true, os.path.join(work, "ca_true"), **CLONEALIGN)
+        pred_true = L_true.columns.to_numpy(dtype=object)[np.nanargmax(P.to_numpy(float), axis=1)]
+        rec["clonealign_true_run"] = P.attrs.get("clonealign_run")
+    else:
+        pred_true = np.array([true_prof.index[0]] * len(keep), dtype=object)
+    rec["truth_arm"] = score_assignment(t_rna, pred_true)
+    t0 = _lap(wall, "clonealign_true", t0)
+
+    # (ii) the clones called from simulated scDNA
+    prof = dna["profiles"]
+    if len(prof) > 1:
+        L_dna = pd.DataFrame(prof.to_numpy()[:, seg].T.astype(float), index=Y.columns, columns=list(prof.index))
+        P = IC.run_clonealign(Y, L_dna, os.path.join(work, "ca_dna"), **CLONEALIGN)
+        called = L_dna.columns.to_numpy(dtype=object)[np.nanargmax(P.to_numpy(float), axis=1)]
+        rec["clonealign_dna_run"] = P.attrs.get("clonealign_run")
+    elif len(prof) == 1:
+        called = np.array([prof.index[0]] * len(keep), dtype=object)
+    else:
+        called = np.array([None] * len(keep), dtype=object)
+    pred_dna = np.array([dna["mapping"].get(c) if c is not None else None for c in called], dtype=object)
+    rec["dna_arm"] = score_assignment(t_rna, pred_dna)
+    from sklearn.metrics import adjusted_rand_score
+    rec["dna_arm"]["ari_unmapped"] = float(adjusted_rand_score(t_rna.astype(str), called.astype(str)))
+    rec["gap"] = rec["truth_arm"]["accuracy"] - rec["dna_arm"]["accuracy"]
+    t0 = _lap(wall, "clonealign_dna", t0)
+    rec["wall_s"] = wall
+
+    # summaries only
+    tp = true_prof.copy()
+    tp.insert(0, "n_cells", [int(sum(1 for g in _gids(dis) if clone_of.get(g) == c)) for c in tp.index])
+    tp.to_csv(os.path.join(out, "true_clones.tsv"), sep="\t", index_label="clone")
+    dp = prof.copy()
+    dp.columns = segs
+    dp.insert(0, "purity", [dna["purity"][n] for n in dp.index])
+    dp.insert(0, "true_clone", [dna["mapping"][n] for n in dp.index])
+    dp.insert(0, "n_cells", [dna["sizes"][n] for n in dp.index])
+    dp.to_csv(os.path.join(out, "dna_clones.tsv"), sep="\t", index_label="clone")
+    dc = pd.concat([dna["cells"], dna["seg_cn"].round(2)], axis=1)
+    dc.to_csv(os.path.join(out, "dna_cells.tsv.gz"), sep="\t", index=False)
+    pd.DataFrame({"cell": Y.index, "true_clone": t_rna, "clonealign_true": pred_true,
+                  "clonealign_dna": called, "clonealign_dna_mapped": pred_dna}).to_csv(
+        os.path.join(out, "rna_cells.tsv.gz"), sep="\t", index=False)
+    with open(os.path.join(out, "score.json"), "w") as f:
+        json.dump(rec, f, indent=1, default=str)
+    print(json.dumps({k: rec[k] for k in ("truth_arm", "dna_arm", "gap", "majority", "n_true_clones")}),
+          flush=True)
+    print("dna:", json.dumps({k: v for k, v in dna["diag"].items() if k != "dlp_fit"}), flush=True)
+
+
+# ---------------------------------------------------------------------------------------------------
+# 4d: Visium, Clonalscope with and without the DNA prior, CalicoST
+# ---------------------------------------------------------------------------------------------------
+def write_prior(prior_dir, dna_clones_tsv, layer):
+    """Clonalscope's DNA prior from the 4c chain's called clones: ``U0.tsv`` (a normal row of 1s and one
+    row per DNA clone: its copy number over its gene-weighted mean, the relative coverage Clonalscope
+    estimates per segment) and ``states.tsv`` (the DNA pseudobulk on the same scale, 1 within 5%)."""
+    dc = pd.read_csv(dna_clones_tsv, sep="\t", index_col=0)
+    segs = segment_names(layer)
+    cn = dc[segs].to_numpy(float)
+    w = layer.genes["segment"].value_counts().reindex(range(len(segs)), fill_value=0).to_numpy(float)
+    ploidy = (cn * w).sum(axis=1, keepdims=True) / w.sum()
+    rel = cn / ploidy
+    U0 = pd.DataFrame(np.vstack([np.ones(len(segs)), rel]), index=[NORMAL] + list(dc.index), columns=segs)
+    n = dc["n_cells"].to_numpy(float)
+    bulk = (rel * n[:, None]).sum(axis=0) / n.sum()
+    states = np.where(np.abs(bulk - 1) < 0.05, 1.0, np.round(bulk, 3))
+    os.makedirs(prior_dir, exist_ok=True)
+    U0.round(4).to_csv(os.path.join(prior_dir, "U0.tsv"), sep="\t", index_label="cluster")
+    pd.DataFrame({"arm": segs, "state": states}).to_csv(os.path.join(prior_dir, "states.tsv"), sep="\t", index=False)
+    return U0, states
+
+
+def run_spatial(a):
+    import regime as RG
+    from iscc.data import Visium
+    from iscc.data.human import HUMAN_VISIUM_KAPPA, write_visium
+    tag = f"{a.run}_{a.task}"
+    out = os.path.join(a.out, "d", tag)
+    os.makedirs(out, exist_ok=True)
+    work = os.path.join(a.work, f"d_{tag}")
+    os.makedirs(work, exist_ok=True)
+    dna_tsv = os.path.join(a.out, "c", tag, "dna_clones.tsv")
+    if not os.path.exists(dna_tsv):
+        sys.exit(f"no DNA clones at {dna_tsv}: run dna-rna first")
+    wall, t0 = {}, time.time()
+    t, layer, dis, sec = sample(a.run, a.task)
+    t0 = _lap(wall, "load_and_sample", t0)
+    clone_of, true_prof, members = true_clones(t, layer, [dis, sec])
+    del dis
+    t0 = _lap(wall, "truth", t0)
+    expr = layer.expression(t)
+    vz = Visium(seed=300 + a.seed, kappa=HUMAN_VISIUM_KAPPA, **RG.VISIUM).run(sec, grid_side=t.grid_size,
+                                                                                 gene_lift=expr)
+    av = layer.visium_allele_counts(vz, t, seed=a.seed)
+    ds = os.path.join(work, "visium")
+    write_visium(ds, vz, layer, allele=av, tumor=t, seed=a.seed)
+    t0 = _lap(wall, "visium", t0)
+
+    # the truth per in-tissue spot: its tumour cells' true clones
+    from iscc.data.human.writers import barcodes
+    placed, members_of_spot = vz._grid["placed"], vz._grid["members"]
+    lab = label_cells(_gids(placed, list(placed["cell_exp"].index)), clone_of)
+    bcs = barcodes(len(vz.spot_counts.index), seed=a.seed)
+    keep = np.flatnonzero(np.asarray(vz.obs["n_cells"]) > 0)
+    clones = list(true_prof.index)
+    rows = []
+    for s in keep:
+        m = members_of_spot[s]
+        lm = lab[m]
+        rows.append([bcs[s], int(m.size), int((lm != NORMAL).sum()), int((lm == OTHER).sum())]
+                    + [int((lm == c).sum()) for c in clones])
+    spots = pd.DataFrame(rows, columns=["barcode", "n_cells", "n_tumour", "n_other"] + [f"n:{c}" for c in clones])
+    pos = pd.read_csv(os.path.join(ds, "outs", "spatial", "tissue_positions.csv"))
+    spots = spots.merge(pos[["barcode", "array_row", "array_col"]], on="barcode", how="left")
+
+    # the tools, CalicoST in the background since it is the slowest
+    bin_dir = os.path.join(TOOLS, "bin")
+    tools_dir = os.environ["ISCC_TOOLS_DIR"]
+    runs = {"clonalscope": os.path.join(work, "clonalscope"),
+            "clonalscope_dna": os.path.join(work, "clonalscope_dna"),
+            "calicost": os.path.join(work, "calicost")}
+    prior_dir = os.path.join(work, "prior")
+    U0, states = write_prior(prior_dir, dna_tsv, layer)
+    logs = {k: open(os.path.join(work, f"{k}.log"), "w") for k in runs}
+    calicost = subprocess.Popen([os.path.join(bin_dir, "python-calicost"), os.path.join(TOOLS, "calicost.py"), ds,
+                                 runs["calicost"], "--seed", str(a.seed)],
+                                stdout=logs["calicost"], stderr=subprocess.STDOUT)
+    status = {}
+    for name, extra in (("clonalscope", []), ("clonalscope_dna", [prior_dir])):
+        t1 = time.time()
+        r = subprocess.run([os.path.join(bin_dir, "rscript-r-cnv"), os.path.join(TOOLS, "clonalscope.R"), ds,
+                            runs[name], os.path.join(tools_dir, "data", "clonalscope"), "20", str(200 + a.seed)]
+                           + extra, stdout=logs[name], stderr=subprocess.STDOUT)
+        status[name] = r.returncode
+        wall[name] = round(time.time() - t1, 1)
+        print(f"  {name}: exit {r.returncode}, {wall[name]} s", flush=True)
+    t1 = time.time()
+    status["calicost"] = calicost.wait()
+    wall["calicost_wait"] = round(time.time() - t1, 1)
+    print(f"  calicost: exit {status['calicost']}", flush=True)
+    for f in logs.values():
+        f.close()
+
+    info = {}
+    for name, d in runs.items():
+        p = os.path.join(d, "calls.tsv")
+        if status[name] == 0 and os.path.exists(p):
+            calls = pd.read_csv(p, sep="\t", dtype={"clone": str}).set_index("barcode")["clone"]
+            spots[f"call:{name}"] = calls.reindex(spots["barcode"]).to_numpy()
+            with open(os.path.join(d, "run.json")) as f:
+                info[name] = json.load(f)
+        else:
+            info[name] = dict(failed=True, exit=status[name],
+                              log_tail=open(os.path.join(work, f"{name}.log")).read()[-3000:])
+    spots.to_csv(os.path.join(out, "spots.tsv.gz"), sep="\t", index=False)
+    rec = dict(run=a.run, task=a.task, commit=_commit(), paper_out=os.environ.get("ISCC_PAPER_OUT"),
+               tier=os.environ.get("ISCC_PAPER_TIER"), seed=a.seed, true_clones=members,
+               n_spots=int(len(spots)), n_tumour_spots=int((spots["n_tumour"] > 0).sum()),
+               mean_cells_per_spot=float(spots["n_cells"].mean()),
+               prior=dict(U0=U0.round(3).to_dict(orient="index"), states=dict(zip(segment_names(layer), states))),
+               runs=info, wall_s=wall)
+    import fig4_score as FS
+    rec["scores"] = FS.score_spots(spots, os.path.join(a.out, "c", tag))
+    with open(os.path.join(out, "score.json"), "w") as f:
+        json.dump(rec, f, indent=1, default=str)
+    print(json.dumps(rec["scores"]), flush=True)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("step", choices=("dna-rna", "spatial"))
+    ap.add_argument("--run", default="R11")
+    ap.add_argument("--task", required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--work", required=True, help="scratch for every tool input and output (a job's $SNIC_TMP)")
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--cores", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", 1)))
+    ap.add_argument("--n-dna", type=int, default=N_DNA)
+    ap.add_argument("--rna-cells", type=int, default=RNA_MAX_CELLS)
+    ap.add_argument("--rna-genes", type=int, default=RNA_GENES)
+    a = ap.parse_args()
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    try:
+        (run_dna_rna if a.step == "dna-rna" else run_spatial)(a)
+    finally:
+        if os.environ.get("FIG4_KEEP_WORK") != "1":
+            for d in (f"c_{a.run}_{a.task}", f"d_{a.run}_{a.task}"):
+                shutil.rmtree(os.path.join(a.work, d), ignore_errors=True)
+
+
+if __name__ == "__main__":
+    main()
