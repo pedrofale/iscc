@@ -10,16 +10,17 @@ tumour (registry R0/seed1: a 170 x 170 primary field with a 170 x 170 metastatic
   (b) selection depends on the niche: a schematic of the gland, the stroma and the metastasis with the
       rule of each, the regime's values read off the tumour, and the share of cancer cells carrying each
       trait in each compartment of the showcase;
-  (c) where the biases enter: a strip under (a), one box per step, each bias marked fitted from real
-      data, fitted when the data carry what the fit needs, or set by the user, per technology. Its
-      source of truth is ``supp_biases.BIASES`` (read through ``supp_biases.biases(step, tech)``);
-  (d) one clone in every modality: its true copy-number profile; a WGS track, drawn over the copies of
+  (c) one clone in every modality, beside (b): its true copy-number profile; a WGS track, drawn over the copies of
       the cells it pools so that the clone's segments enter at its cell fraction (on the multi-region
       block where the clone is largest; the dissociated half, where it is 6% of the cells, is reported in
       the render numbers); the scDNA heatmap with its cells boxed and the calls against the truth; the
       scRNA embedding with its cells highlighted, and the expression shift along the genome against the
       dosage law on its true copies; the Visium map of its true fraction per spot; its place in the
-      genealogy, with the copy-number events on its path and the clones' cells in the metastasis.
+      genealogy, with the copy-number events on its path and the clones' cells in the metastasis;
+  (d) where the biases enter: a strip along the foot of the figure, one box per step, each bias marked
+      fitted from real data, fitted when the data carry what the fit needs, or set by the user, per
+      technology. Its source of truth is ``supp_biases.BIASES`` (read through
+      ``supp_biases.biases(step, tech)``).
 
 Definitions:
   * clones: ``common.Clones`` (clades of the true genealogy holding >= 4% of the cancer cells; the
@@ -924,10 +925,10 @@ def _visium(ax, Vz, T, mode="clone", k=None, colour=None):
     ax.set_aspect("equal", adjustable="box")
 
 
-# --- c: where the biases enter ----------------------------------------------------------------------
-def render_c(fig, y0, nums):
+# --- d: where the biases enter ----------------------------------------------------------------------
+def render_biases(fig, y0, nums):
     import supp_biases as SB
-    S.panel_letter(fig, "c", 1, y0)
+    S.panel_letter(fig, "d", 1, y0)
     tech_colour = {"WGS": S.MODALITY["DNA"], "scDNA": S.MODALITY["DNA"], "scRNA": S.MODALITY["RNA"],
                    "Visium": S.MODALITY["spatial"]}
     status = {}
@@ -990,7 +991,7 @@ def render_c(fig, y0, nums):
             "Tissue and growth add none: the answer key is exact.\nSource: supp_biases.BIASES, traced to the code.",
             fontsize=4.6, color=S.GREY, va="top", linespacing=1.25)
     counts = Counter(b.how for b in SB.BIASES)
-    nums["c"] = dict(entries=len(SB.BIASES), by_status=dict(counts),
+    nums["d"] = dict(entries=len(SB.BIASES), by_status=dict(counts),
                      names={st: names[st] for st in SB.STEPS})
 
 
@@ -1109,8 +1110,8 @@ def render_b(fig, y0, T, nums):
     return yd + 10.5
 
 
-# --- d: one clone in every modality -----------------------------------------------------------------
-def render_d(fig, y0, T, D, Dz, V, Vz, nums):
+# --- c: one clone in every modality -----------------------------------------------------------------
+def render_clone(fig, y0, T, D, Dz, V, Vz, nums):
     from matplotlib.patches import Rectangle
     k = T["choice"]
     labels, colours = T["labels"], T["colours"]
@@ -1119,7 +1120,7 @@ def render_d(fig, y0, T, D, Dz, V, Vz, nums):
     li = {lab: i for i, lab in enumerate(labels)}
     X0, W0 = 84.0, 58.0                 # the genome-aligned column
     XR = 150.0                          # the right column
-    S.panel_letter(fig, "d", 72, y0)
+    S.panel_letter(fig, "c", 72, y0)
     S.text_mm(fig, 76, y0 + 1.6, f"One clone in every modality: {k}", fontsize=6.5, fontweight="bold",
               va="center", color=ck)
     cons, modal = np.asarray(T["consensus"][k]), np.asarray(T["modal"])
@@ -1336,7 +1337,7 @@ def render_d(fig, y0, T, D, Dz, V, Vz, nums):
     ax = S.ax_mm(fig, X0, y0 + 103, 96, 28)
     nd["genealogy"] = _genealogy(ax, T, k, ck)
     ylab(ax, "genealogy")
-    nums["d"] = nd
+    nums["c"] = nd
 
 
 def _node_time(T, k):
@@ -1441,9 +1442,10 @@ def render():
                                                        dissociated=D is not None, section=V is not None))
     fig = S.figure("double", 240)
     render_a(fig, T, Z, D, Dz, V, Vz, nums)
-    render_c(fig, 56.0, nums)
-    render_b(fig, 100.0, T, nums)
-    render_d(fig, 100.0, T, D, Dz, V, Vz, nums)
+    # reading order a, b | c, d: the niches and the clone side by side under (a), the bias strip at the foot
+    render_b(fig, 56.0, T, nums)
+    render_clone(fig, 56.0, T, D, Dz, V, Vz, nums)
+    render_biases(fig, 196.0, nums)
     path = S.save(fig, "fig1_overview")
     with open(cache_path("fig1_render_numbers.json"), "w") as f:
         json.dump(nums, f, indent=1, default=float)
