@@ -56,7 +56,20 @@ def _spot_scores(P, dom, pred_idx, labels):
 
 
 def score_spots(spots, c_dir=None):
-    """Per-tool scores of one tumour's spots table (fig4_chain.py spatial)."""
+    """Per-tool scores of one tumour's spots table (fig4_chain.py spatial): against the answer key's
+    clones (``fine``), and against their copy-number groups (``coarse``, from 4c's true_clones.tsv)."""
+    out = {"fine": _score_spots(spots, c_dir)}
+    tc = os.path.join(c_dir, "true_clones.tsv") if c_dir else None
+    if tc and os.path.exists(tc):
+        group = pd.read_csv(tc, sep="\t", index_col=0)["group"]
+        sp = spots.drop(columns=[c for c in spots.columns if c.startswith("n:")])
+        for g in pd.unique(group):
+            sp[f"n:{g}"] = spots[[f"n:{c}" for c in group.index[group == g] if f"n:{c}" in spots]].sum(axis=1)
+        out["coarse"] = _score_spots(sp, None, group_of=group.to_dict())
+    return out
+
+
+def _score_spots(spots, c_dir=None, group_of=None):
     clones = [c[2:] for c in spots.columns if c.startswith("n:")]
     counts_all = spots[[f"n:{c}" for c in clones]].to_numpy(float)
     m = counts_all.sum(axis=1) > 0
@@ -70,6 +83,8 @@ def score_spots(spots, c_dir=None):
     dna = None
     if c_dir and os.path.exists(os.path.join(c_dir, "dna_clones.tsv")):
         dna = pd.read_csv(os.path.join(c_dir, "dna_clones.tsv"), sep="\t", index_col=0)
+    if group_of is not None and dna is not None:
+        dna = dna.assign(true_clone=dna["true_clone"].map(group_of))
     for tool in TOOLS_D:
         col = f"call:{tool}"
         if col not in spots:
@@ -97,98 +112,128 @@ def collect(out_dir):
     for f in sorted(glob.glob(os.path.join(out_dir, "c", "*", "score.json"))):
         r = json.load(open(f))
         d = r.get("dna", {})
-        rows_c.append(dict(tumour=f"{r['run']}_{r['task']}", n_rna_cells=r["n_rna_cells"],
-                           n_true_clones=r["n_true_clones"], n_called_clones=d.get("n_called_clones"),
-                           acc_true=r["truth_arm"]["accuracy"], acc_dna=r["dna_arm"]["accuracy"],
-                           gap=r["gap"], ari_true=r["truth_arm"]["ari"], ari_dna=r["dna_arm"]["ari"],
-                           majority=r["majority"], chance=r["chance"],
-                           dna_cluster_ari=d.get("cluster_ari"), hmmcopy_concordance=d.get("hmmcopy_bin_concordance"),
-                           dna_cells=d.get("n_cells"), dna_tumour_cells=d.get("n_tumour"),
-                           dna_noise=d.get("n_noise"), commit=r.get("commit")))
+        for res in ("fine", "coarse"):
+            x = r[res]
+            rows_c.append(dict(tumour=f"{r['run']}_{r['task']}", resolution=res, n_rna_cells=r["n_rna_cells"],
+                               n_true_clones=x["n_true_clones"], n_called_clones=d.get("n_called_clones"),
+                               acc_true=x["truth_arm"]["accuracy"], acc_dna=x["dna_arm"]["accuracy"], gap=x["gap"],
+                               bal_true=x["truth_arm"]["balanced_accuracy"],
+                               bal_dna=x["dna_arm"]["balanced_accuracy"], gap_balanced=x["gap_balanced"],
+                               ari_true=x["truth_arm"]["ari"], ari_dna=x["dna_arm"]["ari"],
+                               majority=x["majority"], chance=x["chance"],
+                               dna_cluster_ari=d.get("cluster_ari"),
+                               hmmcopy_concordance=d.get("hmmcopy_bin_concordance"),
+                               hmmcopy_concordance_scaled=d.get("hmmcopy_bin_concordance_scaled"),
+                               hmmcopy_wrong_ploidy=d.get("hmmcopy_wrong_ploidy"),
+                               dna_cells=d.get("n_cells"), dna_tumour_cells=d.get("n_tumour"),
+                               dna_noise=d.get("n_noise"), commit=r.get("commit")))
     for f in sorted(glob.glob(os.path.join(out_dir, "d", "*", "spots.tsv.gz"))):
         tag = os.path.basename(os.path.dirname(f))
         sc = score_spots(pd.read_csv(f, sep="\t", dtype={c: str for c in
                                                           ("call:clonalscope", "call:clonalscope_dna", "call:calicost")}),
                          os.path.join(out_dir, "c", tag))
-        base = dict(tumour=tag, n_spots=sc["n_spots_scored"], n_true_clones=sc["n_true_clones"],
-                    mixed_spots=sc["mixed_spots"])
-        rows_d.append(dict(base, tool="one clone everywhere", **sc["one_clone_everywhere"]))
-        for tool, name in TOOLS_D.items():
-            if tool in sc:
-                rows_d.append(dict(base, tool=name, **sc[tool]))
+        for res, r in sc.items():
+            base = dict(tumour=tag, resolution=res, n_spots=r["n_spots_scored"], n_true_clones=r["n_true_clones"],
+                        mixed_spots=r["mixed_spots"])
+            rows_d.append(dict(base, tool="one clone everywhere", **r["one_clone_everywhere"]))
+            for tool, name in TOOLS_D.items():
+                if tool in r:
+                    rows_d.append(dict(base, tool=name, **r[tool]))
     return pd.DataFrame(rows_c), pd.DataFrame(rows_d)
 
 
+def _panel_c(ax, c, order, short, S, DNA, metric, legend):
+    from matplotlib.lines import Line2D
+    for i, tu in enumerate(order):
+        r = c[c["tumour"] == tu]
+        if not len(r):
+            continue
+        r = r.iloc[0]
+        a_t, a_d = r[f"{metric}_true"], r[f"{metric}_dna"]
+        base = r["majority"] if metric == "acc" else r["chance"]
+        ax.plot([i, i], [a_d, a_t], color=S.GREY, lw=0.6, zorder=1)
+        ax.plot(i - 0.28, base, marker="_", ms=6, mew=0.8, color=S.GREY, ls="none", zorder=1)
+        ax.plot(i, a_t, "o", ms=4, mfc=S.INK, mec="white", mew=0.4, zorder=3)
+        ax.plot(i, a_d, "o", ms=4, mfc=DNA, mec="white", mew=0.4, zorder=3)
+        ax.text(i + 0.12, (a_t + a_d) / 2, f"{a_d - a_t:+.2f}".replace("-", "\u2212"), fontsize=5,
+                color=S.INK, va="center")
+    ax.set_xticks(range(len(order)))
+    ax.set_xticklabels([short[t] for t in order], rotation=20, ha="right")
+    ax.set_xlim(-0.6, len(order) - 0.4)
+    ax.set_ylim(0, 1.02)
+    if legend:
+        h = [Line2D([], [], marker="o", ls="none", mfc=S.INK, mec="white", ms=4, label="true clones and profiles"),
+             Line2D([], [], marker="o", ls="none", mfc=DNA, mec="white", ms=4,
+                    label="clones from simulated scDNA (HMMcopy, clustering)"),
+             Line2D([], [], marker="_", ls="none", color=S.GREY, ms=6, mew=0.8,
+                    label="largest clone" if metric == "acc" else "chance")]
+        ax.legend(handles=h, loc="upper right", fontsize=4.6, frameon=False)
+
+
+def _panel_d(ax, d, order, short, S, colours, legend):
+    from matplotlib.lines import Line2D
+    names = [n for n in colours if n in set(d["tool"])]
+    w = 0.22
+    for i, tu in enumerate(order):
+        g = d[d["tumour"] == tu]
+        base = g[g["tool"] == "one clone everywhere"]
+        if len(base):
+            ax.plot([i - 0.4, i + 0.4], [base["error"].iat[0]] * 2, color=S.GREY, lw=0.6, ls=":", zorder=1)
+        for j, n in enumerate(names):
+            v = g[g["tool"] == n]["error"]
+            if len(v):
+                ax.plot(i + (j - (len(names) - 1) / 2) * w, v.iat[0], "o", ms=4, mfc=colours[n], mec="white",
+                        mew=0.4, zorder=3)
+    ax.set_xticks(range(len(order)))
+    ax.set_xticklabels([short[t] for t in order], rotation=20, ha="right")
+    ax.set_xlim(-0.6, len(order) - 0.4)
+    ax.set_ylim(0, 1.02)
+    if legend:
+        h = [Line2D([], [], marker="o", ls="none", mfc=colours[n], mec="white", ms=4, label=n) for n in names]
+        h.append(Line2D([], [], color=S.GREY, lw=0.6, ls=":", label="largest clone everywhere"))
+        ax.legend(handles=h, loc="lower left", fontsize=4.6, frameon=False, ncol=2)
+
+
 def figure(c, d, path):
+    """Draft panels: 4c (clonealign accuracy and balanced accuracy, truth against DNA-called clones) and
+    4d (per-spot clone-fraction error), each against the answer key's clones (top) and their copy-number
+    groups (bottom)."""
     import matplotlib
     matplotlib.use("Agg")
     import style as S
     S.setup()
-    fig = S.figure("double", 62)
-    order = sorted(set(c["tumour"]) | set(d.get("tumour", pd.Series(dtype=str))),
-                   key=lambda s: (0 if s.endswith("_seed1") and "disp" not in s else 1, s))
+    fig = S.figure("double", 118)
+    tumours = set(c["tumour"]) if len(c) else set()
+    if len(d):
+        tumours |= set(d["tumour"])
+    order = sorted(tumours, key=lambda s: (0 if s.endswith("_seed1") and "disp" not in s else 1, s))
     short = {t: t.split("_", 1)[1].replace("disp", "dispersal ").replace("_seed", ", seed ") for t in order}
     DNA = S.MODALITY["DNA"]
-
-    # c: errors carry across modalities
-    S.panel_letter(fig, "c", 2, 3)
-    ax = S.ax_mm(fig, 14, 8, 70, 38)
-    if len(c):
-        for i, tu in enumerate(order):
-            r = c[c["tumour"] == tu]
-            if not len(r):
-                continue
-            r = r.iloc[0]
-            ax.plot([i, i], [r.acc_dna, r.acc_true], color=S.GREY, lw=0.6, zorder=1)
-            ax.plot(i - 0.28, r.majority, marker="_", ms=6, mew=0.8, color=S.GREY, ls="none", zorder=1)
-            ax.plot(i, r.acc_true, "o", ms=4, mfc=S.INK, mec="white", mew=0.4, zorder=3)
-            ax.plot(i, r.acc_dna, "o", ms=4, mfc=DNA, mec="white", mew=0.4, zorder=3)
-            change = r.acc_dna - r.acc_true                 # what the DNA step costs (negative: a loss)
-            ax.text(i + 0.12, (r.acc_true + r.acc_dna) / 2, f"{change:+.2f}".replace("-", "−"),
-                    fontsize=5, color=S.INK, va="center")
-        ax.set_xticks(range(len(order)))
-        ax.set_xticklabels([short[t] for t in order], rotation=20, ha="right")
-        ax.set_xlim(-0.6, len(order) - 0.4)
-        ax.set_ylim(0, 1.02)
-        ax.set_ylabel("clonealign accuracy on scRNA")
-        from matplotlib.lines import Line2D
-        h = [Line2D([], [], marker="o", ls="none", mfc=S.INK, mec="white", ms=4, label="true clones and profiles"),
-             Line2D([], [], marker="o", ls="none", mfc=DNA, mec="white", ms=4,
-                    label="clones from simulated scDNA (HMMcopy, clustering)"),
-             Line2D([], [], marker="_", ls="none", color=S.GREY, ms=6, mew=0.8, label="largest clone (majority)")]
-        ax.legend(handles=h, loc="lower left", fontsize=4.8, frameon=False)
-    # d: spatial clone mapping with a DNA prior
-    S.panel_letter(fig, "d", 96, 3)
-    ax = S.ax_mm(fig, 108, 8, 70, 38)
     # validated (dataviz validate_palette, all pairs, light): CVD and normal-vision separation pass
     colours = {"Clonalscope": "#EB6834", "Clonalscope, DNA prior": DNA, "CalicoST": "#1BAF7A"}
-    if len(d):
-        names = [n for n in colours if n in set(d["tool"])]
-        w = 0.22
-        for i, tu in enumerate(order):
-            g = d[d["tumour"] == tu]
-            base = g[g["tool"] == "one clone everywhere"]
-            if len(base):
-                ax.plot([i - 0.4, i + 0.4], [base["error"].iat[0]] * 2, color=S.GREY, lw=0.6, ls=":", zorder=1)
-            for j, n in enumerate(names):
-                v = g[g["tool"] == n]["error"]
-                if len(v):
-                    ax.plot(i + (j - (len(names) - 1) / 2) * w, v.iat[0], "o", ms=4, mfc=colours[n], mec="white",
-                            mew=0.4, zorder=3)
-        ax.set_xticks(range(len(order)))
-        ax.set_xticklabels([short[t] for t in order], rotation=20, ha="right")
-        ax.set_xlim(-0.6, len(order) - 0.4)
-        ax.set_ylim(0, 1.02)
-        ax.set_ylabel("per-spot clone-fraction error")
-        from matplotlib.lines import Line2D
-        h = [Line2D([], [], marker="o", ls="none", mfc=colours[n], mec="white", ms=4, label=n) for n in names]
-        h.append(Line2D([], [], color=S.GREY, lw=0.6, ls=":", label="largest clone everywhere"))
-        ax.legend(handles=h, loc="upper left", fontsize=4.8, frameon=False, ncol=2)
-    else:
-        ax.text(0.5, 0.5, "pending", transform=ax.transAxes, ha="center", fontsize=6, color=S.GREY)
-    fig.text(0.995, 0.004, "draft: R11 tumours of the old registry (paper-v2)" if "paper-v2" in
-             str(os.environ.get("ISCC_PAPER_OUT", "paper-v2")) else "draft", ha="right", va="bottom",
-             fontsize=4.5, color=S.GREY)
+    label = {"fine": "answer-key clones", "coarse": "their copy-number groups"}
+    for row, res in enumerate(("fine", "coarse")):
+        y = 8 + row * 56
+        cc = c[c["resolution"] == res] if len(c) else c
+        dd = d[d["resolution"] == res] if len(d) else d
+        for col, (metric, ylab) in enumerate((("acc", "clonealign accuracy"), ("bal", "balanced accuracy"))):
+            if row == 0 and col == 0:
+                S.panel_letter(fig, "c", 2, 3)
+            ax = S.ax_mm(fig, 14 + col * 42, y, 34, 34)
+            if len(cc):
+                _panel_c(ax, cc, order, short, S, DNA, metric, legend=(row == 0 and col == 0))
+            ax.set_ylabel(f"{ylab}\n({label[res]})")
+        if row == 0:
+            S.panel_letter(fig, "d", 110, 3)
+        ax = S.ax_mm(fig, 122, y, 56, 34)
+        if len(dd):
+            _panel_d(ax, dd, order, short, S, colours, legend=(row == 0))
+        else:
+            ax.text(0.5, 0.5, "pending", transform=ax.transAxes, ha="center", fontsize=6, color=S.GREY)
+        ax.set_ylabel(f"per-spot clone-fraction error\n({label[res]})")
+    src = os.environ.get("ISCC_PAPER_OUT", "")
+    fig.text(0.995, 0.004, f"draft; R11 tumours from {os.path.basename(src.rstrip('/')) or 'the registry'}",
+             ha="right", va="bottom", fontsize=4.5, color=S.GREY)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fig.savefig(path + ".pdf")
     fig.savefig(path + ".png", dpi=300)

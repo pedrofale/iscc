@@ -16,7 +16,12 @@
 #                   clone_call.csv    cells -> hard clone call (argmax over clones)
 #                   run.csv           genes and cells dropped before the fit, and the seed that fit
 #
-# Usage: Rscript clonealign_runner.R <indir> <outdir> [max_iter] [n_repeats] [seed]
+# Usage: Rscript clonealign_runner.R <indir> <outdir> [max_iter] [n_repeats] [seed] [preprocess]
+#
+# preprocess = 1 applies the package's own preprocess_for_clonealign() with its defaults (genes with more
+# than 20 counts and copy number at most 6, outlying genes and genes with the same copy number in every
+# clone removed, cells with more than 100 counts kept) after the copy-number-0 filter below. Default 0,
+# the behaviour the Fig 5 and validate_clonealign runs had.
 
 # Point reticulate at THIS conda env's python (where tensorflow + tensorflow_probability live),
 # not reticulate's auto-provisioned uv python.
@@ -36,6 +41,7 @@ outdir <- args[2]
 max_iter  <- if (length(args) >= 3) as.integer(args[3]) else 200L
 n_repeats <- if (length(args) >= 4) as.integer(args[4]) else 3L
 seed      <- if (length(args) >= 5) as.integer(args[5]) else 1L
+preprocess <- length(args) >= 6 && as.integer(args[6]) == 1L
 dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
 
 # ---- load inputs ----
@@ -57,6 +63,15 @@ cat(sprintf("clonealign: dropped %d of %d genes (no counts or copy number 0) and
             sum(!keep_g), length(keep_g), sum(!keep_c), length(keep_c)))
 Yk <- Y[keep_c, keep_g, drop = FALSE]
 Lk <- L[keep_g, , drop = FALSE]
+if (preprocess) {
+  pp <- preprocess_for_clonealign(Yk, Lk)
+  Yk <- pp$gene_expression_data
+  Lk <- as.matrix(pp$copy_number_data)
+  storage.mode(Lk) <- "double"
+  keep_g <- colnames(Y) %in% pp$retained_genes
+  keep_c <- rownames(Y) %in% pp$retained_cells
+  cat(sprintf("clonealign: preprocess_for_clonealign kept %d genes and %d cells\n", ncol(Yk), nrow(Yk)))
+}
 cat(sprintf("clonealign: %d cells x %d genes, %d clones (max_iter=%d, n_repeats=%d)\n",
             nrow(Yk), ncol(Yk), ncol(Lk), max_iter, n_repeats))
 

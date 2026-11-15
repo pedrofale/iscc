@@ -54,8 +54,10 @@ import pandas as pd  # noqa: E402
 MIN_CLONE_FRAC = 0.03       # Fig 4b's truth (make_layer_dataset --min-clone-frac)
 N_DNA = 1500                # single-cell WGS libraries, a DLP+ run's order of magnitude
 RNA_MAX_CELLS = 3000        # tumour cells handed to clonealign
-RNA_GENES = 3000            # the most expressed genes among them
-CLONEALIGN = dict(max_iter=200, n_repeats=2, seed=1)   # Fig 5's settings
+RNA_GENES = 4000            # at most this many genes, the most expressed of the informative ones
+COARSE_K = 4                # the coarse truth: the answer key's clones in this many copy-number groups
+CLONEALIGN = dict(max_iter=200, n_repeats=2, seed=1, preprocess=1)   # Fig 5's settings + the package's
+                                                                      # preprocess_for_clonealign
 NORMAL, OTHER, TRUNK = "normal", "other", "above_clades"
 
 
@@ -158,12 +160,36 @@ def true_clones(t, layer, samples, min_frac=MIN_CLONE_FRAC):
             merged_of[c] = name
     clone_of = {g: (merged_of.get(c, OTHER)) for g, c in clade_of.items()}
     profiles = pd.DataFrame([prof[cs[0]] for cs in members.values()], index=list(members), columns=segs)
+    n_of = pd.Series([clone_of[g] for g, is_t in zip(gids, tum) if is_t]).value_counts()
+    profiles.attrs["n_cells"] = {k: int(n_of.get(k, 0)) for k in members}
     return clone_of, profiles, members
 
 
 def label_cells(gids, clone_of):
     """The answer-key label of each cell: a clone, ``"other"``, or ``"normal"``."""
     return np.array([clone_of.get(g, NORMAL) for g in gids], dtype=object)
+
+
+def coarse_clones(profiles, k=COARSE_K):
+    """The answer key's clones grouped into ``k`` copy-number groups (average linkage on the L1
+    distance between their relative profiles). Returns clone -> group label and the groups' profiles
+    (each group's largest clone's, by the cell counts true_clones attaches)."""
+    from scipy.cluster.hierarchy import fcluster, linkage
+    names = list(profiles.index)
+    if len(names) <= k:
+        return {n: n for n in names}, profiles.copy()
+    rel = profiles.to_numpy(float)
+    rel = 2.0 * rel / rel.mean(axis=1, keepdims=True)
+    grp = fcluster(linkage(rel, method="average", metric="cityblock"), t=k, criterion="maxclust")
+    out, rows = {}, {}
+    for g in sorted(set(grp), key=lambda g: names.index(next(n for n, x in zip(names, grp) if x == g))):
+        members = [n for n, x in zip(names, grp) if x == g]
+        label = "|".join(members)
+        n = profiles.attrs.get("n_cells", {})
+        rows[label] = profiles.loc[max(members, key=lambda m: n.get(m, 0))].to_numpy()
+        for n in members:
+            out[n] = label
+    return out, pd.DataFrame.from_dict(rows, orient="index", columns=profiles.columns)
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -250,7 +276,10 @@ def called_clones(seg_cn, lab):
     Returns ``(clone_of_cluster, profiles)``: cluster id -> clone label (``"normal"`` for a flat one,
     None for noise) and the clones x segments frame of relative copy number."""
     clusters = sorted(c for c in set(lab.tolist()) if c >= 0)
-    prof = {c: np.rint(np.nanmedian(seg_cn[lab == c], axis=0)).astype(int) for c in clusters}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)       # a segment no cell of the cluster called
+        prof = {c: np.nan_to_num(np.rint(np.nanmedian(seg_cn[lab == c], axis=0)), nan=2.0).astype(int)
+                for c in clusters}
     flat = {c for c in clusters if np.unique(prof[c]).size == 1}
     if len(flat) == len(clusters):
         flat = set()
@@ -289,15 +318,25 @@ def dna_chain(t, layer, dis, clone_of, work, seed=0, n_cells=N_DNA, cores=1):
     # when it has a state on at least half its bins, and only bins called in 90% of those cells are
     # clustered on, a missing state taking the cell's median.
     cn = states.to_numpy(float)                                # states are copy numbers 0..11
+    # A bin with no reads at all in a cell whose median bin holds at least 50 (the DLP+ pipeline's
+    # good-cell depth) is a homozygous deletion; HMMcopy's ideal-bin filter would otherwise drop it.
+    rd = reads.to_numpy(float)
+    deep = np.median(rd, axis=0) >= 50
+    cn[(rd == 0) & ~np.isfinite(cn) & deep[None, :]] = 0.0
     ok = np.isfinite(cn).mean(axis=0) >= 0.5
     good_bins = np.isfinite(cn[:, ok]).mean(axis=1) >= 0.9 if ok.any() else np.zeros(len(cn), bool)
     segs = segment_names(layer)
     seg_of_bin = bins["segment"].to_numpy()
+    # Clones are found on relative copy number, each cell scaled so that its median bin is 2: scRNA,
+    # the modality the clones are handed to, is library-normalised and cannot see ploidy, and the
+    # scaling absorbs HMMcopy's ploidy (multiplier) errors, which would otherwise split a clone in two.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)       # all-NaN segments of failed cells
-        seg_cn = np.stack([np.nanmedian(cn[seg_of_bin == s], axis=0) for s in range(len(segs))], axis=1)
-        X = cn[good_bins][:, ok].T
-        X = np.where(np.isfinite(X), X, np.rint(np.nanmedian(X, axis=1, keepdims=True)))
+        med = np.nanmedian(cn, axis=0)
+        rel = 2.0 * cn / np.where(med > 0, med, np.nan)[None, :]
+        seg_cn = np.stack([np.nanmedian(rel[seg_of_bin == s], axis=0) for s in range(len(segs))], axis=1)
+        X = rel[good_bins][:, ok].T
+        X = np.where(np.isfinite(X), X, np.nanmedian(X, axis=1, keepdims=True))
 
     lab = np.full(len(cells), -2)                              # -2: HMMcopy failed
     emb = np.full((len(cells), 2), np.nan)
@@ -366,12 +405,62 @@ def score_assignment(truth, pred):
     from sklearn.metrics import adjusted_rand_score
     truth = np.asarray(truth, dtype=object)
     pred = np.asarray([p if p is not None else "__none__" for p in pred], dtype=object)
-    return dict(accuracy=float(np.mean(pred == truth)),
-                ari=float(adjusted_rand_score(truth.astype(str), pred.astype(str))))
+    recall = {str(c): float(np.mean(pred[truth == c] == c)) for c in pd.unique(truth)}
+    return dict(accuracy=float(np.mean(pred == truth)), balanced_accuracy=float(np.mean(list(recall.values()))),
+                ari=float(adjusted_rand_score(truth.astype(str), pred.astype(str))), recall=recall)
+
+
+def run_clonealign(Y, L, work, max_iter=200, n_repeats=2, seed=1, preprocess=1):
+    """validation/clonealign_runner.R in the clonealign image; ``preprocess=1`` applies the package's own
+    preprocess_for_clonealign. Returns the (cells x clones) probabilities, columns in L's order."""
+    import integration_common as IC
+    in_dir, out_dir = os.path.join(work, "in"), os.path.join(work, "out")
+    os.makedirs(in_dir, exist_ok=True)
+    Y.to_csv(os.path.join(in_dir, "Y.csv"))
+    L.to_csv(os.path.join(in_dir, "L.csv"))
+    r = subprocess.run([IC.CLONEALIGN_RSCRIPT, os.path.join(VAL, "clonealign_runner.R"), in_dir, out_dir,
+                        str(int(max_iter)), str(int(n_repeats)), str(int(seed)), str(int(preprocess))],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"clonealign failed (exit {r.returncode}); Y {Y.shape}, L {L.shape}\n{r.stderr[-2000:]}")
+    print("   ", " | ".join(x for x in r.stdout.splitlines() if x.startswith("clonealign:")), flush=True)
+    P = pd.read_csv(os.path.join(out_dir, "clone_probs.csv"), index_col=0).reindex(Y.index)
+    P.columns = list(L.columns)
+    P.attrs["run"] = {k: int(v) for k, v in pd.read_csv(os.path.join(out_dir, "run.csv")).iloc[0].items()}
+    return P
+
+
+def informative_genes(X, gene_seg, profiles, n_max=RNA_GENES, min_counts=20):
+    """The genes clonealign is given for one set of clone profiles: expressed (more than ``min_counts``
+    UMIs over the cells), on a segment whose copy number differs between the clones and lies in 1..6 in
+    every clone (preprocess_for_clonealign's rules, applied first so the matrix handed over stays small),
+    at most ``n_max`` of them, the most expressed."""
+    prof = profiles.to_numpy(float)
+    seg_ok = (prof.std(axis=0) > 0) & (prof.min(axis=0) > 0) & (prof.max(axis=0) <= 6)
+    tot = np.asarray(X.sum(axis=0)).ravel()
+    cand = np.flatnonzero(seg_ok[gene_seg] & (tot > min_counts))
+    if cand.size > n_max:
+        cand = cand[np.argsort(-tot[cand])[:n_max]]
+    return np.sort(cand)
+
+
+def clonealign_arm(X, cells, layer, profiles, work, name):
+    """clonealign on cells ``X`` given clone ``profiles``; returns the clone each cell is assigned to and
+    the runner's record. With one clone, or no informative gene, every cell goes to the largest clone."""
+    gene_seg = layer.genes["segment"].to_numpy()
+    g = informative_genes(X, gene_seg, profiles)
+    if len(profiles) < 2 or g.size == 0:
+        return np.array([profiles.index[0]] * X.shape[0], dtype=object), dict(n_genes=int(g.size), skipped=True)
+    ids = layer.genes["gene_id"].astype(str).to_numpy()[g]
+    Y = pd.DataFrame(X[:, g].toarray().astype(float), index=cells, columns=[f"{x}.{i}" for i, x in zip(g, ids)])
+    L = pd.DataFrame(profiles.to_numpy(float)[:, gene_seg[g]].T, index=Y.columns, columns=list(profiles.index))
+    P = run_clonealign(Y, L, os.path.join(work, name), **CLONEALIGN)
+    pred = np.asarray(list(profiles.index), dtype=object)[np.nanargmax(P.to_numpy(float), axis=1)]
+    return pred, dict(n_genes=int(g.size), **P.attrs["run"])
 
 
 def run_dna_rna(a):
-    import integration_common as IC
+    from sklearn.metrics import adjusted_rand_score
     out = os.path.join(a.out, "c", f"{a.run}_{a.task}")
     os.makedirs(out, exist_ok=True)
     work = os.path.join(a.work, f"c_{a.run}_{a.task}")
@@ -380,6 +469,7 @@ def run_dna_rna(a):
     t, layer, dis, sec = sample(a.run, a.task)
     t0 = _lap(wall, "load_and_sample", t0)
     clone_of, true_prof, members = true_clones(t, layer, [dis, sec])
+    group_of, coarse_prof = coarse_clones(true_prof)
     t0 = _lap(wall, "truth", t0)
     dna = dna_chain(t, layer, dis, clone_of, work, seed=a.seed, n_cells=a.n_dna, cores=a.cores)
     t0 = _lap(wall, "dna_chain", t0)
@@ -392,60 +482,55 @@ def run_dna_rna(a):
     rng = np.random.default_rng([a.seed, 0xCA])
     if keep.size > a.rna_cells:
         keep = np.sort(rng.choice(keep, size=a.rna_cells, replace=False))
-    X = sc.counts_csr[keep]
-    mean = np.asarray(X.mean(axis=0)).ravel()
-    gsel = np.sort(np.argsort(-mean)[:a.rna_genes])
-    genes = layer.genes.iloc[gsel]
-    gnames = pd.Index(genes["gene_id"].astype(str))
-    if gnames.duplicated().any():
-        gnames = pd.Index([f"{g}.{i}" for i, g in enumerate(gnames)])
-    Y = pd.DataFrame(X[:, gsel].toarray().astype(float), index=[str(cells[i]) for i in keep], columns=gnames)
-    seg = genes["segment"].to_numpy()
+    X = sc.counts_csr[keep].tocsc()
+    rna_ids = [str(cells[i]) for i in keep]
+    t_fine = truth[keep]
+    t_coarse = np.array([group_of[c] for c in t_fine], dtype=object)
+    del sc
     segs = segment_names(layer)
-    L_true = pd.DataFrame(true_prof.to_numpy()[:, seg].T.astype(float), index=Y.columns,
-                          columns=list(true_prof.index))
     rec = dict(run=a.run, task=a.task, commit=_commit(), paper_out=os.environ.get("ISCC_PAPER_OUT"),
-               tier=os.environ.get("ISCC_PAPER_TIER"), n_rna_cells=int(len(keep)), n_genes=int(Y.shape[1]),
-               true_clones={k: v for k, v in members.items()}, clonealign=CLONEALIGN, seed=a.seed,
+               tier=os.environ.get("ISCC_PAPER_TIER"), seed=a.seed, clonealign=CLONEALIGN,
+               n_rna_cells=int(len(keep)), true_clones=members, coarse_groups=sorted(set(group_of.values())),
                dna=dna["diag"], dna_mapping=dna["mapping"], dna_purity=dna["purity"])
-    t_rna = truth[keep]
-    sizes = pd.Series(t_rna).value_counts()
-    rec["majority"] = float(sizes.iat[0] / sizes.sum())
-    rec["chance"] = float(1.0 / len(true_prof))
-    rec["n_true_clones"] = int(len(true_prof))
+    for res, tt, prof in (("fine", t_fine, true_prof), ("coarse", t_coarse, coarse_prof)):
+        sizes = pd.Series(tt).value_counts()
+        rec[res] = dict(n_true_clones=int(len(prof)), majority=float(sizes.iat[0] / sizes.sum()),
+                        chance=float(1.0 / len(prof)))
     t0 = _lap(wall, "inputs", t0)
 
-    # (i) the true clones and profiles
-    if len(true_prof) > 1:
-        P = IC.run_clonealign(Y, L_true, os.path.join(work, "ca_true"), **CLONEALIGN)
-        pred_true = L_true.columns.to_numpy(dtype=object)[np.nanargmax(P.to_numpy(float), axis=1)]
-        rec["clonealign_true_run"] = P.attrs.get("clonealign_run")
-    else:
-        pred_true = np.array([true_prof.index[0]] * len(keep), dtype=object)
-    rec["truth_arm"] = score_assignment(t_rna, pred_true)
+    # (i) the true clones and their profiles, at both resolutions
+    pred_true, rec["fine"]["clonealign_true_run"] = clonealign_arm(X, rna_ids, layer, true_prof, work, "ca_true")
+    rec["fine"]["truth_arm"] = score_assignment(t_fine, pred_true)
     t0 = _lap(wall, "clonealign_true", t0)
+    if len(coarse_prof) < len(true_prof):
+        pred_coarse, rec["coarse"]["clonealign_true_run"] = clonealign_arm(X, rna_ids, layer, coarse_prof, work,
+                                                                         "ca_coarse")
+    else:
+        pred_coarse = np.array([group_of[c] for c in pred_true], dtype=object)
+    rec["coarse"]["truth_arm"] = score_assignment(t_coarse, pred_coarse)
+    t0 = _lap(wall, "clonealign_coarse", t0)
 
-    # (ii) the clones called from simulated scDNA
+    # (ii) the clones called from simulated scDNA; each stands for the true clone most of its DNA cells
+    # belong to, and for that clone's coarse group
     prof = dna["profiles"]
-    if len(prof) > 1:
-        L_dna = pd.DataFrame(prof.to_numpy()[:, seg].T.astype(float), index=Y.columns, columns=list(prof.index))
-        P = IC.run_clonealign(Y, L_dna, os.path.join(work, "ca_dna"), **CLONEALIGN)
-        called = L_dna.columns.to_numpy(dtype=object)[np.nanargmax(P.to_numpy(float), axis=1)]
-        rec["clonealign_dna_run"] = P.attrs.get("clonealign_run")
-    elif len(prof) == 1:
-        called = np.array([prof.index[0]] * len(keep), dtype=object)
+    if len(prof):
+        called, rec["clonealign_dna_run"] = clonealign_arm(X, rna_ids, layer, prof, work, "ca_dna")
     else:
         called = np.array([None] * len(keep), dtype=object)
     pred_dna = np.array([dna["mapping"].get(c) if c is not None else None for c in called], dtype=object)
-    rec["dna_arm"] = score_assignment(t_rna, pred_dna)
-    from sklearn.metrics import adjusted_rand_score
-    rec["dna_arm"]["ari_unmapped"] = float(adjusted_rand_score(t_rna.astype(str), called.astype(str)))
-    rec["gap"] = rec["truth_arm"]["accuracy"] - rec["dna_arm"]["accuracy"]
+    pred_dna_coarse = np.array([group_of.get(c) if c is not None else None for c in pred_dna], dtype=object)
+    for res, tt, pp in (("fine", t_fine, pred_dna), ("coarse", t_coarse, pred_dna_coarse)):
+        rec[res]["dna_arm"] = score_assignment(tt, pp)
+        rec[res]["dna_arm"]["ari_unmapped"] = float(adjusted_rand_score(tt.astype(str), called.astype(str)))
+        rec[res]["gap"] = rec[res]["truth_arm"]["accuracy"] - rec[res]["dna_arm"]["accuracy"]
+        rec[res]["gap_balanced"] = (rec[res]["truth_arm"]["balanced_accuracy"]
+                                    - rec[res]["dna_arm"]["balanced_accuracy"])
     t0 = _lap(wall, "clonealign_dna", t0)
     rec["wall_s"] = wall
 
     # summaries only
     tp = true_prof.copy()
+    tp.insert(0, "group", [group_of[c] for c in tp.index])
     tp.insert(0, "n_cells", [int(sum(1 for g in _gids(dis) if clone_of.get(g) == c)) for c in tp.index])
     tp.to_csv(os.path.join(out, "true_clones.tsv"), sep="\t", index_label="clone")
     dp = prof.copy()
@@ -456,13 +541,20 @@ def run_dna_rna(a):
     dp.to_csv(os.path.join(out, "dna_clones.tsv"), sep="\t", index_label="clone")
     dc = pd.concat([dna["cells"], dna["seg_cn"].round(2)], axis=1)
     dc.to_csv(os.path.join(out, "dna_cells.tsv.gz"), sep="\t", index=False)
-    pd.DataFrame({"cell": Y.index, "true_clone": t_rna, "clonealign_true": pred_true,
-                  "clonealign_dna": called, "clonealign_dna_mapped": pred_dna}).to_csv(
-        os.path.join(out, "rna_cells.tsv.gz"), sep="\t", index=False)
+    pd.DataFrame({"cell": rna_ids, "true_clone": t_fine, "true_group": t_coarse, "clonealign_true": pred_true,
+                  "clonealign_coarse": pred_coarse, "clonealign_dna": called,
+                  "clonealign_dna_mapped": pred_dna}).to_csv(os.path.join(out, "rna_cells.tsv.gz"), sep="\t",
+                                                            index=False)
     with open(os.path.join(out, "score.json"), "w") as f:
         json.dump(rec, f, indent=1, default=str)
-    print(json.dumps({k: rec[k] for k in ("truth_arm", "dna_arm", "gap", "majority", "n_true_clones")}),
-          flush=True)
+    for res in ("fine", "coarse"):
+        r = rec[res]
+        print(res, json.dumps(dict(n_true_clones=r["n_true_clones"], majority=round(r["majority"], 3),
+                                   truth=round(r["truth_arm"]["accuracy"], 3),
+                                   truth_balanced=round(r["truth_arm"]["balanced_accuracy"], 3),
+                                   dna=round(r["dna_arm"]["accuracy"], 3),
+                                   dna_balanced=round(r["dna_arm"]["balanced_accuracy"], 3),
+                                   gap=round(r["gap"], 3))), flush=True)
     print("dna:", json.dumps({k: v for k, v in dna["diag"].items() if k != "dlp_fit"}), flush=True)
 
 
