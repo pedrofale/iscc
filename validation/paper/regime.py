@@ -43,10 +43,12 @@ T = TIERS[TIER]
 # carriers are ~0% when the acinus opens (the early breach clones are purged by their cost instead
 # of fixing), and every first stromal invasion is by breach-carrying cells. The in-situ phase is still
 # short at this scale (10-55 generations from release to invasion).
-# Stromal survival is kept rare: at 0.02 it hitchhikes to fixation in some seeds, and in no setting
-# tried was it enriched in stroma over ducts, because the permissive stroma (stromal_hazard 0.6)
-# gives it little to do. Selecting it after invasion needs a stromal-hazard study; it is recorded as
-# an open modelling item, and the figures do not claim it.
+# Stromal survival is selected where it pays (vault: decision-stromal-survival-selected,
+# exp-stromal-survival-selection): its proliferation cost is 0.05 (the tutorial's 0.6 cost a third of
+# the division rate for one hit, far more than it saved in the stroma, so it was never selected), one
+# hit protects more (effect 4.0, level 0.75, against 2.2 and 0.545), and the stromal hazard it offsets
+# is 0.9 (STROMA below). Its target stays 0.2% of genes: at three times that the trait, nearly neutral
+# at this cost, spreads in every tumour whether or not the stroma selects it.
 # Driver effect 1.03 in CINner's dosage law (the package default is 1.1): at 1.1 the division rate of
 # almost every cell reaches max_birth_rate during the in-situ phase, so after the release clones in a
 # full deme no longer differ in division rate (code audit 2026-11-14, finding A: 99.8-100% of cells at
@@ -54,7 +56,13 @@ T = TIERS[TIER]
 # spread of division rates is about 7%, and the regime still meets every registered tuning criterion
 # (vault: decision-paper-regime-v3).
 SELECTION = {"prop_breach": 0.002, "prop_stromal_survival": 0.002, "breach_effects": 1.01,
-             "driver_effects": 1.03}
+             "driver_effects": 1.03, "stromal_survival_cost": 0.05, "stromal_survival_effects": 4.0}
+# The hazard resident stromal cells add to cancer cells, sigma * (stromal share of the deme) * (1 -
+# stromal survival); with the effect of 4.0 per hit, 0.9 makes stromal survival enriched about 5.6-fold
+# in the stroma over tumours grown without the hazard (median of ten seeds; 20% of stromal cancer cells
+# carry it) and not in the gland, within every registered criterion; at 1.2 genome doublings sweep most
+# tumours (vault: exp-stromal-survival-selection).
+STROMA = {"stromal_hazard": 0.9}
 
 # The founding acinus stays closed for 200 generations after it is half full: long enough for a
 # truncal copy-number layer, short enough that the in-situ phase is not one deme for most of the run.
@@ -165,7 +173,7 @@ def config(scale, selection=None, cancer=None, deme=None, spatial=None, genome=N
     This is the regime's one source: :func:`grow` builds from it, and so must any script that grows a
     paper-regime tumour another way (``supp_tau.py`` runs the exact engine through ``update_mode``).
     ``coarsen`` sets ``coarsen_passengers`` (R2 runs it off)."""
-    sp = {"origin_confinement": dict(ORIGIN_CONFINEMENT), **(spatial or {})}
+    sp = {"origin_confinement": dict(ORIGIN_CONFINEMENT), **STROMA, **(spatial or {})}
     blocks = RR.config_for(scale, genome=genome, selection={**SELECTION, **(selection or {})},
                            cancer={**CANCER, **(cancer or {})}, deme={**DEME, **(deme or {})},
                            spatial=sp)
