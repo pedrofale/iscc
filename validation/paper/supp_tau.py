@@ -531,15 +531,25 @@ def summarise(out):
 
 
 # ---------------------------------------------------------------------------------- figure
-def _ci_points(ax, xs, ds, cols, key=None, **kw):
-    for x, d, c in zip(xs, ds, cols):
+def _ci_points(ax, xs, ds, arms, col, mk, key=None):
+    for x, d, arm in zip(xs, ds, arms):
         if key is not None:
             d = d[key]
         if d.get("mean") is None:
             continue
-        lo, hi = d.get("lo", d["mean"]), d.get("hi", d["mean"])
-        ax.errorbar(x, d["mean"], yerr=[[d["mean"] - lo], [hi - d["mean"]]], fmt="o", ms=2.2, color=c,
-                    lw=0.6, capsize=0, **kw)
+        lo = d["lo"] if d.get("lo") is not None else d["mean"]
+        hi = d["hi"] if d.get("hi") is not None else d["mean"]
+        ax.errorbar(x, d["mean"], yerr=[[d["mean"] - lo], [hi - d["mean"]]], fmt=mk[arm], ms=2.4,
+                    color=col[arm], lw=0.7, capsize=0)
+
+
+def _key_mark(fig, S, x_mm, y_mm, color, marker):
+    """A legend key (a marker on a short line) at an mm position from the top-left corner."""
+    from matplotlib.lines import Line2D
+    W, H = fig.get_size_inches() / S.MM
+    fig.lines.append(Line2D([(x_mm - 1.5) / W, x_mm / W, (x_mm + 1.5) / W], [1 - y_mm / H] * 3,
+                            transform=fig.transFigure, color=color, lw=0.7, marker=marker,
+                            markevery=[1], ms=2.4, figure=fig))
 
 
 def render(a):
@@ -548,13 +558,26 @@ def render(a):
     with open(os.path.join(a.out, "s1_summary.json"), "w") as f:
         json.dump(sm, f, indent=1)
     S.setup()
+    # one colour and one marker per arm (the marker carries identity where two colours are close)
     col = {"exact": S.INK, "paper": S.SOURCE["iscc"], "eps0.003": S.CLONE_FAMILIES[0][2],
            "eps0.03": S.CLONE_FAMILIES[3][1], "eps0.1": S.CLONE_FAMILIES[4][1],
            "critical": S.CLONE_FAMILIES[1][1], "historical": S.CLONE_FAMILIES[2][1]}
+    mk = {"exact": "o", "paper": "o", "eps0.003": "o", "eps0.03": "v", "eps0.1": "^", "critical": "D",
+          "historical": "s"}
     short = {"exact": "exact", "paper": "paper, ε 0.01", "eps0.003": "ε 0.003", "eps0.03": "ε 0.03",
              "eps0.1": "ε 0.1", "critical": "critical", "historical": "historical"}
+    long = {"exact": "exact (Gillespie)", "paper": "paper: binomial, CGP ε 0.01",
+            "eps0.03": "CGP ε 0.03", "eps0.1": "CGP ε 0.1", "critical": "critical channels exact",
+            "historical": "historical: Poisson, fixed step"}
     order = ["exact", "paper", "eps0.03", "eps0.1", "critical", "historical"]
-    fig = S.figure("double", 170)
+    fig = S.figure("double", 178)
+
+    # the arms, once for the whole figure
+    xk = 5.0
+    for arm in order:
+        _key_mark(fig, S, xk, 4.0, col[arm], mk[arm])
+        S.text_mm(fig, xk + 2.6, 4.0, long[arm], fontsize=5.5, va="center")
+        xk += 6.0 + 1.25 * len(long[arm])
 
     def xaxis(ax, arms):
         ax.set_xticks(range(len(arms)))
@@ -563,13 +586,14 @@ def render(a):
 
     # (a) one deme at K = 60: the time-averaged law of its size
     dem = _load(a.out, "deme")
-    S.panel_letter(fig, "a", 2, 3)
-    ax = S.ax_mm(fig, 13, 9, 38, 33)
+    sd = sm.get("deme", {})
+    S.panel_letter(fig, "a", 2, 9)
+    ax = S.ax_mm(fig, 13, 15, 38, 31)
     K = 60
     st = stationary_exact(K)
-    lo_n, hi_n = 36, 70
+    lo_n, hi_n = 36, 72
     nn = np.arange(lo_n, hi_n + 1)
-    ax.bar(nn, st[lo_n:hi_n + 1], width=0.9, color=S.BG_CELLS, lw=0, label="exact law")
+    ax.bar(nn, st[lo_n:hi_n + 1], width=0.9, color=S.BG_CELLS, lw=0)
     for arm in order:
         rs = [r for r in dem.get(arm, []) if r["K"] == K]
         if not rs:
@@ -577,54 +601,53 @@ def render(a):
         h = np.sum([r["hist"] for r in rs], axis=0)
         h = h / h.sum()
         if arm == "exact":
-            ax.plot(nn, h[lo_n:hi_n + 1], "o", ms=1.4, color=col[arm], label=short[arm], zorder=5)
+            ax.plot(nn, h[lo_n:hi_n + 1], "o", ms=1.5, color=col[arm], zorder=5)
         else:
-            ax.plot(nn, h[lo_n:hi_n + 1], "-", lw=0.7, color=col[arm], label=short[arm])
+            ax.plot(nn, h[lo_n:hi_n + 1], "-", lw=0.7, color=col[arm])
     ax.set_yscale("log")
     ax.set_ylim(1e-5, 1.5)
     ax.set_xlabel("Cells in the deme (K = 60)")
     ax.set_ylabel("Fraction of time")
     ax.set_title("One deme at capacity", loc="left")
-    ax.legend(loc="upper left", fontsize=4.5, ncol=1, handlelength=0.8)
+    S.stat(ax, "bars: exact law", loc="upper left")
 
     # (b) the mean size of a deme at K, against the exact law
-    sd = sm.get("deme", {})
-    S.panel_letter(fig, "b", 57, 3)
-    ax = S.ax_mm(fig, 67, 9, 30, 33)
+    S.panel_letter(fig, "b", 57, 9)
+    ax = S.ax_mm(fig, 67, 15, 30, 31)
     arms_b = [m for m in order if m in dem]
     for j, arm in enumerate(arms_b):
-        for K, mk, dx in ((30, "o", -0.15), (60, "s", 0.15)):
+        for K, dx in ((30, -0.17), (60, 0.17)):
             d = sd.get(f"K{K}", {}).get(arm)
             if d is None:
                 continue
             an = sd[f"K{K}"]["analytic"]
             m, lo, hi = (100 * (d[x] - an) / K for x in ("mean", "lo", "hi"))
-            ax.errorbar(j + dx, m, yerr=[[m - lo], [hi - m]], fmt=mk, ms=2.2, color=col[arm],
-                        mfc=col[arm] if K == 60 else "white", lw=0.6, capsize=0)
+            ax.errorbar(j + dx, m, yerr=[[m - lo], [hi - m]], fmt=mk[arm], ms=2.4, color=col[arm],
+                        mfc=col[arm] if K == 60 else "white", lw=0.7, capsize=0)
     ax.axhline(0, color=S.GREY, lw=0.4)
     xaxis(ax, arms_b)
     ax.set_ylabel("Mean size − exact law (% of K)")
-    ax.plot([], [], "s", ms=2.2, color=S.INK, label="K = 60")
-    ax.plot([], [], "o", ms=2.2, color=S.INK, mfc="white", label="K = 30")
+    ax.plot([], [], "o", ms=2.4, color=S.GREY, label="K = 60")
+    ax.plot([], [], "o", ms=2.4, color=S.GREY, mfc="white", label="K = 30")
     ax.legend(loc="lower left", fontsize=5)
 
     # (c) neutral fixation in a full deme of K = 30
     fx = sm.get("fix", {})
-    S.panel_letter(fig, "c", 104, 3)
-    ax = S.ax_mm(fig, 114, 9, 26, 33)
+    S.panel_letter(fig, "c", 104, 9)
+    ax = S.ax_mm(fig, 114, 15, 26, 31)
     arms_c = [m for m in order if m in fx]
     _ci_points(ax, range(len(arms_c)),
                [dict(mean=fx[m]["ratio"], lo=fx[m]["ratio_lo"], hi=fx[m]["ratio_hi"]) for m in arms_c],
-               [col[m] for m in arms_c])
+               arms_c, col, mk)
     ax.axhline(1, color=S.GREY, lw=0.4)
     xaxis(ax, arms_c)
     ax.set_ylabel("P(fixation) / E[1/N₀]")
     ax.set_title("Neutral fixation, K = 30", loc="left")
 
     # (d) time to fixation
-    S.panel_letter(fig, "d", 146, 3)
-    ax = S.ax_mm(fig, 157, 9, 24, 33)
-    _ci_points(ax, range(len(arms_c)), [fx[m] for m in arms_c], [col[m] for m in arms_c], key="t_fix")
+    S.panel_letter(fig, "d", 146, 9)
+    ax = S.ax_mm(fig, 157, 15, 24, 31)
+    _ci_points(ax, range(len(arms_c)), [fx[m] for m in arms_c], arms_c, col, mk, key="t_fix")
     if "exact" in fx:
         e = fx["exact"]["t_fix"]
         ax.axhspan(e["lo"], e["hi"], color=S.BG_CELLS, lw=0, zorder=0)
@@ -633,8 +656,8 @@ def render(a):
 
     # (e) tumours at 5,000 cells: every statistic of every tau arm against exact
     tum = sm.get("tumours", {})
-    S.panel_letter(fig, "e", 2, 60)
-    ax = S.ax_mm(fig, 47, 65, 64, 92)
+    S.panel_letter(fig, "e", 2, 63)
+    ax = S.ax_mm(fig, 47, 69, 84, 98)
     arms_e = [m for m in order if m in tum and m != "exact"]
     CLIP = 25.0
     for i, (key, lab) in enumerate(TUMOUR_STATS):
@@ -645,17 +668,16 @@ def render(a):
             d = tum[arm].get(key, {}).get("vs_exact")
             if d is None:
                 continue
-            y = y0 + 0.3 - j * 0.6 / max(len(arms_e) - 1, 1)
+            y = y0 + 0.32 - j * 0.64 / max(len(arms_e) - 1, 1)
             m, lo, hi = 100 * d["rel"], 100 * d["lo"], 100 * d["hi"]
-            if abs(m) > CLIP:                        # off the scale: an arrow and the value
-                s = np.sign(m)
-                ax.annotate("", xy=(s * CLIP, y), xytext=(s * (CLIP - 3), y),
-                            arrowprops=dict(arrowstyle="-|>", lw=0.6, color=col[arm], mutation_scale=4))
-                ax.text(s * (CLIP - 3.5), y, f"{m:+.0f}%", fontsize=4.2, color=S.INK, va="center",
-                        ha="right" if s > 0 else "left")
-                continue
             ax.plot([max(lo, -CLIP), min(hi, CLIP)], [y, y], color=col[arm], lw=0.7)
-            ax.plot(m, y, "o", ms=2.0, color=col[arm])
+            if abs(m) > CLIP:                        # off the scale: an arrowhead and the value
+                s = np.sign(m)
+                ax.plot(s * CLIP, y, ">" if s > 0 else "<", ms=2.6, color=col[arm], clip_on=False)
+                ax.text(s * (CLIP + 1.5), y, f"{m:+.0f}%", fontsize=4.5, va="center",
+                        ha="left" if s > 0 else "right")
+            else:
+                ax.plot(m, y, mk[arm], ms=2.4, color=col[arm])
     ax.axvspan(-5, 5, color=S.PASTEL["blue"], lw=0, zorder=0, alpha=0.6)
     ax.axvline(0, color=S.INK, lw=0.5)
     ax.set_xlim(-CLIP, CLIP)
@@ -664,39 +686,37 @@ def render(a):
     ax.set_yticklabels([lab for _, lab in TUMOUR_STATS][::-1], fontsize=5.5)
     ax.tick_params(axis="y", length=0)
     ax.set_xlabel("Difference from exact (% of the exact mean, 95% CI)")
-    ax.set_title(f"Paper-regime tumours at {TARGET:,} cells", loc="left")
-    for arm in arms_e:
-        w = tum[arm]["wall_s"]["median"]
-        ax.plot([], [], "o-", ms=2.0, lw=0.7, color=col[arm],
-                label=f"{short[arm]}: n = {tum[arm]['n']}, {w:.0f} s")
-    if "exact" in tum:
-        ax.plot([], [], " ", label=f"exact: n = {tum['exact']['n']}, {tum['exact']['wall_s']['median']:.0f} s")
-    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), fontsize=5,
-              title="tumours, median wall time", title_fontsize=5)
+    ex = tum.get("exact", {})
+    ax.set_title(f"Paper-regime tumours at {TARGET:,} cells: {ex.get('n', 0):,} exact; "
+                 f"in-situ phase on {ex.get('in_situ_followed', 0)}", loc="left")
 
     # (f) drivers per cell at the 5% detection limit, absolute
-    S.panel_letter(fig, "f", 146, 98)
     arms_f = [m for m in order if m in tum]
-    ax = S.ax_mm(fig, 157, 102, 24, 22)
-    _ci_points(ax, range(len(arms_f)), [tum[m] for m in arms_f], [col[m] for m in arms_f], key="n5")
+    S.panel_letter(fig, "f", 146, 63)
+    ax = S.ax_mm(fig, 157, 69, 24, 40)
+    _ci_points(ax, range(len(arms_f)), [tum[m] for m in arms_f], arms_f, col, mk, key="n5")
     if "exact" in tum:
         e = tum["exact"]["n5"]
         ax.axhspan(e["lo"], e["hi"], color=S.BG_CELLS, lw=0, zorder=0)
     ax.set_xticks(range(len(arms_f)))
     ax.set_xticklabels([])
     ax.set_xlim(-0.6, len(arms_f) - 0.4)
-    ax.set_ylabel("Drivers per cell\n(5% detection)", fontsize=5.5)
+    ax.set_ylabel("Drivers per cell, 5% detection")
+    ax.set_title("At 5,000 cells", loc="left")
 
-    # (g) wall time of growth per tumour
-    S.panel_letter(fig, "g", 146, 126)
-    ax = S.ax_mm(fig, 157, 129, 24, 22)
+    # (g) wall time of growth to 5,000 cells, per tumour (median and quartiles; n above)
+    S.panel_letter(fig, "g", 146, 114)
+    ax = S.ax_mm(fig, 157, 120, 24, 40)
     for j, arm in enumerate(arms_f):
         w = tum[arm]["wall_s"]
-        ax.errorbar(j, w["median"], yerr=[[w["median"] - w["q25"]], [w["q75"] - w["median"]]], fmt="o",
-                    ms=2.2, color=col[arm], lw=0.6, capsize=0)
+        ax.errorbar(j, w["median"], yerr=[[w["median"] - w["q25"]], [w["q75"] - w["median"]]],
+                    fmt=mk[arm], ms=2.4, color=col[arm], lw=0.7, capsize=0)
+        ax.text(j, w["q75"] * 1.3, f"n = {tum[arm]['n']:,}", fontsize=4.2, ha="center", va="bottom",
+                rotation=90)
     ax.set_yscale("log")
+    ax.set_ylim(top=ax.get_ylim()[1] * 6)
     xaxis(ax, arms_f)
-    ax.set_ylabel("Wall time per\ntumour (s)", fontsize=5.5)
+    ax.set_ylabel("Wall time to 5,000 cells (s)")
     path = S.save(fig, "supp_s1_tau", stamp=False)
     print("wrote", path)
     return sm
