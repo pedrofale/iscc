@@ -116,6 +116,16 @@ def _tumour(out_dir, tag):
     return dict(wgd_frac=r["wgd_frac"], wgd_swept=r["wgd_swept"])
 
 
+def _oracle_set(out_dir, tag):
+    """clonealign's accuracy given the true profiles of the clones the DNA step found (NaN when absent)."""
+    p = os.path.join(out_dir, "c", tag, "oracle_set.json")
+    r = json.load(open(p)) if os.path.exists(p) else {}
+    arm = r.get("oracle_set_arm", {})
+    return dict(acc_oracle_set=arm.get("accuracy", np.nan), bal_oracle_set=arm.get("balanced_accuracy", np.nan),
+                n_found=len(r["clones_found"]) if r else np.nan,
+                cells_in_found=r.get("share_of_cells_in_found", np.nan))
+
+
 def collect(out_dir):
     rows_c, rows_d = [], []
     for f in sorted(glob.glob(os.path.join(out_dir, "c", "*", "score.json"))):
@@ -124,7 +134,9 @@ def collect(out_dir):
         for res in [x for x in ("fine", "coarse") if x in r and "truth_arm" in r[x]]:
             x = r[res]
             rows_c.append(dict(tumour=f"{r['run']}_{r['task']}", resolution=res,
-                               **_tumour(out_dir, f"{r['run']}_{r['task']}"), n_rna_cells=r["n_rna_cells"],
+                               **_tumour(out_dir, f"{r['run']}_{r['task']}"),
+                               **(_oracle_set(out_dir, f"{r['run']}_{r['task']}") if res == "fine" else {}),
+                               n_rna_cells=r["n_rna_cells"],
                                n_true_clones=x["n_true_clones"], n_called_clones=d.get("n_called_clones"),
                                acc_true=x["truth_arm"]["accuracy"], acc_dna=x["dna_arm"]["accuracy"], gap=x["gap"],
                                bal_true=x["truth_arm"]["balanced_accuracy"],
@@ -165,6 +177,9 @@ def _panel_c(ax, c, order, short, S, DNA, metric):
         ax.plot(i - 0.28, base, marker="_", ms=6, mew=0.8, color=S.GREY, ls="none", zorder=1)
         ax.plot(i, a_t, "o", ms=4, mfc=S.INK, mec="white", mew=0.4, zorder=3)
         ax.plot(i, a_d, "o", ms=4, mfc=DNA, mec="white", mew=0.4, zorder=3)
+        a_o = r.get(f"{metric}_oracle_set", np.nan)
+        if np.isfinite(a_o):
+            ax.plot(i - 0.14, a_o, "o", ms=3.4, mfc="white", mec=S.INK, mew=0.6, zorder=2)
         ax.text(i + 0.1, (a_t + a_d) / 2, f"{a_d - a_t:+.2f}".replace("-", "\u2212"), fontsize=4.6,
                 color=S.INK, va="center")
     ax.set_xticks(range(len(order)))
@@ -236,7 +251,9 @@ def figure(c, d, path):
     fig.legend(handles=[Line2D([], [], marker="o", ls="none", mfc=S.INK, mec="white", ms=4,
                                label="given the true clones and profiles"),
                         Line2D([], [], marker="o", ls="none", mfc=DNA, mec="white", ms=4,
-                               label="given the clones called from simulated scDNA (HMMcopy, clustering)")],
+                               label="given the clones called from simulated scDNA (HMMcopy, clustering)"),
+                        Line2D([], [], marker="o", ls="none", mfc="white", mec=S.INK, mew=0.6, ms=3.4,
+                               label="given the true profiles of only the clones scDNA found")],
                loc="upper left", bbox_to_anchor=(10 / 183, 1 - 1 / 62), ncol=1, fontsize=4.8, frameon=False)
     S.panel_letter(fig, "d", 104, 3)
     ax = S.ax_mm(fig, 116, y, 64, h)

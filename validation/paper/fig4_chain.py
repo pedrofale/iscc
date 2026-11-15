@@ -34,7 +34,9 @@ The spatial step reads ``OUT/c/<run>_<task>/dna_clones.tsv``, so it runs after `
     python validation/paper/fig4_chain.py spatial --run R11 --task seed1 --out OUT --work $SNIC_TMP
     python validation/paper/fig4_chain.py info    --run R11 --task seed1 --out OUT --work $SNIC_TMP
 
-``info`` only writes ``OUT/c/<run>_<task>/tumour.json`` (cancer cells, whole-genome-doubled fraction, and
+``oracle-set`` (after dna-rna) runs clonealign on the true profiles of the clones the DNA step found
+(``oracle_set.json``), which splits 4c's gap into missed clones and profile error. ``info`` only writes
+``OUT/c/<run>_<task>/tumour.json`` (cancer cells, whole-genome-doubled fraction, and
 whether the doubling swept the tumour), which ``dna-rna`` also writes.
 """
 import argparse
@@ -501,6 +503,44 @@ def clonealign_arm(X, cells, layer, profiles, work, name):
     return pred, dict(n_genes=int(g.size), **P.attrs["run"])
 
 
+def rna_inputs(t, layer, dis, clone_of, a):
+    """The tumour cells clonealign is given (at most ``a.rna_cells``, those with a true clone) and their
+    human-gene counts; the same cells on every call with the same seed."""
+    sc = rna_counts(t, layer, dis, seed=a.seed)
+    cells = list(sc.obs.index)
+    truth = label_cells(_gids(dis, cells), clone_of)
+    keep = np.flatnonzero((truth != NORMAL) & (truth != OTHER))
+    rng = np.random.default_rng([a.seed, 0xCA])
+    if keep.size > a.rna_cells:
+        keep = np.sort(rng.choice(keep, size=a.rna_cells, replace=False))
+    return sc.counts_csr[keep].tocsc(), [str(cells[i]) for i in keep], truth[keep]
+
+
+def run_oracle_set(a):
+    """The decomposition of 4c's gap: clonealign given the TRUE profiles of only the true clones the DNA
+    step found (those its called clones stand for). Against the truth arm, the loss is the clones the
+    DNA step missed or merged; against the DNA arm, the rest is the error in the called profiles.
+    Writes ``c/<run>_<task>/oracle_set.json``; needs dna-rna's dna_clones.tsv."""
+    out = os.path.join(a.out, "c", f"{a.run}_{a.task}")
+    work = os.path.join(a.work, f"c_{a.run}_{a.task}")
+    os.makedirs(work, exist_ok=True)
+    dna = pd.read_csv(os.path.join(out, "dna_clones.tsv"), sep="\t", index_col=0)
+    t, layer, dis, sec = sample(a.run, a.task)
+    clone_of, true_prof, members = true_clones(t, layer, [dis, sec])
+    X, rna_ids, t_fine = rna_inputs(t, layer, dis, clone_of, a)
+    found = [c for c in pd.unique(dna["true_clone"]) if c in true_prof.index]
+    rec = dict(run=a.run, task=a.task, commit=_commit(), clones_found=found, n_true_clones=int(len(true_prof)),
+               share_of_cells_in_found=float(np.isin(t_fine, found).mean()))
+    if found:
+        pred, rec["clonealign_run"] = clonealign_arm(X, rna_ids, layer, true_prof.loc[found], work, "ca_oracle")
+        rec["oracle_set_arm"] = score_assignment(t_fine, pred)
+    with open(os.path.join(out, "oracle_set.json"), "w") as f:
+        json.dump(rec, f, indent=1, default=str)
+    print("oracle_set", json.dumps({k: rec[k] for k in ("clones_found", "share_of_cells_in_found")}),
+          json.dumps({k: round(v, 3) for k, v in rec.get("oracle_set_arm", {}).items() if not isinstance(v, dict)}),
+          flush=True)
+
+
 def run_dna_rna(a):
     from sklearn.metrics import adjusted_rand_score
     out = os.path.join(a.out, "c", f"{a.run}_{a.task}")
@@ -517,19 +557,10 @@ def run_dna_rna(a):
     dna = dna_chain(t, layer, dis, clone_of, work, seed=a.seed, n_cells=a.n_dna, cores=a.cores)
     t0 = _lap(wall, "dna_chain", t0)
 
-    sc = rna_counts(t, layer, dis, seed=a.seed)
+    X, rna_ids, t_fine = rna_inputs(t, layer, dis, clone_of, a)
+    keep = np.arange(len(rna_ids))
     t0 = _lap(wall, "scrna", t0)
-    cells = list(sc.obs.index)
-    truth = label_cells(_gids(dis, cells), clone_of)
-    keep = np.flatnonzero((truth != NORMAL) & (truth != OTHER))
-    rng = np.random.default_rng([a.seed, 0xCA])
-    if keep.size > a.rna_cells:
-        keep = np.sort(rng.choice(keep, size=a.rna_cells, replace=False))
-    X = sc.counts_csr[keep].tocsc()
-    rna_ids = [str(cells[i]) for i in keep]
-    t_fine = truth[keep]
     t_coarse = np.array([group_of[c] for c in t_fine], dtype=object)
-    del sc
     segs = segment_names(layer)
     rec = dict(run=a.run, task=a.task, commit=_commit(), paper_out=os.environ.get("ISCC_PAPER_OUT"),
                tier=os.environ.get("ISCC_PAPER_TIER"), seed=a.seed, clonealign=CLONEALIGN, tumour=tinfo,
@@ -725,7 +756,7 @@ def run_spatial(a):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("step", choices=("dna-rna", "spatial", "info"))
+    ap.add_argument("step", choices=("dna-rna", "spatial", "info", "oracle-set"))
     ap.add_argument("--run", default="R11")
     ap.add_argument("--task", required=True)
     ap.add_argument("--out", required=True)
@@ -740,7 +771,8 @@ def main():
     a = ap.parse_args()
     warnings.filterwarnings("ignore", category=FutureWarning)
     try:
-        {"dna-rna": run_dna_rna, "spatial": run_spatial, "info": run_info}[a.step](a)
+        {"dna-rna": run_dna_rna, "spatial": run_spatial, "info": run_info,
+         "oracle-set": run_oracle_set}[a.step](a)
     finally:
         if os.environ.get("FIG4_KEEP_WORK") != "1":
             for d in (f"c_{a.run}_{a.task}", f"d_{a.run}_{a.task}"):
