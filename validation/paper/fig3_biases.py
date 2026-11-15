@@ -170,6 +170,7 @@ def compute_a():
 # --- b. WGS --------------------------------------------------------------------------------------
 KAPPA_X = (0.1, 0.3, 1.0, 3.0, 10.0)           # multiples of the fitted DM concentration
 GC_SIGMA = (0.0, 0.1, 0.2, 0.4)
+LOW_COV = 0.1                                  # "near-empty" locus: below a tenth of the mean coverage
 
 
 def _bulk(diss, est, seed=11, **over):
@@ -206,7 +207,9 @@ def compute_b():
             x, m = VD._gc_curve(o["coverage"].values, o["true_cn"].values, o["gc"].values, nbins=10)
             curves.append(m.tolist())
         gc[str(s)] = dict(gc=x.tolist(), curves=curves)
-    return dict(_tumour=REG.task_path(*TUMOUR), hist=hist, cv_real=_cv(real), cv_iscc=_cv(sim),
+    # the CVs match but the shapes do not: HG002 has a spike of near-empty loci that iscc lacks
+    low = {k: float((np.asarray(v) < LOW_COV).mean()) for k, v in hist.items()}
+    return dict(_tumour=REG.task_path(*TUMOUR), hist=hist, cv_real=_cv(real), cv_iscc=_cv(sim), low_frac=low,
                 kappa_fit=float(est.hypers.kappa), kappa_x=list(KAPPA_X), cv_sweep=sweep,
                 gc_sigma_fit=float(est.hypers.gc_curve_sigma), gc_fitted="gc_curve_sigma" in est.fitted, gc=gc)
 
@@ -334,6 +337,9 @@ def compute_e():
 
 
 # --- render --------------------------------------------------------------------------------------
+LEFT_W = 75            # the left half spans 14-89 mm, as row d's three panels do
+
+
 def _cached(part):
     p = os.path.join(CACHE, f"{part}.json")
     return json.load(open(p)) if os.path.exists(p) else None
@@ -352,7 +358,7 @@ def _legend(ax, **kw):
 def render_a(fig, y):
     d = _cached("a")
     y += 4
-    axs = [S.ax_mm(fig, 14, y, 24, 21), S.ax_mm(fig, 47, y, 22, 21), S.ax_mm(fig, 100, y, 21, 21),
+    axs = [S.ax_mm(fig, 14, y, 30, 21), S.ax_mm(fig, 58, y, 31, 21), S.ax_mm(fig, 100, y, 21, 21),
            S.ax_mm(fig, 141, y, 36, 21)]
     if d is None:
         for ax in axs:
@@ -419,7 +425,7 @@ def render_a(fig, y):
 
 def render_b(fig, y):
     d = _cached("b")
-    axs = [S.ax_mm(fig, 14, y, 44, 24), S.ax_mm(fig, 100, y, 30, 24), S.ax_mm(fig, 145, y, 32, 24)]
+    axs = [S.ax_mm(fig, 14, y, LEFT_W, 24), S.ax_mm(fig, 100, y, 30, 24), S.ax_mm(fig, 145, y, 32, 24)]
     if d is None:
         for ax in axs:
             pending(ax)
@@ -432,7 +438,11 @@ def render_b(fig, y):
     ax.set_xlabel("Per-locus coverage / mean")
     ax.set_ylabel("Density")
     _legend(ax, loc="upper right")
-    S.stat(ax, f"CV real {d['cv_real']:.2f}\niscc {d['cv_iscc']:.2f}", "upper left")
+    txt = f"CV: real {d['cv_real']:.2f}, iscc {d['cv_iscc']:.2f}"
+    if "low_frac" in d:
+        txt += (f"\nloci below {LOW_COV:g} x mean:\nreal {d['low_frac']['real']:.1%}, "
+                f"iscc {d['low_frac']['iscc']:.1%}")
+    S.stat(ax, txt, "upper left")
     ax = axs[1]
     ax.plot(d["kappa_x"], d["cv_sweep"], marker="o", ms=2.5, color=S.SOURCE["iscc"], lw=0.8, label="iscc")
     ax.axhline(d["cv_real"], color=S.SOURCE["real"], lw=0.8, ls="--", label="HG002")
@@ -454,7 +464,7 @@ def render_b(fig, y):
 
 def render_c(fig, y):
     d = _cached("c")
-    axs = [S.ax_mm(fig, 14, y, 44, 24), S.ax_mm(fig, 100, y, 30, 24), S.ax_mm(fig, 145, y, 32, 24)]
+    axs = [S.ax_mm(fig, 14, y, LEFT_W, 24), S.ax_mm(fig, 100, y, 30, 24), S.ax_mm(fig, 145, y, 32, 24)]
     if d is None:
         for ax in axs:
             pending(ax)
@@ -538,12 +548,33 @@ def render_d(fig, y):
     return dict(left=left, dropout_mid_fit=d["dropout_mid_fit"], dropout_fitted=d["dropout_fitted"])
 
 
+def _visium_left(fig, y, d):
+    """Fig 2's Visium panel (fig2_realism.render_h), laid out to fill this figure's left half."""
+    # the bars end 6 mm short of the half, to leave room for the right panel's two-line label
+    ax1, ax2 = S.ax_mm(fig, 14, y, 48, 24), S.ax_mm(fig, 14 + LEFT_W - 17, y, 11, 24)
+    if d is None:
+        pending(ax1)
+        pending(ax2, "")
+        return None
+    lo, ls = np.asarray(d["toto"]), np.asarray(d["tots"])
+    bins = np.linspace(min(lo.min(), ls.min()), max(lo.max(), ls.max()), 30)
+    ax1.hist(lo, bins=bins, density=True, color=S.SOURCE["real"], alpha=0.6, label="real section")
+    ax1.hist(ls, bins=bins, density=True, color=S.SOURCE["iscc"], alpha=0.6, label="iscc")
+    ax1.set_xlabel("log$_{10}$ UMIs per spot")
+    ax1.set_ylabel("Density")
+    _legend(ax1, loc="upper left")
+    ax2.bar([0, 1], [d["moran_real"], d["moran_iscc"]], color=[S.SOURCE["real"], S.SOURCE["iscc"]], width=0.7)
+    ax2.set_xticks([0, 1])
+    ax2.set_xticklabels(["real", "iscc"], rotation=90)
+    ax2.set_ylabel("Moran's I, spot depth")
+    ax2.set_ylim(0, 1)
+    return dict(moran_real=d["moran_real"], moran_iscc=d["moran_iscc"])
+
+
 def render_e(fig, y):
     d = _cached("e")
     ax = S.ax_mm(fig, 100, y, 46, 24)
-    F2 = _f2()
-    F2._cached = lambda part: (d or {}).get("left") if part == "h" else None
-    left = F2.render_h(fig, 14, y)
+    left = _visium_left(fig, y, (d or {}).get("left"))
     if d is None:
         pending(ax)
         return None
