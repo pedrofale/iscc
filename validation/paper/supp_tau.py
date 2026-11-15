@@ -661,6 +661,7 @@ def render(a):
 
     # (e) tumours at 5,000 cells: every statistic of every tau arm against exact
     tum = sm.get("tumours", {})
+    arms_f = [m for m in order if m in tum]
     S.panel_letter(fig, "e", 2, 63)
     ax = S.ax_mm(fig, 47, 69, 84, 98)
     arms_e = [m for m in order if m in tum and m != "exact"]
@@ -691,12 +692,11 @@ def render(a):
     ax.set_yticklabels([lab for _, lab in TUMOUR_STATS][::-1], fontsize=5.5)
     ax.tick_params(axis="y", length=0)
     ax.set_xlabel("Difference from exact (% of the exact mean, 95% CI)")
-    ex = tum.get("exact", {})
-    ax.set_title(f"Paper-regime tumours at {TARGET:,} cells: {ex.get('n', 0):,} exact; "
-                 f"in-situ phase on {ex.get('in_situ_followed', 0)}", loc="left")
+    fol = sorted({tum[m].get("in_situ_followed", 0) for m in arms_f}, reverse=True)
+    ax.set_title(f"Paper-regime tumours at {TARGET:,} cells (n in g); in-situ phase on the first "
+                 f"{' or '.join(str(x) for x in fol)} of each arm", loc="left")
 
     # (f) drivers per cell at the 5% detection limit, absolute
-    arms_f = [m for m in order if m in tum]
     S.panel_letter(fig, "f", 146, 63)
     ax = S.ax_mm(fig, 157, 69, 24, 40)
     _ci_points(ax, range(len(arms_f)), [tum[m] for m in arms_f], arms_f, col, mk, key="n5")
