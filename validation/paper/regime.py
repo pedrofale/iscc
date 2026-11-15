@@ -47,7 +47,14 @@ T = TIERS[TIER]
 # tried was it enriched in stroma over ducts, because the permissive stroma (stromal_hazard 0.6)
 # gives it little to do. Selecting it after invasion needs a stromal-hazard study; it is recorded as
 # an open modelling item, and the figures do not claim it.
-SELECTION = {"prop_breach": 0.002, "prop_stromal_survival": 0.002, "breach_effects": 1.01}
+# Driver effect 1.03 in CINner's dosage law (the package default is 1.1): at 1.1 the division rate of
+# almost every cell reaches max_birth_rate during the in-situ phase, so after the release clones in a
+# full deme no longer differ in division rate (code audit 2026-11-14, finding A: 99.8-100% of cells at
+# the cap in the full-tier registry). At 1.03 most cells stay below the cap and the between-clone
+# spread of division rates is about 7%, and the regime still meets every registered tuning criterion
+# (vault: decision-paper-regime-v3).
+SELECTION = {"prop_breach": 0.002, "prop_stromal_survival": 0.002, "breach_effects": 1.01,
+             "driver_effects": 1.03}
 
 # The founding acinus stays closed for 200 generations after it is half full: long enough for a
 # truncal copy-number layer, short enough that the in-situ phase is not one deme for most of the run.
@@ -69,13 +76,19 @@ ORIGIN_CONFINEMENT = dict(RR._CFG["spatial_params"]["origin_confinement"], gener
 # now acts inside full demes, so the same mutation supply alters more of the genome: `mutation_rate`
 # 0.15 (the ER+ preset is 0.30) brings the fraction of genome altered back to the old law's.
 CROWDING_OVERFILL, CROWDING_D1 = 1.5, 5.0
-# `wgd_rate` 0.005 (the ER+ preset is 0.001): the R5 sweep puts 35% of tumours past a whole-genome
-# duplication at 0.005, inside PCAWG's 30-50%, against 5% at 0.001. It is an effective rate for this
-# lesion size, whose lineages are a few doublings shallower than a real lesion's (vault:
-# decision-paper-regime-wgd-rate).
-CANCER = {"mutation_rate": 0.15, "wgd_rate": 0.005}
+# `wgd_rate` 0.01 (the ER+ preset is 0.001): with driver effect 1.03 on the corrected tau-leaping, 30%
+# of tumours carry a whole-genome duplication at 0.01 (the lower edge of PCAWG's 30-50%), against 15% at
+# 0.005 (20 tumours per rate at the sweep scale). It is an effective rate for this lesion size, whose
+# lineages are a few doublings shallower than a real lesion's (vault: decision-paper-regime-v3, which
+# supersedes decision-paper-regime-wgd-rate's 0.005).
+CANCER = {"mutation_rate": 0.15, "wgd_rate": 0.01}
+# Tau-leaping (vault: decision-standard-simulation-algorithms, decision-paper-regime-v3): binomial deaths
+# (Tian and Burrage 2004; Chatterjee et al. 2005) and each leap chosen by the epsilon-bounded rule of Cao,
+# Gillespie and Petzold (2006) at epsilon 0.01. The historical fixed sub-step let a full deme lose about a
+# quarter of its cells in one leap under the d1 step, and its capped Poisson deaths favoured small clones.
 DEME = {"crowding_overfill": CROWDING_OVERFILL, "crowding_d1": CROWDING_D1,
-        "maximum_death_rate": CROWDING_D1}
+        "maximum_death_rate": CROWDING_D1,
+        "tau_deaths": "binomial", "tau_step": "cgp", "tau_epsilon": 0.01}
 
 # Visium spot swapping, fitted to 10x's V1_Breast_Cancer_Block_A_Section_1 (vault:
 # decision-visium-spot-swapping, exp-visium-bleed): SpotClean's model with a bleeding rate of 0.31, a
@@ -123,6 +136,9 @@ def expression():
     cp["niche_program_strength"] = 3.0
     cp["phenotype_program_strength"] = {"breach": 1.0, "__default__": 0.5}
     e["dosage_params"].update(DOSAGE)
+    # The bound on a program's log-fold (vault: decision-program-log-fold-bound), set here so that a
+    # tumour grown by `grow` carries it; `registry.load` still sets it on tumours stored before.
+    e["program_params"]["max_log_fold"] = PROGRAM_MAX_LOG_FOLD
     return e
 
 

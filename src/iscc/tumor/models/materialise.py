@@ -74,13 +74,17 @@ def _resolve_layers(layers):
 
 def _program_multiplier(P, Z):
     """``exp(Z · loading)`` for a chunk of cells, summed over programs one at a time, so each value
-    is the same whichever chunk its cell falls in (see ``make_cell_data``)."""
+    is the same whichever chunk its cell falls in (see ``make_cell_data``). The log-fold is bounded as
+    in ``ProgramModel.gene_multiplier``: ``x -> c·tanh(x / c)`` when ``max_log_fold`` is ``c``."""
     if P.dictionary is None or Z.shape[1] == 0:
         return np.ones((Z.shape[0], P.n_genes))
     loading = P.dictionary.loading
     acc = np.zeros((Z.shape[0], loading.shape[1]))
     for k in range(Z.shape[1]):
         acc += Z[:, k:k + 1] * loading[k]
+    c = getattr(P, "max_log_fold", None)
+    if c is not None:
+        return np.exp(c * np.tanh(acc / c))
     return np.exp(acc)
 
 

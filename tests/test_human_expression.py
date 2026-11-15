@@ -102,10 +102,6 @@ def test_cancer_takes_its_origins_baseline(grown):
     assert {"proliferation", "emt", "hypoxia"} <= set(expr.programme_genes)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "known bug, kept for bit-identity with the paper regime: make_cell_data's chunked program "
-    "multiplier (_program_multiplier) ignores program_params['max_log_fold'], while the layer's "
-    "factor divides by the bounded ProgramModel.gene_multiplier"))
 def test_cancer_differs_from_epithelium_only_by_its_genotype(grown):
     t, layer, expr = grown
     cd = t.cell_data

@@ -106,7 +106,7 @@ The step is therefore chosen by a published rule, set by `deme_params["tau_step"
 - `"cgp_critical"`: tau-leaping with critical reactions (Cao, Gillespie and Petzold 2005, *J Chem Phys* 123:054104): the channels of demes at or above `K` are critical (`_classify_critical`); each leap takes the ε-bounded step over the other channels and an exponential time for the critical ones, and fires one critical event exactly, through the exact mode's `_event_in_deme`, when its time comes first (`_tau_leaps_critical`).
 
 Against the exact mode (small systems of the 2026-11-14 algorithm reviews): `"cgp_critical"` reproduces a deme at capacity, neutral fixation and 5,000-cell tumours, but in a paper tumour most demes are full, so it costs more than the exact mode; `"cgp"` reproduces neutral fixation and 5,000-cell tumours and holds a full deme about 1% below the exact occupancy, at about five times the cost of the historical fixed step at ε 0.01.
-**The paper's step rule: pending Pedro's choice** (vault: `paper1-autonomous-log`, question 1a).
+The paper runs `"cgp"` at ε 0.01 with binomial deaths (`validation/paper/regime.py`, vault: `decision-paper-regime-v3`); the critical-channel rule stays available for runs that need exact-quality crowding at a deme and can afford its cost.
 
 **Births and free slots.**
 A deme holds at most `ρK` cells; a birth that reaches a full deme displaces a resident normal cell if there is one, and is lost otherwise.
