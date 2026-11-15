@@ -33,8 +33,9 @@ mean ploidy (``sweep_score.score_tumour``, as the regime's tuning reads them), t
 K) of the demes that reached K, the founding acinus's time-averaged occupancy while it is confined
 (from 10 generations after it is half full to its release), the time to reach 5,000 cells, the
 acinus's release time, and the wall time of growth. Most tumours are still in situ at 5,000 cells, so
-each is then grown on, in the same streams, until its first cancer cell reaches a stroma deme (at most
-300 generations after the release): the in-situ phase is that time minus the release. Full demes and
+the first INSITU_SEEDS of each arm are then grown on, in the same streams, until their first cancer
+cell reaches a stroma deme (at most 300 generations after the release): the in-situ phase is that time
+minus the release. Full demes and
 the stroma are read every half generation in both engines.
 
 Heavy work runs through Slurm (``wt/s1-jobs``); results are a few JSON-lines files per arm.
@@ -64,6 +65,7 @@ GRID = 0.5                       # generations between the reads of the in-situ 
 SETTLE = 10.0                    # generations after the acinus is half full before its occupancy counts
 T_MAX = 1_500.0                  # generations; a tumour still below target then has stayed in situ
 INSITU_MAX = 300.0               # generations after the release that the in-situ phase is followed for
+INSITU_SEEDS = 300               # construction seeds 1..INSITU_SEEDS are followed to the first stromal cell
 GROW_SEED = {"exact": 10_000_000, "tau": 20_000_000}   # growth seed = construction seed + offset
 
 _TAU_PAPER = {k: RG.DEME[k] for k in ("tau_deaths", "tau_step", "tau_epsilon")}
@@ -194,12 +196,14 @@ def run_tumour(arm, seed):
 
     # phase 2: on to the first cancer cell in the stroma (in the same stream, as one growth)
     wall0 = time.time()
-    if rec["reached"]:
+    rec["insitu_followed"] = bool(rec["reached"] and seed <= INSITU_SEEDS)
+    if rec["insitu_followed"]:
         advance(lambda: (st["first_stroma"] is not None or t.get_cancer_size() == 0
                          or t.time >= (release() or t.time) + INSITU_MAX or t.time >= T_MAX), None)
     rel = release()
     rec.update(release=rel, first_stroma=st["first_stroma"],
-               in_situ=st["first_stroma"] - rel if rel is not None and st["first_stroma"] is not None else None,
+               in_situ=(st["first_stroma"] - rel if rec["insitu_followed"] and st["first_stroma"] is not None
+                        else None),
                cancer_at_invasion=int(t.get_cancer_size()), wall_insitu_s=round(time.time() - wall0, 2))
     return rec
 
@@ -356,11 +360,16 @@ def run(a):
     for arm, n in _parse(a.fix):
         done = _done(a.out, "fix", arm)
         jobs += [("fix", arm, b) for b in range(math.ceil(n / FIX_BATCH)) if b not in done]
-    # the longest jobs first, so the pool does not end on a tail of them
-    cost = {"tumours": 0, "fix": 1, "deme": 2}
+    # the longest jobs first (tumours followed through the in-situ phase), so the pool does not end on
+    # a tail of them
     heavy = {"critical": 0, "exact": 1, "paper": 2, "eps0.003": 2, "eps0.03": 3, "eps0.1": 4,
              "historical": 5}
-    jobs.sort(key=lambda j: (cost[j[0]], heavy[j[1]], str(j[2])))
+
+    def order(j):
+        if j[0] == "tumours":
+            return (0 if j[2] <= INSITU_SEEDS else 1, heavy[j[1]], j[2])
+        return (2 if j[0] == "fix" else 3, heavy[j[1]], 0)
+    jobs.sort(key=order)
     print(f"{len(jobs)} jobs on {a.nproc} processes", flush=True)
     files = {}
     t0, n_err = time.time(), 0
@@ -447,7 +456,7 @@ TUMOUR_STATS = [
     ("D5", "clonal diversity, 5% detection"), ("D0", "clonal diversity, full census"),
     ("genotypes", "genotypes"), ("fga", "fraction of genome altered"), ("ploidy", "mean ploidy"),
     ("occ_full", "occupancy of demes that reached K"), ("occ_acinus", "acinus occupancy, confined"),
-    ("time", "time to 5,000 cells"), ("release", "release of the acinus"), ("in_situ", "in-situ phase"),
+    ("release", "release of the acinus"), ("growth", "release to 5,000 cells"), ("in_situ", "in-situ phase"),
 ]
 
 
@@ -456,6 +465,9 @@ def summarise(out):
     from scipy.stats import mannwhitneyu
     S = {"target": TARGET, "scale": SCALE, "arms": {a: ARMS[a]["label"] for a in ARMS}}
     tum = _load(out, "tumours")
+    for rs in tum.values():
+        for r in rs:
+            r["growth"] = r["time"] - r["release"] if r.get("release") is not None else None
     if "exact" in tum:
         ok = {a: [r for r in rs if r.get("reached")] for a, rs in tum.items()}
         S["tumours"] = {}
@@ -469,8 +481,11 @@ def summarise(out):
                      wall_s=dict(median=float(np.median(walls)), mean=float(np.mean(walls)),
                                  q25=float(np.quantile(walls, 0.25)), q75=float(np.quantile(walls, 0.75))))
             d["invaded_at_target"] = float(np.mean([r["invaded"] for r in rs]))
-            d["in_situ_censored"] = sum(1 for r in rs if r.get("in_situ") is None)
-            d["wall_insitu_s"] = float(np.median([r["wall_insitu_s"] for r in rs]))
+            fol = [r for r in rs if r.get("insitu_followed")]
+            d["in_situ_followed"] = len(fol)
+            d["in_situ_censored"] = sum(1 for r in fol if r.get("in_situ") is None)
+            d["time_to_target"] = _mean_ci([r["time"] for r in rs])
+            d["wall_insitu_s"] = float(np.median([r["wall_insitu_s"] for r in fol])) if fol else None
             if arm == "exact":
                 d["events"] = float(np.mean([r["events"] for r in rs]))
             elif rs[0].get("leaps"):
@@ -688,6 +703,7 @@ def render(a):
 
 
 def main():
+    global INSITU_SEEDS
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")
@@ -696,10 +712,13 @@ def main():
     r.add_argument("--tumours", default="", help="arm:n_seeds,...")
     r.add_argument("--deme", default="", help="arm:n_replicates (per K),...")
     r.add_argument("--fix", default="", help="arm:n_replicates,...")
+    r.add_argument("--insitu-seeds", type=int, default=INSITU_SEEDS,
+                   help="seeds 1..N are followed past the target to the first stromal cell")
     g = sub.add_parser("render")
     g.add_argument("--out", required=True)
     a = ap.parse_args()
     if a.cmd == "run":
+        INSITU_SEEDS = a.insitu_seeds            # read by run_tumour in the forked workers
         run(a)
     else:
         render(a)
