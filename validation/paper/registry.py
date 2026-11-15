@@ -99,8 +99,10 @@ def _runs():
                   for s in range(1, 7)]
     # R10: compartment barriers on against off (the genotype-niche benchmark and Fig 3C).
     off = {"breach_gated_invasion": False, "stromal_hazard": 0.0}
+    # Spatial history every 8 steps, so the time of first invasion and the clones that reach the stroma
+    # after it can be read off (Fig 2b).
     runs["R10"] = [(f"{name}_seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
-                                            spatial=sp))
+                                            spatial_snapshot_every=8, spatial=sp))
                    for name, sp in (("barriers", {}), ("open", off)) for s in SEEDS]
     # R12: metastatic seeding across seeds (Fig 2e): the regime with the metastatic lattice, at the sweep
     # scale, twice the sweep's seeds.
@@ -108,6 +110,18 @@ def _runs():
                                      spatial_snapshot_every=8, selection=RG.MET_SELECTION,
                                      spatial=RG.met_spatial(SWEEP)))
                    for s in range(1, 2 * T["seeds"] + 1)]
+    # R13: traits are selected where they pay (Fig 2c). The metastatic regime of R12 with the selection on
+    # one trait switched off per arm, seeds 1-10 (R12's seeds 1-10 are the selected arm): the breach gate
+    # off (crossing into the stroma no longer needs the breach trait), the stromal hazard off, or the
+    # host hazard off with every seeding cell surviving transit (the met-survival trait no longer pays).
+    # Each trait still costs proliferation everywhere, so its enrichment over the control is its benefit.
+    controls = {"no_breach_sel": {"breach_gated_invasion": False},
+                "no_stromal_sel": {"stromal_hazard": 0.0},
+                "no_met_sel": {"met_hazard": 0.0, "met_transit_floor": 1.0}}
+    runs["R13"] = [(f"{name}_seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
+                                            spatial_snapshot_every=8, selection=RG.MET_SELECTION,
+                                            spatial={**RG.met_spatial(SWEEP), **ctl}))
+                   for name, ctl in controls.items() for s in SEEDS]
     # R11: the human genome layer's tool figure (Fig 5) on an arm-homologous growth genome: one segment
     # per autosomal arm, 6,000 growth genes shared in proportion to each arm's genes, and 240 drivers
     # placed per arm from Cancer Gene Census content (driver_scale 0.4 keeps today's prop_driver 0.04
