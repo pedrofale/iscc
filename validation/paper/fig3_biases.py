@@ -118,10 +118,18 @@ def compute_a():
     clones = C.Clones(t)
     order = clones.labels + [C.ANCESTRAL]
     spec = RR.resect(t)
-    # whole tumour: every live cancer cell, from the per-deme counts (no materialisation)
-    whole = dict.fromkeys(order, 0)
-    for g, c in C.live_cancer_counts(t).items():
-        whole[clones.of(g)] += c
+    # whole tumour: every live cancer cell of the PRIMARY, from the per-deme counts (no materialisation).
+    # The section, the dissociated sample and the blocks are cut from the primary (Resection's default
+    # compartment), so a metastatic lattice appended after the primary demes must not count here.
+    n_prim = int(getattr(t, "n_primary_demes", 0) or t.grid_size ** 2)
+    whole, met = dict.fromkeys(order, 0), 0
+    for di, deme in enumerate(t.demes):
+        for g, c in deme.items():
+            if c > 0 and t._is_cancer(g):
+                if di < n_prim:
+                    whole[clones.of(g)] += c
+                else:
+                    met += c
     tot = sum(whole.values())
     fr = {"whole tumour": [whole[L] / tot for L in order]}
 
@@ -160,7 +168,7 @@ def compute_a():
         score[name] = (np.asarray(X[:, idx].sum(1)).ravel() / np.maximum(lib, 1)).tolist()
     G = t.grid_size
     tmap = (255 * C.tissue_map(t, clones)).astype(np.uint8)
-    return dict(_tumour=REG.task_path(*TUMOUR), clone_order=order,
+    return dict(_tumour=REG.task_path(*TUMOUR), n_cancer_primary=int(tot), n_cancer_met=int(met), clone_order=order,
                 clone_colour=[clones.colour[L] for L in order], fractions=fr,
                 block_centres=centres, block_half=BLOCK_HALF, grid=int(G), map=tmap.tolist(),
                 types=types, composition=comp, stress_strength=STRESS, n_stress_genes=len(idx),
@@ -493,7 +501,7 @@ def render_c(fig, y):
         ax.scatter([cv[i_fit]], [ado_[i_fit]], s=16, color=col, zorder=4, label=f"iscc, {name} fit")
     r = d["DLP+"]
     lumpy = d.get("sc_default", {})
-    if "cv_cn2" in lumpy:
+    if lumpy.get("cv_cn2") is not None:          # undefined when too few loci at two copies are covered
         # scDNA's own single-cell defaults (kappa 5, ado_rate 0.20), which the code calls lumpy MDA/MALBAC
         ax.scatter([lumpy["cv_cn2"]], [lumpy["ado"]], s=16, facecolors="white", edgecolors=S.SOURCE["iscc"], lw=0.8,
                    zorder=4, label="iscc, lumpy setting (scDNA\ndefaults; not a validated preset)")
@@ -502,6 +510,9 @@ def render_c(fig, y):
                label="Tapestri, real")
     ax.axvline(r["cv_real_cn2"], color=S.SOURCE["real"], lw=0.7, ls="--", zorder=1, label="DLP+ real\n(no allele data)")
     ax.set_xscale("log")
+    ax.set_xticks([0.1, 0.2, 0.5, 1, 2])
+    ax.set_xticklabels(["0.1", "0.2", "0.5", "1", "2"])
+    ax.xaxis.set_minor_formatter(__import__("matplotlib").ticker.NullFormatter())
     ax.set_xlabel("Coverage CV, two copies")
     ax.set_ylabel("Allelic dropout")
     ax.set_ylim(0, 0.95)
