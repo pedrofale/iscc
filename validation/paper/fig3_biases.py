@@ -530,6 +530,7 @@ def render_c(fig, y):
     ax.set_ylabel("Coverage CV")
     _legend(ax, loc="upper right")
     if "Tapestri" in ado:
+        ax.set_ylim(top=max(ax.get_ylim()[1], 0.95))          # headroom so the statistic clears the points
         S.stat(ax, f"Tapestri allelic dropout, balanced het sites:\nreal {ado['Tapestri'][0]:.2f}, "
                    f"iscc {ado['Tapestri'][1]:.2f}", "upper left")
     ax = axs[1]
