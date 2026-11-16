@@ -29,9 +29,11 @@ barcodes <- colnames(raw)
 back <- setNames(barcodes, make.names(barcodes))
 
 norm <- ""
+n_ref <- 0L
 if (use_ref) {
   ct <- fread(file.path(ds, "clonalscope", "celltype.tsv"))
   norm <- ct[[1]][ct[[2]] == "normal"]
+  n_ref <- length(unique(norm))                  # the reference barcodes, counted once
   norm <- unique(c(norm, make.names(norm)))     # as given, and as CopyKAT may rename them internally
 }
 set.seed(seed)
@@ -66,7 +68,7 @@ fwrite(cn, file.path(out, "cn_arm.tsv"), sep = "\t")
 
 write_json(list(tool = "copykat", version = as.character(packageVersion("copykat")),
                 n_barcodes = length(barcodes), n_genes = nrow(raw), n_cores = cores, seed = seed,
-                n_reference = if (use_ref) length(norm) else 0L,
+                n_reference = n_ref,
                 wall_s = round(as.numeric(difftime(Sys.time(), t0, units = "secs")), 1)),
            file.path(out, "run.json"), auto_unbox = TRUE, pretty = TRUE)
 cat("copykat done:", sum(calls$malignant, na.rm = TRUE), "of", nrow(calls), "called aneuploid\n")

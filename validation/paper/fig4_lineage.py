@@ -140,12 +140,24 @@ def panel(out):
     print("panel (i) cached:", run, task, flush=True)
 
 
+def _stalled(run, task):
+    """A tumour whose registry record says it never reached its target size (it stalled, in the glands for
+    the R1 seeds at about 11,200 cells; vault question 0f)."""
+    p = os.path.splitext(REG.task_path(run, task))[0] + ".json"
+    try:
+        with open(p) as fh:
+            return not bool(json.load(fh).get("reached_target", True))
+    except OSError:
+        return False
+
+
 def load(out):
     d = os.path.join(out, "e", "cache")
     rows = [json.load(open(os.path.join(d, f))) for f in sorted(os.listdir(d))] if os.path.isdir(d) else []
     df = pd.DataFrame(rows)
     if len(df):
         df["group"] = [f"{r}:{a}:{s}" for r, a, s in zip(df["run"], df["arch"], df["selection"])]
+        df["stalled"] = [_stalled(r, t) for r, t in zip(df["run"], df["task"])]
     return df
 
 
@@ -156,13 +168,19 @@ def summary(out):
     s = {"n_tumours": int(len(df))}
 
     def block(sub):
-        return dict(n=int(len(sub)), max_lineage=round(float(sub.field_lin.max()), 3),
+        return dict(n=int(len(sub)), n_stalled=int(sub.stalled.sum()),
+                    stalled=sorted(f"{r}/{t}" for r, t in zip(sub.run[sub.stalled], sub.task[sub.stalled])),
+                    lineage_exceeds_spatial=sorted(f"{r}/{t}" for r, t in
+                                                   zip(sub.run[sub.field_lin >= sub.field_sp],
+                                                       sub.task[sub.field_lin >= sub.field_sp])),
+                    max_lineage=round(float(sub.field_lin.max()), 3),
                     share_min=round(float(sub.share.min()), 3), share_max=round(float(sub.share.max()), 3),
                     share_mean=round(float(sub.share.mean()), 3),
                     spatial_exceeds_lineage_all=bool((sub.field_sp > sub.field_lin).all()),
                     n_spatial_exceeds=int((sub.field_sp > sub.field_lin).sum()),
                     perm_significant_0_05=int((sub.perm_p < 0.05).sum()),
                     perm_rebuilt_matches=bool(sub.perm_matches.all()))
+    s["all"] = block(df)
     s["ductal_R1"] = block(df[df.run == "R1"])
     s["ductal_R1_and_R3_confined"] = block(df[df.arch == "ductal"])
     s["free_R3"] = block(df[df.arch == "free"])

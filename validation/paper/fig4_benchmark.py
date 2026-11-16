@@ -48,12 +48,12 @@ TUMOURS = os.environ.get("FIG4_TUMOURS", "seed1,seed2,disp0.1_seed1,disp0.9_seed
 NICHE = {"duct_wall": ("duct wall", "#7570B3"), "hypoxic_core": ("hypoxic core", "#D95F02"),
          "stroma": ("stroma", "#1B9E77")}
 TOOL_D = {"Clonalscope": "#EB6834", "Clonalscope, DNA prior": S.MODALITY["DNA"], "CalicoST": "#1BAF7A"}
-# † : the runner hands the tool every true normal barcode as its reference (submit_tools.sh's protocol), and
-# the AUC then scores those same barcodes, so for these tools it says little
-ROWS_B = [("scrna", "copykat", "CopyKAT"), ("scrna", "copykat-ref", "CopyKAT, normal ref.\u2020"),
-          ("scrna", "numbat", "Numbat\u2020"), ("scrna", "infercnvpy", "inferCNV\u2020"),
-          ("visium", "copykat", "CopyKAT"), ("visium", "copykat-ref", "CopyKAT, normal ref.\u2020"),
-          ("visium", "calicost", "CalicoST"), ("visium", "clonalscope", "Clonalscope\u2020"),
+# the tools that take a normal reference are given a held-out half of the true normals (fig4_tools.py), and
+# every tool is scored on the malignant barcodes and the other half
+ROWS_B = [("scrna", "copykat", "CopyKAT"), ("scrna", "copykat-ref", "CopyKAT, normal ref."),
+          ("scrna", "numbat", "Numbat"), ("scrna", "infercnvpy", "inferCNV"),
+          ("visium", "copykat", "CopyKAT"), ("visium", "copykat-ref", "CopyKAT, normal ref."),
+          ("visium", "calicost", "CalicoST"), ("visium", "clonalscope", "Clonalscope"),
           ("visium", "cancerfinder", "Cancer-Finder")]
 
 
@@ -186,9 +186,10 @@ def panel_b(fig, ov, nums):
             ax.set_yticklabels([])
     h = [Line2D([], [], marker="o", ls="none", mfc=c, mec="white", ms=3.4, label=l) for l, c in NICHE.values()]
     h.append(Line2D([], [], color=S.INK, lw=1.2, label="mean over tumours"))
-    S.text_mm(fig, 122, 49.6, "\u2020 given every true normal barcode as its reference, which the AUC then also "
-              "scores", fontsize=4.4, color=S.GREY, va="top")
-    fig.legend(handles=h, loc="upper left", bbox_to_anchor=(36 / 183, 1 - 50.5 / FIG_H), ncol=4, fontsize=4.8,
+    S.text_mm(fig, 36, 53.0, "AUC on the malignant barcodes and a held-out half of the normals (the tools' "
+              "reference is the other half), where a niche keeps at least 10 of them", fontsize=4.4, color=S.GREY,
+              va="top")
+    fig.legend(handles=h, loc="upper left", bbox_to_anchor=(36 / 183, 1 - 48.6 / FIG_H), ncol=4, fontsize=4.8,
                frameon=False)
 
 
@@ -284,14 +285,26 @@ def panel_e(fig, ov, nums):
             S.despine(ax, False, False)
             ax.set_title(title, fontsize=5.2, pad=2)
         S.text_mm(fig, 6, 193.5, f"(i) {z['run']} {z['task']}, ductal field", fontsize=4.5, color=S.GREY, va="top")
+    df0 = FL.load(DEV)
+    if len(df0) and "stalled" in df0 and df0["stalled"].any():
+        names = ", ".join(f"{r} {t.replace('_seed', ' s').replace('_', ' ')}" for r, t in
+                          zip(df0.run[df0.stalled], df0.task[df0.stalled]))
+        S.text_mm(fig, 6, 197.0, f"(ii, iii) open: {int(df0.stalled.sum())} tumours that stalled before their target "
+                  f"size\n({names})", fontsize=4.2, color=S.GREY, va="top", linespacing=1.2)
     df = FL.load(DEV)
     ARCH = {"ductal": ("ductal field", S.CLONE_FAMILIES[0][1]), "free": ("without glands", S.CLONE_FAMILIES[2][1])}
     if len(df):
         ax = S.ax_mm(fig, 68, 168, 30, 26)
+        stalled = df["stalled"].astype(bool) if "stalled" in df else pd.Series(False, index=df.index)
         for arch, (lab, col) in ARCH.items():
-            sub = df[df.arch == arch]
+            sub = df[(df.arch == arch) & ~stalled]
             ax.scatter(sub.field_sp, sub.field_lin, s=5, color=col, edgecolors=S.INK, linewidths=0.2,
-                       label=f"{lab} ({len(sub)})", zorder=3)
+                       label=f"{lab} ({int((df.arch == arch).sum())})", zorder=3)
+            st = df[(df.arch == arch) & stalled]
+            ax.scatter(st.field_sp, st.field_lin, s=7, facecolors="white", edgecolors=col, linewidths=0.6, zorder=4)
+        if stalled.any():
+            ax.scatter([], [], s=7, facecolors="white", edgecolors=S.INK, linewidths=0.6,
+                       label=f"stalled in situ ({int(stalled.sum())})")
         lim = max(1.0, 1.05 * float(np.nanmax(df[["field_sp", "field_lin"]].to_numpy())))
         ax.plot([0, lim], [0, lim], color=S.INK, lw=0.5, ls=":")
         ax.set_xlim(0, lim)
@@ -307,8 +320,11 @@ def panel_e(fig, ov, nums):
         for k, (run, arch, sel, lab) in enumerate(groups):
             sub = df[(df.run == run) & (df.arch == arch) & (df.selection.astype(str) == str(sel))]
             x = k + np.random.default_rng(k).uniform(-0.17, 0.17, len(sub))
-            ax.scatter(x, sub.share, s=4, color=ARCH[arch][1], alpha=0.9 if sel != "neutral" else 0.55,
+            st = sub["stalled"].astype(bool).to_numpy() if "stalled" in sub else np.zeros(len(sub), bool)
+            ax.scatter(x[~st], sub.share[~st], s=4, color=ARCH[arch][1], alpha=0.9 if sel != "neutral" else 0.55,
                        edgecolors="none", zorder=3)
+            ax.scatter(x[st], sub.share[st], s=6, facecolors="white", edgecolors=ARCH[arch][1], linewidths=0.6,
+                       zorder=4)
             if len(sub):
                 ax.plot([k - 0.3, k + 0.3], [sub.share.mean()] * 2, color=S.INK, lw=0.9, zorder=4)
         ax.set_xticks(range(len(groups)))

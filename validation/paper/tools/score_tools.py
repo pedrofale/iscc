@@ -142,13 +142,19 @@ def score_niches(bc, true_cn, run_dir, min_class=10):
 
 
 def score_niches_frames(bc, true_cn, calls, cn, min_class=10):
-    """The malignancy AUC (from ``p_malignant``, else the 0/1 call) over each niche's barcodes when each
-    class holds at least ``min_class`` of them, and the per-arm copy-number correlation over its malignant
-    barcodes. ``calls`` is indexed by barcode; ``cn`` may be None."""
+    """The malignancy AUC (from ``p_malignant``, else the 0/1 call) over each niche's scored barcodes when
+    each class holds at least ``min_class`` of them, and the per-arm copy-number correlation over its
+    malignant barcodes. With a ``reference`` column in ``bc`` (1: the barcode was in the normal reference
+    the tools were given), only the other barcodes are scored, for every tool alike: the malignant ones
+    and the held-out normals. ``calls`` is indexed by barcode; ``cn`` may be None."""
     s = calls["p_malignant"] if calls["p_malignant"].notna().any() else calls["malignant"]
     s = s.astype(float)
     rows = []
-    for niche, mask in niche_masks(bc).items():
+    masks = niche_masks(bc)            # the niches are defined on every barcode, the hypoxia cut included
+    if "reference" in bc:
+        bc = bc[bc["reference"].astype(int).to_numpy() == 0]
+        masks = {k: m.reindex(bc.index) for k, m in masks.items()}
+    for niche, mask in masks.items():
         sub = bc[mask.to_numpy()]
         y = sub["malignant"].astype(int)
         sc = s.reindex(sub.index)

@@ -12,6 +12,12 @@ Tools: on scRNA, CopyKAT (with and without the normal barcodes as its reference)
 Clonalscope make no malignancy call and Cancer-Finder no copy-number call; those cells of the score table
 stay empty.
 
+Reference protocol: a tool that takes a normal reference (CopyKAT with one, Numbat, inferCNV, Clonalscope,
+all through ``clonalscope/celltype.tsv``) is given a held-out one: a seeded random half of the tumour's true
+normal barcodes, drawn within each niche stratum (compartment, and whether the barcode is in the hypoxic
+core) so that every niche keeps normals to score. The other half and the malignant barcodes are the
+scored barcodes, for every tool, reference or not (``reference`` in barcodes.tsv.gz).
+
 Truth per barcode: ``malignant`` (a cancer cell; a spot whose cells are at least half cancer, as Fig 5 and
 make_layer_dataset.py define it), ``compartment`` (the cell's deme: 0 stroma, 1 the epithelial wall of a
 duct, 2 its lumen; a spot takes the compartment most of its cells sit in), ``hypoxia`` (the cell's; a spot's
@@ -64,6 +70,33 @@ RUNS = [
 ]
 
 
+# the runs whose tool reads the normal reference of clonalscope/celltype.tsv
+REFERENCE_RUNS = ("copykat-scrna-ref", "copykat-visium-ref", "numbat-scrna", "infercnvpy-scrna",
+                  "clonalscope-visium")
+
+
+def split_reference(bc, seed=0):
+    """1 for the normal barcodes the tools are given as their reference: a seeded random half of each
+    stratum (compartment x hypoxic core) of the true normals; 0 for the held-out normals and the malignant
+    barcodes."""
+    import score_tools as ST
+    core = ST.niche_masks(bc.set_index("barcode") if "barcode" in bc else bc)["hypoxic_core"].to_numpy()
+    normal = bc["malignant"].astype(int).to_numpy() == 0
+    strata = bc["compartment"].astype(int).to_numpy() * 2 + core.astype(int)
+    ref = np.zeros(len(bc), dtype=int)
+    rng = np.random.default_rng([int(seed), 0x4EF])
+    for st in np.unique(strata[normal]):
+        idx = np.flatnonzero(normal & (strata == st))
+        ref[rng.permutation(idx)[: idx.size // 2]] = 1
+    return ref
+
+
+def _write_reference(ds, bc):
+    """The reference the tools read: only the reference half of the normals is labelled normal."""
+    pd.DataFrame({"barcode": bc["barcode"], "celltype": np.where(bc["reference"] == 1, "normal", "tumor")}).to_csv(
+        os.path.join(ds, "clonalscope", "celltype.tsv"), sep="\t", index=False)
+
+
 def _compartments(t):
     """Per deme: 0 stroma, 1 the epithelial wall of a duct, 2 its lumen."""
     n = len(t.demes)
@@ -114,6 +147,8 @@ def build(a, work):
     cn, arm_names = _arm_cn(t, layer, gids)
     bc = pd.DataFrame({"barcode": bcs, "malignant": tum.astype(int), "tumour_fraction": tum.astype(float),
                        "compartment": comp[demes], "hypoxia": hyp})
+    bc["reference"] = split_reference(bc, a.seed)
+    _write_reference(ds_rna, bc)
     bc.to_csv(os.path.join(truth_dir, "scrna_barcodes.tsv"), sep="\t", index=False)
     pd.DataFrame({"barcode": np.repeat(bcs, len(arm_names)), "arm": np.tile(arm_names, len(bcs)),
                   "cn": cn.ravel()}).to_csv(os.path.join(truth_dir, "scrna_arm_cn.tsv"), sep="\t", index=False)
@@ -145,6 +180,8 @@ def build(a, work):
                      float(phyp[m].mean())))
         cn_rows.append(pcn[tm].mean(axis=0) if tm.size else np.full(len(arm_names), 2.0))
     bcv = pd.DataFrame(rows, columns=["barcode", "malignant", "tumour_fraction", "compartment", "hypoxia"])
+    bcv["reference"] = split_reference(bcv, a.seed)
+    _write_reference(ds_vis, bcv)
     bcv.to_csv(os.path.join(truth_dir, "visium_barcodes.tsv"), sep="\t", index=False)
     cnv = np.stack(cn_rows)
     pd.DataFrame({"barcode": np.repeat(bcv["barcode"].to_numpy(), len(arm_names)),
@@ -261,12 +298,22 @@ def main():
         print("built:", json.dumps(info), flush=True)
         import gc
         gc.collect()
-        bc_all[["assay", "barcode", "malignant", "tumour_fraction", "compartment", "hypoxia"]].to_csv(
-            os.path.join(out, "barcodes.tsv.gz"), sep="\t", index=False)
+        cols = ["assay", "barcode", "malignant", "tumour_fraction", "compartment", "hypoxia", "reference"]
+        only = None if a.only is None else a.only.split(",")
+        merge = only is not None and os.path.exists(os.path.join(out, "calls.tsv.gz"))
+        if merge:
+            # the runs not redone keep their stored calls: the rebuilt truth must be the one they were made on
+            old = pd.read_csv(os.path.join(out, "barcodes.tsv.gz"), sep="\t")
+            key = ["assay", "barcode", "malignant", "compartment"]
+            same = (len(old) == len(bc_all)
+                    and old[key].reset_index(drop=True).equals(bc_all[key].reset_index(drop=True)))
+            if not same:
+                raise RuntimeError("the rebuilt truth differs from the stored one: rerun every tool, not --only")
+        bc_all[cols].to_csv(os.path.join(out, "barcodes.tsv.gz"), sep="\t", index=False)
         pd.concat([pd.read_csv(os.path.join(truth_dir, f"{x}_arm_cn.tsv"), sep="\t").assign(assay=x)
                    for x in ("scrna", "visium")])[["assay", "barcode", "arm", "cn"]].round(4).to_csv(
             os.path.join(out, "truth_arm_cn.tsv.gz"), sep="\t", index=False)
-        status = run_tools(datasets, work, a.cores, None if a.only is None else a.only.split(","))
+        status = run_tools(datasets, work, a.cores, only)
         calls, cns = [], []
         for name, tool, assay, _, _ in RUNS:
             st = status.get(name)
@@ -280,15 +327,32 @@ def main():
             p = os.path.join(rd, "cn_arm.tsv")
             if os.path.exists(p) and os.path.getsize(p) > 0:
                 cns.append(pd.read_csv(p, sep="\t").assign(run=name, assay=assay))
+        runs_all = status
+        if merge:
+            redone = set(only)
+            oc = pd.read_csv(os.path.join(out, "calls.tsv.gz"), sep="\t", dtype={"clone": str})
+            calls.insert(0, oc[~oc["run"].isin(redone)])
+            if os.path.exists(os.path.join(out, "cn_arm.tsv.gz")):
+                on = pd.read_csv(os.path.join(out, "cn_arm.tsv.gz"), sep="\t")
+                cns.insert(0, on[~on["run"].isin(redone)])
+            with open(os.path.join(out, "runs.json")) as f:
+                runs_all = {k: v for k, v in json.load(f)["runs"].items() if k not in redone}
+            runs_all.update(status)
         if calls:
             pd.concat(calls, ignore_index=True)[["run", "assay", "barcode", "malignant", "p_malignant", "clone"]].to_csv(
                 os.path.join(out, "calls.tsv.gz"), sep="\t", index=False)
         if cns:
             pd.concat(cns, ignore_index=True)[["run", "assay", "barcode", "arm", "value", "scale"]].round(5).to_csv(
                 os.path.join(out, "cn_arm.tsv.gz"), sep="\t", index=False)
+        n_ref = {x: dict(reference=int(bc_all[(bc_all.assay == x)]["reference"].sum()),
+                         held_out_normals=int(((bc_all.assay == x) & (bc_all.malignant == 0)
+                                               & (bc_all.reference == 0)).sum())) for x in ("scrna", "visium")}
         with open(os.path.join(out, "runs.json"), "w") as f:
             json.dump(dict(run=a.run, task=a.task, commit=F._commit(), paper_out=os.environ.get("ISCC_PAPER_OUT"),
-                           section_max_cells=a.section_max_cells, data=info, runs=status), f, indent=1, default=str)
+                           section_max_cells=a.section_max_cells, data=info,
+                           reference_protocol=dict(kind="held-out half of the true normals, by niche stratum",
+                                                   seed=a.seed, **n_ref, redone=only),
+                           runs=runs_all), f, indent=1, default=str)
         failed = {k: v["exit"] for k, v in status.items() if v["exit"] != 0}
         print("failed runs:", failed or "none", flush=True)
         if calls:
