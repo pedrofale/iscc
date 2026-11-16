@@ -16,7 +16,7 @@ import os
 
 from iscc.data.reads import (
     distort_vaf, observed_allele_counts, emit_scrna_reads, ScReadSimAdapter, ScrnaAlleleCounts,
-    SyntheticTranscriptome, write_scrna_fastq,
+    SyntheticTranscriptome, write_scrna_fastq, site_geometry, site_coverage,
 )
 from iscc.tumor.models import GenotypeTumor
 
@@ -123,6 +123,65 @@ def test_emit_scrna_reads_counts_only_path(tmp_path):
     assert np.array_equal(res["alt"].values + res["ref"].values, res["total"].values)
     assert res["status"].startswith("counts-only")
     assert res["dna_vaf"].shape == res["obs_vaf"].shape
+
+
+# ------------------------------------------------- where reads fall along a transcript --------
+class TestSiteCoverage:
+    """The variant-site coverage model: a 3' protocol reads a site only near the 3' end."""
+    GENES = [f"G_{s}_{g}" for s in range(12) for g in range(500)]
+
+    def test_geometry_is_a_genome_property(self):
+        length, dist = site_geometry(self.GENES)
+        assert np.all(length > 0) and np.all((dist >= 0) & (dist <= length))
+        # independent of gene order and of which other genes are present (gene-name seeded)
+        sub = self.GENES[::-7][:50]
+        l2, d2 = site_geometry(sub)
+        idx = [self.GENES.index(g) for g in sub]
+        assert np.allclose(l2, length[idx]) and np.allclose(d2, dist[idx])
+        assert 2000 < np.median(length) < 3100
+
+    def test_full_length_reaches_every_site_3prime_a_minority(self):
+        full = site_coverage(self.GENES, "smartseq3")
+        three = site_coverage(self.GENES, "10x")
+        assert np.allclose(full, 0.1)                            # every site, per-molecule 0.1
+        assert set(np.unique(three)) <= {0.0, 0.1}
+        assert 0.25 < (three > 0).mean() < 0.50                  # sites within 1,000 bases of 3'
+        assert np.array_equal(three, site_coverage(self.GENES, "visium"))
+        assert (site_coverage(self.GENES, "10x", window=5000) > 0).mean() > (three > 0).mean()
+        assert np.allclose(site_coverage(self.GENES, "smartseq3", coverage=1.0), 1.0)
+        with pytest.raises(ValueError):
+            site_coverage(self.GENES, "dropseq")
+
+    def test_thinning_keeps_split_consistent(self):
+        cells = [f"C{i}" for i in range(30)]
+        genes = ["a", "b", "c", "d"]
+        expr = pd.DataFrame(np.full((30, 4), 40), index=cells, columns=genes)
+        vaf = pd.DataFrame(np.full((30, 4), 0.5), index=cells, columns=genes)
+        cover = np.array([1.0, 0.0, 1.0, 0.5])
+        out = observed_allele_counts(expr, vaf, obs_fidelity=1.0, error_rate=0.0,
+                                     rng=np.random.default_rng(4), site_cover=cover)
+        assert np.array_equal(out.alt.values + out.ref.values, out.total.values)
+        assert np.all(out.total.values <= expr.values)
+        assert np.array_equal(out.total["a"].values, expr["a"].values)   # covered: every molecule
+        assert out.total["b"].sum() == 0 and out.alt["b"].sum() == 0     # uncovered: invisible
+        assert 0.35 < out.total["d"].values.mean() / 40 < 0.65           # partial: thinned
+        with pytest.raises(ValueError):
+            observed_allele_counts(expr, vaf, site_cover=[1.0, 0.0])
+
+    def test_emit_scrna_coverage_model_by_protocol(self, tmp_path):
+        cd = _grow_tumor().make_cell_data()
+        off = emit_scrna_reads(cd, obs_fidelity=1.0, protocol="10x", seed=3, outdir=str(tmp_path))
+        on = emit_scrna_reads(cd, obs_fidelity=1.0, protocol="10x", seed=3, outdir=str(tmp_path),
+                              site_coverage_model=True)
+        ss3 = emit_scrna_reads(cd, obs_fidelity=1.0, protocol="smartseq3", seed=3, outdir=str(tmp_path),
+                               site_coverage_model=True)
+        assert off["site_cover"] is None
+        cover = on["site_cover"].values
+        assert (cover == 0).any() and (cover > 0).any()
+        assert np.all(on["total"].values <= off["total"].values)                 # thinned, never more
+        assert on["total"].values[:, cover == 0].sum() == 0                      # out of reach: unread
+        assert np.all(ss3["site_cover"].values > 0)
+        assert np.array_equal(on["alt"].values + on["ref"].values, on["total"].values)
 
 
 def test_emit_scrna_requires_rna_vaf():
