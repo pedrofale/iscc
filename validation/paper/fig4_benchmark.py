@@ -48,10 +48,12 @@ TUMOURS = os.environ.get("FIG4_TUMOURS", "seed1,seed2,disp0.1_seed1,disp0.9_seed
 NICHE = {"duct_wall": ("duct wall", "#7570B3"), "hypoxic_core": ("hypoxic core", "#D95F02"),
          "stroma": ("stroma", "#1B9E77")}
 TOOL_D = {"Clonalscope": "#EB6834", "Clonalscope, DNA prior": S.MODALITY["DNA"], "CalicoST": "#1BAF7A"}
-ROWS_B = [("scrna", "copykat-ref", "CopyKAT, normal ref."), ("scrna", "copykat", "CopyKAT, no ref."),
-          ("scrna", "numbat", "Numbat"), ("scrna", "infercnvpy", "inferCNV"),
-          ("visium", "copykat-ref", "CopyKAT, normal ref."), ("visium", "copykat", "CopyKAT, no ref."),
-          ("visium", "calicost", "CalicoST"), ("visium", "clonalscope", "Clonalscope"),
+# † : the runner hands the tool every true normal barcode as its reference (submit_tools.sh's protocol), and
+# the AUC then scores those same barcodes, so for these tools it says little
+ROWS_B = [("scrna", "copykat", "CopyKAT"), ("scrna", "copykat-ref", "CopyKAT, normal ref.\u2020"),
+          ("scrna", "numbat", "Numbat\u2020"), ("scrna", "infercnvpy", "inferCNV\u2020"),
+          ("visium", "copykat", "CopyKAT"), ("visium", "copykat-ref", "CopyKAT, normal ref.\u2020"),
+          ("visium", "calicost", "CalicoST"), ("visium", "clonalscope", "Clonalscope\u2020"),
           ("visium", "cancerfinder", "Cancer-Finder")]
 
 
@@ -155,8 +157,9 @@ def panel_b(fig, ov, nums):
             sub = df[(df["assay"] == assay) & (df["tool"] == tool)] if len(df) else df
             vals = sub[sub["niche"].isin(NICHE)][metric] if len(sub) else pd.Series(dtype=float)
             if not len(sub) or not np.isfinite(vals.astype(float)).any():
-                ax.text(lim[0] + 0.02 * (lim[1] - lim[0]), y, "no call" if len(sub) else "pending", fontsize=4.4,
-                        color=S.GREY, va="center")
+                failed = len(sub) and "status" in sub and sub["status"].astype(str).str.startswith("failed").all()
+                note = "pending" if not len(sub) else ("failed in every tumour" if failed else "no call")
+                ax.text(lim[0] + 0.02 * (lim[1] - lim[0]), y, note, fontsize=4.4, color=S.GREY, va="center")
                 continue
             for k, (niche, (nlab, ncol)) in enumerate(NICHE.items()):
                 v = sub[sub["niche"] == niche][metric].astype(float).dropna()
@@ -183,6 +186,8 @@ def panel_b(fig, ov, nums):
             ax.set_yticklabels([])
     h = [Line2D([], [], marker="o", ls="none", mfc=c, mec="white", ms=3.4, label=l) for l, c in NICHE.values()]
     h.append(Line2D([], [], color=S.INK, lw=1.2, label="mean over tumours"))
+    S.text_mm(fig, 36, 101.5, "\u2020 given every true normal barcode as its reference, which the AUC then also "
+              "scores", fontsize=4.4, color=S.GREY, va="top")
     fig.legend(handles=h, loc="upper left", bbox_to_anchor=(36 / 183, 1 - 50.5 / FIG_H), ncol=4, fontsize=4.8,
                frameon=False)
 

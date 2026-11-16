@@ -216,10 +216,17 @@ def score_dir(out):
         cn = cna[cna["run"] == name].drop(columns=["run", "assay"], errors="ignore")
         rr = ST.score_niches_frames(bc, true_cn, c.drop(columns=["run", "assay"]).set_index("barcode"),
                                     cn if len(cn) else None)
-        wall = (runs.get(name, {}).get("run_json") or {}).get("wall_s", runs.get(name, {}).get("wall_s"))
+        rj = runs.get(name, {}).get("run_json") or {}
+        wall = rj.get("wall_s", runs.get(name, {}).get("wall_s"))
+        # a runner that catches the tool's own error still writes calls (Numbat: all zero); such a run is
+        # reported as failed, not scored
+        status = str(rj.get("status", "ok"))
+        failed = status.startswith("error")
         for r in rr:
+            if failed:
+                r = dict(r, auc=np.nan, cn_r=np.nan)
             rows.append(dict(tool=tool + ("-ref" if name.endswith("-ref") else ""), run=name, assay=assay,
-                             wall_s=wall, **r))
+                             wall_s=wall, status="failed: " + status[7:].strip()[:200] if failed else "ok", **r))
     df = pd.DataFrame(rows)
     df.to_csv(os.path.join(out, "scores.csv"), index=False)
     return df
