@@ -20,6 +20,9 @@ named ``<tool>-<assay>[-<variant>]``.
   against ``log2(CN / 2)`` for the log-ratio and relative scales and against CN for ``total_cn``.
 - ``wall_s`` from ``run.json``.
 
+``score_niches`` (Fig 4b) scores one run within each niche of ``niche_masks``: the duct wall, the hypoxic
+core and the stroma, each over its malignant and normal barcodes alike.
+
 ``compare`` writes, per tool, the change from the generated to the permuted (or noise) arm, overall and within
 the hypoxic core (top decile of hypoxia among tumour barcodes) and at the epithelial wall: the share of
 barcodes whose malignant call flips, the ARI between the two arms' clone labels, and the mean absolute
@@ -97,6 +100,61 @@ def score(dataset_dir, runs_dir, out_csv):
                          **_score(calls, cn, bc, true_cn)))
     pd.DataFrame(rows).to_csv(out_csv, index=False)
     print(pd.DataFrame(rows).to_string(index=False))
+
+
+# Fig 4b's niches. The strata of the P2 contrast below (_strata) hold tumour barcodes only, which is
+# enough to see a call change but not to read a malignancy AUC; these masks hold every barcode, malignant
+# and normal, of a niche. They need the columns fig4_tools.py writes: ``compartment`` (0 stroma, 1 the
+# epithelial wall of a duct, 2 its lumen; a spot takes the compartment most of its cells sit in) and
+# ``hypoxia``.
+NICHES = ("all", "duct_wall", "hypoxic_core", "stroma")
+
+
+def niche_masks(bc):
+    """``all``; ``duct_wall``: the barcode sits in a duct's epithelial wall; ``hypoxic_core``: its
+    hypoxia is at or above the 90th percentile of the malignant barcodes' (the threshold of _strata);
+    ``stroma``: it sits in the stroma."""
+    tum = bc["malignant"].astype(bool)
+    hyp = bc["hypoxia"].astype(float)
+    cut = hyp[tum].quantile(0.9) if tum.any() else np.inf
+    comp = bc["compartment"].astype(int)
+    return {"all": pd.Series(True, index=bc.index), "duct_wall": comp == 1, "hypoxic_core": hyp >= cut,
+            "stroma": comp == 0}
+
+
+def _cn_r(cn, keep, true_cn):
+    """Pearson r of a run's per-arm values against the truth over the barcodes in ``keep``."""
+    if cn is None or not len(cn):
+        return np.nan, ""
+    scale = cn["scale"].iloc[0]
+    tt = true_cn.copy()
+    tt["truth"] = tt["cn"] if scale == "total_cn" else np.log2(np.maximum(tt["cn"], 0.05) / 2.0)
+    j = cn.merge(tt[["barcode", "arm", "truth"]], on=["barcode", "arm"])
+    j = j[j["barcode"].isin(keep)]
+    ok = len(j) > 2 and j["value"].std() > 0 and j["truth"].std() > 0
+    return (float(np.corrcoef(j["value"], j["truth"])[0, 1]) if ok else np.nan), scale
+
+
+def score_niches(bc, true_cn, run_dir, min_class=10):
+    """One run scored in each niche: the malignancy AUC (from ``p_malignant``, else the 0/1 call) over the
+    niche's barcodes when each class holds at least ``min_class`` of them, and the per-arm copy-number
+    correlation over its malignant barcodes. Returns a list of rows and the run's run.json."""
+    calls, cn, info = _read(run_dir)
+    s = calls["p_malignant"] if calls["p_malignant"].notna().any() else calls["malignant"]
+    s = s.astype(float)
+    rows = []
+    for niche, mask in niche_masks(bc).items():
+        sub = bc[mask.to_numpy()]
+        y = sub["malignant"].astype(int)
+        sc = s.reindex(sub.index)
+        ok = sc.notna().to_numpy()
+        n_pos, n_neg = int(y[ok].sum()), int((1 - y[ok]).sum())
+        auc = (float(roc_auc_score(y[ok], sc[ok])) if min(n_pos, n_neg) >= min_class and sc[ok].nunique() > 1
+               else (0.5 if min(n_pos, n_neg) >= min_class else np.nan))
+        r, scale = _cn_r(cn, sub.index[y.astype(bool).to_numpy()], true_cn)
+        rows.append(dict(niche=niche, n=int(len(sub)), n_malignant=int(y.sum()), n_normal=int((1 - y).sum()),
+                         n_scored=int(ok.sum()), auc=auc, cn_r=r, cn_scale=scale))
+    return rows, info
 
 
 def _strata(bc):

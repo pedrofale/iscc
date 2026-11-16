@@ -1,0 +1,252 @@
+"""Fig 4b on one tumour: the single-modality copy-number tools against the truth, by niche.
+
+Builds under ``--work`` (a job's $SNIC_TMP) the tumour's human-gene scRNA of the dissociated cells, drawn as
+fig4_chain.py's 4c draws it, and Visium of the 50,000-cell section, drawn as its 4d draws it (the same
+samples, seeds and settings, so the same counts); writes both in the tools' input layouts
+(``iscc.data.human.write_scrna`` / ``write_visium``) with a truth per barcode; runs the tools of Fig 4b side by
+side through ``tools/run_tool.sh`` with the settings of ``tools/submit_tools.sh``; and scores every run in
+each niche with ``score_tools.score_niches``.
+
+Tools: on scRNA, CopyKAT (with and without the normal barcodes as its reference), Numbat and inferCNV
+(infercnvpy); on Visium, CopyKAT (both ways), CalicoST, Clonalscope and Cancer-Finder. CalicoST and
+Clonalscope make no malignancy call and Cancer-Finder no copy-number call; those cells of the score table
+stay empty.
+
+Truth per barcode: ``malignant`` (a cancer cell; a spot whose cells are at least half cancer, as Fig 5 and
+make_layer_dataset.py define it), ``compartment`` (the cell's deme: 0 stroma, 1 the epithelial wall of a
+duct, 2 its lumen; a spot takes the compartment most of its cells sit in), ``hypoxia`` (the cell's; a spot's
+mean) and the true copy number per arm (a spot: the mean over its cancer cells, 2 without any).
+
+Only summaries reach ``--out``/b/<run>_<task>/:
+
+    scores.csv      tool, run, assay, niche, n, n_malignant, n_normal, n_scored, auc, cn_r, cn_scale, wall_s
+    runs.json       each run's exit status, wall time and run.json, and the tail of its log when it failed
+    barcodes.tsv.gz the truth per barcode (assay, barcode, malignant, tumour_fraction, compartment, hypoxia)
+    calls.tsv.gz    every run's calls (run, assay, barcode, malignant, p_malignant, clone)
+
+    python validation/paper/fig4_tools.py --run R11 --task seed1 --out OUT --work $SNIC_TMP
+"""
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+TOOLS = os.path.join(HERE, "tools")
+for p in (HERE, os.path.dirname(HERE), TOOLS):
+    if p not in sys.path:
+        sys.path.insert(0, p)
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+
+import fig4_chain as F  # noqa: E402
+
+# (run name, tool, assay, cores, run_tool.sh arguments after the output directory), longest first; the
+# arguments are submit_tools.sh's with TOOL_SEED 0
+RUNS = [
+    ("numbat-scrna", "numbat", "scrna", 4, ["2", "50", "0"]),
+    ("calicost-visium", "calicost", "visium", 1, ["--seed", "0"]),
+    ("copykat-scrna", "copykat", "scrna", 3, ["0"]),
+    ("copykat-scrna-ref", "copykat", "scrna", 3, ["0", "1"]),
+    ("copykat-visium", "copykat", "visium", 2, ["0"]),
+    ("copykat-visium-ref", "copykat", "visium", 2, ["0", "1"]),
+    ("clonalscope-visium", "clonalscope", "visium", 1, ["20", "200"]),
+    ("infercnvpy-scrna", "infercnvpy", "scrna", 1, ["--seed", "0"]),
+    ("cancerfinder-visium", "cancerfinder", "visium", 1, []),
+]
+
+
+def _compartments(t):
+    """Per deme: 0 stroma, 1 the epithelial wall of a duct, 2 its lumen."""
+    n = len(t.demes)
+    comp = np.zeros(n, dtype=np.int8)
+    if t.gland_id is not None:
+        gl = np.asarray(t.gland_id)
+        comp[gl >= 0] = 1
+        for lumen in (t.gland_lumen_demes or []):
+            comp[np.asarray(lumen, dtype=int)] = 2
+    return comp
+
+
+def _arm_cn(t, layer, gids):
+    """Per cell, the true total copy number averaged over each arm's human genes (cells x arms)."""
+    arms = layer.genes["arm"].to_numpy()
+    names = pd.unique(arms)
+    uniq, inv = np.unique(np.asarray([str(g) for g in gids]), return_inverse=True)
+    lookup = {str(g): g for g in gids}
+    cn_p, cn_m = layer.homolog_cn([lookup[u] for u in uniq], t)
+    tot = (cn_p + cn_m)[:, layer.segment].astype(float)
+    per = np.stack([tot[:, arms == a].mean(axis=1) for a in names], axis=1)
+    return per[inv], names
+
+
+def build(a, work):
+    """Write the scRNA and Visium datasets and their truth under ``work``; returns the dataset directories."""
+    import regime as RG
+    from iscc.data import Visium
+    from iscc.data.human import HUMAN_VISIUM_KAPPA, write_scrna, write_visium
+    from iscc.data.human.writers import barcodes
+    t, layer, dis, sec = F.sample(a.run, a.task, a.section_max_cells)
+    comp = _compartments(t)
+    truth_dir = os.path.join(work, "truth_extra")
+    os.makedirs(truth_dir, exist_ok=True)
+    rows_bc = []
+
+    # scRNA of the dissociated cells, as fig4_chain.rna_counts draws it
+    sc = F.rna_counts(t, layer, dis, seed=a.seed)
+    ac = layer.scrna_allele_counts(sc, dis, t, seed=a.seed)
+    ds_rna = os.path.join(work, "scrna")
+    write_scrna(ds_rna, sc, layer, dis, allele=ac, tumor=t, seed=a.seed)
+    cells = list(sc.obs.index)
+    bcs = barcodes(len(cells), seed=a.seed)
+    gids = F._gids(dis, cells)
+    tum = layer.is_tumour(gids, t)
+    demes = dis["cell_deme"]["deme_id"].reindex(cells).to_numpy(int)
+    hyp = dis["cell_microenv"]["hypoxia_level"].reindex(cells).to_numpy(float)
+    cn, arm_names = _arm_cn(t, layer, gids)
+    bc = pd.DataFrame({"barcode": bcs, "malignant": tum.astype(int), "tumour_fraction": tum.astype(float),
+                       "compartment": comp[demes], "hypoxia": hyp})
+    bc.to_csv(os.path.join(truth_dir, "scrna_barcodes.tsv"), sep="\t", index=False)
+    pd.DataFrame({"barcode": np.repeat(bcs, len(arm_names)), "arm": np.tile(arm_names, len(bcs)),
+                  "cn": cn.ravel()}).to_csv(os.path.join(truth_dir, "scrna_arm_cn.tsv"), sep="\t", index=False)
+    rows_bc.append(bc.assign(assay="scrna"))
+    del sc, ac
+
+    # Visium of the section, as fig4_chain.run_spatial draws it
+    expr = layer.expression(t)
+    vz = Visium(seed=300 + a.seed, kappa=HUMAN_VISIUM_KAPPA, **RG.VISIUM).run(sec, grid_side=t.grid_size,
+                                                                                 gene_lift=expr)
+    av = layer.visium_allele_counts(vz, t, seed=a.seed)
+    ds_vis = os.path.join(work, "visium")
+    write_visium(ds_vis, vz, layer, allele=av, tumor=t, seed=a.seed)
+    placed, members = vz._grid["placed"], vz._grid["members"]
+    pcells = list(placed["cell_exp"].index)
+    pg = F._gids(placed, pcells)
+    ptum = layer.is_tumour(pg, t)
+    pdeme = placed["cell_deme"]["deme_id"].reindex(pcells).to_numpy(int)
+    phyp = placed["cell_microenv"]["hypoxia_level"].reindex(pcells).to_numpy(float)
+    pcn, _ = _arm_cn(t, layer, pg)
+    all_bcs = barcodes(len(vz.spot_counts.index), seed=a.seed)
+    keep = np.flatnonzero(np.asarray(vz.obs["n_cells"]) > 0)
+    rows, cn_rows = [], []
+    for s in keep:
+        m = members[s]
+        tm = m[ptum[m]]
+        frac = tm.size / m.size
+        rows.append((all_bcs[s], int(frac >= 0.5), frac, int(np.bincount(comp[pdeme[m]], minlength=3).argmax()),
+                     float(phyp[m].mean())))
+        cn_rows.append(pcn[tm].mean(axis=0) if tm.size else np.full(len(arm_names), 2.0))
+    bcv = pd.DataFrame(rows, columns=["barcode", "malignant", "tumour_fraction", "compartment", "hypoxia"])
+    bcv.to_csv(os.path.join(truth_dir, "visium_barcodes.tsv"), sep="\t", index=False)
+    cnv = np.stack(cn_rows)
+    pd.DataFrame({"barcode": np.repeat(bcv["barcode"].to_numpy(), len(arm_names)),
+                  "arm": np.tile(arm_names, len(bcv)), "cn": cnv.ravel()}).to_csv(
+        os.path.join(truth_dir, "visium_arm_cn.tsv"), sep="\t", index=False)
+    rows_bc.append(bcv.assign(assay="visium"))
+    info = dict(cells_scrna=int(len(bc)), malignant_scrna=int(bc["malignant"].sum()),
+                spots_visium=int(len(bcv)), malignant_visium=int(bcv["malignant"].sum()),
+                section_cells=int(len(pcells)), mean_cells_per_spot=float(np.mean([members[s].size for s in keep])))
+    return {"scrna": ds_rna, "visium": ds_vis}, truth_dir, pd.concat(rows_bc, ignore_index=True), info
+
+
+def run_tools(datasets, work, total_cores, only=None):
+    """Every run of ``RUNS`` side by side within ``total_cores``; returns {run: status}."""
+    env = dict(os.environ)
+    pending = [r for r in RUNS if only is None or r[0] in only]
+    running, status = {}, {}
+    free = total_cores
+    while pending or running:
+        for r in list(pending):
+            name, tool, assay, cores, extra = r
+            cores = min(cores, total_cores)
+            if cores <= free:
+                out = os.path.join(work, "runs", name)
+                os.makedirs(out, exist_ok=True)
+                log = open(os.path.join(work, "runs", f"{name}.log"), "w")
+                e = dict(env, SLURM_CPUS_PER_TASK=str(cores))
+                p = subprocess.Popen(["/usr/bin/time", "-v", os.path.join(TOOLS, "run_tool.sh"), tool, datasets[assay],
+                                      out] + extra, stdout=log, stderr=subprocess.STDOUT, env=e)
+                running[name] = (p, log, cores, time.time())
+                free -= cores
+                pending.remove(r)
+                print(f"  start {name} ({cores} cores)", flush=True)
+        for name, (p, log, cores, t0) in list(running.items()):
+            rc = p.poll()
+            if rc is None:
+                continue
+            log.close()
+            wall = round(time.time() - t0, 1)
+            text = open(log.name).read()
+            rss = [ln for ln in text.splitlines() if "Maximum resident" in ln]
+            status[name] = dict(exit=rc, wall_s=wall, max_rss_kb=int(rss[-1].split()[-1]) if rss else None)
+            if rc != 0:
+                status[name]["log_tail"] = text[-3000:]
+            free += cores
+            del running[name]
+            print(f"  done {name}: exit {rc}, {wall} s", flush=True)
+        time.sleep(10)
+    return status
+
+
+def main():
+    import score_tools as ST
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--run", default="R11")
+    ap.add_argument("--task", required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--work", required=True)
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--section-max-cells", type=int, default=F.SECTION_MAX_CELLS)
+    ap.add_argument("--cores", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", 1)))
+    ap.add_argument("--only", default=None, help="comma-separated run names (default all)")
+    a = ap.parse_args()
+    tag = f"{a.run}_{a.task}"
+    out = os.path.join(a.out, "b", tag)
+    os.makedirs(out, exist_ok=True)
+    work = os.path.join(a.work, f"b_{tag}")
+    os.makedirs(work, exist_ok=True)
+    t0 = time.time()
+    try:
+        datasets, truth_dir, bc_all, info = build(a, work)
+        info["build_s"] = round(time.time() - t0, 1)
+        print("built:", json.dumps(info), flush=True)
+        import gc
+        gc.collect()
+        status = run_tools(datasets, work, a.cores, None if a.only is None else a.only.split(","))
+        rows, calls = [], []
+        for name, tool, assay, _, _ in RUNS:
+            st = status.get(name)
+            rd = os.path.join(work, "runs", name)
+            if st is None or st["exit"] != 0 or not os.path.exists(os.path.join(rd, "run.json")):
+                continue
+            bc, true_cn = ST._truth(truth_dir, assay)
+            rr, rinfo = ST.score_niches(bc, true_cn, rd)
+            st["run_json"] = rinfo
+            for r in rr:
+                rows.append(dict(tool=tool + ("-ref" if name.endswith("-ref") else ""), run=name, assay=assay,
+                                 wall_s=rinfo.get("wall_s", st["wall_s"]), **r))
+            c = pd.read_csv(os.path.join(rd, "calls.tsv"), sep="\t", dtype={"clone": str})
+            calls.append(c.assign(run=name, assay=assay))
+        pd.DataFrame(rows).to_csv(os.path.join(out, "scores.csv"), index=False)
+        if calls:
+            pd.concat(calls, ignore_index=True)[["run", "assay", "barcode", "malignant", "p_malignant", "clone"]].to_csv(
+                os.path.join(out, "calls.tsv.gz"), sep="\t", index=False)
+        bc_all[["assay", "barcode", "malignant", "tumour_fraction", "compartment", "hypoxia"]].to_csv(
+            os.path.join(out, "barcodes.tsv.gz"), sep="\t", index=False)
+        with open(os.path.join(out, "runs.json"), "w") as f:
+            json.dump(dict(run=a.run, task=a.task, commit=F._commit(), paper_out=os.environ.get("ISCC_PAPER_OUT"),
+                           section_max_cells=a.section_max_cells, data=info, runs=status), f, indent=1, default=str)
+        failed = {k: v["exit"] for k, v in status.items() if v["exit"] != 0}
+        print("failed runs:", failed or "none", flush=True)
+        with pd.option_context("display.width", 200, "display.max_columns", 20):
+            print(pd.DataFrame(rows).round(3).to_string(index=False), flush=True)
+    finally:
+        if os.environ.get("FIG4_KEEP_WORK") != "1":
+            shutil.rmtree(work, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    main()
