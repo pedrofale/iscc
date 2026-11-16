@@ -15,12 +15,15 @@ HERE=${RECIPES:-${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")" && pwd)}}
 [ -f "$HERE/$NAME.sh" ] || { echo "no recipe $HERE/$NAME.sh" >&2; exit 1; }
 BASE=${BASE_IMAGE:-docker://mambaorg/micromamba:1.5.8}
 LOCAL=${SNIC_TMP:-${TMPDIR:-/tmp}}/$USER-build-$NAME
-rm -rf "$LOCAL"; mkdir -p "$LOCAL/cache" "$LOCAL/tmp"
+rm -rf "$LOCAL"; mkdir -p "$LOCAL/cache" "$LOCAL/tmp" "$LOCAL/ctmp"
 export APPTAINER_CACHEDIR=$LOCAL/cache APPTAINER_TMPDIR=$LOCAL/tmp
 apptainer build --sandbox "$LOCAL/sb" "$BASE"
 mkdir -p "$LOCAL/sb/recipes"                 # a writable sandbox cannot create a bind's mount point
-apptainer exec --writable --cleanenv --no-home -B "$HERE:/recipes" --env MAMBA_ROOT_PREFIX=/opt/conda \
-  "$LOCAL/sb" bash -c "export HOME=/tmp; bash -euo pipefail /recipes/$NAME.sh"
+# The container's /tmp and /var/tmp are node scratch ($LOCAL/ctmp), not the host's /tmp that
+# apptainer binds by default: pip, R and the compilers write their build trees there.
+apptainer exec --writable --cleanenv --no-home -B "$HERE:/recipes" -B "$LOCAL/ctmp:/tmp" \
+  -B "$LOCAL/ctmp:/var/tmp" --env MAMBA_ROOT_PREFIX=/opt/conda \
+  "$LOCAL/sb" bash -c "export HOME=/tmp TMPDIR=/tmp; bash -euo pipefail /recipes/$NAME.sh"
 mkdir -p "$OUT"
 apptainer build --force "$OUT/$NAME.sif" "$LOCAL/sb"
 apptainer exec "$OUT/$NAME.sif" bash -c 'cat /opt/versions.txt' > "$OUT/$NAME.versions.txt"
