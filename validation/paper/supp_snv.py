@@ -209,14 +209,114 @@ def read_cardelino(out_dir, cfg_names, seed):
     return np.asarray(cfg_names, dtype=object)[pick], mx, run
 
 
+def scrna_arm_kwargs():
+    """The three scRNA arms' protocol settings (the rest is shared: obs_fidelity 1, dropout_mid 0, the
+    site-coverage model, seed 100 + seed)."""
+    from iscc.data.rna import PROTOCOL_PRESETS
+    p10 = PROTOCOL_PRESETS["10x"]
+    return {"10x": dict(protocol="10x"), "smartseq3": dict(protocol="smartseq3"),
+            "smartseq3_10xdepth": dict(protocol="smartseq3", mu_lib=p10["mu_lib"], sigma_lib=p10["sigma_lib"])}
+
+
+def emit_scrna_arm(dis, dcells, genes, arm, seed, work):
+    """One scRNA arm's alt and total counts (cells x genes) through emit_scrna_reads."""
+    from iscc.data.reads import emit_scrna_reads
+    r = emit_scrna_reads(dis, obs_fidelity=1.0, error_rate=ERROR_RATE, seed=100 + seed, cell_subset=dcells,
+                         outdir=os.path.join(work, f"reads_{arm}"), site_coverage_model=True,
+                         dropout_mid=0.0, **scrna_arm_kwargs()[arm])
+    if list(r["alt"].index) != dcells or list(r["alt"].columns) != genes:
+        raise RuntimeError(f"{arm}: cells or genes out of order")
+    return r
+
+
+def cardelino_setup(td, dcells, clone_of, clones, members, a, tag):
+    """Fig 4c's RNA cells (fig4_chain.rna_inputs' selection: tumour cells with a true clone, at most --rna-cells of
+    them, the same rng), the true clone-by-variant matrix, and (with --fig4-c) the matrix of Fig 4c's scDNA-called
+    clones, with the checks that the cells and clones are Fig 4c's."""
+    lab_d = FC.label_cells(td["gids"], clone_of)
+    keep = np.flatnonzero((lab_d != NORMAL) & (lab_d != OTHER))
+    rng = np.random.default_rng([a.seed, 0xCA])
+    if keep.size > a.rna_cells:
+        keep = np.sort(rng.choice(keep, size=a.rna_cells, replace=False))
+    ca_cells = [str(dcells[i]) for i in keep]
+    t_fine = lab_d[keep]
+    cfg, cfg_names = clone_config(td["car"][td["tum"]], lab_d[td["tum"]], clones)
+    var_true = np.flatnonzero(td["somatic"] & cfg.any(axis=1) & ~cfg.all(axis=1)) if cfg.shape[1] else np.array([], int)
+    dna_cfg = None
+    fig4c = os.path.join(a.fig4_c, tag) if a.fig4_c else None
+    checks = {}
+    if fig4c and os.path.isdir(fig4c):
+        rc = pd.read_csv(os.path.join(fig4c, "rna_cells.tsv.gz"), sep="\t", dtype={"cell": str})
+        checks["rna_cells_match_fig4c"] = bool(list(rc["cell"]) == ca_cells and
+                                               list(rc["true_clone"].astype(str)) == [str(x) for x in t_fine])
+        with open(os.path.join(fig4c, "score.json")) as f:
+            checks["true_clones_match_fig4c"] = bool(json.load(f)["true_clones"] == members)
+        dc = pd.read_csv(os.path.join(fig4c, "dna_cells.tsv.gz"), sep="\t", dtype={"cell": str})
+        dclones = pd.read_csv(os.path.join(fig4c, "dna_clones.tsv"), sep="\t", index_col=0)
+        row = {c: i for i, c in enumerate(dcells)}
+        called = dc["called_clone"].astype(object).where(dc["called_clone"].notna(), None).to_numpy()
+        car_dna = td["car"][[row[c] for c in dc["cell"]]]
+        dcfg, dnames = clone_config(car_dna, called, list(dclones.index))
+        var_dna = np.flatnonzero(dcfg.any(axis=1) & ~dcfg.all(axis=1)) if dcfg.shape[1] >= 2 else np.array([], int)
+        dna_cfg = dict(cfg=dcfg, names=dnames, var=var_dna, mapping=dclones["true_clone"].astype(str).to_dict(),
+                       cells=list(dc["cell"]))
+    else:
+        checks["fig4c"] = f"not given or missing: {fig4c}"
+    return dict(keep=keep, ca_cells=ca_cells, t_fine=t_fine, cfg=cfg, cfg_names=cfg_names, var_true=var_true,
+                dna_cfg=dna_cfg, checks=checks)
+
+
+def cardelino_inputs(alt, tot, cs):
+    """A and D (cells x variants) of the cardelino cells, for the true and the scDNA-called matrices."""
+    keep, var_true, dna_cfg = cs["keep"], cs["var_true"], cs["dna_cfg"]
+    D = tot[keep][:, var_true]
+    out = dict(A=alt[keep][:, var_true], D=D, no_read=float(np.mean(D.sum(axis=1) == 0)),
+               mean_depth=float(D.mean()) if D.size else float("nan"))
+    if dna_cfg is not None and dna_cfg["var"].size:
+        out["A_dna"] = alt[keep][:, dna_cfg["var"]]
+        out["D_dna"] = tot[keep][:, dna_cfg["var"]]
+    return out
+
+
+def score_cardelino(kind, arm, d, cs, inp, seed):
+    """One finished cardelino run scored against the true clones: its record and its per-cell columns."""
+    t_fine, dna_cfg = cs["t_fine"], cs["dna_cfg"]
+    names = cs["cfg_names"] if kind == "true" else dna_cfg["names"]
+    key = f"{kind}_{arm}"
+    pred, mx, run = read_cardelino(d, names, seed)
+    cols = {}
+    if kind == "dna":
+        cols[f"called_{key}"] = pred
+        pred = np.array([dna_cfg["mapping"].get(c) for c in pred], dtype=object)
+    sc = FC.score_assignment(t_fine, pred)
+    conf = mx > 0.5
+    sc_conf = FC.score_assignment(t_fine[conf], pred[conf]) if conf.sum() else {}
+    D = inp["D"] if kind == "true" else inp["D_dna"]
+    entry = dict(
+        balanced_accuracy=sc["balanced_accuracy"], accuracy=sc["accuracy"], ari=sc["ari"], recall=sc["recall"],
+        share_prob_above_half=float(conf.mean()),
+        confident_accuracy=sc_conf.get("accuracy"), confident_balanced_accuracy=sc_conf.get("balanced_accuracy"),
+        share_cells_no_read=inp["no_read"] if kind == "true" else float(np.mean(D.sum(axis=1) == 0)),
+        mean_reads_per_cell_variant=inp["mean_depth"] if kind == "true" else float(D.mean()),
+        run=run)
+    cols[f"pred_{key}"] = pred
+    cols[f"prob_{key}"] = mx.round(4)
+    return entry, cols
+
+
+def _print_cardelino(key, r, chance):
+    print(f"  cardelino {key}: balanced {r['balanced_accuracy']:.3f} (chance {chance:.3f}), "
+          f"p>0.5 {r['share_prob_above_half']:.3f}, no read {r['share_cells_no_read']:.3f}, "
+          f"{r['run'].get('n_iter')} iterations, {r['run'].get('wall_s')} s", flush=True)
+
+
 # ---------------------------------------------------------------------------------------------------
 # one tumour
 # ---------------------------------------------------------------------------------------------------
 def run_tumour(a):
     from iscc.data import bulkDNA, scDNA
     from iscc.data.human import HUMAN_VISIUM_KAPPA
-    from iscc.data.reads import emit_scrna_reads, emit_visium_reads, site_coverage, site_geometry
-    from iscc.data.rna import PROTOCOL_PRESETS
+    from iscc.data.reads import emit_visium_reads, site_coverage, site_geometry
     import regime as RG
     tag = f"{a.run}_{a.task}"
     out = os.path.join(a.out, tag)
@@ -262,59 +362,26 @@ def run_tumour(a):
     pairs_d = td["car"] & td["tum"][:, None] & td["somatic"][None, :]
     t0 = _lap(wall, "site_truth", t0)
 
-    # Fig 4c's RNA cells (fig4_chain.rna_inputs' selection: tumour cells with a true clone, at most
-    # --rna-cells of them, the same rng), for cardelino
-    lab_d = FC.label_cells(td["gids"], clone_of)
-    keep = np.flatnonzero((lab_d != NORMAL) & (lab_d != OTHER))
-    rng = np.random.default_rng([a.seed, 0xCA])
-    if keep.size > a.rna_cells:
-        keep = np.sort(rng.choice(keep, size=a.rna_cells, replace=False))
-    ca_cells = [str(dcells[i]) for i in keep]
-    t_fine = lab_d[keep]
-    cfg, cfg_names = clone_config(td["car"][td["tum"]], lab_d[td["tum"]], clones)
-    var_true = np.flatnonzero(td["somatic"] & cfg.any(axis=1) & ~cfg.all(axis=1)) if cfg.shape[1] else np.array([], int)
+    cs = cardelino_setup(td, dcells, clone_of, clones, members, a, tag)
+    keep, ca_cells, t_fine, var_true, dna_cfg, checks = (cs["keep"], cs["ca_cells"], cs["t_fine"], cs["var_true"],
+                                                         cs["dna_cfg"], cs["checks"])
+    cfg, cfg_names = cs["cfg"], cs["cfg_names"]
     sites["cardelino_true_cfg"] = np.isin(np.arange(len(genes)), var_true).astype(int)
     rec["cardelino_config"] = dict(clones=cfg_names, n_variants=int(var_true.size),
                                    n_variants_per_clone={c: int(cfg[var_true, k].sum()) for k, c in enumerate(cfg_names)})
-
-    # Fig 4c's scDNA cells and called clones (the optional DNA-config arm and the sampling check)
-    dna_cfg = None
-    fig4c = os.path.join(a.fig4_c, tag) if a.fig4_c else None
-    checks = {}
-    if fig4c and os.path.isdir(fig4c):
-        rc = pd.read_csv(os.path.join(fig4c, "rna_cells.tsv.gz"), sep="\t", dtype={"cell": str})
-        checks["rna_cells_match_fig4c"] = bool(list(rc["cell"]) == ca_cells and
-                                               list(rc["true_clone"].astype(str)) == [str(x) for x in t_fine])
-        with open(os.path.join(fig4c, "score.json")) as f:
-            checks["true_clones_match_fig4c"] = bool(json.load(f)["true_clones"] == members)
-        dc = pd.read_csv(os.path.join(fig4c, "dna_cells.tsv.gz"), sep="\t", dtype={"cell": str})
-        dclones = pd.read_csv(os.path.join(fig4c, "dna_clones.tsv"), sep="\t", index_col=0)
-        row = {c: i for i, c in enumerate(dcells)}
-        called = dc["called_clone"].astype(object).where(dc["called_clone"].notna(), None).to_numpy()
-        car_dna = td["car"][[row[c] for c in dc["cell"]]]
-        dcfg, dnames = clone_config(car_dna, called, list(dclones.index))
-        var_dna = np.flatnonzero(dcfg.any(axis=1) & ~dcfg.all(axis=1)) if dcfg.shape[1] >= 2 else np.array([], int)
-        dna_cfg = dict(cfg=dcfg, names=dnames, var=var_dna, mapping=dclones["true_clone"].astype(str).to_dict(),
-                       cells=list(dc["cell"]))
-        rec["cardelino_dna_config"] = dict(clones=dnames, mapping=dna_cfg["mapping"], n_variants=int(var_dna.size),
-                                           n_variants_true_cfg_also=int(np.isin(var_dna, var_true).sum()))
-    else:
-        checks["fig4c"] = f"not given or missing: {fig4c}"
+    if dna_cfg is not None:
+        rec["cardelino_dna_config"] = dict(clones=dna_cfg["names"], mapping=dna_cfg["mapping"],
+                                           n_variants=int(dna_cfg["var"].size),
+                                           n_variants_true_cfg_also=int(np.isin(dna_cfg["var"], var_true).sum()))
     t0 = _lap(wall, "configs", t0)
 
     # ---- scRNA, three arms on the same cells ------------------------------------------------------
-    p10 = PROTOCOL_PRESETS["10x"]
-    arm_kw = {"10x": dict(protocol="10x"), "smartseq3": dict(protocol="smartseq3"),
-              "smartseq3_10xdepth": dict(protocol="smartseq3", mu_lib=p10["mu_lib"], sigma_lib=p10["sigma_lib"])}
+    arm_kw = scrna_arm_kwargs()
     rec["scrna_arms"] = {k: dict(v, obs_fidelity=1.0, dropout_mid=0.0, site_coverage_model=True,
                                  seed=100 + a.seed, error_rate=ERROR_RATE) for k, v in arm_kw.items()}
     ca_inputs = {}
     for arm in SCRNA_ARMS:
-        r = emit_scrna_reads(dis, obs_fidelity=1.0, error_rate=ERROR_RATE, seed=100 + a.seed, cell_subset=dcells,
-                             outdir=os.path.join(work, f"reads_{arm}"), site_coverage_model=True,
-                             dropout_mid=0.0, **arm_kw[arm])
-        if list(r["alt"].index) != dcells or list(r["alt"].columns) != genes:
-            raise RuntimeError(f"{arm}: cells or genes out of order")
+        r = emit_scrna_arm(dis, dcells, genes, arm, a.seed, work)
         alt, tot = r["alt"].to_numpy(), r["total"].to_numpy()
         sites[f"alt_{arm}"] = alt.sum(axis=0)
         sites[f"tot_{arm}"] = tot.sum(axis=0)
@@ -323,13 +390,7 @@ def run_tumour(a):
             cell=cell_level(alt, tot, pairs_d, win),
             mean_site_reads_per_cell=float(tot.sum() / len(dcells)),
             site_cover_values=sorted(set(np.round(np.asarray(r["site_cover"], float), 4).tolist())))
-        A = alt[keep][:, var_true]
-        D = tot[keep][:, var_true]
-        ca_inputs[arm] = dict(A=A, D=D, no_read=float(np.mean(D.sum(axis=1) == 0)),
-                              mean_depth=float(D.mean()) if D.size else float("nan"))
-        if dna_cfg is not None and dna_cfg["var"].size:
-            ca_inputs[arm]["A_dna"] = alt[keep][:, dna_cfg["var"]]
-            ca_inputs[arm]["D_dna"] = tot[keep][:, dna_cfg["var"]]
+        ca_inputs[arm] = cardelino_inputs(alt, tot, cs)
         del r, alt, tot
         t0 = _lap(wall, f"scrna_{arm}", t0)
 
@@ -424,29 +485,10 @@ def run_tumour(a):
             rec["cardelino"][key] = dict(failed=True, exit=rc_, log_tail=open(log.name).read()[-3000:])
             print(f"  cardelino {key}: FAILED (exit {rc_})", flush=True)
             continue
-        names = cfg_names if kind == "true" else dna_cfg["names"]
-        pred, mx, run = read_cardelino(d, names, a.seed)
-        if kind == "dna":
-            cells_tab[f"called_{key}"] = pred
-            pred = np.array([dna_cfg["mapping"].get(c) for c in pred], dtype=object)
-        sc = FC.score_assignment(t_fine, pred)
-        conf = mx > 0.5
-        sc_conf = FC.score_assignment(t_fine[conf], pred[conf]) if conf.sum() else {}
-        rec["cardelino"][key] = dict(
-            balanced_accuracy=sc["balanced_accuracy"], accuracy=sc["accuracy"], ari=sc["ari"], recall=sc["recall"],
-            share_prob_above_half=float(conf.mean()),
-            confident_accuracy=sc_conf.get("accuracy"), confident_balanced_accuracy=sc_conf.get("balanced_accuracy"),
-            share_cells_no_read=ca_inputs[arm]["no_read"] if kind == "true" else
-            float(np.mean(ca_inputs[arm]["D_dna"].sum(axis=1) == 0)),
-            mean_reads_per_cell_variant=ca_inputs[arm]["mean_depth"] if kind == "true" else
-            float(ca_inputs[arm]["D_dna"].mean()),
-            run=run)
-        cells_tab[f"pred_{key}"] = pred
-        cells_tab[f"prob_{key}"] = mx.round(4)
-        r = rec["cardelino"][key]
-        print(f"  cardelino {key}: balanced {r['balanced_accuracy']:.3f} (chance {rec['chance']:.3f}), "
-              f"p>0.5 {r['share_prob_above_half']:.3f}, no read {r['share_cells_no_read']:.3f}, "
-              f"{run.get('wall_s')} s", flush=True)
+        rec["cardelino"][key], cols = score_cardelino(kind, arm, d, cs, ca_inputs[arm], a.seed)
+        for c, v in cols.items():
+            cells_tab[c] = v
+        _print_cardelino(key, rec["cardelino"][key], rec["chance"])
     t0 = _lap(wall, "cardelino_wait", t0)
     rec["checks"] = checks
     rec["wall_s"] = wall
@@ -456,6 +498,86 @@ def run_tumour(a):
     with open(os.path.join(out, "summary.json"), "w") as f:
         json.dump(rec, f, indent=1, default=lambda x: x.item() if hasattr(x, "item") else str(x))
     print_summary(rec)
+
+
+def rerun_cardelino(a):
+    """Rerun the named cardelino runs (``--keys``, e.g. true_10x,dna_smartseq3) of one tumour with
+    ``--cardelino-iter``, their inputs rebuilt exactly as ``run`` built them (same sample, cells, matrices, scRNA
+    seed; the rebuilt inputs are checked against the stored run's), and replace them in the tumour's summary.json
+    and cells.tsv.gz. The replaced run's scores and iteration record are kept under ``superseded``."""
+    tag = f"{a.run}_{a.task}"
+    out = os.path.join(a.out, tag)
+    work = os.path.join(a.work, f"snv_{tag}")
+    os.makedirs(work, exist_ok=True)
+    with open(os.path.join(out, "summary.json")) as f:
+        rec = json.load(f)
+    keys = [k for k in a.keys.split(",") if k]
+    bad = [k for k in keys if k not in rec["cardelino"]]
+    if bad:
+        sys.exit(f"no such cardelino runs in {tag}: {bad}")
+    wall, t0 = {}, time.time()
+    t, layer, dis, sec = FC.sample(a.run, a.task, rec["section_max_cells"])   # Fig 4's cut: the same cells
+    clone_of, true_prof, members = FC.true_clones(t, layer, [dis, sec])
+    del sec
+    if members != rec["true_clones"]:
+        raise RuntimeError("the true clones differ from the stored run's")
+    t0 = _lap(wall, "load_and_sample", t0)
+    genes = list(dis["cell_snv"].columns)
+    dcells = list(dis["cell_exp"].index)
+    td = site_truth(t, layer, dis)
+    cs = cardelino_setup(td, dcells, clone_of, list(true_prof.index), members, a, tag)
+    cells_tab = pd.read_csv(os.path.join(out, "cells.tsv.gz"), sep="\t", dtype={"cell": str})
+    if list(cells_tab["cell"]) != cs["ca_cells"]:
+        raise RuntimeError("the cardelino cells differ from the stored run's")
+    procs, inputs = {}, {}
+    for arm in sorted({k.split("_", 1)[1] for k in keys}):
+        r = emit_scrna_arm(dis, dcells, genes, arm, a.seed, work)
+        inputs[arm] = cardelino_inputs(r["alt"].to_numpy(), r["total"].to_numpy(), cs)
+        del r
+    t0 = _lap(wall, "inputs", t0)
+    for key in keys:
+        kind, arm = key.split("_", 1)
+        d = os.path.join(work, f"ca_{key}")
+        if kind == "true":
+            write_cardelino_inputs(d + "_in", cs["cfg"], cs["cfg_names"], cs["var_true"], inputs[arm]["A"],
+                                   inputs[arm]["D"], cs["ca_cells"])
+        else:
+            dc = cs["dna_cfg"]
+            write_cardelino_inputs(d + "_in", dc["cfg"], dc["names"], dc["var"], inputs[arm]["A_dna"],
+                                   inputs[arm]["D_dna"], cs["ca_cells"])
+        procs[key] = launch_cardelino(d + "_in", d, a.seed + 1, a.cardelino_iter)
+    keep_fields = ("balanced_accuracy", "accuracy", "share_prob_above_half", "confident_balanced_accuracy")
+    for key, (p, log) in procs.items():
+        kind, arm = key.split("_", 1)
+        rc_ = p.wait()
+        log.close()
+        d = os.path.join(work, f"ca_{key}")
+        if rc_ != 0 or not os.path.exists(os.path.join(d, "prob.csv")):
+            print(f"  cardelino {key}: FAILED (exit {rc_}); the stored run is kept\n" + open(log.name).read()[-3000:],
+                  flush=True)
+            continue
+        entry, cols = score_cardelino(kind, arm, d, cs, inputs[arm], a.seed)
+        old = rec["cardelino"][key]
+        same = (abs(entry["mean_reads_per_cell_variant"] - old["mean_reads_per_cell_variant"]) < 1e-12
+                and abs(entry["share_cells_no_read"] - old["share_cells_no_read"]) < 1e-12)
+        if not same:
+            raise RuntimeError(f"{key}: the rebuilt inputs differ from the stored run's")
+        entry["superseded"] = dict({f: old.get(f) for f in keep_fields},
+                                   n_iter=old["run"].get("n_iter"), min_iter=old["run"].get("min_iter"),
+                                   max_iter=old["run"].get("max_iter"), commit=rec.get("commit"))
+        entry["rerun_commit"] = _commit()
+        rec["cardelino"][key] = entry
+        for c, v in cols.items():
+            cells_tab[c] = v
+        _print_cardelino(key, entry, rec["chance"])
+        print(f"    was {old['balanced_accuracy']:.3f} after {old['run'].get('n_iter')} iterations; "
+              f"change {entry['balanced_accuracy'] - old['balanced_accuracy']:+.4f}", flush=True)
+    t0 = _lap(wall, "cardelino", t0)
+    rec.setdefault("cardelino_reruns", []).append(dict(keys=keys, cardelino_iter=list(a.cardelino_iter),
+                                                       commit=_commit(), wall_s=wall))
+    cells_tab.to_csv(os.path.join(out, "cells.tsv.gz"), sep="\t", index=False)
+    with open(os.path.join(out, "summary.json"), "w") as f:
+        json.dump(rec, f, indent=1, default=lambda x: x.item() if hasattr(x, "item") else str(x))
 
 
 def print_summary(rec):
@@ -772,13 +894,14 @@ def make_figure(out_dir, fig4_c=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("step", choices=("run", "figure"))
+    ap.add_argument("step", choices=("run", "cardelino", "figure"))
     ap.add_argument("--run", default="R11")
     ap.add_argument("--task")
     ap.add_argument("--out", required=True)
     ap.add_argument("--work", help="scratch for every tool input and output (a job's $SNIC_TMP)")
     ap.add_argument("--fig4-c", help="Fig 4c's per-tumour outputs (OUT/c of fig4_chain.py): the sampling check "
                                      "and the optional scDNA-called clones for cardelino")
+    ap.add_argument("--keys", default="", help="cardelino step: the runs to redo, e.g. true_10x,dna_smartseq3")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--n-dna", type=int, default=FC.N_DNA)
     ap.add_argument("--rna-cells", type=int, default=FC.RNA_MAX_CELLS)
@@ -793,7 +916,7 @@ def main():
     if not (a.task and a.work):
         sys.exit("run needs --task and --work")
     try:
-        run_tumour(a)
+        (run_tumour if a.step == "run" else rerun_cardelino)(a)
     finally:
         if os.environ.get("SNV_KEEP_WORK") != "1":
             shutil.rmtree(os.path.join(a.work, f"snv_{a.run}_{a.task}"), ignore_errors=True)
