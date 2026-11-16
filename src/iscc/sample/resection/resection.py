@@ -90,6 +90,7 @@ class Resection:
         self.tumor = tumor
         self.compartment = compartment
         self._grids = self._compartment_grids()
+        self.dissociation_meta = None       # the last dissociate()'s record (None: no recovery/stress)
 
     def _compartment_grids(self):
         """The ``(base_deme_index, grid_side)`` of each grid in the resected compartment.
@@ -157,11 +158,25 @@ class Resection:
         with _CellDataGuard(self.tumor):
             return self.tumor.make_cell_data(**kwargs)
 
-    def dissociate(self, region=None, max_cells=None, install=False, layers=None):
+    def dissociate(self, region=None, max_cells=None, install=False, layers=None,
+                   recovery_probs=None, stress_strength=0.0, n_stress_genes=None,
+                   stress_genes=None, seed=None):
         """Dissociate a 2-D part into a per-cell table for the sequencing assays.
 
         Materialises the part at FULL column depth (all ~K cells/deme, subsampled to ``max_cells``);
         the cells lose their spatial position, as in a real dissociation.
+
+        By default that is all: every materialised cell is returned, as it was in the tissue. With
+        ``recovery_probs`` and/or ``stress_strength`` the dissociation's own biology is applied too,
+        through :class:`iscc.sample.dissociation.Dissociation`: each cell is recovered with its
+        biological type's probability (composition bias) and the recovered cells' expression picks
+        up the stress signature. This is how per-patient dissociation settings reach a cohort: call
+        ``resect(t).dissociate(..., recovery_probs=..., stress_strength=..., seed=...)`` per patient.
+        The recovery draw comes first from the generator, so with the same ``seed`` and
+        ``recovery_probs`` the recovered cells are the same whatever the stress strength, and so is
+        the stress-gene set (unless ``stress_genes`` names it). The dissociation's record (recovery
+        probabilities, compositions before and after, the stress genes) is kept in
+        :attr:`dissociation_meta`; it is None after a plain dissociation.
 
         Parameters
         ----------
@@ -179,15 +194,64 @@ class Resection:
         layers : str or iterable of str, optional
             The gene-wide frames to build, by frame or assay name (``"scrna"``, ``"scdna"``); see
             [`make_cell_data`][iscc.tumor.GenotypeTumor.make_cell_data]. ``None`` builds them all.
+        recovery_probs : dict or "default", optional
+            Per-biological-type recovery probability (``cancer``, ``epithelial``, ``host``,
+            ``stromal``, ``immune``), merged over
+            :data:`~iscc.sample.dissociation.DEFAULT_RECOVERY`; ``"default"`` (or an empty dict)
+            uses the defaults as they are. ``None`` (default) recovers every cell, unless a stress
+            signature is asked for, in which case every type is recovered with probability 1.
+        stress_strength : float, default 0.0
+            Dissociation-stress bump: the stress genes of every recovered cell are multiplied by
+            ``1 + stress_strength``. 0 leaves the expression as it is.
+        n_stress_genes : int, optional
+            Size of the randomly drawn stress-gene set (default 5% of the expression genes).
+        stress_genes : list of str, optional
+            The stress-gene set itself, instead of the random draw.
+        seed : int or numpy.random.Generator, optional
+            Seed (or generator) for the recovery and stress-gene draws. ``None`` draws fresh entropy,
+            so pass a seed whenever the same patient is dissociated more than once.
 
         Returns
         -------
         dict
-            The per-cell ``cell_data`` tables (pass to ``bulkDNA`` / ``scDNA`` / ``scRNA``).
+            The per-cell ``cell_data`` tables (pass to ``bulkDNA`` / ``scDNA`` / ``scRNA``): with
+            recovery, only the recovered cells, and with stress, their stressed ``cell_exp``.
         """
         if region is None:
             region = self._all_demes()
-        return self._materialise(install, region=region, max_cells=max_cells, layers=layers)
+        self.dissociation_meta = None
+        if recovery_probs is None and float(stress_strength) == 0.0:
+            return self._materialise(install, region=region, max_cells=max_cells, layers=layers)
+        import numpy as np
+        from ..dissociation import Dissociation, DEFAULT_RECOVERY
+
+        cd = self._materialise(install, region=region, max_cells=max_cells, layers=layers)
+        if float(stress_strength) != 0.0 and cd.get("cell_exp") is None:
+            raise ValueError("a stress signature needs the expression table; pass layers that "
+                             "build cell_exp (e.g. 'scrna')")
+        if recovery_probs is None:
+            probs = {t: 1.0 for t in DEFAULT_RECOVERY}
+        elif isinstance(recovery_probs, str):
+            if recovery_probs != "default":
+                raise ValueError(f"recovery_probs must be a dict, 'default' or None, got {recovery_probs!r}")
+            probs = {}
+        else:
+            probs = dict(recovery_probs)
+        rng = seed if isinstance(seed, np.random.Generator) else np.random.default_rng(seed)
+        diss = Dissociation(cd, rng=rng, recovery_probs=probs, stress_strength=stress_strength,
+                            n_stress_genes=n_stress_genes, stress_genes=stress_genes)
+        chosen, meta, exp_override = diss.run()
+        out = {}
+        for key, df in cd.items():
+            src = exp_override if (key == "cell_exp" and exp_override is not None) else df
+            out[key] = src.loc[chosen]
+        meta["recovery_probs_given"] = (None if recovery_probs is None else
+                                        ("default" if isinstance(recovery_probs, str) else
+                                         {k: float(v) for k, v in dict(recovery_probs).items()}))
+        self.dissociation_meta = meta
+        if install:
+            self.tumor.cell_data = out
+        return out
 
     def slice(self, region=None, depth_frac=0.5, max_cells=None, install=False, layers=None):
         """Cut a thin histology / Visium **section**: a depth cut of a 2-D part.

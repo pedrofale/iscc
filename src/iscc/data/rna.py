@@ -438,9 +438,37 @@ def _sparse_doublets(batch, counts):
     return (counts + (add @ counts)).tocsr().astype(np.int32), is_doublet
 
 
+# scRNA constructor arguments a per-batch override may set: the technical hyper-parameters (and
+# their aliases). The cells, labels and seeds are the design's, so `run_scrna_batches` owns them.
+BATCH_OVERRIDE_KEYS = (
+    "n_reads", "lib_size_sigma", "dispersion", "sigma_batch", "mu_lib", "sigma_lib",
+    "ambient_frac", "doublet_rate", "dropout_mid", "dropout_shape", "well_sigma", "n_wells",
+    "n_plates", "plate_sigma", "depth_batch_sigma", "kappa",
+)
+
+
+def _check_batch_kwargs(batch_kwargs, n_batches):
+    """Validate `run_scrna_batches`'s per-batch overrides: one mapping per batch, known keys."""
+    if batch_kwargs is None:
+        return [{} for _ in range(n_batches)]
+    batch_kwargs = list(batch_kwargs)
+    if len(batch_kwargs) != n_batches:
+        raise ValueError(f"batch_kwargs has {len(batch_kwargs)} entries for {n_batches} batches; "
+                         "give one mapping per batch ({} keeps the shared settings)")
+    out = []
+    for i, kw in enumerate(batch_kwargs):
+        kw = dict(kw or {})
+        bad = sorted(set(kw) - set(BATCH_OVERRIDE_KEYS))
+        if bad:
+            raise ValueError(f"batch_kwargs[{i}] sets {bad}, which are not per-batch technical "
+                             f"settings; allowed: {list(BATCH_OVERRIDE_KEYS)}")
+        out.append(kw)
+    return out
+
+
 def run_scrna_batches(cell_data, n_batches=2, base_seed=42, design="shared",
                       protocol="10x", n_cells=100, count_model="nb", plate_layout=None,
-                      **scrna_kwargs):
+                      batch_kwargs=None, **scrna_kwargs):
     """Generate `n_batches` scRNA batches that share biology but differ technically.
 
     designs:
@@ -458,7 +486,17 @@ def run_scrna_batches(cell_data, n_batches=2, base_seed=42, design="shared",
     `plate_layout` (see `scRNA`) is one plate map for the whole run, passed to every batch:
     each batch looks up its own cells in it, so under ``"split"`` a batch sorts only its share
     of the cells and under ``"shared"`` every batch repeats the same sort as its own plate run.
+
+    `batch_kwargs` gives each batch its own technical settings: a list of ``n_batches``
+    mappings, the i-th applied to batch ``i`` on top of ``scrna_kwargs`` (so an empty mapping
+    keeps the shared settings). Each mapping may set any of the scRNA hyper-parameters listed in
+    ``BATCH_OVERRIDE_KEYS`` (e.g. ``mu_lib``, ``sigma_lib``, ``dispersion``, ``ambient_frac``,
+    ``dropout_mid``, ``doublet_rate``, ``sigma_batch``, ``depth_batch_sigma``). This is how batches
+    differ by their own fitted parameters rather than only by their seed's realisation. The cell
+    selection does not depend on it: the same cells land in the same batches whatever the
+    overrides.
     """
+    per_batch = _check_batch_kwargs(batch_kwargs, n_batches)
     cell_states = cell_data["cell_exp"]
     n_avail = len(cell_states.index)
     sel_rng = np.random.default_rng(base_seed)  # biology selection (NOT technical)
@@ -479,10 +517,12 @@ def run_scrna_batches(cell_data, n_batches=2, base_seed=42, design="shared",
 
     assays = []
     for i, subset in enumerate(subsets):
+        kwargs = dict(scrna_kwargs)
+        kwargs.update(per_batch[i])
         assay = scRNA(
             protocol=protocol, n_cells=len(subset), count_model=count_model,
             batch_label=f"batch{i}", seed=base_seed + 1 + i, plate_layout=plate_layout,
-            **scrna_kwargs,
+            **kwargs,
         )
         assay.run(cell_data, cell_subset=subset)
         assays.append(assay)
@@ -490,7 +530,11 @@ def run_scrna_batches(cell_data, n_batches=2, base_seed=42, design="shared",
 
 
 def concat_batches(assays):
-    """Concatenate per-batch AnnData into one labelled object (for integration benchmarks)."""
+    """Concatenate per-batch AnnData into one labelled object (for integration benchmarks).
+
+    Each batch's own hyper-parameters are kept in ``uns["batch_hyperparams"]`` (keyed by batch
+    label), so a run whose batches had different technical settings records them all.
+    """
     import anndata as ad
 
     adatas = [a.to_anndata() for a in assays]
@@ -498,4 +542,5 @@ def concat_batches(assays):
     combined.uns["protocol"] = adatas[0].uns["protocol"]
     combined.uns["count_model"] = adatas[0].uns["count_model"]
     combined.uns["n_batches"] = len(adatas)
+    combined.uns["batch_hyperparams"] = {str(a.batch.label): a.hypers.to_dict() for a in assays}
     return combined
