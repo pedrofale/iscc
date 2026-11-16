@@ -136,10 +136,15 @@ def _cn_r(cn, keep, true_cn):
 
 
 def score_niches(bc, true_cn, run_dir, min_class=10):
-    """One run scored in each niche: the malignancy AUC (from ``p_malignant``, else the 0/1 call) over the
-    niche's barcodes when each class holds at least ``min_class`` of them, and the per-arm copy-number
-    correlation over its malignant barcodes. Returns a list of rows and the run's run.json."""
+    """One run scored in each niche (see score_niches_frames); returns the rows and the run's run.json."""
     calls, cn, info = _read(run_dir)
+    return score_niches_frames(bc, true_cn, calls, cn, min_class), info
+
+
+def score_niches_frames(bc, true_cn, calls, cn, min_class=10):
+    """The malignancy AUC (from ``p_malignant``, else the 0/1 call) over each niche's barcodes when each
+    class holds at least ``min_class`` of them, and the per-arm copy-number correlation over its malignant
+    barcodes. ``calls`` is indexed by barcode; ``cn`` may be None."""
     s = calls["p_malignant"] if calls["p_malignant"].notna().any() else calls["malignant"]
     s = s.astype(float)
     rows = []
@@ -154,7 +159,7 @@ def score_niches(bc, true_cn, run_dir, min_class=10):
         r, scale = _cn_r(cn, sub.index[y.astype(bool).to_numpy()], true_cn)
         rows.append(dict(niche=niche, n=int(len(sub)), n_malignant=int(y.sum()), n_normal=int((1 - y).sum()),
                          n_scored=int(ok.sum()), auc=auc, cn_r=r, cn_scale=scale))
-    return rows, info
+    return rows
 
 
 def _strata(bc):

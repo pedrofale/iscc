@@ -23,8 +23,13 @@ Only summaries reach ``--out``/b/<run>_<task>/:
     runs.json       each run's exit status, wall time and run.json, and the tail of its log when it failed
     barcodes.tsv.gz the truth per barcode (assay, barcode, malignant, tumour_fraction, compartment, hypoxia)
     calls.tsv.gz    every run's calls (run, assay, barcode, malignant, p_malignant, clone)
+    cn_arm.tsv.gz   every run's per-arm values (run, assay, barcode, arm, value, scale)
+    truth_arm_cn.tsv.gz  the true copy number per arm (assay, barcode, arm, cn)
+
+so that the runs can be scored again without rerunning them (``--rescore``, on the login node: seconds).
 
     python validation/paper/fig4_tools.py --run R11 --task seed1 --out OUT --work $SNIC_TMP
+    python validation/paper/fig4_tools.py --run R11 --task seed1 --out OUT --work - --rescore
 """
 import argparse
 import json
@@ -191,6 +196,35 @@ def run_tools(datasets, work, total_cores, only=None):
     return status
 
 
+def score_dir(out):
+    """Score every persisted run of one tumour's directory per niche (``scores.csv``)."""
+    import score_tools as ST
+    bc_all = pd.read_csv(os.path.join(out, "barcodes.tsv.gz"), sep="\t")
+    tcn = pd.read_csv(os.path.join(out, "truth_arm_cn.tsv.gz"), sep="\t")
+    calls = pd.read_csv(os.path.join(out, "calls.tsv.gz"), sep="\t", dtype={"clone": str})
+    cna = pd.read_csv(os.path.join(out, "cn_arm.tsv.gz"), sep="\t") if os.path.exists(
+        os.path.join(out, "cn_arm.tsv.gz")) else pd.DataFrame(columns=["run"])
+    with open(os.path.join(out, "runs.json")) as f:
+        runs = json.load(f)["runs"]
+    rows = []
+    for name, tool, assay, _, _ in RUNS:
+        c = calls[calls["run"] == name]
+        if not len(c):
+            continue
+        bc = bc_all[bc_all["assay"] == assay].set_index("barcode")
+        true_cn = tcn[tcn["assay"] == assay].drop(columns="assay")
+        cn = cna[cna["run"] == name].drop(columns=["run", "assay"], errors="ignore")
+        rr = ST.score_niches_frames(bc, true_cn, c.drop(columns=["run", "assay"]).set_index("barcode"),
+                                    cn if len(cn) else None)
+        wall = (runs.get(name, {}).get("run_json") or {}).get("wall_s", runs.get(name, {}).get("wall_s"))
+        for r in rr:
+            rows.append(dict(tool=tool + ("-ref" if name.endswith("-ref") else ""), run=name, assay=assay,
+                             wall_s=wall, **r))
+    df = pd.DataFrame(rows)
+    df.to_csv(os.path.join(out, "scores.csv"), index=False)
+    return df
+
+
 def main():
     import score_tools as ST
     ap = argparse.ArgumentParser()
@@ -202,9 +236,14 @@ def main():
     ap.add_argument("--section-max-cells", type=int, default=F.SECTION_MAX_CELLS)
     ap.add_argument("--cores", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", 1)))
     ap.add_argument("--only", default=None, help="comma-separated run names (default all)")
+    ap.add_argument("--rescore", action="store_true", help="score the persisted runs again, nothing else")
     a = ap.parse_args()
     tag = f"{a.run}_{a.task}"
     out = os.path.join(a.out, "b", tag)
+    if a.rescore:
+        with pd.option_context("display.width", 200, "display.max_columns", 20):
+            print(score_dir(out).round(3).to_string(index=False))
+        return
     os.makedirs(out, exist_ok=True)
     work = os.path.join(a.work, f"b_{tag}")
     os.makedirs(work, exist_ok=True)
@@ -215,34 +254,39 @@ def main():
         print("built:", json.dumps(info), flush=True)
         import gc
         gc.collect()
+        bc_all[["assay", "barcode", "malignant", "tumour_fraction", "compartment", "hypoxia"]].to_csv(
+            os.path.join(out, "barcodes.tsv.gz"), sep="\t", index=False)
+        pd.concat([pd.read_csv(os.path.join(truth_dir, f"{x}_arm_cn.tsv"), sep="\t").assign(assay=x)
+                   for x in ("scrna", "visium")])[["assay", "barcode", "arm", "cn"]].round(4).to_csv(
+            os.path.join(out, "truth_arm_cn.tsv.gz"), sep="\t", index=False)
         status = run_tools(datasets, work, a.cores, None if a.only is None else a.only.split(","))
-        rows, calls = [], []
+        calls, cns = [], []
         for name, tool, assay, _, _ in RUNS:
             st = status.get(name)
             rd = os.path.join(work, "runs", name)
             if st is None or st["exit"] != 0 or not os.path.exists(os.path.join(rd, "run.json")):
                 continue
-            bc, true_cn = ST._truth(truth_dir, assay)
-            rr, rinfo = ST.score_niches(bc, true_cn, rd)
-            st["run_json"] = rinfo
-            for r in rr:
-                rows.append(dict(tool=tool + ("-ref" if name.endswith("-ref") else ""), run=name, assay=assay,
-                                 wall_s=rinfo.get("wall_s", st["wall_s"]), **r))
-            c = pd.read_csv(os.path.join(rd, "calls.tsv"), sep="\t", dtype={"clone": str})
-            calls.append(c.assign(run=name, assay=assay))
-        pd.DataFrame(rows).to_csv(os.path.join(out, "scores.csv"), index=False)
+            with open(os.path.join(rd, "run.json")) as f:
+                st["run_json"] = json.load(f)
+            calls.append(pd.read_csv(os.path.join(rd, "calls.tsv"), sep="\t", dtype={"clone": str}).assign(
+                run=name, assay=assay))
+            p = os.path.join(rd, "cn_arm.tsv")
+            if os.path.exists(p) and os.path.getsize(p) > 0:
+                cns.append(pd.read_csv(p, sep="\t").assign(run=name, assay=assay))
         if calls:
             pd.concat(calls, ignore_index=True)[["run", "assay", "barcode", "malignant", "p_malignant", "clone"]].to_csv(
                 os.path.join(out, "calls.tsv.gz"), sep="\t", index=False)
-        bc_all[["assay", "barcode", "malignant", "tumour_fraction", "compartment", "hypoxia"]].to_csv(
-            os.path.join(out, "barcodes.tsv.gz"), sep="\t", index=False)
+        if cns:
+            pd.concat(cns, ignore_index=True)[["run", "assay", "barcode", "arm", "value", "scale"]].round(5).to_csv(
+                os.path.join(out, "cn_arm.tsv.gz"), sep="\t", index=False)
         with open(os.path.join(out, "runs.json"), "w") as f:
             json.dump(dict(run=a.run, task=a.task, commit=F._commit(), paper_out=os.environ.get("ISCC_PAPER_OUT"),
                            section_max_cells=a.section_max_cells, data=info, runs=status), f, indent=1, default=str)
         failed = {k: v["exit"] for k, v in status.items() if v["exit"] != 0}
         print("failed runs:", failed or "none", flush=True)
-        with pd.option_context("display.width", 200, "display.max_columns", 20):
-            print(pd.DataFrame(rows).round(3).to_string(index=False), flush=True)
+        if calls:
+            with pd.option_context("display.width", 200, "display.max_columns", 20):
+                print(score_dir(out).round(3).to_string(index=False), flush=True)
     finally:
         if os.environ.get("FIG4_KEEP_WORK") != "1":
             shutil.rmtree(work, ignore_errors=True)
