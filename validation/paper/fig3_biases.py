@@ -233,6 +233,26 @@ def compute_b():
 
 # --- c. scDNA ------------------------------------------------------------------------------------
 ADO_RATES = (0.0, 0.15, 0.3, 0.45, 0.6)
+# Allelic dropout is scored at copy-balanced het sites on both sides, which is what the estimator's
+# model assumes (a het BAF around 0.5). Counting every simulated observation with a true alt fraction in
+# (0.15, 0.85) as "het" mixes in imbalanced sites: on the doubled v4 showcase 92% of them sit at 1:3,
+# 1:2 or 1:4, whose extreme BAFs at panel depth look like dropout (15.5% extreme at ado_rate 0, against
+# 2.6% at balanced sites; wt/fig3-jobs/diag/ado_het.py, job 5338433). Real het sites count as balanced
+# at a called copy number of two.
+BALANCED_AF = 0.05
+
+
+def _het_balanced_real(z):
+    """Real het observations at called copy number two (1:1), as a (cell, locus) mask."""
+    cn = np.atleast_2d(np.asarray(z["cn"], float))
+    het = np.asarray(z["het_mask"], bool)
+    het = np.broadcast_to(het, cn.shape) if het.ndim == 1 else np.atleast_2d(het)
+    return het & (np.rint(cn) == 2)
+
+
+def _het_balanced_sim(s):
+    """Simulated observations whose true alt fraction is 0.5 (within BALANCED_AF): 1:1 or 2:2 sites."""
+    return np.abs(s.true_alt_fraction.values - 0.5) < BALANCED_AF
 
 
 def compute_c():
@@ -265,8 +285,17 @@ def compute_c():
                    ado_fitted="ado_rate" in est.fitted)
         if name == "Tapestri":
             ado = [_sc_stats(VD, run(ado_rate=a))[1] for a in ADO_RATES]
+            fit_run = run()
             rec.update(ado_fit=float(est.hypers.ado_rate), ado_sweep=ado,
-                       ado_real=VD._ado_frac(VD._baf_at_hets(z["alt"], z["coverage"], z["het_mask"])))
+                       ado_real=VD._ado_frac(VD._baf_at_hets(z["alt"], z["coverage"], _het_balanced_real(z))),
+                       # the earlier measure, every het site on both sides, kept for the record
+                       ado_real_allhet=VD._ado_frac(VD._baf_at_hets(z["alt"], z["coverage"], z["het_mask"])),
+                       ado_iscc_allhet=VD._ado_frac(VD._baf_at_hets(fit_run.alt_counts.values,
+                                                                    fit_run.coverage.values,
+                                                                    VD._het_obs_assay_sc(fit_run))),
+                       share_balanced_sim=float(_het_balanced_sim(fit_run)[VD._het_obs_assay_sc(fit_run)].mean()))
+            # panel c's headline (left["_ado"], computed by fig2_realism over every het site) at balanced sites
+            left.setdefault("_ado", {})["Tapestri"] = [rec["ado_real"], _sc_stats(VD, fit_run)[1]]
         out[name] = rec
     # The package's own single-cell defaults (scDNA.mode_defaults: kappa 5, ado_rate 0.20, no kappa_loci),
     # recorded for the report; at whole-genome breadth kappa 5 spreads very few reads over thousands of loci.
@@ -279,9 +308,10 @@ def compute_c():
 
 
 def _sc_stats(VD, s):
-    """Coverage CV at two copies (median over cells) and measured allelic dropout of an scDNA run."""
+    """Coverage CV at two copies (median over cells) and measured allelic dropout of an scDNA run, at
+    copy-balanced het sites."""
     cv = _f2()._cv_by_state(s.coverage.values.astype(float), s.true_cn.values).get(2)
-    ado = VD._ado_frac(VD._baf_at_hets(s.alt_counts.values, s.coverage.values, VD._het_obs_assay_sc(s)))
+    ado = VD._ado_frac(VD._baf_at_hets(s.alt_counts.values, s.coverage.values, _het_balanced_sim(s)))
     return cv, ado
 
 
@@ -500,7 +530,8 @@ def render_c(fig, y):
     ax.set_ylabel("Coverage CV")
     _legend(ax, loc="upper right")
     if "Tapestri" in ado:
-        S.stat(ax, f"Tapestri allelic dropout:\nreal {ado['Tapestri'][0]:.2f}, iscc {ado['Tapestri'][1]:.2f}", "upper left")
+        S.stat(ax, f"Tapestri allelic dropout, balanced het sites:\nreal {ado['Tapestri'][0]:.2f}, "
+                   f"iscc {ado['Tapestri'][1]:.2f}", "upper left")
     ax = axs[1]
     i_fit = d["kappa_x"].index(1.0)
     for name, col in (("DLP+", SWEEP[-1]), ("Tapestri", SWEEP[1])):
@@ -523,7 +554,7 @@ def render_c(fig, y):
     ax.set_xticklabels(["0.1", "0.2", "0.5", "1", "2"])
     ax.xaxis.set_minor_formatter(__import__("matplotlib").ticker.NullFormatter())
     ax.set_xlabel("Coverage CV, two copies")
-    ax.set_ylabel("Allelic dropout")
+    ax.set_ylabel("Allelic dropout\n(balanced het sites)")
     ax.set_ylim(0, 0.95)
     _legend(ax, loc="upper left", ncol=2, fontsize=3.8, columnspacing=0.6)
     ax.set_title("lines: amplification concentration 0.1-10x fit", fontsize=5)
