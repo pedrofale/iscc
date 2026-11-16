@@ -598,7 +598,8 @@ def print_summary(rec):
 # the figure
 # ---------------------------------------------------------------------------------------------------
 LABEL = {"10x": "10x", "smartseq3": "Smart-seq3", "smartseq3_10xdepth": "Smart-seq3, 10x depth",
-         "visium": "Visium", "bulk": "Bulk WGS", "scdna_site": "scDNA", "scdna_bin": "scDNA (bin reads)"}
+         "visium": "Visium", "bulk": "Bulk WGS", "scdna_site": "scDNA (reads over the site)",
+         "scdna_bin": "scDNA (bin reads, as emitted)"}
 DRAWN = ("10x", "smartseq3", "smartseq3_10xdepth", "visium", "bulk", "scdna_site")
 CELL_DRAWN = ("10x", "smartseq3", "smartseq3_10xdepth", "visium", "scdna_site")
 TASK_ORDER = ("seed1", "seed2", "disp0.1_seed1", "disp0.9_seed1", "disp0.9_seed2")
@@ -628,13 +629,18 @@ def collect(out_dir):
     return [recs[t] for t in order]
 
 
-ERR_ALPHA = 1e-3      # an error-aware call: >= MIN_ALT_SITE alt reads AND P(Binomial(total, ERROR_RATE) >= alt) < this
+ERR_ALPHA = 1e-3      # the drawn site call: >= MIN_ALT_SITE alt reads AND P(Binomial(total, ERROR_RATE) >= alt) < this
+
+
+SITE_CALL = (f"error-aware: >= {MIN_ALT_SITE} alt reads pooled over the assay's cells (spots) AND "
+             f"P(Binomial(total, {ERROR_RATE}) >= alt) < {ERR_ALPHA} (the error floor)")
 
 
 def error_aware(recs):
-    """The site-level calls redone from each tumour's sites.tsv.gz with the error floor taken into account (a
-    diagnostic beside the >= 2-alt-read rule, which a deep pooled assay passes on error reads alone). Same shape
-    as ``numbers()["site_level"]`` (only the "all" part) and ``["specificity"]``."""
+    """The drawn site calls, from each tumour's sites.tsv.gz: >= MIN_ALT_SITE pooled alt reads AND a binomial tail
+    below ERR_ALPHA against the error floor (the >= 2-read rule alone is passed on error reads by a deep pooled
+    assay). Per assay: ``all``, ``in_window`` and ``out_window`` (the site within 1,000 bases of the 3' end or not),
+    each with its frequency bins; and the calls at non-mutated sites."""
     from scipy.stats import binom
     site, spec = {}, {}
     for k in ASSAYS:
@@ -647,24 +653,31 @@ def error_aware(recs):
             call = (alt >= MIN_ALT_SITE) & (binom.sf(alt - 1, tot, ERROR_RATE) < ERR_ALPHA)
             sfx = "sec" if k == "visium" else "dis"
             som, non = s[f"somatic_{sfx}"].to_numpy() == 1, s[f"nonmut_{sfx}"].to_numpy() == 1
-            acc.append((r["task"], call, som, non, freq_bin(s[f"freq_{sfx}"].to_numpy())))
+            win = s["in_3p_window"].to_numpy() == 1
+            acc.append((r["task"], call, som, non, freq_bin(s[f"freq_{sfx}"].to_numpy()), win))
         if not acc:
             continue
-        bins = []
-        for kb in range(len(FREQ_LABELS)):
-            n = sum(int((som & (b == kb)).sum()) for _, call, som, non, b in acc)
-            d = sum(int((call & som & (b == kb)).sum()) for _, call, som, non, b in acc)
-            bins.append(dict(bin=FREQ_LABELS[kb], n_sites=n, n_detected=d, share=_share(d, n),
-                             per_tumour={t: _share((call & som & (b == kb)).sum(), (som & (b == kb)).sum())
-                                         for t, call, som, non, b in acc}))
-        n = sum(int(som.sum()) for _, call, som, non, b in acc)
-        d = sum(int((call & som).sum()) for _, call, som, non, b in acc)
-        site[k] = {"all": dict(n_sites=n, n_detected=d, share=_share(d, n), by_bin=bins,
-                               per_tumour={t: _share((call & som).sum(), som.sum()) for t, call, som, non, b in acc})}
-        nn = sum(int(non.sum()) for _, call, som, non, b in acc)
-        nf = sum(int((call & non).sum()) for _, call, som, non, b in acc)
+        site[k] = {}
+        for part in ("all", "in_window", "out_window"):
+            def m(w):
+                return np.ones_like(w) if part == "all" else (w if part == "in_window" else ~w)
+            bins = []
+            for kb in range(len(FREQ_LABELS)):
+                n = sum(int((som & m(w) & (b == kb)).sum()) for _, call, som, non, b, w in acc)
+                d = sum(int((call & som & m(w) & (b == kb)).sum()) for _, call, som, non, b, w in acc)
+                bins.append(dict(bin=FREQ_LABELS[kb], n_sites=n, n_detected=d, share=_share(d, n),
+                                 per_tumour={t: _share((call & som & m(w) & (b == kb)).sum(), (som & m(w) & (b == kb)).sum())
+                                             for t, call, som, non, b, w in acc}))
+            n = sum(int((som & m(w)).sum()) for _, call, som, non, b, w in acc)
+            d = sum(int((call & som & m(w)).sum()) for _, call, som, non, b, w in acc)
+            site[k][part] = dict(n_sites=n, n_detected=d, share=_share(d, n), by_bin=bins,
+                                 per_tumour={t: _share((call & som & m(w)).sum(), (som & m(w)).sum())
+                                             for t, call, som, non, b, w in acc})
+        nn = sum(int(non.sum()) for _, call, som, non, b, w in acc)
+        nf = sum(int((call & non).sum()) for _, call, som, non, b, w in acc)
         spec[k] = dict(n_nonmut=nn, n_false=nf, false_share=_share(nf, nn), alpha=ERR_ALPHA, error_rate=ERROR_RATE,
-                       per_tumour={t: _share((call & non).sum(), non.sum()) for t, call, som, non, b in acc})
+                       per_tumour={t: dict(n_false=int((call & non).sum()), n_nonmut=int(non.sum()))
+                                   for t, call, som, non, b, w in acc})
     return site, spec
 
 
@@ -675,7 +688,8 @@ def numbers(recs):
                share_genes_in_3p_window=recs[0]["share_genes_in_window"],
                share_somatic_in_3p_window={r["task"]: r["dissociated"]["share_somatic_in_window"] for r in recs},
                sites={r["task"]: dict(dissociated=r["dissociated"], section=r["section"]) for r in recs},
-               site_level={}, specificity={}, cell_level={}, cardelino={})
+               site_call_drawn=SITE_CALL,
+               site_level_min2_only_not_drawn={}, specificity_min2_only_not_drawn={}, cell_level={}, cardelino={})
     for k in ASSAYS:
         rs = [r for r in recs if k in r["assays"]]
         if not rs:
@@ -695,9 +709,9 @@ def numbers(recs):
             d = sum(x["n_detected"] for x in src)
             pooled[part] = dict(n_sites=n, n_detected=d, share=_share(d, n), by_bin=bins,
                                 per_tumour={r["task"]: _share(x["n_detected"], x["n_sites"]) for r, x in zip(rs, src)})
-        num["site_level"][k] = pooled
+        num["site_level_min2_only_not_drawn"][k] = pooled
         nf, nn = sum(x["n_false"] for x in s), sum(x["n_nonmut"] for x in s)
-        num["specificity"][k] = dict(n_nonmut=nn, n_false=nf, false_share=_share(nf, nn),
+        num["specificity_min2_only_not_drawn"][k] = dict(n_nonmut=nn, n_false=nf, false_share=_share(nf, nn),
                                      per_tumour={r["task"]: _share(x["n_false"], x["n_nonmut"]) for r, x in zip(rs, s)})
         if all("cell" in r["assays"][k] for r in rs):
             c = [r["assays"][k]["cell"] for r in rs]
@@ -719,17 +733,30 @@ def numbers(recs):
                                            n_variants=r["cardelino_config"]["n_variants"],
                                            n_variants_dna_config=r.get("cardelino_dna_config", {}).get("n_variants"),
                                            checks=r["checks"],
-                                           arms={k: {f: v.get(f) for f in ("balanced_accuracy", "accuracy",
-                                                                            "share_prob_above_half", "share_cells_no_read",
-                                                                            "mean_reads_per_cell_variant",
-                                                                            "confident_balanced_accuracy", "failed")}
-                                                 for k, v in r["cardelino"].items()})
+                                           arms={k: dict({f: v.get(f) for f in (
+                                               "balanced_accuracy", "accuracy", "share_prob_above_half",
+                                               "share_cells_no_read", "mean_reads_per_cell_variant",
+                                               "confident_balanced_accuracy", "failed", "superseded")},
+                                               n_iter=v.get("run", {}).get("n_iter"),
+                                               min_iter=v.get("run", {}).get("min_iter"),
+                                               max_iter=v.get("run", {}).get("max_iter"))
+                                               for k, v in r["cardelino"].items()})
     return num
 
 
-def draw(recs, num, rule="min_alt"):
-    """rule "min_alt": the >= 2-alt-read call (the spec); "error_aware": that call AND the binomial test against
-    the error floor (``error_aware``)."""
+def specificity_note(spec_num):
+    """Panel b's one-line account of the calls at non-mutated sites (drawn assays)."""
+    ks = [k for k in DRAWN if k in spec_num]
+    n_dis = sorted({spec_num[k]["n_nonmut"] for k in ks if k != "visium"})
+    n_vis = spec_num["visium"]["n_nonmut"] if "visium" in spec_num else None
+    if all(spec_num[k]["n_false"] == 0 for k in ks):
+        n = "/".join(str(x) for x in n_dis)
+        return f"no non-mutated site called in any assay (n = {n}" + (f"; Visium {n_vis})" if n_vis is not None else ")")
+    return "non-mutated sites called: " + ", ".join(f"{LABEL[k]} {spec_num[k]['n_false']}/{spec_num[k]['n_nonmut']}"
+                                                     for k in ks)
+
+
+def draw(recs, num):
     import matplotlib.pyplot as plt
     from matplotlib.patches import FancyBboxPatch, Rectangle
     import style as S
@@ -741,7 +768,7 @@ def draw(recs, num, rule="min_alt"):
     S.panel_letter(fig, "a", 2, 3)
     ax = S.ax_mm(fig, 6, 9, 80, 44)
     ax.set_xlim(-0.6, 10.4)
-    ax.set_ylim(-1.1, 6.4)
+    ax.set_ylim(-2.0, 6.4)
     ax.axis("off")
     L, W = 10.0, 3.9            # transcript drawn 0..L (5'..3'), window the last W (1,000 of ~2,500 b)
     rng = np.random.default_rng(3)
@@ -766,16 +793,18 @@ def draw(recs, num, rule="min_alt"):
             ax.text(sx, y - 0.26, "read" if seen else "not read", ha="center", va="top", fontsize=4.5,
                     color=S.INK if seen else S.GREY)
     share = num["share_genes_in_3p_window"]
-    ax.text(-0.5, -1.05, "Transcript length log-normal (median 2,500 b), the site uniform along it:\n"
+    bin_kb = num["scdna_thinning"]["median_bin_len"] / 1000
+    ax.text(-0.5, -1.95, "Transcript length log-normal (median 2,500 b), the site uniform along it:\n"
             f"{share:.0%} of sites lie in the 3′ window. Within reach, a molecule is read at\n"
-            "the site with probability 0.1 (as germline SNPs).", ha="left", va="bottom", fontsize=5.0, color=S.INK,
+            "the site with probability 0.1 (as germline SNPs).\n"
+            f"scDNA (reads over the site): Fig 4c's DLP+ reads per bin (median {bin_kb:.0f} kb)\n"
+            f"thinned to those over the site, assuming {DLP_READ_LEN}-bp reads and one read per bin read.", ha="left", va="bottom", fontsize=5.0, color=S.INK,
             linespacing=1.3)
 
     # (b) site-level detection ------------------------------------------------------------------------
     S.panel_letter(fig, "b", 94, 3)
-    site_num = num["site_level"] if rule == "min_alt" else num["site_level_error_aware"]
-    spec_num = num["specificity"] if rule == "min_alt" else num["specificity_error_aware"]
-    ax = S.ax_mm(fig, 102, 15, 50, 34)
+    site_num, spec_num = num["site_level_error_aware"], num["specificity_error_aware"]
+    ax = S.ax_mm(fig, 104, 15, 76, 34)
     xs = np.arange(len(FREQ_LABELS))
     for i, k in enumerate(DRAWN):
         sl = site_num.get(k)
@@ -791,33 +820,22 @@ def draw(recs, num, rule="min_alt"):
     ax.set_xticks(xs)
     ax.set_xticklabels(FREQ_LABELS)
     ax.set_xlabel("Site frequency among cancer cells")
-    ax.set_ylabel(f"Somatic sites called\n(≥{MIN_ALT_SITE} alt reads" + (")" if rule == "min_alt" else ", above error)"))
-    ax.set_ylim(-0.02, 1.02)
+    ax.set_ylabel(f"Somatic sites called\n(≥{MIN_ALT_SITE} alt reads, above error)")
+    ax.set_ylim(-0.02, 1.13)                       # headroom above 1 for the note
+    ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
+    ax.spines["left"].set_bounds(0, 1)
     ax.legend(loc="lower left", bbox_to_anchor=(-0.02, 1.01), fontsize=5.0, ncol=3, handlelength=1.6,
               columnspacing=0.8)
-    # false calls at non-mutated sites
-    ax = S.ax_mm(fig, 163, 15, 17, 34)
-    ks = [k for k in DRAWN if k in spec_num]
-    v = [spec_num[k]["false_share"] for k in ks]
-    ax.barh(np.arange(len(ks))[::-1], v, color=[col[k] for k in ks], height=0.7)
-    ax.set_yticks(np.arange(len(ks))[::-1])
-    ax.set_yticklabels([])
-    ax.tick_params(axis="y", length=0)
-    for j, (k, x) in enumerate(zip(ks, v)):
-        ax.plot(0, len(ks) - 1 - j, marker="s", ms=2.6, color=col[k], ls="none", clip_on=False, zorder=3)
-        ax.text(x, len(ks) - 1 - j, f"  {x:.2f}" if x >= 0.005 else f"  {x:.3f}", va="center", ha="left", fontsize=4.8)
-    ax.set_xlim(0, max(0.05, max(v) * 1.6))
-    ax.set_xlabel("Non-mutated sites\ncalled (share)")
-    S.despine(ax, left=False)
+    ax.text(xs[0] - 0.25, 1.125, specificity_note(spec_num), ha="left", va="top", fontsize=5.0, color=S.INK)
 
     # (c) cell-level detection --------------------------------------------------------------------------
     S.panel_letter(fig, "c", 2, 64)
     ks = [k for k in CELL_DRAWN if k in num["cell_level"]]
     lab = [LABEL[k] + (" (spots)" if num["cell_level"][k]["unit"] == "spot" else "") for k in ks]
     for j, (metric, xl, logx, x0) in enumerate((("share_detected", "Carrier cell–site pairs\nwith ≥1 alt read",
-                                                 False, 30),
-                                                ("mean_depth", "Mean reads over the site\nper carrier pair", False, 62))):
-        ax = S.ax_mm(fig, x0, 70, 24, 38)
+                                                 False, 36),
+                                                ("mean_depth", "Mean reads over the site\nper carrier pair", False, 66))):
+        ax = S.ax_mm(fig, x0, 70, 22, 38)
         yy = np.arange(len(ks))[::-1]
         val = [num["cell_level"][k]["all"][metric] for k in ks]
         ax.barh(yy, val, color=[col[k] for k in ks], height=0.68)
@@ -865,7 +883,7 @@ def draw(recs, num, rule="min_alt"):
     ax.set_ylim(0, 1.0)
     ax.set_ylabel("cardelino balanced accuracy")
     ax.legend(loc="lower left", bbox_to_anchor=(0.0, 1.0), ncol=5, fontsize=5.0, handlelength=1.2)
-    return S.save(fig, "supp_snv" if rule == "min_alt" else "supp_snv_error_aware")
+    return S.save(fig, "supp_snv")
 
 
 def make_figure(out_dir, fig4_c=None):
@@ -882,10 +900,9 @@ def make_figure(out_dir, fig4_c=None):
                 num["cardelino"][r["task"]]["fig4c_clonealign"] = dict(
                     truth_arm=fine["truth_arm"]["balanced_accuracy"], dna_arm=fine["dna_arm"]["balanced_accuracy"],
                     chance=fine["chance"])
+    num["scdna_thinning"] = recs[0]["assays"]["scdna_site"]["thinning"]
     path = draw(recs, num)
-    path_e = draw(recs, num, rule="error_aware")
     num["figure"] = [path, path[:-4] + ".png"]
-    num["figure_error_aware"] = [path_e, path_e[:-4] + ".png"]
     with open(os.path.join(out_dir, "supp_snv_numbers.json"), "w") as f:
         json.dump(num, f, indent=1, default=lambda x: x.item() if hasattr(x, "item") else str(x))
     print("figure:", path, flush=True)
