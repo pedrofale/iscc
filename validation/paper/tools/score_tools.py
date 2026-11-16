@@ -162,11 +162,15 @@ def score_niches_frames(bc, true_cn, calls, cn, min_class=10):
         sc = s.reindex(sub.index)
         ok = sc.notna().to_numpy()
         n_pos, n_neg = int(y[ok].sum()), int((1 - y[ok]).sum())
-        auc = (float(roc_auc_score(y[ok], sc[ok])) if min(n_pos, n_neg) >= min_class and sc[ok].nunique() > 1
-               else (0.5 if min(n_pos, n_neg) >= min_class else np.nan))
-        r, scale = _cn_r(cn, sub.index[y.astype(bool).to_numpy()], true_cn)
         n_epi = int(((1 - y).astype(bool) & (sub["epithelial"].astype(int) > 0)).sum()) if "epithelial" in sub \
             else None
+        # with an epithelial column the normal class must hold at least min_class barcodes of normal
+        # epithelium (a Visium "normal" spot can be a stroma spot with a minority of cancer cells)
+        n_neg_gate = n_neg if n_epi is None else int(((1 - y[ok]).astype(bool)
+                                                       & (sub["epithelial"][ok].astype(int) > 0)).sum())
+        enough = n_pos >= min_class and n_neg >= min_class and n_neg_gate >= min_class
+        auc = (float(roc_auc_score(y[ok], sc[ok])) if enough and sc[ok].nunique() > 1 else (0.5 if enough else np.nan))
+        r, scale = _cn_r(cn, sub.index[y.astype(bool).to_numpy()], true_cn)
         rows.append(dict(niche=niche, n=int(len(sub)), n_malignant=int(y.sum()), n_normal=int((1 - y).sum()),
                          n_normal_with_epithelium=n_epi, n_scored=int(ok.sum()), auc=auc, cn_r=r, cn_scale=scale))
     return rows

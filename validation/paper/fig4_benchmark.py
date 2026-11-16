@@ -187,7 +187,7 @@ def panel_b(fig, ov, nums):
     h = [Line2D([], [], marker="o", ls="none", mfc=c, mec="white", ms=3.4, label=l) for l, c in NICHE.values()]
     h.append(Line2D([], [], color=S.INK, lw=1.2, label="mean over tumours"))
     S.text_mm(fig, 36, 53.0, "Reference: the non-epithelial normals (Visium: their spots). AUC on epithelial-lineage "
-              "barcodes, cancer against normal (spot: half its cells cancer); drawn where a niche has 10 normal",
+              "barcodes, cancer vs. not (spot: half its cells cancer), where a niche holds \u226510 normal epithelial",
               fontsize=4.2, color=S.GREY, va="top")
     fig.legend(handles=h, loc="upper left", bbox_to_anchor=(36 / 183, 1 - 48.6 / FIG_H), ncol=4, fontsize=4.8,
                frameon=False)
