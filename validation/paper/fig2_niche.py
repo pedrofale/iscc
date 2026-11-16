@@ -15,7 +15,7 @@ The panels of the figure plan (vault: roadmap/paper1-figure-plan, "Fig 2"):
       seeding marked; (ii) across R12's 20 seeds, the lineages founding each metastasis, and the
       release, first invasion and seeding as fractions of the primary's age;
   (f) against real tumours: fig2_realism.py's panels a and c, from summaries.py's caches of R1-R5;
-  (g) speed: wall time and peak memory of one run against cancer cells (the v3 runtime logs).
+  (g) speed: wall time and peak memory of one run against cancer cells (the v4 runtime logs).
 
 Definitions used throughout:
   * compartments: gland = primary demes of a gland (lumen or wall, ``gland_id >= 0``); stroma =
@@ -78,7 +78,8 @@ WINDOW = 10.0            # generations after the first invasion in which crossin
 # about a third of the median time from first invasion to the target size in R10's barrier arm
 SHOWCASE = "R0/seed1"
 STAND_IN = "R12/seed1"   # panel a and e(i) are built and tested on it until R0 is grown
-RUNTIME_LOGS = "/nobackup/proj/disk/naiss2025-22-1610/personal/pedrof/iscc/logs/runtime-v3"
+RUNTIME_LOGS = "/nobackup/proj/disk/naiss2025-22-1610/personal/pedrof/iscc/logs/runtime-v4"
+RUNTIME_VARIANT = "v4"                          # the regime the runtime runs grew on
 # Line colours of the three compartments (darker versions of style.COMPARTMENT's tissue fills) and of
 # where a clone's cells live in the tree of panel e.
 LINE = {"gland": S.COMPARTMENT["epithelium"], "stroma": "#B8875A", "met": "#3E7CB1"}
@@ -598,7 +599,7 @@ def _parse_runtime_log(path):
 
 def compute_g(logdir):
     rows = [r for r in (_parse_runtime_log(p) for p in sorted(glob.glob(os.path.join(logdir, "*.out"))))
-            if r and r["tool"] == "iscc" and r["variant"] == "v3"]
+            if r and r["tool"] == "iscc" and r["variant"] == RUNTIME_VARIANT]
     _write("g", dict(logdir=logdir, rows=rows))
     print(f"part g: {len(rows)} completed runs from {logdir}")
 
