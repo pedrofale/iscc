@@ -12,9 +12,9 @@ The tools do different work in a run, which the legend states for each; the pane
 costs, not which tool is faster at the same work, and the figure says so. demon grows the tumour only
 (the demon match's selection settings: K 16, invasion at 0.1, drivers only).
 
-iscc is shown as the paper runs it on regime v3 (variant ``v3``: binomial tau-leaping with the
+iscc is shown as the paper runs it on regime v4 (variant ``v4``: binomial tau-leaping with the
 Cao-Gillespie-Petzold step, the tumour grown, resected, sectioned and put through Visium;
-``comparisons/iscc_runtime_v3.py``). The earlier iscc variants, timed on the old tau-leaping, stay in
+``comparisons/iscc_runtime_v4.py``). The earlier iscc variants (v3 and those timed on the old tau-leaping) stay in
 the CSV and are not drawn. Failed attempts are left out; they are kept in the CSV with ``ok`` False.
 A run cancelled before it finished is drawn in the wall-time panel as a hollow upward triangle at the
 lower bound of its wall time (``wall_lower_s``). Two of demon's five 75,000-cell runs stopped on demon's
@@ -47,7 +47,7 @@ LABEL = {"iscc": "iscc: grow, resect, section, Visium", "demon": "demon: grow (d
          "OncoSpot": "OncoSpot: end to end",
          "stCNASim": "stCNASim: spots, counts, reads",
          "CINner": "CINner: grow, sample, phylogeny", "SISTEM": "SISTEM: grow, sample, read counts"}
-ISCC_VARIANT = "v3"
+ISCC_VARIANT = "v4"
 
 
 def _series(ax, sub, col, colour, **kw):
