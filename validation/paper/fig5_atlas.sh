@@ -5,7 +5,9 @@
 #     [ISCC_TOOLS_DIR=<images>] [AFTER=<job id>] validation/paper/fig5_atlas.sh
 #
 # STEP is
-#   pilot          an array, one tumour per task (arm x grid x patient), 1 CPU each;
+#   pilot          an array, one tumour per task (arm x grid x patient), 1 CPU each; SIZES=s0,...,s6
+#                  grows one grid at those sizes instead of the registered grid (a confirming round;
+#                  EXTRA="--grid-name r2" names it);
 #   pilot-collect  one small job;
 #   grow           an array, one cohort patient per task; needs SIZES=s0,...,s6 (E0..E6);
 #   integrate      one job per batch level: LEVEL=10x|strong|intermediate (16 CPUs: two scVI runs of
@@ -31,9 +33,9 @@ case "$STEP" in
   pilot|grow)
     export ISCC_PAPER_TIER=full
     [ "$STEP" = grow ] && : "${SIZES:?set SIZES=s0,...,s6 for grow}"
-    N=$(PYTHONPATH="$REPO/src" "$ISCC_ENV/bin/python" "$HERE/fig5_atlas.py" count "$STEP" ${NP:-})
     SZ=${SIZES:+--sizes $SIZES}
-    "${SB[@]}" -J "fig5a-$STEP" -c 1 --mem="${MEM:-16G}" -t "${TIME:-06:00:00}" \
+    N=$(PYTHONPATH="$REPO/src" "$ISCC_ENV/bin/python" "$HERE/fig5_atlas.py" count "$STEP" ${NP:-} ${SZ:-})
+    "${SB[@]}" -J "fig5a-$STEP" -c 1 --mem="${MEM:-8G}" -t "${TIME:-01:00:00}" \
       --array="0-$((N - 1))%${MAX_PARALLEL:-100}" -o "$LOGS/%x-%A_%a.out" \
       --wrap "export TMPDIR=\$SNIC_TMP; $PY $STEP \$SLURM_ARRAY_TASK_ID ${NP:-} ${ES:-} ${SZ:-} ${EXTRA:-}" ;;
   pilot-collect)

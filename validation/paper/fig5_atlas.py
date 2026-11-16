@@ -173,19 +173,27 @@ def _cost(t, c0, t0):
 
 
 # ================================================================== the pilot
-def pilot_tasks(n):
-    return [(arm, g, k) for arm in PILOT_ARMS for g in PILOT_GRID for k in range(n)]
+def pilot_grid(args):
+    """The grids of module sizes a pilot submission grows: PILOT_GRID, or one custom grid
+    (``--sizes``, named ``--grid-name``) for a confirming round at chosen sizes."""
+    sizes = getattr(args, "sizes", None)
+    return {args.grid_name: tuple(sizes)} if sizes else dict(PILOT_GRID)
+
+
+def pilot_tasks(n, grid=PILOT_GRID):
+    return [(arm, g, k) for arm in PILOT_ARMS for g in grid for k in range(n)]
 
 
 def pilot(args):
     from iscc.integrations import event_cell_fractions
     from iscc.tumor.diagnostics import division_cap_share
     n = args.n_patients or len(PILOT_SEEDS)
-    arm, grid, k = pilot_tasks(n)[args.task]
+    grids = pilot_grid(args)
+    arm, grid, k = pilot_tasks(n, grids)[args.task]
     seeds = PILOT_SEEDS[:n]
     targets = ([args.target] * n if args.target else pilot_targets(n, args.target_range))
     scale, spatial = field(args)
-    sizes = PILOT_GRID[grid]
+    sizes = grids[grid]
     planted = scaled(PILOT_ARMS[arm], args.effect_scale)
     ep = epistasis(sizes, planted)
     t0, c0 = time.time(), F._cpu()
@@ -254,7 +262,10 @@ def pilot_collect(args):
             lam = _fit_rate([r["sizes"][e] for r in rs], [r["present"][e] for r in rs])
             fits[arm][name] = dict(rate_per_gene=round(lam, 4), predicted={
                 str(s): round(1 - math.exp(-lam * s), 3) for s in range(1, 13)})
-    summary = dict(step="pilot-collect", commit=F._commit(), detection=DETECTION, grid=PILOT_GRID,
+    grids = {}
+    for r in recs:
+        grids[r["grid"]] = r["sizes"]
+    summary = dict(step="pilot-collect", commit=F._commit(), detection=DETECTION, grid=grids,
                    names=EVENT_NAMES, n_records=len(recs), cells=cells, fits=fits,
                    note="each event's presence at 5% detection, the cap share and the cost only; "
                         "no dependency between events is computed")
@@ -761,7 +772,7 @@ def collect(args):
 # ================================================================== CLI
 def count(args):
     if args.what == "pilot":
-        return len(pilot_tasks(args.n_patients or len(PILOT_SEEDS)))
+        return len(pilot_tasks(args.n_patients or len(PILOT_SEEDS), pilot_grid(args)))
     return args.n_patients or len(COHORT_SEEDS)
 
 
@@ -782,13 +793,20 @@ def main(argv=None):
         p.add_argument("--effect-scale", type=float, default=1.0,
                        help="multiply every planted fitness term (0.5: the cap-share rule)")
 
+    def grid(p):
+        p.add_argument("--sizes", type=parse_sizes, default=None,
+                       help="one grid of module sizes E0..E6 instead of PILOT_GRID (a confirming round)")
+        p.add_argument("--grid-name", default="r2", help="the name of that grid in the records")
+
     c = sub.add_parser("count")
     c.add_argument("what", choices=["pilot", "grow"])
     common(c)
+    grid(c)
     p = sub.add_parser("pilot")
     p.add_argument("task", type=int)
     common(p)
     growth(p)
+    grid(p)
     p = sub.add_parser("pilot-collect")
     common(p)
     p = sub.add_parser("grow")
