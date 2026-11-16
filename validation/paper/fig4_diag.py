@@ -184,6 +184,8 @@ def main():
     ap.add_argument("--max-iter", type=int, default=F.CLONEALIGN["max_iter"])
     ap.add_argument("--n-repeats", type=int, default=F.CLONEALIGN["n_repeats"])
     ap.add_argument("--K", default="NA")
+    ap.add_argument("--l-power", type=float, default=1.0,
+                    help="diagnostic only: hand clonealign 2 (L/2)^p instead of L, the dosage the cells show")
     ap.add_argument("--skip-checks", action="store_true")
     a = ap.parse_args()
     tag = f"{a.run}_{a.task}"
@@ -208,7 +210,7 @@ def main():
         d = os.path.join(work, f"ca_{a.variant}")
         os.makedirs(os.path.join(d, "in"), exist_ok=True)
         inp["Y"].to_csv(os.path.join(d, "in", "Y.csv"))
-        inp["L"].to_csv(os.path.join(d, "in", "L.csv"))
+        (2.0 * (inp["L"] / 2.0) ** a.l_power).to_csv(os.path.join(d, "in", "L.csv"))
         r = subprocess.run([IC.CLONEALIGN_RSCRIPT, os.path.join(F.VAL, "clonealign_runner.R"), os.path.join(d, "in"),
                             os.path.join(d, "out"), str(a.max_iter), str(a.n_repeats), "1", "1", str(a.K)],
                            capture_output=True, text=True)
@@ -220,7 +222,7 @@ def main():
         header_ok = list(P.columns) == list(inp["L"].columns)
         pred = np.asarray(inp["L"].columns, dtype=object)[np.nanargmax(P.to_numpy(float), axis=1)]
         ct = pd.crosstab(pd.Series(inp["truth"], name="true"), pd.Series(pred, name="clonealign"))
-        rec = dict(variant=a.variant, max_iter=a.max_iter, n_repeats=a.n_repeats, K=a.K, notes=notes,
+        rec = dict(variant=a.variant, max_iter=a.max_iter, n_repeats=a.n_repeats, K=a.K, l_power=a.l_power, notes=notes,
                    probs_header_matches_L=bool(header_ok), scores=_assign_scores(inp["truth"], pred),
                    assigned=pd.Series(pred).value_counts().to_dict(), crosstab=ct.to_dict(orient="index"))
         with open(os.path.join(out, f"variant_{a.variant}.json"), "w") as f:
