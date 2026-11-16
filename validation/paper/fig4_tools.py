@@ -12,11 +12,15 @@ Tools: on scRNA, CopyKAT (with and without the normal barcodes as its reference)
 Clonalscope make no malignancy call and Cancer-Finder no copy-number call; those cells of the score table
 stay empty.
 
-Reference protocol: a tool that takes a normal reference (CopyKAT with one, Numbat, inferCNV, Clonalscope,
-all through ``clonalscope/celltype.tsv``) is given a held-out one: a seeded random half of the tumour's true
-normal barcodes, drawn within each niche stratum (compartment, and whether the barcode is in the hypoxic
-core) so that every niche keeps normals to score. The other half and the malignant barcodes are the
-scored barcodes, for every tool, reference or not (``reference`` in barcodes.tsv.gz).
+Reference protocol, as the tools are used in practice: a tool that takes a normal reference (CopyKAT with
+one, Numbat, inferCNV, Clonalscope, all through ``clonalscope/celltype.tsv``) is given the sample's
+microenvironment normals, the cells a user annotates by cell type from markers: every non-epithelial normal
+cell (stromal, immune, any other non-epithelial type); on Visium, the spots whose cells are all such
+normals (a pathologist's stroma annotation). Normal epithelial cells are never in the reference: a user
+cannot tell them from tumour cells. The malignancy AUC is read, for every tool alike, on the
+epithelial-lineage barcodes only (``scored``): cancer cells against normal epithelial cells; on Visium the
+spots holding any epithelial-lineage cell, a spot malignant when at least half its cells are cancer cells
+(the rule of make_layer_dataset.py). No scored barcode is in any reference.
 
 Truth per barcode: ``malignant`` (a cancer cell; a spot whose cells are at least half cancer, as Fig 5 and
 make_layer_dataset.py define it), ``compartment`` (the cell's deme: 0 stroma, 1 the epithelial wall of a
@@ -75,20 +79,13 @@ REFERENCE_RUNS = ("copykat-scrna-ref", "copykat-visium-ref", "numbat-scrna", "in
                   "clonalscope-visium")
 
 
-def split_reference(bc, seed=0):
-    """1 for the normal barcodes the tools are given as their reference: a seeded random half of each
-    stratum (compartment x hypoxic core) of the true normals; 0 for the held-out normals and the malignant
-    barcodes."""
-    import score_tools as ST
-    core = ST.niche_masks(bc.set_index("barcode") if "barcode" in bc else bc)["hypoxic_core"].to_numpy()
-    normal = bc["malignant"].astype(int).to_numpy() == 0
-    strata = bc["compartment"].astype(int).to_numpy() * 2 + core.astype(int)
-    ref = np.zeros(len(bc), dtype=int)
-    rng = np.random.default_rng([int(seed), 0x4EF])
-    for st in np.unique(strata[normal]):
-        idx = np.flatnonzero(normal & (strata == st))
-        ref[rng.permutation(idx)[: idx.size // 2]] = 1
-    return ref
+def _classes(t, gids):
+    """Per cell: 2 a cancer cell, 1 a normal epithelial cell, 0 a microenvironment normal (any other type)."""
+    out = np.zeros(len(gids), dtype=np.int8)
+    for i, g in enumerate(gids):
+        ty = getattr(t.genotypes.get(g), "type", None)
+        out[i] = 2 if ty == "cancer" else (1 if ty == "epithelial" else 0)
+    return out
 
 
 def _write_reference(ds, bc):
@@ -145,9 +142,10 @@ def build(a, work):
     demes = dis["cell_deme"]["deme_id"].reindex(cells).to_numpy(int)
     hyp = dis["cell_microenv"]["hypoxia_level"].reindex(cells).to_numpy(float)
     cn, arm_names = _arm_cn(t, layer, gids)
+    cls = _classes(t, gids)
     bc = pd.DataFrame({"barcode": bcs, "malignant": tum.astype(int), "tumour_fraction": tum.astype(float),
-                       "compartment": comp[demes], "hypoxia": hyp})
-    bc["reference"] = split_reference(bc, a.seed)
+                       "compartment": comp[demes], "hypoxia": hyp, "epithelial": (cls == 1).astype(int),
+                       "reference": (cls == 0).astype(int), "scored": (cls > 0).astype(int)})
     _write_reference(ds_rna, bc)
     bc.to_csv(os.path.join(truth_dir, "scrna_barcodes.tsv"), sep="\t", index=False)
     pd.DataFrame({"barcode": np.repeat(bcs, len(arm_names)), "arm": np.tile(arm_names, len(bcs)),
@@ -166,6 +164,7 @@ def build(a, work):
     pcells = list(placed["cell_exp"].index)
     pg = F._gids(placed, pcells)
     ptum = layer.is_tumour(pg, t)
+    pcls = _classes(t, pg)
     pdeme = placed["cell_deme"]["deme_id"].reindex(pcells).to_numpy(int)
     phyp = placed["cell_microenv"]["hypoxia_level"].reindex(pcells).to_numpy(float)
     pcn, _ = _arm_cn(t, layer, pg)
@@ -176,11 +175,12 @@ def build(a, work):
         m = members[s]
         tm = m[ptum[m]]
         frac = tm.size / m.size
+        n_lin = int((pcls[m] > 0).sum())
         rows.append((all_bcs[s], int(frac >= 0.5), frac, int(np.bincount(comp[pdeme[m]], minlength=3).argmax()),
-                     float(phyp[m].mean())))
+                     float(phyp[m].mean()), int((pcls[m] == 1).sum()), int(n_lin == 0), int(n_lin > 0)))
         cn_rows.append(pcn[tm].mean(axis=0) if tm.size else np.full(len(arm_names), 2.0))
-    bcv = pd.DataFrame(rows, columns=["barcode", "malignant", "tumour_fraction", "compartment", "hypoxia"])
-    bcv["reference"] = split_reference(bcv, a.seed)
+    bcv = pd.DataFrame(rows, columns=["barcode", "malignant", "tumour_fraction", "compartment", "hypoxia",
+                                      "epithelial", "reference", "scored"])
     _write_reference(ds_vis, bcv)
     bcv.to_csv(os.path.join(truth_dir, "visium_barcodes.tsv"), sep="\t", index=False)
     cnv = np.stack(cn_rows)
@@ -298,7 +298,8 @@ def main():
         print("built:", json.dumps(info), flush=True)
         import gc
         gc.collect()
-        cols = ["assay", "barcode", "malignant", "tumour_fraction", "compartment", "hypoxia", "reference"]
+        cols = ["assay", "barcode", "malignant", "tumour_fraction", "compartment", "hypoxia", "epithelial",
+                "reference", "scored"]
         only = None if a.only is None else a.only.split(",")
         merge = only is not None and os.path.exists(os.path.join(out, "calls.tsv.gz"))
         if merge:
@@ -345,13 +346,15 @@ def main():
             pd.concat(cns, ignore_index=True)[["run", "assay", "barcode", "arm", "value", "scale"]].round(5).to_csv(
                 os.path.join(out, "cn_arm.tsv.gz"), sep="\t", index=False)
         n_ref = {x: dict(reference=int(bc_all[(bc_all.assay == x)]["reference"].sum()),
-                         held_out_normals=int(((bc_all.assay == x) & (bc_all.malignant == 0)
-                                               & (bc_all.reference == 0)).sum())) for x in ("scrna", "visium")}
+                         scored=int(bc_all[(bc_all.assay == x)]["scored"].sum()),
+                         scored_normal=int(((bc_all.assay == x) & (bc_all.malignant == 0)
+                                            & (bc_all.scored == 1)).sum())) for x in ("scrna", "visium")}
         with open(os.path.join(out, "runs.json"), "w") as f:
             json.dump(dict(run=a.run, task=a.task, commit=F._commit(), paper_out=os.environ.get("ISCC_PAPER_OUT"),
                            section_max_cells=a.section_max_cells, data=info,
-                           reference_protocol=dict(kind="held-out half of the true normals, by niche stratum",
-                                                   seed=a.seed, **n_ref, redone=only),
+                           reference_protocol=dict(kind="microenvironment normals (non-epithelial; Visium: "
+                                                        "all-normal spots); scored: epithelial-lineage barcodes",
+                                                   **n_ref, redone=only),
                            runs=runs_all), f, indent=1, default=str)
         failed = {k: v["exit"] for k, v in status.items() if v["exit"] != 0}
         print("failed runs:", failed or "none", flush=True)

@@ -48,8 +48,8 @@ TUMOURS = os.environ.get("FIG4_TUMOURS", "seed1,seed2,disp0.1_seed1,disp0.9_seed
 NICHE = {"duct_wall": ("duct wall", "#7570B3"), "hypoxic_core": ("hypoxic core", "#D95F02"),
          "stroma": ("stroma", "#1B9E77")}
 TOOL_D = {"Clonalscope": "#EB6834", "Clonalscope, DNA prior": S.MODALITY["DNA"], "CalicoST": "#1BAF7A"}
-# the tools that take a normal reference are given a held-out half of the true normals (fig4_tools.py), and
-# every tool is scored on the malignant barcodes and the other half
+# the tools that take a normal reference are given the sample's non-epithelial normals (Visium: the spots of
+# such normals only), and every tool is scored on the epithelial-lineage barcodes (fig4_tools.py)
 ROWS_B = [("scrna", "copykat", "CopyKAT"), ("scrna", "copykat-ref", "CopyKAT, normal ref."),
           ("scrna", "numbat", "Numbat"), ("scrna", "infercnvpy", "inferCNV"),
           ("visium", "copykat", "CopyKAT"), ("visium", "copykat-ref", "CopyKAT, normal ref."),
@@ -186,9 +186,9 @@ def panel_b(fig, ov, nums):
             ax.set_yticklabels([])
     h = [Line2D([], [], marker="o", ls="none", mfc=c, mec="white", ms=3.4, label=l) for l, c in NICHE.values()]
     h.append(Line2D([], [], color=S.INK, lw=1.2, label="mean over tumours"))
-    S.text_mm(fig, 36, 53.0, "AUC on the malignant barcodes and a held-out half of the normals (the tools' "
-              "reference is the other half), where a niche keeps at least 10 of them", fontsize=4.4, color=S.GREY,
-              va="top")
+    S.text_mm(fig, 36, 53.0, "Reference: the non-epithelial normals (Visium: their spots). AUC on epithelial-lineage "
+              "barcodes, cancer against normal (spot: half its cells cancer); drawn where a niche has 10 normal",
+              fontsize=4.2, color=S.GREY, va="top")
     fig.legend(handles=h, loc="upper left", bbox_to_anchor=(36 / 183, 1 - 48.6 / FIG_H), ncol=4, fontsize=4.8,
                frameon=False)
 

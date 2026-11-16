@@ -144,15 +144,17 @@ def score_niches(bc, true_cn, run_dir, min_class=10):
 def score_niches_frames(bc, true_cn, calls, cn, min_class=10):
     """The malignancy AUC (from ``p_malignant``, else the 0/1 call) over each niche's scored barcodes when
     each class holds at least ``min_class`` of them, and the per-arm copy-number correlation over its
-    malignant barcodes. With a ``reference`` column in ``bc`` (1: the barcode was in the normal reference
-    the tools were given), only the other barcodes are scored, for every tool alike: the malignant ones
-    and the held-out normals. ``calls`` is indexed by barcode; ``cn`` may be None."""
+    malignant barcodes. With a ``scored`` column in ``bc`` only those barcodes are scored, for every tool
+    alike (Fig 4b: the epithelial-lineage barcodes); else, with a ``reference`` column, the barcodes not in
+    the tools' reference. ``calls`` is indexed by barcode; ``cn`` may be None."""
     s = calls["p_malignant"] if calls["p_malignant"].notna().any() else calls["malignant"]
     s = s.astype(float)
     rows = []
     masks = niche_masks(bc)            # the niches are defined on every barcode, the hypoxia cut included
-    if "reference" in bc:
-        bc = bc[bc["reference"].astype(int).to_numpy() == 0]
+    keep = (bc["scored"].astype(int).to_numpy() == 1 if "scored" in bc
+            else bc["reference"].astype(int).to_numpy() == 0 if "reference" in bc else None)
+    if keep is not None:
+        bc = bc[keep]
         masks = {k: m.reindex(bc.index) for k, m in masks.items()}
     for niche, mask in masks.items():
         sub = bc[mask.to_numpy()]
@@ -163,8 +165,10 @@ def score_niches_frames(bc, true_cn, calls, cn, min_class=10):
         auc = (float(roc_auc_score(y[ok], sc[ok])) if min(n_pos, n_neg) >= min_class and sc[ok].nunique() > 1
                else (0.5 if min(n_pos, n_neg) >= min_class else np.nan))
         r, scale = _cn_r(cn, sub.index[y.astype(bool).to_numpy()], true_cn)
+        n_epi = int(((1 - y).astype(bool) & (sub["epithelial"].astype(int) > 0)).sum()) if "epithelial" in sub \
+            else None
         rows.append(dict(niche=niche, n=int(len(sub)), n_malignant=int(y.sum()), n_normal=int((1 - y).sum()),
-                         n_scored=int(ok.sum()), auc=auc, cn_r=r, cn_scale=scale))
+                         n_normal_with_epithelium=n_epi, n_scored=int(ok.sum()), auc=auc, cn_r=r, cn_scale=scale))
     return rows
 
 
