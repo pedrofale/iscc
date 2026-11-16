@@ -139,12 +139,40 @@ def panel_a(fig, ov):
     ov.text(138.5, 44, "every link scored", ha="center", va="top", fontsize=4.6, color=S.GREY)
 
 
+def _numbers_b_all(df, nums):
+    """Beside the drawn niches: each tool's scores over all its scored barcodes (niche ``all``: the mean, range
+    and per-tumour values), and per tumour the scored barcodes it left undefined, which count as
+    non-malignant calls (score_tools.malignancy_score)."""
+    if not len(df):
+        return
+    al = df[df["niche"] == "all"]
+    for assay, tool, _ in ROWS_B:
+        sub = al[(al["assay"] == assay) & (al["tool"] == tool)]
+        if not len(sub):
+            continue
+        rec = nums["b"].setdefault(f"{assay}:{tool}", {})
+        for metric in ("auc", "cn_r"):
+            v = sub.set_index("tumour")[metric].astype(float).dropna()
+            if len(v):
+                rec[f"all:{metric}"] = dict(mean=round(float(v.mean()), 3), min=round(float(v.min()), 3),
+                                            max=round(float(v.max()), 3), n=int(len(v)),
+                                            per_tumour={k: round(float(x), 3) for k, x in v.items()})
+        und = sub[sub["n_undefined"].notna()] if "n_undefined" in sub else sub.iloc[:0]
+        if len(und):
+            rec["undefined"] = {r.tumour: dict(n_undefined=int(r.n_undefined),
+                                               n_undefined_malignant=int(r.n_undefined_malignant),
+                                               n_scored=int(r.n_scored), n_malignant=int(r.n_malignant),
+                                               share=round(float(r.n_undefined) / max(int(r.n_scored), 1), 4))
+                                for r in und.itertuples()}
+
+
 def panel_b(fig, ov, nums):
     S.panel_letter(fig, "b", 2, 52)
     files = [os.path.join(DEV, "b", f"R11_{t}", "scores.csv") for t in TUMOURS]
     have = [pd.read_csv(f).assign(tumour=os.path.basename(os.path.dirname(f))) for f in files if os.path.exists(f)]
     df = pd.concat(have, ignore_index=True) if have else pd.DataFrame()
     nums["b"] = {"tumours": sorted(set(df["tumour"])) if len(df) else []}
+    _numbers_b_all(df, nums)
     for col, (metric, xlab, lim) in enumerate((("auc", "Malignancy AUC", (0.4, 1.0)),
                                                ("cn_r", "Per-arm copy-number correlation", (-0.2, 1.0)))):
         x0 = 36 + col * 77
@@ -256,6 +284,13 @@ def panel_d(fig, ov, d, nums):
             if len(v):
                 ax.plot(i + (j - 1) * w, v.iat[0], "o", ms=4, mfc=TOOL_D[n], mec="white", mew=0.4, zorder=3)
                 rec[n] = round(float(v.iat[0]), 3)
+        sj = os.path.join(OUT, "d", f"R11_{task}", "score.json")
+        if os.path.exists(sj):
+            with open(sj) as f:
+                rj = json.load(f)
+            rec["commit"] = rj.get("commit")
+            rec["reference_protocol"] = rj.get("reference_protocol")
+            rec["n_clustered"] = {k: v.get("n_clustered") for k, v in rj.get("runs", {}).items() if "n_clustered" in v}
         nums["d"][task] = rec
     ax.set_xticks(range(len(TUMOURS)))
     ax.set_xticklabels([_label(t) for t in TUMOURS], fontsize=4.6, rotation=25, ha="right", rotation_mode="anchor")
