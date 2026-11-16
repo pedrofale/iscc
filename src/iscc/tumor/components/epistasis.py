@@ -33,7 +33,9 @@ events to RECUR across patients: with ~10^4 genes and mutation spread genome-wid
 is hit in almost no patient, so a single-gene alphabet yields a cohort with no shared events and
 nothing to recover. A module is the familiar pathway-level event, and ``event_size=1`` recovers the
 single-gene case. ``event_size`` is therefore the knob that sets how fast events accrue — see
-PARAMETERS.md.
+PARAMETERS.md. It is one int for every module, or a list of one int per event so that events can be
+set to different frequencies; either way every module's genes come from one draw of the layout
+sub-stream, cut in event order, so a single size draws the same modules as a list of that size.
 
 Events are **monotone**: once acquired an event never reverts, even if a later deletion removes the
 mutated allele. That is deliberate — it is exactly the generative assumption MHN/CBN/TreeMHN make,
@@ -96,7 +98,8 @@ import numpy as np
 # documented contract in PARAMETERS.md.
 EPISTASIS_DEFAULTS = dict(
     n_events=0,                  # 0 => OFF (no network is built; selection stays additive)
-    event_size=20,               # driver genes per event module; sets how fast events accrue
+    event_size=20,               # driver genes per event module (one int, or one per event);
+                                 # sets how fast events accrue
     event_effect_mean=0.1,       # beta_i ~ N(mean, sd): the event's own marginal log-fitness effect
     event_effect_sd=0.0,
     n_interactions=None,         # number of non-zero E[i, j]; None => use network_sparsity
@@ -160,9 +163,12 @@ class EpistasisNetwork:
         self.dependency_params = dp
 
         self.n_events = int(ep["n_events"])
-        self.event_size = int(ep["event_size"])
         if self.n_events <= 0:
             raise ValueError("EpistasisNetwork requires n_events > 0 (it is only built when ON)")
+        # module sizes: one int for every event (as before), or one int per event
+        scalar_size = np.ndim(ep["event_size"]) == 0
+        self.event_sizes = self._module_sizes(ep["event_size"], self.n_events)
+        self.event_size = self.event_sizes[0] if scalar_size else list(self.event_sizes)
         if ep["network_topology"] not in _TOPOLOGIES:
             raise ValueError(f"network_topology must be one of {_TOPOLOGIES}, got {ep['network_topology']!r}")
         if dp["gating_mode"] not in _GATING_MODES:
@@ -170,17 +176,21 @@ class EpistasisNetwork:
         self.gating_mode = dp["gating_mode"]
 
         driver_pool = np.asarray(driver_pool, dtype=int)
-        needed = self.n_events * self.event_size
+        needed = int(sum(self.event_sizes))
         if needed > len(driver_pool):
+            what = (f"{self.n_events} x {self.event_size}" if scalar_size
+                    else " + ".join(str(s) for s in self.event_sizes))
             raise ValueError(
-                f"epistasis needs {self.n_events} x {self.event_size} = {needed} driver genes for its "
+                f"epistasis needs {what} = {needed} driver genes for its "
                 f"event modules but the shared layout only has {len(driver_pool)}; raise prop_driver / "
                 "the genome size, or lower n_events / event_size")
 
         # -- the event alphabet: disjoint modules of driver genes ----------------------------
+        # One draw of every module's genes, cut in event order: with a single size this is the same
+        # draw, with the same stream consumption, as before per-event sizes existed.
         chosen = rng.choice(driver_pool, size=needed, replace=False)
-        self.event_genes = [np.sort(chosen[i * self.event_size:(i + 1) * self.event_size])
-                            for i in range(self.n_events)]
+        cuts = np.concatenate([[0], np.cumsum(self.event_sizes)]).astype(int)
+        self.event_genes = [np.sort(chosen[cuts[i]:cuts[i + 1]]) for i in range(self.n_events)]
 
         # per-segment gene -> event id lookup (-1 = not an event gene), so scoring a mutation is a
         # single fancy-index on the segment's mutation mask.
@@ -214,6 +224,23 @@ class EpistasisNetwork:
         # per-event-set caches (pure functions of the event bitmask => tau-leap safe)
         self._fitness_cache = {}
         self._blocked_cache = {}
+
+    @staticmethod
+    def _module_sizes(size, n_events):
+        """``event_size`` as one size per event: a single int (every module that size, as before)
+        or a sequence of ``n_events`` positive ints (module ``i`` has ``size[i]`` genes)."""
+        if np.ndim(size) == 0:
+            return (int(size),) * n_events
+        sizes = list(np.asarray(size, dtype=object).ravel())
+        if len(sizes) != n_events:
+            raise ValueError(f"event_size: give one int or one per event ({n_events}), "
+                             f"got {len(sizes)} sizes")
+        out = []
+        for s in sizes:
+            if isinstance(s, (bool, np.bool_)) or not isinstance(s, (int, np.integer)) or int(s) < 1:
+                raise ValueError(f"event_size: module sizes are positive integers, got {s!r}")
+            out.append(int(s))
+        return tuple(out)
 
     def _draw(self, ep, dp, rng):
         """The random network (the default): beta, E, exclusive pairs and the DAG drawn, in that
@@ -527,6 +554,7 @@ class EpistasisNetwork:
         return dict(n_events=self.n_events,
                     event_names=self.event_names(),
                     event_genes=[g.tolist() for g in self.event_genes],
+                    event_sizes=list(self.event_sizes),
                     beta=self.beta.copy(),
                     E=self.true_interaction_matrix(),
                     edges=self.true_edges(),

@@ -727,6 +727,92 @@ def test_planted_modules_are_the_random_modes_modules():
                    zip(planted.epistasis.event_genes, other.epistasis.event_genes))
 
 
+# ------------------------------------------------------------------ per-event module sizes
+_POOL = np.arange(40, 160)                       # a driver pool on a genome of 4 segments of 50
+_SEGS = dict(seg_offsets=[0, 50, 100, 150], segment_sizes=[50, 50, 50, 50])
+
+
+def test_a_single_event_size_draws_the_modules_as_before():
+    """One int draws exactly the modules the code drew before per-event sizes existed (one choice
+    of n_events x size genes, cut into consecutive slices) and leaves the stream where it left it,
+    so the random network drawn after the modules is unchanged too; a list of that same size is
+    the same draw."""
+    old = np.random.default_rng(11)
+    chosen = old.choice(_POOL, size=6 * 4, replace=False)
+    before = [np.sort(chosen[i * 4:(i + 1) * 4]) for i in range(6)]
+    after_modules = old.bit_generator.state
+    nets = {}
+    for name, size in (("int", 4), ("list", [4] * 6), ("array", np.full(6, 4))):
+        rng = np.random.default_rng(11)
+        nets[name] = EpistasisNetwork(_POOL, rng=rng, epistasis_params={
+            "n_events": 6, "event_size": size, "planted": {}}, **_SEGS)
+        assert all(np.array_equal(a, b) for a, b in zip(nets[name].event_genes, before)), name
+        assert rng.bit_generator.state == after_modules, name   # the same stream consumption
+        assert nets[name].event_sizes == (4,) * 6
+    assert nets["int"].event_size == 4 and nets["list"].event_size == [4] * 6
+    # in the random mode everything drawn after the modules is the same as well
+    rnd = [EpistasisNetwork(_POOL, rng=np.random.default_rng(11), epistasis_params={**EPI, "event_size": s},
+                            **_SEGS) for s in (5, [5] * 6)]
+    assert np.array_equal(rnd[0].E, rnd[1].E) and np.array_equal(rnd[0].beta, rnd[1].beta)
+    assert rnd[0].dag_edges == rnd[1].dag_edges
+    # and through Selection, the planted network's modules and the gene roles are untouched
+    a, b = _planted_selection(), _planted_selection({**PLANTED_EP, "event_size": [5] * 6})
+    assert all(np.array_equal(x, y) for x, y in zip(a.epistasis.event_genes, b.epistasis.event_genes))
+    assert list(a.get_oncogenes()) == list(b.get_oncogenes())
+
+
+def test_per_event_module_sizes():
+    sizes = [1, 2, 3, 4, 5, 6, 2]
+    net = EpistasisNetwork(_POOL, rng=np.random.default_rng(3), epistasis_params={
+        "n_events": 7, "event_size": sizes, "planted": {"effects": 0.1}}, **_SEGS)
+    assert [len(g) for g in net.event_genes] == sizes
+    genes = np.concatenate(net.event_genes)
+    assert len(set(genes.tolist())) == sum(sizes) and set(genes.tolist()) <= set(_POOL.tolist())
+    # every module gene maps back to its event, and nothing else is an event gene
+    for ev, g in enumerate(net.event_genes):
+        for x in g:
+            seg = int(np.searchsorted(_SEGS["seg_offsets"], x, side="right") - 1)
+            assert net.event_ids[seg][x - _SEGS["seg_offsets"][seg]] == ev
+    assert sum(int((ids >= 0).sum()) for ids in net.event_ids) == sum(sizes)
+    assert net.ground_truth()["event_sizes"] == sizes and net.event_size == sizes
+    # the modules are cut from one draw in event order: the first event's gene is that draw's first
+    first = np.random.default_rng(3).choice(_POOL, size=sum(sizes), replace=False)
+    assert net.event_genes[0].tolist() == [first[0]]
+    assert sorted(net.event_genes[1].tolist()) == sorted(first[1:3].tolist())
+
+
+@pytest.mark.parametrize("size, match", [
+    ([2, 2], "one per event"),
+    ([2, 2, 0], "positive integers"),
+    ([2, 2, 2.5], "positive integers"),
+    ([2, True, 2], "positive integers"),
+    ([2, 2, 200], "driver genes"),
+])
+def test_per_event_module_sizes_are_validated(size, match):
+    with pytest.raises(ValueError, match=match):
+        EpistasisNetwork(_POOL, rng=np.random.default_rng(3),
+                         epistasis_params={"n_events": 3, "event_size": size}, **_SEGS)
+
+
+def test_per_event_module_sizes_in_a_grown_tumour():
+    """Tumours grown with per-event sizes acquire each event through its own module: over three
+    seeds a module of 12 genes is carried by more cells than a module of one, and every lineage
+    carrying the one-gene event carries that gene's SNV."""
+    ep = {"n_events": 3, "event_size": [1, 4, 12], "planted": {"effects": 0.1}}
+    frac = np.zeros(3)
+    for seed in (1, 2, 3):
+        t = _grown(seed=seed, steps=150, epistasis_params=ep)
+        net = t.selection.epistasis
+        assert [len(g) for g in net.event_genes] == [1, 4, 12]
+        assert t.epistasis_ground_truth()["event_sizes"] == [1, 4, 12]
+        frac += event_cell_fractions(t)
+        g0 = int(net.event_genes[0][0])
+        for rep in t.genotypes.values():
+            if rep.type == "cancer" and rep.event_bits & 1:
+                assert rep.get_snvs()[g0] > 0
+    assert frac[2] > frac[0]
+
+
 @pytest.mark.parametrize("ep, dp, match", [
     ({**PLANTED_EP, "n_interactions": 2}, PLANTED_DP, "random-draw"),
     (PLANTED_EP, {"gating_mode": "accessibility", "n_constraints": 1}, "random-draw"),

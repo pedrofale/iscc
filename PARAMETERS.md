@@ -293,14 +293,17 @@ An **event** is a disjoint module of `event_size` driver genes; it fires when �
 the module, and is **monotone** (once acquired, never lost — the assumption MHN/CBN are defined under).
 Modules rather than single genes because MHN/TreeMHN pool many tumours to fit **one** network, which
 requires the same events to **recur across patients**; a single named gene out of ~10⁴ is hit in
-almost no patient. `event_size: 1` recovers the single-gene case.
+almost no patient. `event_size: 1` recovers the single-gene case. `event_size` is one int for every
+module, or a list of one int per event (`[2, 1, 1, 2, 2, 2, 4]`), so that events can be set to different
+frequencies in a cohort; either way the modules come from one draw of the layout seed's epistasis
+stream, cut in event order, so a single size and a list of that size draw the same modules.
 
 Fitness gains `exp(Σᵢ βᵢxᵢ + Σᵢ<ⱼ Eᵢⱼxᵢxⱼ)` as a multiplier on the additive model.
 
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|
 | `n_events` | 0 (**off**) | 4–20 | 0 → additive engine, bit-identical; many → each event rarer, cohort needs to be larger |
-| `event_size` | 20 | 1–~5% of the genome | **the rate knob**: too small → events never fire (empty matrix); too large → every patient acquires every event (all-ones matrix, zero variance, nothing to correlate) |
+| `event_size` | 20 | 1–~5% of the genome, per event | **the rate knob**, one int or a list of one per event: too small → events never fire (empty matrix); too large → every patient acquires every event (all-ones matrix, zero variance, nothing to correlate). Their sum must fit in the driver pool |
 | `event_effect_mean` / `_sd` | 0.1 / 0.0 | 0–0.5 | the events' own marginal log-fitness effect (MHN's diagonal). 0 → events are marginally neutral and only `E` acts |
 | `n_interactions` | `None` → use `network_sparsity` | 0–`n_events(n_events−1)/2` | 0 → empty `E` (the false-positive control) |
 | `network_sparsity` | 0.2 | 0.05–0.5 | fraction of event pairs that interact, when `n_interactions` is unset |
