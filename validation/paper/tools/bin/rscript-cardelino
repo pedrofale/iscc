@@ -1,0 +1,5 @@
+#!/bin/bash
+# Rscript of the cardelino image (cardelino 1.8.0, R 4.4; recipe in ../images/cardelino.sh), one BLAS thread.
+# Point ISCC_CARDELINO_RSCRIPT at this file; ISCC_TOOLS_DIR holds the images.
+exec apptainer exec --cleanenv -B /nobackup --env OMP_NUM_THREADS=1 --env OPENBLAS_NUM_THREADS=1 \
+  "${ISCC_TOOLS_DIR:?set ISCC_TOOLS_DIR to the directory of the tool images}/cardelino.sif" /opt/conda/bin/Rscript "$@"
