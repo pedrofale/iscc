@@ -12,7 +12,8 @@ Tools: on scRNA, CopyKAT (with and without the normal barcodes as its reference)
 Clonalscope make no malignancy call and Cancer-Finder no copy-number call; those cells of the score table
 stay empty.
 
-Reference protocol, as the tools are used in practice: a tool that takes a normal reference (CopyKAT with
+Reference protocol (``fig4_chain.cell_classes``, ``visium_reference`` and ``write_reference``, which 4d's
+Clonalscope runs share), as the tools are used in practice: a tool that takes a normal reference (CopyKAT with
 one, Numbat, inferCNV, Clonalscope, all through ``clonalscope/celltype.tsv``) is given the sample's
 microenvironment normals, the cells a user annotates by cell type from markers: every non-epithelial normal
 cell (stromal, immune, any other non-epithelial type); on Visium, the spots whose cells are all such
@@ -79,19 +80,9 @@ REFERENCE_RUNS = ("copykat-scrna-ref", "copykat-visium-ref", "numbat-scrna", "in
                   "clonalscope-visium")
 
 
-def _classes(t, gids):
-    """Per cell: 2 a cancer cell, 1 a normal epithelial cell, 0 a microenvironment normal (any other type)."""
-    out = np.zeros(len(gids), dtype=np.int8)
-    for i, g in enumerate(gids):
-        ty = getattr(t.genotypes.get(g), "type", None)
-        out[i] = 2 if ty == "cancer" else (1 if ty == "epithelial" else 0)
-    return out
-
-
 def _write_reference(ds, bc):
-    """The reference the tools read: only the reference half of the normals is labelled normal."""
-    pd.DataFrame({"barcode": bc["barcode"], "celltype": np.where(bc["reference"] == 1, "normal", "tumor")}).to_csv(
-        os.path.join(ds, "clonalscope", "celltype.tsv"), sep="\t", index=False)
+    """The reference the tools read (fig4_chain.write_reference): the barcodes of ``bc["reference"]``."""
+    F.write_reference(ds, bc["barcode"], bc["reference"])
 
 
 def _compartments(t):
@@ -142,7 +133,7 @@ def build(a, work):
     demes = dis["cell_deme"]["deme_id"].reindex(cells).to_numpy(int)
     hyp = dis["cell_microenv"]["hypoxia_level"].reindex(cells).to_numpy(float)
     cn, arm_names = _arm_cn(t, layer, gids)
-    cls = _classes(t, gids)
+    cls = F.cell_classes(t, gids)
     bc = pd.DataFrame({"barcode": bcs, "malignant": tum.astype(int), "tumour_fraction": tum.astype(float),
                        "compartment": comp[demes], "hypoxia": hyp, "epithelial": (cls == 1).astype(int),
                        "reference": (cls == 0).astype(int), "scored": (cls > 0).astype(int)})
@@ -164,20 +155,20 @@ def build(a, work):
     pcells = list(placed["cell_exp"].index)
     pg = F._gids(placed, pcells)
     ptum = layer.is_tumour(pg, t)
-    pcls = _classes(t, pg)
+    pcls = F.cell_classes(t, pg)
     pdeme = placed["cell_deme"]["deme_id"].reindex(pcells).to_numpy(int)
     phyp = placed["cell_microenv"]["hypoxia_level"].reindex(pcells).to_numpy(float)
     pcn, _ = _arm_cn(t, layer, pg)
     all_bcs = barcodes(len(vz.spot_counts.index), seed=a.seed)
     keep = np.flatnonzero(np.asarray(vz.obs["n_cells"]) > 0)
+    ref = F.visium_reference(pcls, members, keep)
     rows, cn_rows = [], []
-    for s in keep:
+    for s, r in zip(keep, ref):
         m = members[s]
         tm = m[ptum[m]]
         frac = tm.size / m.size
-        n_lin = int((pcls[m] > 0).sum())
         rows.append((all_bcs[s], int(frac >= 0.5), frac, int(np.bincount(comp[pdeme[m]], minlength=3).argmax()),
-                     float(phyp[m].mean()), int((pcls[m] == 1).sum()), int(n_lin == 0), int(n_lin > 0)))
+                     float(phyp[m].mean()), int((pcls[m] == 1).sum()), int(r), int(1 - r)))
         cn_rows.append(pcn[tm].mean(axis=0) if tm.size else np.full(len(arm_names), 2.0))
     bcv = pd.DataFrame(rows, columns=["barcode", "malignant", "tumour_fraction", "compartment", "hypoxia",
                                       "epithelial", "reference", "scored"])
@@ -305,7 +296,8 @@ def main():
         if merge:
             # the runs not redone keep their stored calls: the rebuilt truth must be the one they were made on
             old = pd.read_csv(os.path.join(out, "barcodes.tsv.gz"), sep="\t")
-            key = ["assay", "barcode", "malignant", "compartment"]
+            key = ["assay", "barcode", "malignant", "compartment"] + [
+                c for c in ("epithelial", "reference", "scored") if c in old]
             same = (len(old) == len(bc_all)
                     and old[key].reset_index(drop=True).equals(bc_all[key].reset_index(drop=True)))
             if not same:

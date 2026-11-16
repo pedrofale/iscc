@@ -7,12 +7,16 @@ reference in ``validation/data``), HMMcopy per cell on bins of ~500 kb (one grow
 UMAP + HDBSCAN on the called states, clusters with the same copy-number profile merged and flat (diploid)
 clusters dropped. The gap between the two accuracies is the error the RNA step inherits from the DNA step.
 
-4d (``spatial``). Clonalscope maps clones onto the tumour's Visium section without a prior (Fig 4b's run)
-and with the DNA-derived prior from 4c's scDNA chain, handed over through Clonalscope's own inputs: the
-segment table's ``states`` (the relative copy number of the DNA pseudobulk per arm, what
-``Segmentation_bulk`` gives from matched WGS) and ``U0``, its prior mean relative coverage per cluster (a
-normal row and one row per DNA clone). CalicoST runs alongside. Each tool's call per spot is scored
-against the spot's true clone fractions by ``fig4_score.py``.
+4d (``spatial``). Clonalscope maps clones onto the tumour's Visium section (the Visium of Fig 4b: the same
+section, seeds and settings) without a prior and with the DNA-derived prior from 4c's scDNA chain, handed
+over through Clonalscope's own inputs: the segment table's ``states`` (the relative copy number of the DNA
+pseudobulk per arm, what ``Segmentation_bulk`` gives from matched WGS) and ``U0``, its prior mean relative
+coverage per cluster (a normal row and one row per DNA clone). Both runs take Fig 4b's normal reference
+(``visium_reference``: the spots holding only non-epithelial normal cells) and cluster every other spot,
+normal epithelium included; the writer's own celltype.tsv, which marks the spots with any true cancer
+cell, is never read. CalicoST runs alongside (its clone labels; it reads no reference). Each tool's call per
+spot is scored against the spot's true clone fractions by ``fig4_score.py``. ``--only`` redoes some of the
+three tools and keeps the others' stored labels, refusing when the rebuilt spots differ from the stored.
 
 The true clones are the answer key's: lineage clades (``clones_from_clades``) holding at least 3% of the
 sampled tumour cells, counted over the dissociated and the sectioned cells together so that scRNA, scDNA
@@ -24,7 +28,7 @@ Every input a tool reads and everything it writes live under ``--work`` (a job's
 per-tumour summaries reach ``--out``:
 
     OUT/c/<run>_<task>/  score.json, true_clones.tsv, dna_clones.tsv, dna_cells.tsv.gz, rna_cells.tsv.gz
-    OUT/d/<run>_<task>/  score.json, spots.tsv.gz (truth and every tool's label per spot)
+    OUT/d/<run>_<task>/  score.json, spots.tsv.gz (truth, the reference flag and every tool's label per spot)
 
 The spatial step reads ``OUT/c/<run>_<task>/dna_clones.tsv``, so it runs after ``dna-rna``. Usage
 (``ISCC_PAPER_OUT`` and ``ISCC_PAPER_TIER`` locate the registry; ``ISCC_TOOLS_DIR``,
@@ -71,6 +75,7 @@ SECTION_LAYERS = ("cell_exp", "cell_exp_p", "cell_exp_m")
 CLONEALIGN = dict(max_iter=200, n_repeats=2, seed=1, preprocess=1)   # Fig 5's settings + the package's
                                                                       # preprocess_for_clonealign
 NORMAL, OTHER, TRUNK = "normal", "other", "above_clades"
+SPATIAL_TOOLS = ("clonalscope", "clonalscope_dna", "calicost")   # 4d
 
 
 def _lap(wall, name, t0):
@@ -213,6 +218,39 @@ def true_clones(t, layer, samples, min_frac=MIN_CLONE_FRAC):
 def label_cells(gids, clone_of):
     """The answer-key label of each cell: a clone, ``"other"``, or ``"normal"``."""
     return np.array([clone_of.get(g, NORMAL) for g in gids], dtype=object)
+
+
+# ---------------------------------------------------------------------------------------------------
+# the normal reference, as the tools are used in practice (Fig 4b and 4d)
+# ---------------------------------------------------------------------------------------------------
+# A tool that takes a normal reference (CopyKAT with one, Numbat, inferCNV, Clonalscope: all through
+# clonalscope/celltype.tsv) is given the sample's microenvironment normals, the cells a user annotates by
+# cell type from markers: every non-epithelial normal cell; on Visium, the spots whose cells are all such
+# normals (a pathologist's stroma annotation). Normal epithelial cells are never in the reference, since a
+# user cannot tell them from cancer cells; everything outside the reference is clustered. The writers'
+# own celltype.tsv labels a barcode by its TRUE tumour content, which no user has, so it is always
+# overwritten with this one.
+def cell_classes(t, gids):
+    """Per cell: 2 a cancer cell, 1 a normal epithelial cell, 0 a microenvironment normal (any other type)."""
+    out = np.zeros(len(gids), dtype=np.int8)
+    for i, g in enumerate(gids):
+        ty = getattr(t.genotypes.get(g), "type", None)
+        out[i] = 2 if ty == "cancer" else (1 if ty == "epithelial" else 0)
+    return out
+
+
+def visium_reference(cls, members, keep):
+    """Per in-tissue spot of ``keep`` (the writer's order), 1 when every cell in it is a microenvironment
+    normal (``cell_classes`` 0), else 0. ``members[s]`` indexes the cells of spot ``s`` in ``cls``."""
+    return np.array([int(not (cls[members[s]] > 0).any()) for s in keep], dtype=np.int8)
+
+
+def write_reference(ds, barcodes, reference):
+    """Write the reference into ``<ds>/clonalscope/celltype.tsv`` (``normal`` where ``reference`` is 1,
+    ``tumor`` elsewhere), replacing the writer's truth-derived one."""
+    pd.DataFrame({"barcode": list(barcodes),
+                  "celltype": np.where(np.asarray(reference).astype(int) == 1, "normal", "tumor")}).to_csv(
+        os.path.join(ds, "clonalscope", "celltype.tsv"), sep="\t", index=False)
 
 
 def coarse_clones(profiles, k=COARSE_K):
@@ -696,7 +734,8 @@ def run_spatial(a):
     # the truth per in-tissue spot: its tumour cells' true clones
     from iscc.data.human.writers import barcodes
     placed, members_of_spot = vz._grid["placed"], vz._grid["members"]
-    lab = label_cells(_gids(placed, list(placed["cell_exp"].index)), clone_of)
+    pg = _gids(placed, list(placed["cell_exp"].index))
+    lab = label_cells(pg, clone_of)
     bcs = barcodes(len(vz.spot_counts.index), seed=a.seed)
     keep = np.flatnonzero(np.asarray(vz.obs["n_cells"]) > 0)
     clones = list(true_prof.index)
@@ -709,21 +748,60 @@ def run_spatial(a):
     spots = pd.DataFrame(rows, columns=["barcode", "n_cells", "n_tumour", "n_other"] + [f"n:{c}" for c in clones])
     pos = pd.read_csv(os.path.join(ds, "outs", "spatial", "tissue_positions.csv"))
     spots = spots.merge(pos[["barcode", "array_row", "array_col"]], on="barcode", how="left")
+    stored_key = list(spots.columns)
 
-    # the tools, CalicoST in the background since it is the slowest
+    # the normal reference as the tools are used (Fig 4b's protocol): the spots holding only
+    # microenvironment normals; every other spot, normal epithelium included, is clustered
+    cls = cell_classes(t, pg)
+    ref = visium_reference(cls, members_of_spot, keep)
+    write_reference(ds, [bcs[s] for s in keep], ref)
+    spots["n_normal_epithelium"] = [int((cls[members_of_spot[s]] == 1).sum()) for s in keep]
+    spots["reference"] = ref
+    clustered = ref == 0
+    protocol = dict(kind="microenvironment normals: the spots holding only non-epithelial normal cells; "
+                         "every other spot clustered (fig4_chain.visium_reference)",
+                    n_reference=int(ref.sum()), n_clustered=int(clustered.sum()),
+                    n_clustered_with_cancer=int((clustered & (spots["n_tumour"] > 0)).sum()),
+                    n_clustered_normal_epithelium_only=int((clustered & (spots["n_tumour"] == 0)).sum()),
+                    n_reference_with_cancer=int((~clustered & (spots["n_tumour"] > 0)).sum()))
+    print("reference protocol:", json.dumps(protocol), flush=True)
+
+    # the tools (all of them, or --only), CalicoST in the background since it is the slowest; a tool not
+    # redone keeps its stored labels, which needs the rebuilt truth to be the stored one
+    only = list(SPATIAL_TOOLS) if not getattr(a, "only", None) else a.only.split(",")
+    unknown = set(only) - set(SPATIAL_TOOLS)
+    if unknown:
+        sys.exit(f"--only: unknown spatial tools {sorted(unknown)} (of {SPATIAL_TOOLS})")
+    kept = [x for x in SPATIAL_TOOLS if x not in only]
+    old_rec = {}
+    if kept:
+        old_p = os.path.join(out, "spots.tsv.gz")
+        if not os.path.exists(old_p):
+            sys.exit(f"--only {a.only}: no stored spots at {old_p} to keep {kept} from")
+        old = pd.read_csv(old_p, sep="\t", dtype={f"call:{x}": str for x in SPATIAL_TOOLS})
+        key = [c for c in stored_key if c in old.columns]
+        if key != stored_key or not old[key].reset_index(drop=True).equals(spots[key].reset_index(drop=True)):
+            raise RuntimeError("the rebuilt spots differ from the stored ones: rerun every spatial tool, not --only")
+        for x in kept:
+            if f"call:{x}" in old:
+                spots[f"call:{x}"] = old[f"call:{x}"].to_numpy()
+        with open(os.path.join(out, "score.json")) as f:
+            old_rec = json.load(f)
     bin_dir = os.path.join(TOOLS, "bin")
     tools_dir = os.environ["ISCC_TOOLS_DIR"]
-    runs = {"clonalscope": os.path.join(work, "clonalscope"),
-            "clonalscope_dna": os.path.join(work, "clonalscope_dna"),
-            "calicost": os.path.join(work, "calicost")}
+    runs = {x: os.path.join(work, x) for x in only}
     prior_dir = os.path.join(work, "prior")
     U0, states = write_prior(prior_dir, dna_tsv, layer)
     logs = {k: open(os.path.join(work, f"{k}.log"), "w") for k in runs}
-    calicost = subprocess.Popen([os.path.join(bin_dir, "python-calicost"), os.path.join(TOOLS, "calicost.py"), ds,
-                                 runs["calicost"], "--seed", str(a.seed)],
-                                stdout=logs["calicost"], stderr=subprocess.STDOUT)
+    calicost = None
+    if "calicost" in runs:
+        calicost = subprocess.Popen([os.path.join(bin_dir, "python-calicost"), os.path.join(TOOLS, "calicost.py"),
+                                     ds, runs["calicost"], "--seed", str(a.seed)],
+                                    stdout=logs["calicost"], stderr=subprocess.STDOUT)
     status = {}
     for name, extra in (("clonalscope", []), ("clonalscope_dna", [prior_dir])):
+        if name not in runs:
+            continue
         t1 = time.time()
         r = subprocess.run([os.path.join(bin_dir, "rscript-r-cnv"), os.path.join(TOOLS, "clonalscope.R"), ds,
                             runs[name], os.path.join(tools_dir, "data", "clonalscope"), "20", str(200 + a.seed)]
@@ -731,14 +809,15 @@ def run_spatial(a):
         status[name] = r.returncode
         wall[name] = round(time.time() - t1, 1)
         print(f"  {name}: exit {r.returncode}, {wall[name]} s", flush=True)
-    t1 = time.time()
-    status["calicost"] = calicost.wait()
-    wall["calicost_wait"] = round(time.time() - t1, 1)
-    print(f"  calicost: exit {status['calicost']}", flush=True)
+    if calicost is not None:
+        t1 = time.time()
+        status["calicost"] = calicost.wait()
+        wall["calicost_wait"] = round(time.time() - t1, 1)
+        print(f"  calicost: exit {status['calicost']}", flush=True)
     for f in logs.values():
         f.close()
 
-    info = {}
+    info = {x: dict(old_rec.get("runs", {}).get(x, {}), kept_from_commit=old_rec.get("commit")) for x in kept}
     for name, d in runs.items():
         p = os.path.join(d, "calls.tsv")
         if status[name] == 0 and os.path.exists(p):
@@ -756,6 +835,7 @@ def run_spatial(a):
                n_spots=int(len(spots)), n_tumour_spots=int((spots["n_tumour"] > 0).sum()),
                mean_cells_per_spot=float(spots["n_cells"].mean()),
                mean_cells_per_tumour_spot=float(spots.loc[spots["n_tumour"] > 0, "n_cells"].mean()),
+               reference_protocol=protocol, redone=only, kept=kept,
                prior=dict(U0=U0.round(3).to_dict(orient="index"), states=dict(zip(segment_names(layer), states))),
                runs=info, wall_s=wall)
     import fig4_score as FS
@@ -781,6 +861,9 @@ def main():
                     help="cells in the Visium section (default $ISCC_SECTION_MAX_CELLS or 50,000)")
     ap.add_argument("--coarse", action="store_true",
                     help="also run clonealign on the copy-number groups of the true clones (a diagnostic)")
+    ap.add_argument("--only", default=None,
+                    help="spatial: comma-separated tools to redo (of clonalscope, clonalscope_dna, calicost); the "
+                         "others keep their stored labels (default: all)")
     a = ap.parse_args()
     warnings.filterwarnings("ignore", category=FutureWarning)
     try:
