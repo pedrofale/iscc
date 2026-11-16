@@ -1,0 +1,11 @@
+#!/bin/bash
+# Rscript of the evamtools image (EvAM-Tools, jsonlite; R on the image's PATH); runs cbn_runner.R.
+# The container's /tmp, /var/tmp and HOME are the work directory (ISCC_WORK_DIR, else the job's
+# node-local SNIC_TMP), never the host's /tmp; the runner reads it as ISCC_WORK_DIR and its threads
+# from ISCC_THREADS (SLURM_CPUS_PER_TASK). ISCC_TOOLS_DIR holds the images.
+W=${ISCC_WORK_DIR:-${SNIC_TMP:?run inside a Slurm job (SNIC_TMP) or set ISCC_WORK_DIR}}
+C=${ISCC_THREADS:-${SLURM_CPUS_PER_TASK:-1}}
+mkdir -p "$W/tmp" "$W/home"
+exec apptainer exec --cleanenv -B /nobackup -B "$W" -B "$W/tmp:/tmp" -B "$W/tmp:/var/tmp" --home "$W/home" \
+  --env ISCC_WORK_DIR="$W" --env TMPDIR="$W/tmp" --env ISCC_THREADS="$C" --env OMP_NUM_THREADS="$C" \
+  "${ISCC_TOOLS_DIR:?set ISCC_TOOLS_DIR to the directory of the tool images}/evamtools.sif" Rscript "$@"

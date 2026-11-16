@@ -772,7 +772,8 @@ LETHAL_DEME = {**RECOVERY_DEME, "maximum_death_rate": 2.5}
 
 
 def _lethal_arm(seed, planted):
-    ep = {"n_events": 2, "event_size": 10, "lethal_death_rate": 2.5, "planted": planted}
+    # modules of 25 of the ~100 drivers: both events are common enough to co-occur often unchecked
+    ep = {"n_events": 2, "event_size": 25, "lethal_death_rate": 2.5, "planted": planted}
     t = GenotypeTumor(seed=seed, genome_params=RECOVERY_GENOME,
                       selection_params={**RECOVERY_SELECTION, "epistasis_params": ep},
                       cancer_cell_params=RECOVERY_CANCER, deme_params=LETHAL_DEME,
@@ -792,7 +793,7 @@ def test_planted_exclusive_pair_carriers_die_in_a_grown_tumour():
     """Same seeds, same modules: with the pair planted exclusive, the cells carrying both events are
     removed (every such genotype dies at the lethal rate), against a control with nothing planted."""
     both_lethal = both_ctl = 0
-    for seed in (1, 2, 3):
+    for seed in (1, 2, 3, 4, 5):
         lethal, ctl = _lethal_arm(seed, {"exclusive": [(0, 1)]}), _lethal_arm(seed, {})
         for g, rep in lethal.genotypes.items():
             if rep.type == "cancer" and rep.event_bits == 0b11:

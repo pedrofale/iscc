@@ -28,6 +28,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import numpy as np  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
+from matplotlib.ticker import NullFormatter  # noqa: E402
 from matplotlib.patches import Circle, FancyArrowPatch, FancyBboxPatch  # noqa: E402
 
 import fig5_cohort as F  # noqa: E402
@@ -38,7 +39,7 @@ TOOL_COLOUR = {"none": S.GREY, "harmony": S.TOOL["Harmony"], "scvi": S.TOOL["scV
 TOOL_LABEL = {"none": "no integration", "harmony": "Harmony", "scvi": "scVI", "cooc": "co-occurrence",
               "mhn": "MHN", "treemhn": "TreeMHN"}
 DESIGN_LABEL = {"confounded": "one batch per patient", "balanced": "patients across batches"}
-LEVEL_MARKER = {"10x": "o", "strong": "^"}
+LEVEL_MARKER = {"10x": "o", "intermediate": "s", "strong": "^"}
 
 
 def load(out):
@@ -186,7 +187,10 @@ def panel_c(fig, x, y, part1):
                          label="one batch per patient"),
                   Line2D([], [], marker="o", ls="", mfc="white", mec=S.INK, markersize=3,
                          label="patients across batches"),
-                  Line2D([], [], marker="^", ls="", mfc="white", mec=S.INK, markersize=3, label="strong")])
+                  Line2D([], [], marker="o", ls="", mfc="white", mec=S.GREY, markersize=3, label="10x preset"),
+                  Line2D([], [], marker="^", ls="", mfc="white", mec=S.GREY, markersize=3, label="strong"),
+                  Line2D([], [], marker="s", ls="", mfc="white", mec=S.GREY, markersize=3,
+                         label="intermediate (exploratory,\nadded after the smoke test)")])
     ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.02, 1.0), fontsize=4.8)
 
 
@@ -228,6 +232,8 @@ def panel_d(fig, x, y, part2):
         ax.set_xscale("log")
         ax.set_xticks(ns)
         ax.set_xticklabels([str(n) for n in ns])
+        ax.xaxis.set_minor_formatter(NullFormatter())
+        ax.set_xlim(min(ns) / 1.3, max(ns) * 1.3)
         ax.set_ylim(15.5, 0.5)
         ax.set_yticks([1, 5, 10, 15])
         ax.set_title(TOOL_LABEL[tool], fontsize=5.5, pad=1.5)
@@ -235,6 +241,19 @@ def panel_d(fig, x, y, part2):
             ax.set_ylabel("rank of the planted pair\n(of 15)")
             ax.legend(loc="lower right", fontsize=4.8)
         ax.set_xlabel("patients")
+        if tool == "cooc":
+            cbn = {}
+            for f in part2["fits"]:
+                c = f["fits"].get("cbn") or {}
+                if f["arm"].startswith("planted") and f["kind"] == "nested" and "edges" in c \
+                        and f["threshold"] == F.DETECTION:
+                    # evam merges events with identical columns into one node ("E2_E1_E5")
+                    cbn.setdefault(f["n"], []).append(any("E4" in a.split("_") and "E5" in b.split("_")
+                                                          for a, b in c["edges"]))
+            if cbn:
+                ax.text(0.03, 0.03, "CBN E5\u2192E6 edge: " + ", ".join(
+                    f"{np.mean(cbn[n]):.0%}" for n in sorted(cbn)), transform=ax.transAxes, fontsize=4.5,
+                    color=S.GREY)
         # the order E5 -> E6: share of replicates with Theta[E6, E5] > Theta[E5, E6]
         if tool != "cooc":
             right = [np.mean([fit["pairs"]["4,5"]["ji"] > fit["pairs"]["4,5"]["ij"] for _, fit in data[n]])

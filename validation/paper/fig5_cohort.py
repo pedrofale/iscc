@@ -21,8 +21,9 @@ cohort's six patients in parallel processes, or loads R6's stored tumours for th
 changed between R6's commit (b4f6fb9, regime v4) and this one, and test_paper_regime_golden pins
 ``regime.grow``. Each patient's primary is dissociated to 1,000 cells; the pooled cells are measured
 by scRNA under two designs (confounded: one batch per patient; balanced: the pooled cells split at
-random into six batches) at two batch-effect levels (the 10x preset; strong: sigma_batch 0.6,
-depth_batch_sigma 0.3), and once with no batch effect (one batch, sigma_batch 0, depth_batch_sigma
+random into six batches) at the registered batch-effect levels (the 10x preset; strong: sigma_batch
+0.6, depth_batch_sigma 0.3) and the exploratory intermediate one added before any run (0.3 / 0.15;
+``LEVEL_STATUS``), and once with no batch effect (one batch, sigma_batch 0, depth_batch_sigma
 0), the truth, scored with each design's batch labels. Each set of counts is written to scratch as an
 h5ad and integrated by ``tools/integrate.py`` through ``tools/bin/python-integration`` (none,
 Harmony, scVI; k = 30), which computes the registered metrics; the summary keeps the metrics, their
@@ -34,8 +35,9 @@ with the same events and no interactions (each event's own effect kept), on the 
 15,000 cancer cells. Each task writes, per patient: event cell fractions and presence at 5% and 1%,
 the true clone tree collapsed to event acquisitions at 5%, the share of cells at the division cap,
 and the cost (CPU, wall, peak memory). ``part2-collect`` fits MHN (sym_sparse, lambda by CV),
-TreeMHN (its defaults) and the co-occurrence log odds on nested subsamples of 50/100/200/300 of every
-cohort, and on bootstrap resamples of the empty-network cohort for the null.
+TreeMHN (its defaults), CBN (EvAM-Tools, defaults; the first tool to cut) and the co-occurrence log
+odds on nested subsamples of 50/100/200/300 of every cohort, and on bootstrap resamples of the
+empty-network cohort for the null.
 
 Part III grows the ductal arm (the regime with the metastatic lattice) and a neutral arm (barriers
 off, stromal and metastatic hazards 0, transit floor 1, the three trait costs 0), 300 tumours each,
@@ -83,7 +85,13 @@ TOOLS_DIR = os.environ.get("ISCC_TOOLS_DIR",
 COHORTS = {0: tuple(range(101, 107)), 1: tuple(range(107, 113)), 2: tuple(range(113, 119))}
 CELLS_PER_PATIENT = 1000
 N_BALANCED_BATCHES = 6
-LEVELS = {"10x": {}, "strong": {"sigma_batch": 0.6, "depth_batch_sigma": 0.3}}
+LEVELS = {"10x": {}, "intermediate": {"sigma_batch": 0.3, "depth_batch_sigma": 0.15},
+          "strong": {"sigma_batch": 0.6, "depth_batch_sigma": 0.3}}
+# The intermediate level is the amendment of 2026-11-16 (exp-paper1-fig5-cohort, "Amendments before
+# any run"): added after the tool smoke test showed Harmony does not integrate at the strong level,
+# exploratory, with no expectation.
+LEVEL_STATUS = {"10x": "registered", "strong": "registered",
+                "intermediate": "exploratory: added 2026-11-16 after the tool smoke test, no expectation"}
 TRUTH_LEVEL = {"sigma_batch": 0.0, "depth_batch_sigma": 0.0}
 METHODS = ("none", "harmony", "scvi")
 K = 30
@@ -231,7 +239,7 @@ def _write_h5ad(path, counts, batch, meta):
     return list(counts.index)
 
 
-def _integrate(h5ad, prefix, method, args, log):
+def _integrate(h5ad, prefix, method, args, log, threads=1):
     py = args.integration_python or os.path.join(BIN, "python-integration")
     cmd = [py, os.path.join(TOOLS, "integrate.py"), h5ad, prefix, "--method", method, "--k", str(K),
            "--batch-key", "batch", "--patient-key", "patient", "--celltype-key", "cell_type",
@@ -240,7 +248,9 @@ def _integrate(h5ad, prefix, method, args, log):
         cmd.append("--no-metrics")
     if args.max_epochs:
         cmd += ["--max-epochs", str(args.max_epochs)]
-    env = dict(os.environ, ISCC_WORK_DIR=os.path.dirname(h5ad), ISCC_TOOLS_DIR=TOOLS_DIR)
+    cmd += ["--threads", str(threads)]
+    env = dict(os.environ, ISCC_WORK_DIR=os.path.dirname(h5ad), ISCC_TOOLS_DIR=TOOLS_DIR,
+               ISCC_THREADS=str(threads))
     t0 = time.time()
     r = subprocess.run(cmd, capture_output=True, text=True, env=env)
     log.append(dict(run=os.path.basename(prefix), method=method, returncode=r.returncode,
@@ -348,23 +358,32 @@ def part1(args):
             order[h5[(dname, "truth")]] = _write_h5ad(h5[(dname, "truth")], tc, labels[dname], meta)
         del tc, pooled
 
+        # every integration at once, one thread each (each run is mostly single-threaded metrics
+        # and, for scVI, training on a few thousand cells)
+        runs = [(dname, lname, m, h) for (dname, lname), h in h5.items()
+                for m in (("none",) if lname == "truth" else (args.methods or METHODS))]
+        cpus = int(os.environ.get("SLURM_CPUS_PER_TASK", "1"))
+        workers = max(1, min(len(runs), args.procs or cpus))
+        threads = max(1, cpus // workers)
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            outs = list(ex.map(lambda r: _integrate(r[3], r[3][:-5] + f"_{r[2]}", r[2], args, log, threads),
+                               runs))
         truth = {}
-        for (dname, lname), h in h5.items():
-            methods = ("none",) if lname == "truth" else (args.methods or METHODS)
-            for m in methods:
-                pre = h[:-5] + f"_{m}"
-                out = _integrate(h, pre, m, args, log)
-                if lname == "truth":
-                    truth[dname] = dict(prefix=pre, h5ad=h, out=out)
-                else:
-                    results[f"{dname}/{lname}/{m}"] = dict(prefix=pre, h5ad=h, out=out)
+        for (dname, lname, m, h), out in zip(runs, outs):
+            pre = h[:-5] + f"_{m}"
+            if lname == "truth":
+                truth[dname] = dict(prefix=pre, h5ad=h, out=out)
+            else:
+                results[f"{dname}/{lname}/{m}"] = dict(prefix=pre, h5ad=h, out=out)
 
         summary = dict(
             part="I", cohort=c, seeds=list(seeds), scale=scale, target_cancer=target,
             toy=bool(args.toy), commit=_commit(), tier=RG.TIER, cells_per_patient=n_cells,
             source=("R6 stored tumours (identical to regrowing: no growth-code change since b4f6fb9)"
                     if r6 else "grown through iscc.cohort.Cohort"),
-            k=K, levels=LEVELS, truth_level=TRUTH_LEVEL, n_balanced_batches=N_BALANCED_BATCHES,
+            k=K, levels=LEVELS, level_status=LEVEL_STATUS, truth_level=TRUTH_LEVEL,
+            n_balanced_batches=N_BALANCED_BATCHES, integration_workers=workers,
             doublets=doublets, grow_wall_s=round(grow_wall, 1),
             patients=[{k: v for k, v in d.items() if k not in ("cells", "cell_exp", "genes", "genotype",
                                                                  "cell_type", "is_cancer", "clone")}
@@ -599,6 +618,31 @@ def _fit_treemhn(trees, names, work, tag, seed=0):
                 versions=rec.get("versions"))
 
 
+def _fit_cbn(X, work, tag, seed=0):
+    """CBN through EvAM-Tools (tools/cbn_runner.R): the fitted poset as (parent, child) edges, the
+    root's children left out, plus the model table as evam returns it."""
+    csv = os.path.join(work, f"{tag}.cbn.csv")
+    X.to_csv(csv)
+    pre = os.path.join(work, f"{tag}.cbn")
+    env = dict(os.environ, ISCC_WORK_DIR=work, ISCC_TOOLS_DIR=TOOLS_DIR, ISCC_THREADS="1")
+    r = subprocess.run([os.path.join(BIN, "rscript-evamtools"), os.path.join(TOOLS, "cbn_runner.R"), csv, pre,
+                        "--seed", str(seed)], capture_output=True, text=True, env=env)
+    if r.returncode or not os.path.exists(pre + ".json"):
+        return dict(error=(r.stderr or r.stdout)[-1500:])
+    with open(pre + ".json") as f:
+        rec = json.load(f)
+    if rec.get("error"):
+        return dict(error=rec["error"], timings=rec.get("timings"))
+    model = rec.get("cbn_model") or []
+    edges = []
+    for row in model:
+        a, b = row.get("From"), row.get("To")
+        if a is not None and b is not None and str(a) != "Root":
+            edges.append((str(a), str(b)))
+    return dict(edges=edges, model=model, returned=rec.get("returned"), timings=rec.get("timings"),
+                versions=rec.get("versions"))
+
+
 def _tree_frame(rows):
     return pd.DataFrame(rows, columns=["Node_ID", "Mutation_ID", "Parent_ID", "n_cells"])
 
@@ -633,6 +677,8 @@ def _fit_all(X, trees, names, tools, work, tag, seed):
     if "treemhn" in tools:
         fits["treemhn"] = (_fit_treemhn(trees, names, work, tag, seed) if _image("treemhn")
                            else dict(skipped="treemhn.sif absent"))
+    if "cbn" in tools:
+        fits["cbn"] = _fit_cbn(X, work, tag, seed) if _image("evamtools") else dict(skipped="evamtools.sif absent")
     for f in fits.values():
         if "theta" in f:
             sc = pair_scores(f["theta"], symmetric=f.get("symmetric", False))
@@ -722,6 +768,7 @@ def collect(args, part):
                    null_arms=null_arms, resamples=args.resamples, seed=args.seed,
                    settings=dict(mhn="cMHN, sym_sparse, lambda by 5-fold CV (1-SE), unrounded "
                                      "(decision-fig5-progression-settings)",
+                                 cbn="evamtools::evam(methods = 'CBN'), defaults",
                                  treemhn="learn_MHN defaults, no stability selection",
                                  cooc="pairwise log odds, pseudocount 0.5"),
                    truth=truth, cohorts=cohorts, fits=fits)
@@ -778,7 +825,9 @@ def main(argv=None):
     for name in ("part2-collect", "part3-collect"):
         p = sub.add_parser(name)
         common(p)
-        p.add_argument("--tools", default="cooc,mhn,treemhn")
+        p.add_argument("--tools", default="cooc,mhn,treemhn,cbn" if name == "part2-collect"
+                       else "cooc,mhn,treemhn",
+                       help="cbn (EvAM-Tools) is Part II only by default, the first tool to cut")
         p.add_argument("--sizes", default=None, help="cohort sizes (default 50,100,200,300)")
         p.add_argument("--null-arms", default=None, help="arms resampled for the null")
         p.add_argument("--resamples", type=int, default=20, help="bootstrap resamples of a null arm")
