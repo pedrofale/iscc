@@ -20,7 +20,9 @@ from iscc.tumor.models import GenotypeTumor
 from iscc.tumor.components.selection import Selection
 from iscc.tumor.components.epistasis import EpistasisNetwork, bits_to_events, events_to_bits
 from iscc.constants import DEFAULT_LAYOUT_SEED, LAYOUT_OFFSET_EPISTASIS
-from iscc.cohort import Cohort
+import functools
+
+from iscc.cohort import Cohort, grow_tumor, shared_selection
 from iscc.integrations import (to_mhn_matrix, to_cell_fraction_matrix, to_mutation_tree,
                                to_treemhn_trees, event_cell_fractions, cooccurrence_scores,
                                top_edges, score_edges, score_order, score_exclusivity)
@@ -58,10 +60,11 @@ def _grown(seed=1, steps=200, **kw):
 def _cohort(n=8, epistasis_params=EPI, steps=200, **kw):
     """N patients over ONE shared landscape (shared network, private evolution) — the substrate the
     whole progression benchmark stands on."""
-    return Cohort(patient_seeds=list(range(1, n + 1)), genome_params=GENOME,
-                  selection_params={**SELECTION, "epistasis_params": epistasis_params, **kw},
-                  cancer_cell_params=CANCER, deme_params=DEME, spatial_params=SPATIAL,
-                  grow_steps=steps)
+    grow = functools.partial(
+        grow_tumor, genome_params=GENOME,
+        selection_params={**SELECTION, "epistasis_params": epistasis_params, **kw},
+        cancer_cell_params=CANCER, deme_params=DEME, spatial_params=SPATIAL, grow_steps=steps)
+    return Cohort(grow, patient_seeds=list(range(1, n + 1)))
 
 
 def _cohort_tumors(coh):
@@ -141,7 +144,8 @@ def test_network_uses_the_registered_layout_offset():
 def test_whole_cohort_shares_one_network():
     """The benchmark is only well-posed if the cohort shares a network — assert it directly."""
     coh = _cohort(n=4, steps=60)
-    shared = coh.selection.epistasis           # the cohort's shared landscape
+    # the cohort's shared landscape, built without growing anyone
+    shared = shared_selection(GENOME, {**SELECTION, "epistasis_params": EPI}).epistasis
     for t in _cohort_tumors(coh):
         net = t.selection.epistasis
         assert np.array_equal(net.E, shared.E)
@@ -346,7 +350,7 @@ def test_tau_leaping_runs_with_epistasis_and_shares_the_network():
 
 # =================================== export + scoring ===================================
 def test_mhn_matrix_shape_and_content():
-    X = to_mhn_matrix(_cohort_tumors(_cohort(n=5)))
+    X = to_mhn_matrix(_cohort_tumors(_cohort(n=5)), min_freq=0.0)
     assert X.shape == (5, EPI["n_events"])
     assert set(np.unique(X.values)) <= {0, 1}
     assert list(X.columns) == [f"E{i}" for i in range(EPI["n_events"])]
@@ -410,7 +414,7 @@ def test_cell_fraction_matrix_is_the_continuous_observable():
     assert F.shape == (4, EPI["n_events"])
     assert ((F.values >= 0) & (F.values <= 1)).all()
     # binary presence is exactly the >0 indicator of it
-    assert np.array_equal(to_mhn_matrix(tumors).values, (F.values > 0).astype(int))
+    assert np.array_equal(to_mhn_matrix(tumors, min_freq=0.0).values, (F.values > 0).astype(int))
 
 
 def test_score_edges_precision_recall():
@@ -454,10 +458,11 @@ RECOVERY_SPATIAL = {"grid_size": 7, "structure_radius": 0}
 
 
 def _recovery_cohort(n=24, steps=500, **sel):
-    coh = Cohort(patient_seeds=list(range(1, n + 1)), genome_params=RECOVERY_GENOME,
-                 selection_params={**RECOVERY_SELECTION, **sel},
-                 cancer_cell_params=RECOVERY_CANCER, deme_params=RECOVERY_DEME,
-                 spatial_params=RECOVERY_SPATIAL, grow_steps=steps)
+    grow = functools.partial(
+        grow_tumor, genome_params=RECOVERY_GENOME, selection_params={**RECOVERY_SELECTION, **sel},
+        cancer_cell_params=RECOVERY_CANCER, deme_params=RECOVERY_DEME,
+        spatial_params=RECOVERY_SPATIAL, grow_steps=steps)
+    coh = Cohort(grow, patient_seeds=list(range(1, n + 1)))
     # extinct patients contribute an all-zero row and are not patients in a real cohort study
     return [p.tumor for p in coh.run().patients if p.tumor.get_cancer_size() > 0]
 
@@ -476,7 +481,7 @@ def test_planted_dependency_dag_is_recoverable_in_an_easy_regime():
     dp = {"n_constraints": 2, "dag_depth": 2, "dag_branching": 1, "gating_mode": "accessibility"}
     tumors = _recovery_cohort(epistasis_params=ep, dependency_params=dp)
     net = tumors[0].selection.epistasis
-    X = to_mhn_matrix(tumors).values
+    X = to_mhn_matrix(tumors, min_freq=0.0).values
 
     informative = violations = 0
     for (parent, child) in net.true_dag_edges():
@@ -531,7 +536,7 @@ def test_empty_network_control_recovers_nothing():
     net = tumors[0].selection.epistasis
     assert net.true_edges() == []
     assert np.allclose(net.E, 0)
-    X = to_mhn_matrix(tumors)
+    X = to_mhn_matrix(tumors, min_freq=0.0)
     pred = top_edges(cooccurrence_scores(X.values), k=3)
     res = score_edges(net.true_edges(), pred)
     assert res["tp"] == 0 and res["fp"] == 3 and res["precision"] == 0.0
@@ -662,3 +667,335 @@ def test_death_rate_is_untouched_when_epistasis_is_off():
     t = _tumor()
     assert t.selection.update_death_rate({}, 0.02, event_bits=0) == 0.02
     assert t.selection.epistasis is None
+
+
+# ============================ the planted (explicit) network ============================
+# Fig 5's network (vault: decision-fig5-planted-network), with the decision's E1..E6 as events 0..5.
+PLANTED = {"effects": 0.05, "interactions": [(0, 1, 0.4)], "exclusive": [(2, 3)],
+           "constraints": [(4, 5)]}
+PLANTED_EP = {"n_events": 6, "event_size": 5, "lethal_death_rate": 2.5, "planted": PLANTED}
+PLANTED_DP = {"gating_mode": "accessibility"}
+
+
+def _planted_selection(ep=PLANTED_EP, dp=PLANTED_DP, layout_seed=DEFAULT_LAYOUT_SEED):
+    return Selection(n_segments=GENOME["n_segments"], segment_size=GENOME["segment_size"],
+                     rng=np.random.default_rng(layout_seed), layout_seed=layout_seed,
+                     epistasis_params=ep, dependency_params=dp, **SELECTION)
+
+
+def test_planted_network_is_exactly_as_specified():
+    net = _planted_selection().epistasis
+    assert net.planted and net.n_events == 6 and net.event_size == 5
+    assert np.array_equal(net.beta, np.full(6, 0.05))
+    expected_E = np.zeros((6, 6))
+    expected_E[0, 1] = expected_E[1, 0] = 0.4
+    assert np.array_equal(net.E, expected_E)                  # the one interaction, nothing else
+    assert net.true_edges() == [(0, 1, 0.4)]
+    assert net.true_exclusive_pairs() == [(2, 3)]
+    assert net.true_dag_edges() == [(4, 5)]
+    assert net.dag_parents[5] == (4,) and all(net.dag_parents[i] == () for i in range(5))
+    assert net.gating_mode == "accessibility"
+    assert net.lethal and net.lethal_death_rate == 2.5
+    gt = net.ground_truth()
+    assert gt["planted"] is True and gt["exclusive_pairs"] == [(2, 3)]
+    # per-event effects can be given one by one
+    per = _planted_selection({**PLANTED_EP, "planted": {"effects": [0.1, 0, 0, 0, 0, 0.2]}}).epistasis
+    assert np.array_equal(per.beta, [0.1, 0, 0, 0, 0, 0.2])
+    assert per.true_edges() == [] and per.true_dag_edges() == [] and per.true_exclusive_pairs() == []
+
+
+def test_planted_fitness_is_beta_plus_the_planted_terms():
+    net = _planted_selection().epistasis
+    assert net.log_fitness(events_to_bits([0])) == pytest.approx(0.05)
+    assert net.log_fitness(events_to_bits([0, 1])) == pytest.approx(0.05 + 0.05 + 0.4)
+    assert net.log_fitness(events_to_bits([2, 3])) == pytest.approx(0.1)   # exclusivity has no E term
+    assert net.log_fitness(events_to_bits([4, 5])) == pytest.approx(0.1)
+
+
+def test_planted_modules_are_the_random_modes_modules():
+    """Only the event modules are drawn, from the same sub-stream and first: planting the network
+    leaves the modules and every other gene role exactly where the random mode puts them."""
+    planted = _planted_selection()
+    random = _planted_selection({"n_events": 6, "event_size": 5}, None)
+    for a, b in zip(planted.epistasis.event_genes, random.epistasis.event_genes):
+        assert np.array_equal(a, b)
+    for get in ("get_oncogenes", "get_tsgs", "get_dispersal_genes", "get_treatment_resistant"):
+        assert list(getattr(planted, get)()) == list(getattr(random, get)())
+    # and the modules still follow the layout seed (a replicate network is a different layout seed)
+    other = _planted_selection(layout_seed=7)
+    assert not all(np.array_equal(a, b) for a, b in
+                   zip(planted.epistasis.event_genes, other.epistasis.event_genes))
+
+
+@pytest.mark.parametrize("ep, dp, match", [
+    ({**PLANTED_EP, "n_interactions": 2}, PLANTED_DP, "random-draw"),
+    (PLANTED_EP, {"gating_mode": "accessibility", "n_constraints": 1}, "random-draw"),
+    ({**PLANTED_EP, "planted": {"interaction": [(0, 1, 0.4)]}}, None, "unknown planted"),
+    ({**PLANTED_EP, "planted": {"interactions": [(0, 0, 0.4)]}}, None, "itself"),
+    ({**PLANTED_EP, "planted": {"interactions": [(0, 6, 0.4)]}}, None, "out of range"),
+    ({**PLANTED_EP, "planted": {"interactions": [(0, 1)]}}, None, "3-tuples"),
+    ({**PLANTED_EP, "planted": {"interactions": [(0, 1, 0.4), (1, 0, 0.1)]}}, None, "twice"),
+    ({**PLANTED_EP, "planted": {"interactions": [(0, 1, 0.4)], "exclusive": [(1, 0)]}}, None,
+     "also an interaction"),
+    ({**PLANTED_EP, "planted": {"constraints": [(0, 1), (1, 2), (2, 0)]}}, None, "cycle"),
+    ({**PLANTED_EP, "planted": {"effects": [0.1, 0.2]}}, None, "one value per event"),
+    ({**PLANTED_EP, "mutual_exclusivity_lethal": False}, PLANTED_DP, "lethality"),
+])
+def test_planted_network_rejects_what_it_cannot_plant_exactly(ep, dp, match):
+    with pytest.raises(ValueError, match=match):
+        _planted_selection(ep, dp)
+
+
+def test_planted_exclusive_carrier_takes_the_lethal_death_rate():
+    sel = _planted_selection()
+    assert sel.update_death_rate({}, 0.02, event_bits=events_to_bits([2, 3])) == 2.5
+    assert sel.update_death_rate({}, 0.02, event_bits=events_to_bits([2])) == 0.02
+    assert sel.update_death_rate({}, 0.02, event_bits=events_to_bits([3, 4, 5])) == 0.02
+
+
+def test_lethal_rate_above_the_death_clamp_is_rejected():
+    """Every death rate is clamped to maximum_death_rate, so a lethal rate above it would silently
+    become the clamp; the tumour refuses to build instead."""
+    with pytest.raises(ValueError, match="maximum_death_rate"):
+        _tumor(epistasis_params=PLANTED_EP, dependency_params=PLANTED_DP)       # clamp 1.0 < 2.5
+    t = GenotypeTumor(seed=1, genome_params=GENOME,
+                      selection_params={**SELECTION, "epistasis_params": PLANTED_EP,
+                                        "dependency_params": PLANTED_DP},
+                      cancer_cell_params=CANCER, deme_params={**DEME, "maximum_death_rate": 2.5},
+                      spatial_params=SPATIAL)
+    assert t.selection.epistasis.planted
+
+
+# A regime where events co-occur often without selection (neutral drivers, slow growth), so a planted
+# lethal pair has many would-be carriers to remove.
+LETHAL_DEME = {**RECOVERY_DEME, "maximum_death_rate": 2.5}
+
+
+def _lethal_arm(seed, planted):
+    ep = {"n_events": 2, "event_size": 10, "lethal_death_rate": 2.5, "planted": planted}
+    t = GenotypeTumor(seed=seed, genome_params=RECOVERY_GENOME,
+                      selection_params={**RECOVERY_SELECTION, "epistasis_params": ep},
+                      cancer_cell_params=RECOVERY_CANCER, deme_params=LETHAL_DEME,
+                      spatial_params=RECOVERY_SPATIAL)
+    t.grow(n_steps=500, seed=seed, materialize=False)
+    return t
+
+
+def _carriers(t, i=0, j=1):
+    both = sum(c for g, c in t.genotypes_counts.items() if t._is_cancer(g)
+               and t.genotypes[g].event_bits >> i & 1 and t.genotypes[g].event_bits >> j & 1)
+    total = sum(c for g, c in t.genotypes_counts.items() if t._is_cancer(g))
+    return both, total
+
+
+def test_planted_exclusive_pair_carriers_die_in_a_grown_tumour():
+    """Same seeds, same modules: with the pair planted exclusive, the cells carrying both events are
+    removed (every such genotype dies at the lethal rate), against a control with nothing planted."""
+    both_lethal = both_ctl = 0
+    for seed in (1, 2, 3):
+        lethal, ctl = _lethal_arm(seed, {"exclusive": [(0, 1)]}), _lethal_arm(seed, {})
+        for g, rep in lethal.genotypes.items():
+            if rep.type == "cancer" and rep.event_bits == 0b11:
+                assert rep.evolutionary_parameters["death_rate"] == 2.5
+        b, n = _carriers(lethal)
+        both_lethal += b
+        b, n = _carriers(ctl)
+        both_ctl += b
+    assert both_ctl > 20, "the control regime has too few double carriers to test removal"
+    assert both_lethal < 0.1 * both_ctl
+
+
+def test_planted_constraint_is_respected_along_every_lineage():
+    """E5 accessible only after E4 (accessibility gating): no lineage carries the child without its
+    parent, and wherever both are carried the parent came first."""
+    ep = {"n_events": 2, "event_size": 10, "planted": {"constraints": [(0, 1)]}}
+    tumors = _recovery_cohort(n=6, epistasis_params=ep,
+                              dependency_params={"gating_mode": "accessibility"})
+    n_child = 0
+    for t in tumors:
+        for events in t.event_table()["events"]:
+            if 1 in events:
+                n_child += 1
+                assert 0 in events
+    assert n_child > 0, "the child event never arose: the regime cannot test the constraint"
+    order = score_order([(0, 1)], [g for t in tumors for g in t.event_table()["event_groups"]])
+    assert order["constraint_satisfaction"] == 1.0
+    assert order["n_scored"] == 0 or order["order_accuracy"] == 1.0
+
+
+def test_planted_network_is_reachable_through_selection_params():
+    """A planted network needs no hook after construction: it rides in selection_params, which is
+    all the paper regime's grow passes on (see test_cohort's regime test for the full path)."""
+    t = GenotypeTumor(seed=2, genome_params=GENOME,
+                      selection_params={**SELECTION, "epistasis_params": PLANTED_EP,
+                                        "dependency_params": PLANTED_DP},
+                      cancer_cell_params=CANCER, deme_params={**DEME, "maximum_death_rate": 2.5},
+                      spatial_params=SPATIAL)
+    gt = t.epistasis_ground_truth()
+    assert gt["planted"] and gt["edges"] == [(0, 1, 0.4)] and gt["dag_edges"] == [(4, 5)]
+
+
+# ================================ the share of cells at the cap ================================
+def test_division_cap_share():
+    from iscc.tumor.diagnostics import division_cap_share
+    # neutral drivers and b0 below the cap: nobody can reach it
+    t = _grown(seed=1, steps=150, driver_effects=1.0)
+    assert division_cap_share(t) == 0.0
+    # b0 AT the cap: every cell is there from the start
+    at = GenotypeTumor(seed=1, genome_params=GENOME,
+                       selection_params={**SELECTION, "driver_effects": 1.0},
+                       cancer_cell_params={**CANCER, "division_rate": CANCER["max_birth_rate"]},
+                       deme_params=DEME, spatial_params=SPATIAL)
+    at.grow(n_steps=60, seed=1, materialize=False)
+    assert division_cap_share(at) == 1.0
+    # a mixed tumour: the share is the count-weighted fraction whose uncapped rate reaches the cap,
+    # and reading it changes nothing
+    t = _grown(seed=4, steps=200, driver_effects=1.2)
+    counts = dict(t.genotypes_counts)
+    n = at_cap = 0
+    for g, c in counts.items():
+        if not t._is_cancer(g):
+            continue
+        rep = t.genotypes[g]
+        u = rep.baseline_rates["division_rate"] * t.selection.update_division_rate(
+            rep.genome_summary, event_bits=rep.event_bits)
+        n += c
+        at_cap += c * (u >= rep.max_birth_rate - 1e-12)
+    share = division_cap_share(t)
+    assert share == pytest.approx(at_cap / n)
+    assert 0.0 <= share <= 1.0 and dict(t.genotypes_counts) == counts
+
+
+# =============================== event exports for Fig 5 ===============================
+def test_presence_threshold_is_explicit():
+    """No default: the old default (any surviving cell) saturates the matrix, so it must be stated."""
+    from iscc.integrations import DETECTION_LIMIT
+    t = _grown(seed=1, epistasis_params=EPI)
+    with pytest.raises(TypeError):
+        to_mhn_matrix([t])
+    assert DETECTION_LIMIT == 0.05
+    frac = event_cell_fractions(t)
+    assert np.array_equal(to_mhn_matrix([t], min_freq=DETECTION_LIMIT).values[0],
+                          (frac >= 0.05).astype(int))
+
+
+def test_trie_detection_collapses_nodes_below_the_limit():
+    """A node is kept when the cells through it (with its descendants) reach the limit; a dropped
+    node's cells go to its deepest kept ancestor."""
+    from iscc.integrations.progression import _trie
+    paths = [((0, 1), 60), ((0,), 30), ((2,), 4), ((0, 2), 6)]
+    full = _trie(paths, total=100)
+    assert len(full) == 5                                       # root, 0, 0>1, 2, 0>2
+    cut = _trie(paths, total=100, detection=0.05)
+    rows = {(r.Parent_ID, r.Mutation_ID): r for r in cut.itertuples()}
+    assert set(rows) == {(1, 0), (1, 1), (2, 2), (2, 3)}        # root, 0, 0>1, 0>2; not 2 (4%)
+    assert rows[(1, 0)].n_cells == 4                            # the 4% clone merged into the root
+    assert cut["n_cells"].sum() == 100
+    assert _trie(paths, total=100, detection=0.07)["Mutation_ID"].tolist() == [0, 1, 2]
+
+
+def test_collapsed_tree_keeps_only_clones_above_the_limit():
+    tumors = _cohort_tumors(_cohort(n=4, steps=200))
+    for t in tumors:
+        tbl = t.event_table()
+        total = tbl["n_cells"].sum()
+        # without a limit every distinct acquisition path is a node (the export as it always was)
+        prefixes = {tuple(o[:k]) for o in tbl["event_order"] for k in range(1, len(o) + 1)}
+        assert len(to_mutation_tree(t)) == len(prefixes) + 1
+        tree = to_mutation_tree(t, detection=0.05)
+        assert tree["n_cells"].sum() == total
+        # every kept node's path is carried (as a path prefix) by >= 5% of the cancer cells
+        nodes = {int(r.Node_ID): r for r in tree.itertuples()}
+        for nid, r in nodes.items():
+            if nid == 1:
+                continue
+            path, cur = [], nid
+            while cur != 1:
+                path.append(int(nodes[cur].Mutation_ID) - 1)
+                cur = int(nodes[cur].Parent_ID)
+            path = tuple(reversed(path))
+            through = sum(n for order, n in zip(tbl["event_order"], tbl["n_cells"])
+                          if tuple(order[:len(path)]) == path)
+            assert through / total >= 0.05
+    trees = to_treemhn_trees(tumors, detection=0.05)
+    ids = sorted(trees["Patient_ID"].unique())
+    assert ids == list(range(1, len(ids) + 1))
+    # trees stored one patient at a time stack to the same frame
+    from iscc.integrations import stack_trees
+    stored = [to_mutation_tree(t, detection=0.05) for t in tumors]
+    assert stack_trees(stored).equals(trees)
+
+
+# A tumour whose cells acquire the three dissemination traits by mutation.
+TRAITS_SEL = dict(prop_breach=0.05, prop_stromal_survival=0.05, prop_met_survival=0.05,
+                  trait_source="mutation")
+
+
+def _lineage_traits(t, gid, traits):
+    """Brute force: the traits any genotype on gid's lineage (itself included) carried."""
+    from iscc.integrations.progression import _TRAIT_TALLY
+    got, cur = set(), gid
+    while cur is not None and cur in t.genotypes and t._is_cancer(cur):
+        gs = t.genotypes[cur].genome_summary
+        got |= {k for k, name in enumerate(traits) if gs.get(_TRAIT_TALLY[name], 0) > 0}
+        cur = t.genotypes_parents.get(cur)
+    return got
+
+
+def test_trait_table_reads_acquisitions_off_the_genealogy():
+    from iscc.integrations import TRAIT_EVENTS, trait_table, trait_cell_fractions
+    t = _grown(seed=2, steps=250, **TRAITS_SEL)
+    tbl = trait_table(t)
+    assert tbl.attrs["names"] == list(TRAIT_EVENTS)
+    assert tbl["n_cells"].sum() == t.get_cancer_size()
+    n_with = 0
+    for gid, events, order, groups in zip(tbl["genotype_id"], tbl["events"], tbl["event_order"],
+                                          tbl["event_groups"]):
+        assert set(events) == _lineage_traits(t, gid, TRAIT_EVENTS)
+        assert tuple(e for g in groups for e in g) == order and sorted(order) == sorted(events)
+        n_with += bool(events)
+    assert n_with > 0, "no trait acquired: the regime cannot test the adapter"
+    frac = trait_cell_fractions(t)
+    for k, name in enumerate(TRAIT_EVENTS):
+        carried = tbl["events"].apply(lambda ev: k in ev)
+        assert frac[name] == pytest.approx(tbl.loc[carried, "n_cells"].sum() / tbl["n_cells"].sum())
+
+
+def test_trait_matrix_and_trees():
+    from iscc.integrations import (TRAIT_EVENTS, to_trait_matrix, to_trait_tree, to_trait_trees,
+                                   trait_cell_fractions)
+    tumors = [_grown(seed=s, steps=250, **TRAITS_SEL) for s in (2, 3, 4)]
+    X = to_trait_matrix(tumors)                                   # default: the 5% limit
+    assert list(X.columns) == list(TRAIT_EVENTS) and X.shape == (3, 3)
+    for i, t in enumerate(tumors):
+        frac = trait_cell_fractions(t).values
+        assert np.array_equal(X.values[i], (frac >= 0.05).astype(int))
+        assert np.array_equal(to_trait_matrix([t], min_freq=0).values[0], (frac > 0).astype(int))
+        tree = to_trait_tree(t)
+        assert tree.iloc[0].to_dict() == dict(Node_ID=1, Mutation_ID=0, Parent_ID=1,
+                                              n_cells=int(tree.iloc[0]["n_cells"]))
+        assert set(tree["Mutation_ID"]) <= set(range(len(TRAIT_EVENTS) + 1))
+        assert tree["n_cells"].sum() == t.get_cancer_size()
+        # a trait kept in the tree is carried by >= 5% of cells, so it is present in the matrix
+        for m in set(tree["Mutation_ID"]) - {0}:
+            assert X.values[i, m - 1] == 1
+    trees = to_trait_trees(tumors)
+    assert {"Patient_ID", "Tree_ID", "Node_ID", "Mutation_ID", "Parent_ID"} <= set(trees.columns)
+
+
+def test_traits_with_events_agree_with_the_event_machinery():
+    """Read together with an epistasis network, the event part of the trait adapter is exactly the
+    engine's own event_table: same event sets, same acquisition groups."""
+    from iscc.integrations import trait_table, to_trait_matrix
+    t = _grown(seed=3, steps=250, epistasis_params=EPI, **TRAITS_SEL)
+    n = EPI["n_events"]
+    tbl = trait_table(t, with_events=True)
+    assert tbl.attrs["names"][:n] == t.selection.epistasis.event_names()
+    tbl = tbl.set_index("genotype_id")
+    ev = t.event_table().set_index("genotype_id")
+    for gid, row in ev.iterrows():
+        assert tuple(e for e in tbl.loc[gid, "events"] if e < n) == row["events"]
+        groups = tuple(g for g in (tuple(e for e in grp if e < n) for grp in tbl.loc[gid, "event_groups"]) if g)
+        assert groups == row["event_groups"]
+    X = to_trait_matrix([t], with_events=True)
+    assert np.array_equal(X.values[0, :n], to_mhn_matrix([t], min_freq=0.05).values[0])

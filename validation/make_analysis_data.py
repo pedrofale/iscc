@@ -352,7 +352,7 @@ def _treemhn(out_dir, seed, scale, n_clones):
     truth_trees.to_csv(os.path.join(out_dir, "truth_trees.csv"), index=False)
 
     # --- the cross-sectional view of the same cohort (MHN), binary and continuous
-    X = ig.to_mhn_matrix(tumors)
+    X = ig.to_mhn_matrix(tumors, min_freq=0.0)
     X.to_csv(os.path.join(out_dir, "X_presence.csv"))
     F = ig.to_cell_fraction_matrix(tumors)
     F.to_csv(os.path.join(out_dir, "X_cellfraction.csv"))
@@ -454,9 +454,9 @@ def _mhn(out_dir, seed, scale, n_clones, event_size=MHN_EVENT_SIZE,
     control = VE.run_cohort(n_patients, dependency_params=None, **common)
 
     os.makedirs(out_dir, exist_ok=True)
-    X = ig.to_mhn_matrix(tumors)
+    X = ig.to_mhn_matrix(tumors, min_freq=0.0)
     X.to_csv(os.path.join(out_dir, "X_presence.csv"))
-    ig.to_mhn_matrix(control).to_csv(os.path.join(out_dir, "X_presence_control.csv"))
+    ig.to_mhn_matrix(control, min_freq=0.0).to_csv(os.path.join(out_dir, "X_presence_control.csv"))
     # The continuous view as well: a detection floor is an assay property, so keeping the raw
     # cancer-cell fractions lets the analysis vary it instead of inheriting min_freq=0 from here.
     ig.to_cell_fraction_matrix(tumors).to_csv(os.path.join(out_dir, "X_cellfraction.csv"))

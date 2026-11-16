@@ -279,10 +279,12 @@ def test_dosage_sensitivity_is_bounded():
 
 # --------------------------------------------------------------- 5b. the COHORT layer
 def _cohort(n=3, steps=3000, **kw):
-    from iscc.cohort import Cohort
-    return Cohort(patient_seeds=list(range(1, n + 1)), genome_params=GENOME,
-                  selection_params=SELECTION, cancer_cell_params=CANCER, deme_params=DEME,
-                  spatial_params=SPATIAL, grow_steps=steps, **kw).run()
+    import functools
+    from iscc.cohort import Cohort, grow_tumor
+    grow = functools.partial(grow_tumor, genome_params=GENOME, selection_params=SELECTION,
+                             cancer_cell_params=CANCER, deme_params=DEME, spatial_params=SPATIAL,
+                             grow_steps=steps, **kw)
+    return Cohort(grow, patient_seeds=list(range(1, n + 1))).run()
 
 
 def test_cohort_forwards_expression_params():

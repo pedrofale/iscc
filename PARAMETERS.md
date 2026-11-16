@@ -310,7 +310,36 @@ Fitness gains `exp(Σᵢ βᵢxᵢ + Σᵢ<ⱼ Eᵢⱼxᵢxⱼ)` as a multiplier
 | `mutual_exclusivity_strength` | 0.0 | 2–8 when used | magnitude of the strongly-negative (synthetic-lethal) edges |
 | `n_exclusive_pairs` | 0 | ≤ pairs left after the interaction edges | how many such edges |
 | `mutual_exclusivity_lethal` | `True` | `True` \| `False` | **`True` is required for exclusivity to mean anything** — see below. `False` leaves only the soft `E` effect |
-| `lethal_death_rate` | 1.0 | ≥ `max_birth_rate` | death rate of a synthetic-lethal genotype |
+| `lethal_death_rate` | 1.0 | ≥ `max_birth_rate`, ≤ `maximum_death_rate` | death rate of a synthetic-lethal genotype; above `maximum_death_rate` (which clamps every death rate) the tumour refuses to build |
+| `planted` | `None` (drawn at random) | a dict, see below | states the whole network explicitly instead of drawing it |
+
+**Planting an explicit network.** `planted` replaces every random draw above except the event modules
+(still drawn from the layout seed, exactly as in the random mode), so every pair can be named before
+any tumour is grown. Events are indexed from 0 (`E0`, `E1`, ...):
+
+```yaml
+epistasis_params:
+  n_events: 6
+  event_size: 10
+  lethal_death_rate: 2.5            # needs deme_params.maximum_death_rate >= 2.5
+  planted:
+    effects: 0.05                   # each event's own log-fitness effect: a scalar or one per event (default 0)
+    interactions: [[0, 1, 0.4]]     # pairwise log-additive terms E[i, j]
+    exclusive: [[2, 3]]             # synthetic-lethal together (lethal_death_rate); no E term of their own
+    constraints: [[4, 5]]           # 4 must precede 5 (a DAG), gated by dependency_params.gating_mode
+dependency_params:
+  gating_mode: accessibility
+```
+
+Nothing that is not planted acts: an event's own effect is 0 unless given, and a pair interacts only if
+listed. The random-draw knobs (`event_effect_*`, `n_interactions`, `network_*`, `interaction_strength*`,
+`prop_synergy`, `mutual_exclusivity_strength`, `n_exclusive_pairs`, and `n_constraints` / `dag_*` in
+`dependency_params`) cannot be combined with `planted`, and a cycle, a self-pair, an out-of-range event,
+a pair given twice, or an exclusive pair that is also an interaction is an error. The network rides in
+`selection_params`, so the paper regime's `grow` takes it as `selection={"epistasis_params": ...,
+"dependency_params": ...}`. `iscc.tumor.diagnostics.division_cap_share(tumor)` reports the share of
+cancer cells whose division rate is at `max_birth_rate`, where any planted term stops acting (the clamp
+trap below).
 
 **Trap — a strongly negative `E` does NOT produce mutual exclusivity on its own.** It only suppresses
 the *division* rate: a clone that has stopped dividing still dies only at its baseline rate (or at
@@ -367,7 +396,12 @@ with `epistasis_params`:
   raising `E` changes how much of the tumour its lineages occupy, which a presence call throws away.
   Sweep `min_freq` (a per-event **cancer-cell fraction** threshold, aggregated across clones — not a
   per-clone size filter) and check the column marginals: all-zero or all-one columns carry no
-  information and no method can recover anything from them.
+  information and no method can recover anything from them. `min_freq` has no default in
+  `to_mhn_matrix` / `to_cbn_poset` / `patient_event_vector`; `iscc.integrations.DETECTION_LIMIT` (5%)
+  is paper 1's. The tree exports take `detection`, the same limit on the collapsed clone tree (a node
+  is kept when at least that share of the cancer cells descends through it), and
+  `to_trait_matrix` / `to_trait_trees` read the dissemination traits (breach, stromal and metastatic
+  survival) as events in the same shapes.
 - **Tumour size is the binding constraint, not patient count.** A clone arising late has little time
   to expand, so in small tumours the frequency signal never develops. Adding patients does not fix
   this. If recovery looks flat, check the observable's marginals before concluding anything about the

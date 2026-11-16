@@ -23,7 +23,8 @@ from .petracer import decompose_lineage_spatial, LineageSpatialDecomposition
 from .progression import (
     to_mhn_matrix, to_cell_fraction_matrix, to_mutation_tree, to_treemhn_trees, to_cbn_poset,
     clone_events, event_cell_fractions, patient_event_vector, cooccurrence_scores, top_edges,
-    score_edges, score_order, score_exclusivity,
+    score_edges, score_order, score_exclusivity, DETECTION_LIMIT, TRAIT_EVENTS, trait_table,
+    trait_cell_fractions, to_trait_matrix, to_trait_tree, to_trait_trees, stack_trees,
 )
 from .multiregion import (
     true_origin_counts, region_bulk_profiles, oracle_clone_profiles,
@@ -44,7 +45,10 @@ __all__ = [
     "to_mhn_matrix", "to_cell_fraction_matrix", "to_mutation_tree", "to_treemhn_trees",
     "to_cbn_poset", "clone_events", "event_cell_fractions", "patient_event_vector",
     "cooccurrence_scores", "top_edges",
-    "score_edges", "score_order", "score_exclusivity",
+    "score_edges", "score_order", "score_exclusivity", "DETECTION_LIMIT", "stack_trees",
+    # dissemination traits read as events (presence matrix + collapsed clone trees)
+    "TRAIT_EVENTS", "trait_table", "trait_cell_fractions", "to_trait_matrix", "to_trait_tree",
+    "to_trait_trees",
     # multi-region "sample trees are not phylogenies" benchmark
     "true_origin_counts", "region_bulk_profiles", "oracle_clone_profiles",
     "count_spurious_parallel", "multiregion_phylogeny",

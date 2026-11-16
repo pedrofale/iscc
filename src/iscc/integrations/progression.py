@@ -13,6 +13,17 @@ Three export shapes:
     exactly, which is why TreeMHN is the flagship of this benchmark.
   * :func:`to_cbn_poset` — the observed event sets for CBN/H-CBN's poset fit.
 
+Event presence takes an explicit cancer-cell-fraction threshold, ``min_freq``, with no default: the
+old default of 0 (any surviving cell) saturates the matrix in a mutation-rich regime, so every caller
+states its detection limit. :data:`DETECTION_LIMIT` (5%, the detection limit of the paper's Fig 2f) is
+the one paper 1's Fig 5 uses. The tree exports take ``detection``, the same limit applied to the nodes
+of the collapsed clone tree.
+
+**Traits as events.** :func:`to_trait_matrix`, :func:`trait_table` and :func:`to_trait_trees` export the
+heritable dissemination traits (breach, stromal survival, metastatic survival) in the same shapes, read
+from the genotype counts and the genealogy rather than from an epistasis network, so a progression
+model can be asked about an order that tissue architecture imposes without any planted interaction.
+
 Scoring (:func:`score_edges`, :func:`score_order`, :func:`score_exclusivity`) is deliberately generic:
 it takes an edge/order list from ANY tool and the ground truth from
 ``tumor.epistasis_ground_truth()``, so a new tool only needs an adapter to its output format.
@@ -22,8 +33,23 @@ essentially the DISCOVER/MEGSA statistic). It is not a replacement for MHN: it c
 direct interaction from one induced through a shared ancestor. It is here so the benchmark always
 has a floor to compare a real tool against, and so the validation figure renders without R.
 """
+from collections import Counter
+
 import numpy as np
 import pandas as pd
+
+#: The cancer-cell fraction at which an event counts as present in paper 1's Fig 5: the detection
+#: limit of Fig 2f (vault: decision-fig5-planted-network). Pass it as ``min_freq`` / ``detection``.
+DETECTION_LIMIT = 0.05
+
+#: The heritable dissemination traits Fig 5 reads as events, in column order.
+TRAIT_EVENTS = ("breach", "stromal_survival", "met_survival")
+
+# A trait is acquired when a genotype carries >= 1 mutated copy of one of the trait's genes: the
+# genome-summary tally of each trait axis.
+_TRAIT_TALLY = {"breach": "n_mut_breach", "stromal_survival": "n_mut_ss", "met_survival": "n_mut_ms",
+                "treatment_resistance": "n_mut_tr", "immune_resistance": "n_mut_ir",
+                "dispersal": "n_mut_disp", "drug_tolerance": "n_mut_dt"}
 
 
 # ------------------------------------------------------------------ export: cross-sectional (MHN)
@@ -76,36 +102,42 @@ def event_cell_fractions(tumor, n_events=None):
     return frac / total
 
 
-def patient_event_vector(tumor, min_freq=0.0, n_events=None):
-    """Binary event vector for ONE patient: 1 where the event's CELL FRACTION >= ``min_freq``.
-
-    ``min_freq`` is the detection floor of the assay, applied to the event's cancer-cell fraction
-    (see :func:`event_cell_fractions`) — not to any single clone's size. At ``min_freq=0`` every
-    event ever acquired by any surviving cell counts as observed, which is both more than a real
-    study sees AND, in a mutation-rich regime, **saturated**: a recurrent event is present in almost
-    every patient regardless of selection, so the column carries no signal. Sweep this threshold
-    rather than assuming it (see validation/validate_epistasis.py).
-    """
-    net = tumor.selection.epistasis
-    n = n_events if n_events is not None else net.n_events
-    frac = event_cell_fractions(tumor, n_events=n)
+def _present(frac, min_freq):
+    """1 where a cell fraction reaches the detection floor; a floor of 0 means any cell at all."""
+    frac = np.asarray(frac, dtype=float)
     if min_freq <= 0:
         return (frac > 0).astype(int)
     return (frac >= min_freq).astype(int)
 
 
-def to_mhn_matrix(tumors, min_freq=0.0):
+def patient_event_vector(tumor, min_freq, n_events=None):
+    """Binary event vector for ONE patient: 1 where the event's CELL FRACTION >= ``min_freq``.
+
+    ``min_freq`` is the detection floor of the assay, applied to the event's cancer-cell fraction
+    (see :func:`event_cell_fractions`) — not to any single clone's size. It has no default: at
+    ``min_freq=0`` every event ever acquired by any surviving cell counts as observed, which is both
+    more than a real study sees AND, in a mutation-rich regime, **saturated**: a recurrent event is
+    present in almost every patient regardless of selection, so the column carries no signal. Sweep
+    this threshold rather than assuming it (see validation/validate_epistasis.py);
+    :data:`DETECTION_LIMIT` is paper 1's.
+    """
+    net = tumor.selection.epistasis
+    n = n_events if n_events is not None else net.n_events
+    return _present(event_cell_fractions(tumor, n_events=n), min_freq)
+
+
+def to_mhn_matrix(tumors, min_freq):
     """Patients x events binary DataFrame — MHN's (and DISCOVER/MEGSA's) input.
 
     ``tumors`` is any iterable of grown tumours sharing one network (i.e. one ``Cohort``).
-    ``min_freq`` is the per-event cancer-cell-fraction detection floor; see
+    ``min_freq`` is the per-event cancer-cell-fraction detection floor (no default); see
     :func:`patient_event_vector`.
     """
     tumors = list(tumors)
     if not tumors:
         raise ValueError("no tumours given")
     net = tumors[0].selection.epistasis
-    rows = [patient_event_vector(t, min_freq=min_freq, n_events=net.n_events) for t in tumors]
+    rows = [patient_event_vector(t, min_freq, n_events=net.n_events) for t in tumors]
     return pd.DataFrame(rows, columns=net.event_names(),
                         index=[f"P{i}" for i in range(len(tumors))])
 
@@ -127,7 +159,52 @@ def to_cell_fraction_matrix(tumors):
 
 
 # ------------------------------------------------------------------ export: mutation trees (TreeMHN)
-def to_mutation_tree(tumor, min_clone_freq=0.0):
+def _trie(paths, total, detection=0.0):
+    """TreeMHN's node table for a set of ``(acquisition path, n_cells)``: the trie of the paths.
+
+    ``detection`` collapses the tree at a cell-fraction limit: a node is kept when the cells whose
+    path passes through it reach ``detection`` of ``total`` (the tumour's cancer cells), and the cells
+    of a dropped node are attributed to its deepest kept ancestor. A node's cells include its
+    descendants', as in Noble et al.'s detection limit (see iscc.inference.indices.detect_combinations),
+    so a node below the limit merges into its parent. ``detection=0`` keeps every node."""
+    keep = None
+    if detection > 0 and total > 0:
+        through = Counter()
+        for path, n in paths:
+            for k in range(1, len(path) + 1):
+                through[path[:k]] += n
+        keep = {p for p, c in through.items() if c / total >= detection}
+    nodes = [dict(Node_ID=1, Mutation_ID=0, Parent_ID=1, n_cells=0)]  # root: its own parent (TreeMHN)
+    children = {}  # (parent Node_ID, mutation) -> Node_ID
+    for path, n in paths:
+        parent_node = 1
+        for k, ev in enumerate(path):
+            if keep is not None and path[:k + 1] not in keep:
+                break                    # a node's cells shrink down the path: nothing deeper is kept
+            key = (parent_node, int(ev))
+            node = children.get(key)
+            if node is None:
+                node = len(nodes) + 1
+                nodes.append(dict(Node_ID=node, Mutation_ID=int(ev) + 1,
+                                  Parent_ID=parent_node, n_cells=0))
+                children[key] = node
+            parent_node = node
+        # attribute the clone's cells to the deepest node of its path that is kept
+        nodes[parent_node - 1]["n_cells"] += int(n)
+    return pd.DataFrame(nodes)
+
+
+def _tree_from_table(tbl, min_clone_freq, detection):
+    """The trie of an event table's ``event_order`` paths (see :func:`_trie`)."""
+    total = int(tbl["n_cells"].sum()) if not tbl.empty else 0
+    if min_clone_freq > 0 and total > 0:
+        tbl = tbl[tbl["n_cells"] / total >= min_clone_freq]
+    paths = [(tuple(int(e) for e in order), int(n))
+             for order, n in zip(tbl["event_order"], tbl["n_cells"])]
+    return _trie(paths, total, detection)
+
+
+def to_mutation_tree(tumor, min_clone_freq=0.0, detection=0.0):
     """The patient's **mutation tree** as a trie over the realised event orders.
 
     Each surviving clone contributes the path ``event_order`` from the root; shared prefixes are
@@ -135,9 +212,19 @@ def to_mutation_tree(tumor, min_clone_freq=0.0):
     TreeMHN's / REVOLVER's input. The root is ``Mutation_ID = 0`` (the normal genotype) and events
     are numbered ``1..n_events`` (TreeMHN's convention: 0 is reserved for the root).
 
-    ``min_clone_freq`` prunes clones below a fraction of the tumour — a CLONE-level filter, which is
-    the right notion here (a tip too small to resolve), unlike the per-EVENT detection threshold that
-    ``to_mhn_matrix`` applies.
+    This is the true clone tree collapsed to event acquisitions: ``event_order`` is each genotype's
+    lineage read off the genealogy (every event acquisition mints a genotype), and parallel lineages
+    that acquired the same events in the same order become one node, which is what TreeMHN's tree (a
+    set of acquisition orders) can express. Events acquired in one division are tied and appear in
+    index order, an arbitrary tie-break (see ``event_groups``).
+
+    ``detection`` is the clone-size limit of the collapsed tree: a node is kept when the cancer cells
+    descending through it (its own and its descendants') reach this fraction of the tumour, and a
+    node below it merges into its parent. Paper 1's Fig 5 uses :data:`DETECTION_LIMIT` (clones of at
+    least 5% of cancer cells). A genotype is far finer than a clone — with passengers unfolded, which
+    epistasis forces, almost no single genotype holds 5% of a tumour — so this is the limit to use for
+    a clone tree; ``min_clone_freq`` is the older GENOTYPE-level filter (drop genotypes below a
+    fraction of the tumour before building the trie), kept for its callers.
 
     ``n_cells`` is emitted for the caller's own analysis, but note that **TreeMHN does not read it**:
     its ``input_tree_df`` accepts ONLY ``Patient_ID``/``Tree_ID``/``Node_ID``/``Mutation_ID``/
@@ -151,28 +238,30 @@ def to_mutation_tree(tumor, min_clone_freq=0.0):
 
     Returns a DataFrame with ``Node_ID``, ``Mutation_ID``, ``Parent_ID``, ``n_cells``.
     """
-    tbl = clone_events(tumor, min_clone_freq=min_clone_freq)
-    nodes = [dict(Node_ID=1, Mutation_ID=0, Parent_ID=1, n_cells=0)]  # root: its own parent (TreeMHN)
-    children = {}  # (parent Node_ID, mutation) -> Node_ID
-    for _, row in tbl.iterrows():
-        parent_node = 1
-        for ev in row["event_order"]:
-            key = (parent_node, int(ev))
-            node = children.get(key)
-            if node is None:
-                node = len(nodes) + 1
-                nodes.append(dict(Node_ID=node, Mutation_ID=int(ev) + 1,
-                                  Parent_ID=parent_node, n_cells=0))
-                children[key] = node
-            parent_node = node
-        # attribute the clone's cells to the leaf it ends at
-        nodes[parent_node - 1]["n_cells"] += int(row["n_cells"])
-    return pd.DataFrame(nodes)
+    return _tree_from_table(clone_events(tumor), min_clone_freq, detection)
 
 
-def to_treemhn_trees(tumors, min_clone_freq=0.0, drop_empty=True):
+def stack_trees(frames, drop_empty=True, what="event"):
+    """Per-patient tree frames (from :func:`to_mutation_tree` / :func:`to_trait_tree`) stacked with
+    ``Patient_ID`` / ``Tree_ID``, as :func:`to_treemhn_trees` does. For trees stored one patient at a
+    time (one Slurm array task per patient) and assembled later, without the tumours."""
+    frames = [df for df in frames if not (drop_empty and len(df) < 2)]
+    if not frames:
+        raise ValueError(f"no patient acquired any {what}, so there are no mutation trees to export; "
+                         "raise event_size / mutation_rate / grow_steps, or lower the detection limit")
+    out = []
+    for i, df in enumerate(frames):
+        df = df.copy()
+        df.insert(0, "Patient_ID", i + 1)
+        df.insert(1, "Tree_ID", i + 1)
+        out.append(df)
+    return pd.concat(out, ignore_index=True)
+
+
+def to_treemhn_trees(tumors, min_clone_freq=0.0, drop_empty=True, detection=0.0):
     """Every patient's mutation tree in one tidy frame (a ``Patient_ID`` column added) — the shape
-    TreeMHN's R ``input_tree`` list is built from.
+    TreeMHN's R ``input_tree`` list is built from. ``min_clone_freq`` and ``detection`` are
+    :func:`to_mutation_tree`'s.
 
     A patient that acquired NO event yields a tree with only the root and no edges, which TreeMHN
     rejects outright ("Tree with ID n does not contain edges from the root"). Such a patient carries
@@ -183,29 +272,136 @@ def to_treemhn_trees(tumors, min_clone_freq=0.0, drop_empty=True):
     Note this makes the tree export's patient set potentially SMALLER than the cross-sectional
     matrix's; when comparing the two observables, compare on the tumours each actually saw.
     """
-    frames = []
-    for t in tumors:
-        df = to_mutation_tree(t, min_clone_freq=min_clone_freq)
-        if drop_empty and len(df) < 2:      # root only: no events, nothing for TreeMHN to read
-            continue
-        frames.append(df)
-    if not frames:
-        raise ValueError("no patient acquired any event, so there are no mutation trees to export; "
-                         "raise event_size / mutation_rate / grow_steps")
-    out = []
-    for i, df in enumerate(frames):
-        df = df.copy()
-        df.insert(0, "Patient_ID", i + 1)
-        df.insert(1, "Tree_ID", i + 1)
-        out.append(df)
-    return pd.concat(out, ignore_index=True)
+    return stack_trees([to_mutation_tree(t, min_clone_freq=min_clone_freq, detection=detection)
+                         for t in tumors], drop_empty, "event")
 
 
-def to_cbn_poset(tumors, min_freq=0.0):
+def to_cbn_poset(tumors, min_freq):
     """CBN/H-CBN input: the cross-sectional binary genotype matrix (same shape as MHN's), which
     H-CBN fits a poset to. Kept as its own name because the two tools' semantics differ even though
-    the file format coincides."""
-    return to_mhn_matrix(tumors, min_freq=min_freq)
+    the file format coincides. ``min_freq`` as in :func:`to_mhn_matrix`."""
+    return to_mhn_matrix(tumors, min_freq)
+
+
+# ------------------------------------------------------------------ traits as events
+def _trait_names(traits, with_events, tumor):
+    traits = tuple(traits)
+    unknown = [t for t in traits if t not in _TRAIT_TALLY]
+    if unknown:
+        raise ValueError(f"unknown trait(s) {unknown}; known: {sorted(_TRAIT_TALLY)}")
+    events = []
+    if with_events:
+        net = tumor.selection.epistasis
+        if net is None:
+            raise ValueError("with_events=True needs an epistasis network on the tumour")
+        events = net.event_names()
+    return list(events) + list(traits)
+
+
+def _carried_bits(rep, traits, n_events):
+    """Bitmask of what genotype ``rep`` carries: its epistasis events in the low ``n_events`` bits,
+    then one bit per trait with >= 1 mutated copy of the trait's genes."""
+    bits = rep.event_bits if n_events else 0
+    gs = rep.genome_summary
+    for k, name in enumerate(traits):
+        if gs.get(_TRAIT_TALLY[name], 0) > 0:
+            bits |= 1 << (n_events + k)
+    return bits
+
+
+def trait_table(tumor, traits=TRAIT_EVENTS, with_events=False):
+    """Per-genotype trait acquisitions, in :meth:`GenotypeTumor.event_table`'s shape.
+
+    One row per live cancer genotype, in every compartment (primary and metastasis): its cell count,
+    the traits it has acquired (``events``, indices into ``traits``) and the order its lineage acquired
+    them, read off the genealogy (``tumor.genotypes_parents``). A trait is acquired at the first
+    genotype of the lineage that carries a mutated copy of one of its genes — under
+    ``trait_source="mutation"`` (the paper regime) exactly where the trait turns on. Acquisitions are
+    MONOTONE, as epistasis events are and as MHN/TreeMHN assume: a lineage that later loses every
+    mutated copy (a deletion) still counts as having acquired the trait. ``event_groups`` holds the
+    traits acquired in one division as one tied group, ``event_order`` flattens them in index order.
+
+    ``with_events=True`` prepends the tumour's epistasis events (``E0``, ``E1``, ...), so a cohort can
+    be read on traits and event modules together; trait ``k`` is then index ``n_events + k``.
+    """
+    names = _trait_names(traits, with_events, tumor)
+    traits = tuple(traits)
+    n_events = len(names) - len(traits)
+    cols = ["genotype_id", "n_cells", "events", "event_order", "event_groups"]
+    parents, genos = tumor.genotypes_parents, tumor.genotypes
+    acquired, groups = {}, {}                       # gid -> carried-so-far bitmask, acquisition groups
+
+    def resolve(gid):
+        chain, cur = [], gid
+        while cur is not None and cur not in acquired:
+            chain.append(cur)
+            p = parents.get(cur)
+            cur = p if (p is not None and p in genos and genos[p].type == "cancer") else None
+        base_bits = acquired[cur] if cur is not None else 0
+        base_groups = groups[cur] if cur is not None else ()
+        for g in reversed(chain):
+            new = _carried_bits(genos[g], traits, n_events) & ~base_bits
+            if new:
+                base_groups = base_groups + (tuple(i for i in range(len(names)) if new >> i & 1),)
+                base_bits |= new
+            acquired[g], groups[g] = base_bits, base_groups
+
+    rows = []
+    for gid, count in tumor.genotypes_counts.items():
+        if not tumor._is_cancer(gid) or count <= 0:
+            continue
+        resolve(gid)
+        grp = groups[gid]
+        rows.append(dict(genotype_id=gid, n_cells=int(count),
+                         events=tuple(i for i in range(len(names)) if acquired[gid] >> i & 1),
+                         event_order=tuple(e for g in grp for e in g), event_groups=grp))
+    tbl = pd.DataFrame(rows, columns=cols)
+    tbl.attrs["names"] = names
+    return tbl
+
+
+def trait_cell_fractions(tumor, traits=TRAIT_EVENTS, with_events=False):
+    """Per-trait fraction of the tumour's cancer cells (primary and metastasis together) whose lineage
+    has acquired it; see :func:`trait_table`. Returned as a Series indexed by name."""
+    tbl = trait_table(tumor, traits=traits, with_events=with_events)
+    names = tbl.attrs["names"]
+    frac = np.zeros(len(names))
+    total = tbl["n_cells"].sum() if not tbl.empty else 0
+    if total > 0:
+        for events, cnt in zip(tbl["events"], tbl["n_cells"]):
+            for e in events:
+                frac[e] += cnt
+        frac = frac / total
+    return pd.Series(frac, index=names)
+
+
+def to_trait_matrix(tumors, traits=TRAIT_EVENTS, min_freq=DETECTION_LIMIT, with_events=False):
+    """Patients x traits binary DataFrame (MHN's input): 1 where the trait is carried by at least
+    ``min_freq`` of the tumour's cancer cells, primary and metastasis together (default
+    :data:`DETECTION_LIMIT`; 0 means any cell). ``with_events=True`` adds the epistasis events as
+    leading columns, at the same threshold."""
+    tumors = list(tumors)
+    if not tumors:
+        raise ValueError("no tumours given")
+    fr = [trait_cell_fractions(t, traits=traits, with_events=with_events) for t in tumors]
+    return pd.DataFrame([_present(f.values, min_freq) for f in fr], columns=list(fr[0].index),
+                        index=[f"P{i}" for i in range(len(tumors))])
+
+
+def to_trait_tree(tumor, traits=TRAIT_EVENTS, detection=DETECTION_LIMIT, with_events=False):
+    """The patient's true clone tree collapsed to trait acquisitions, in :func:`to_mutation_tree`'s
+    format (``Mutation_ID = k + 1`` for trait ``k`` of :func:`trait_table`'s names; 0 is the root).
+    ``detection`` is the clone-size limit, as in :func:`to_mutation_tree` (default
+    :data:`DETECTION_LIMIT`)."""
+    return _tree_from_table(trait_table(tumor, traits=traits, with_events=with_events), 0.0, detection)
+
+
+def to_trait_trees(tumors, traits=TRAIT_EVENTS, detection=DETECTION_LIMIT, with_events=False,
+                   drop_empty=True):
+    """Every patient's trait tree in one frame, as :func:`to_treemhn_trees` stacks event trees
+    (patients with no trait above the limit dropped and the rest renumbered, with ``drop_empty``)."""
+    return stack_trees([to_trait_tree(t, traits=traits, detection=detection, with_events=with_events)
+                         for t in tumors], drop_empty, "trait")
 
 
 # ------------------------------------------------------------------ a dependency-free baseline

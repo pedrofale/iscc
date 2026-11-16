@@ -11,6 +11,7 @@ recurrent-vs-private driver split, per-cell patient-of-origin, shared-vs-private
 per-patient subgroup + true therapy response — exactly what a real cohort can never give.
 """
 import os
+import functools
 import itertools
 import subprocess
 
@@ -18,7 +19,8 @@ import numpy as np
 import pandas as pd
 
 from iscc.cohort import (Cohort, Subgroup, pool_cell_data, run_cohort_batches, concat_cohort_batches,
-                         emit_cell_hashtags, demux_hashtags)
+                         emit_cell_hashtags, demux_hashtags, grow_tumor, shared_selection,
+                         assign_subgroups, draw_germline_markers, patient_overrides)
 from iscc.cohort.groundtruth import _cancer_snv
 from iscc.tumor.models import GenotypeTumor
 from iscc.treatment.chemotherapy import Chemotherapy
@@ -91,9 +93,10 @@ RECUR_CANCER = {"division_rate": 0.6, "death_rate": 0.06, "max_birth_rate": 0.98
 
 
 def recurrence_cohort(n_patients=24, steps=300):
-    return Cohort(patient_seeds=list(range(1, n_patients + 1)), genome_params=RECUR_GENOME,
-                  selection_params=RECUR_SEL, cancer_cell_params=RECUR_CANCER, deme_params=RECUR_DEME,
-                  spatial_params=RECUR_SPATIAL, grow_steps=steps).run()
+    grow = functools.partial(grow_tumor, genome_params=RECUR_GENOME, selection_params=RECUR_SEL,
+                             cancer_cell_params=RECUR_CANCER, deme_params=RECUR_DEME,
+                             spatial_params=RECUR_SPATIAL, grow_steps=steps)
+    return Cohort(grow, patient_seeds=list(range(1, n_patients + 1))).run()
 
 
 def _jaccard(a, b):
@@ -149,14 +152,16 @@ def pm_cohort(n_patients=14, steps=PM_STEPS):
     variation; ADJUVANT therapy then SELECTS them in the resistant subtype (which relapses) while they
     stay inert in the sensitive subtype (which is eradicated). The differential response is therefore a
     genuine evolutionary outcome, not an imposed one."""
-    sel = Cohort(patient_seeds=[1], genome_params=PM_GENOME, selection_params=PM_SEL,
-                 cancer_cell_params=PM_CANCER, deme_params=PM_DEME, spatial_params=PM_SPATIAL).selection
+    sel = shared_selection(PM_GENOME, PM_SEL)
     loci = [int(x) for x in sel.get_treatment_resistant()]
-    subs = [Subgroup("sensitive", {"treatment_resistant_effects": 1.0}, therapy_response=1),
-            Subgroup("resistant", {"treatment_resistant_effects": 6.0}, therapy_response=0)]
-    co = Cohort(patient_seeds=list(range(1, n_patients + 1)), genome_params=PM_GENOME,
-                selection_params=PM_SEL, cancer_cell_params=PM_CANCER, deme_params=PM_DEME,
-                spatial_params=PM_SPATIAL, subgroups=subs, grow_steps=steps)
+    subs = assign_subgroups(n_patients, [
+        Subgroup("sensitive", {"treatment_resistant_effects": 1.0}, therapy_response=1),
+        Subgroup("resistant", {"treatment_resistant_effects": 6.0}, therapy_response=0)])
+    grow = functools.partial(grow_tumor, genome_params=PM_GENOME, selection_params=PM_SEL,
+                             cancer_cell_params=PM_CANCER, deme_params=PM_DEME,
+                             spatial_params=PM_SPATIAL, grow_steps=steps)
+    co = Cohort(grow, patient_seeds=list(range(1, n_patients + 1)),
+                patient_kwargs=patient_overrides(n_patients, PM_SEL, subs), subgroups=subs)
     co._resistance_loci = loci
     return co
 
@@ -244,9 +249,10 @@ INT_CANCER = {"division_rate": 0.6, "death_rate": 0.05, "max_birth_rate": 0.98,
 
 
 def integration_cohort(n_patients=8, steps=280):
-    return Cohort(patient_seeds=list(range(1, n_patients + 1)), genome_params=INT_GENOME,
-                  selection_params=INT_SEL, cancer_cell_params=INT_CANCER, deme_params=INT_DEME,
-                  spatial_params=INT_SPATIAL, grow_steps=steps).run()
+    grow = functools.partial(grow_tumor, genome_params=INT_GENOME, selection_params=INT_SEL,
+                             cancer_cell_params=INT_CANCER, deme_params=INT_DEME,
+                             spatial_params=INT_SPATIAL, grow_steps=steps)
+    return Cohort(grow, patient_seeds=list(range(1, n_patients + 1))).run()
 
 
 def _coarse_types(cohort, gids):
@@ -345,10 +351,14 @@ def demux_cohort(n_patients=8, steps=450, n_germline=40):
     """Solid tumours WITH a normal compartment (epithelial/stromal + immune), each patient carrying its
     own PRIVATE germline markers (the individual background genetic demux exploits). Pooled N:1, the
     patient-of-origin answer key is the private germline fingerprint carried by EVERY cell."""
-    return Cohort(patient_seeds=list(range(1, n_patients + 1)), genome_params=DEMUX_GENOME,
-                  selection_params=DEMUX_SEL, cancer_cell_params=DEMUX_CANCER, deme_params=DEMUX_DEME,
-                  spatial_params=DEMUX_SPATIAL, immune_cell_params=DEMUX_IMMUNE, grow_steps=steps,
-                  n_germline_markers=n_germline).run()
+    markers = (draw_germline_markers(shared_selection(DEMUX_GENOME, DEMUX_SEL), n_patients, n_germline)
+               if n_germline else None)
+    grow = functools.partial(grow_tumor, genome_params=DEMUX_GENOME, selection_params=DEMUX_SEL,
+                             cancer_cell_params=DEMUX_CANCER, deme_params=DEMUX_DEME,
+                             spatial_params=DEMUX_SPATIAL, immune_cell_params=DEMUX_IMMUNE,
+                             grow_steps=steps)
+    return Cohort(grow, patient_seeds=list(range(1, n_patients + 1)),
+                  patient_kwargs=patient_overrides(n_patients, germline_markers=markers)).run()
 
 
 def dna_demux_analysis(cohort, n_cells_per_patient=120):

@@ -119,6 +119,32 @@ def _cancer_gids_counts(tumor):
     return [(g, c) for g, c in tumor.genotypes_counts.items() if tumor._is_cancer(g)]
 
 
+def division_cap_share(tumor):
+    """Share of the live cancer cells whose division rate is at the cap, ``max_birth_rate``.
+
+    A genotype's division rate is ``min(b0 * F, max_birth_rate)`` (times its trait costs), with ``F``
+    the selection model's fitness — the driver term and, when it is on, the epistasis network. A cell
+    is at the cap when ``b0 * F`` reaches ``max_birth_rate``: its division rate can rise no further, so
+    any extra fitness (a planted interaction, another driver) changes nothing for it. This is the
+    measure of the code audit's Finding A (vault: iscc-code-audit-2026-11), where almost every cell of
+    a paper tumour sat at the cap and clones in a full deme no longer differed in division rate. The
+    trait costs are applied after the cap and are not counted.
+
+    Reads every live cancer genotype in every compartment (primary and metastasis) from the genotype
+    counts; draws nothing. Returns NaN for a tumour with no cancer cells.
+    """
+    sel = tumor.selection
+    n = at_cap = 0
+    for gid, cnt in _cancer_gids_counts(tumor):
+        rep = tumor.genotypes[gid]
+        uncapped = rep.baseline_rates["division_rate"] * sel.update_division_rate(
+            rep.genome_summary, event_bits=rep.event_bits)
+        n += cnt
+        if uncapped >= rep.max_birth_rate - 1e-12:
+            at_cap += cnt
+    return at_cap / n if n else float("nan")
+
+
 def tmb_stats(tumor):
     """Count-weighted mean mutated sites per cancer cell, and its fraction of the genome.
 

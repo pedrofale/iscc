@@ -15,10 +15,13 @@ import pytest
 
 from iscc.tumor.models import GenotypeTumor
 from iscc.constants import DEFAULT_LAYOUT_SEED
+import functools
+
 from iscc.cohort import (Cohort, Subgroup, assign_batches, pool_cell_data, run_cohort_batches,
                          concat_cohort_batches, recurrence_table, true_recurrent_drivers,
                          private_mutation_table, shared_private_labels, subgroup_response_table,
-                         emit_cell_hashtags, demux_hashtags)
+                         emit_cell_hashtags, demux_hashtags, grow_tumor, shared_selection,
+                         assign_subgroups, draw_germline_markers, patient_overrides, clone_key)
 
 GENOME = {"n_segments": 5, "segment_size": 40}
 SELECTION = {"prop_driver": 0.12, "prop_dispersal": 0.1, "prop_immune_resistance": 0.1,
@@ -107,10 +110,15 @@ def test_bare_selection_matches_the_engine_layout():
 
 
 # ================================== the Cohort wrapper ==================================
+def _grow(**over):
+    """One tumour's growth function at this file's config (what every patient of `_cohort` runs)."""
+    kw = dict(genome_params=GENOME, selection_params=SELECTION, cancer_cell_params=CANCER,
+              deme_params=DEME, spatial_params=SPATIAL, grow_steps=160)
+    return functools.partial(grow_tumor, **{**kw, **over})
+
+
 def _cohort(n=6, **kw):
-    return Cohort(patient_seeds=list(range(1, n + 1)), genome_params=GENOME,
-                  selection_params=SELECTION, cancer_cell_params=CANCER, deme_params=DEME,
-                  spatial_params=SPATIAL, grow_steps=160, **kw)
+    return Cohort(_grow(), patient_seeds=list(range(1, n + 1)), **kw)
 
 
 def test_cohort_runs_shared_landscape_private_evolution():
@@ -126,9 +134,14 @@ def test_cohort_runs_shared_landscape_private_evolution():
 def test_subgroups_assignment_and_response():
     subs = [Subgroup("S", {"treatment_resistant_effects": 1.0}, therapy_response=1),
             Subgroup("R", {"treatment_resistant_effects": 3.0}, therapy_response=0)]
-    co = _cohort(subgroups=subs)
+    per_patient = assign_subgroups(6, subs)
+    kw = patient_overrides(6, selection_params=SELECTION, subgroups=per_patient)
+    co = _cohort(patient_kwargs=kw, subgroups=per_patient)
     assert co.subgroup_assignment == ["S", "R", "S", "R", "S", "R"]
+    # a subgroup is a per-patient override of the shared selection params, nothing more
+    assert kw[1]["selection_params"] == {**SELECTION, "treatment_resistant_effects": 3.0}
     co.run()
+    assert co.patients[1].tumor.selection.treatment_resistant_effects == 3.0
     rt = subgroup_response_table(co)
     assert set(rt["subgroup"]) == {"S", "R"}
     assert rt.loc[0, "therapy_response"] == 1 and rt.loc[1, "therapy_response"] == 0
@@ -146,9 +159,10 @@ def test_germline_mutations_in_all_cell_types():
     # could otherwise delete the (single-allele) germline variant in a small tumour's dominant clone.
     cancer = {**CANCER, "snv_prob": 0.95, "cnv_prob": 0.05}
     deme = {**DEME, "carrying_capacity": 8}
-    co = Cohort(patient_seeds=[1], genome_params=GENOME, selection_params=SELECTION,
-                cancer_cell_params=cancer, deme_params=deme, spatial_params=spatial,
-                grow_steps=300, subgroups=subs).run()
+    co = Cohort(_grow(cancer_cell_params=cancer, deme_params=deme, spatial_params=spatial,
+                      grow_steps=300),
+                patient_seeds=[1], patient_kwargs=patient_overrides(1, SELECTION, subs),
+                subgroups=subs).run()
     snv = co.patients[0].cell_data["cell_snv"].values
     ct = co.patients[0].cell_data["cell_type"].iloc[:, 0].astype(str).values
     genos = co.patients[0].tumor.genotypes
@@ -177,8 +191,10 @@ def test_resistance_EMERGES_and_drives_differential_response():
         sel = {"prop_driver": 0.04, "prop_dispersal": 0.0, "prop_immune_resistance": 0.0,
                "prop_treatment_resistance": 0.06, "driver_effects": 1.15,
                "treatment_resistant_effects": tr_eff}
-        co = Cohort(patient_seeds=[seed], genome_params=genome, selection_params=sel,
-                    cancer_cell_params=cancer, deme_params=deme, spatial_params=spatial, grow_steps=320)
+        co = Cohort(functools.partial(grow_tumor, genome_params=genome, selection_params=sel,
+                                      cancer_cell_params=cancer, deme_params=deme,
+                                      spatial_params=spatial, grow_steps=320),
+                    patient_seeds=[seed])
         chemo = Chemotherapy(start=120, effectiveness=0.95, toxicity=0.01, kill_rate=1.8, rate_multiplier=2.5)
         return co.grow_patient(0, treatment=chemo).get_cancer_size()
 
@@ -189,14 +205,117 @@ def test_resistance_EMERGES_and_drives_differential_response():
 
 
 def test_germline_markers_are_disjoint_and_private():
-    co = _cohort(n_germline_markers=20).run()
-    marks = [set(co.germline_markers[i].tolist()) for i in range(co.n_patients)]
+    markers = draw_germline_markers(shared_selection(GENOME, SELECTION), n_patients=6, n_markers=20)
+    co = _cohort(patient_kwargs=patient_overrides(6, germline_markers=markers)).run()
+    marks = [set(markers[i].tolist()) for i in range(co.n_patients)]
     # disjoint across patients (private) and none overlap a driver
     for i in range(len(marks)):
         for j in range(i + 1, len(marks)):
             assert marks[i].isdisjoint(marks[j])
     drivers = set(int(x) for x in co.selection.get_oncogenes()) | set(int(x) for x in co.selection.get_tsgs())
     assert all(m.isdisjoint(drivers) for m in marks)
+    # and each patient's founder actually carries its own markers, and no other patient's
+    for i, pr in enumerate(co.patients):
+        founder = pr.tumor.genotypes[pr.tumor.founder_id].get_snvs() > 0
+        assert founder[markers[i]].all()
+        assert not founder[markers[(i + 1) % 6]].any()
+
+
+# ============================== the thin utility's own contract ===============================
+def test_cohort_calls_grow_with_each_seed_and_the_shared_layout_seed():
+    """Cohort owns no tumour model: it calls `grow` once per patient with the patient's seed, the
+    shared layout seed, and the patient's overrides on top of any call-time overrides."""
+    calls = []
+
+    def grow(seed, layout_seed, **kw):
+        calls.append((seed, layout_seed, kw))
+        return ("tumour", seed)
+
+    co = Cohort(grow, patient_seeds=[11, 12, 13], layout_seed=5,
+                patient_kwargs=[{}, {"a": 1}, {"a": 2, "b": 3}])
+    assert co.grow_patient(1) == ("tumour", 12)
+    assert co.grow_patient(2, b=9)                       # call-time overrides win
+    assert calls == [(12, 5, {"a": 1}), (13, 5, {"a": 2, "b": 9})]
+    calls.clear()
+    co.run()
+    assert [c[0] for c in calls] == [11, 12, 13] and {c[1] for c in calls} == {5}
+    assert [p.patient_id for p in co.patients] == [0, 1, 2]
+    assert co.subgroup_assignment == ["all"] * 3
+
+
+def test_cohort_patient_equals_the_single_tumour():
+    """A cohort grows exactly as its single tumours would: patient i is bit-identical to the same
+    growth function called directly with that seed."""
+    co = _cohort(n=2)
+    a = co.grow_patient(1)
+    b = _grow()(seed=2)
+    assert np.array_equal(a.cell_data["cell_snv"].values, b.cell_data["cell_snv"].values)
+    assert np.array_equal(a.cell_data["cell_cnv"].values, b.cell_data["cell_cnv"].values)
+
+
+def test_cohort_rejects_inconsistent_inputs():
+    with pytest.raises(TypeError, match="grows one tumour"):
+        Cohort(None, patient_seeds=[1])
+    with pytest.raises(ValueError, match="entries for 2 patients"):
+        Cohort(_grow(), patient_seeds=[1, 2], patient_kwargs=[{}])
+    with pytest.raises(ValueError, match="may not set"):
+        Cohort(_grow(), patient_seeds=[1], patient_kwargs=[{"seed": 3}])
+    with pytest.raises(RuntimeError, match="run the cohort first"):
+        Cohort(_grow(), patient_seeds=[1]).selection
+
+
+def test_clone_key_separates_patients_with_the_same_genotype_id():
+    """Genotype ids come from a process-wide counter, so two patients grown in separate Slurm tasks
+    reuse the same ids. Simulated here by restarting the counter between two patients: their ids
+    collide, and the (patient, clone) key keeps them apart."""
+    from iscc.constants import normal_names
+    from iscc.tumor.components.cell import Cell
+    start = Cell._genotype_counter
+    a = _grow(grow_steps=60)(seed=1)
+    after_a = Cell._genotype_counter
+    Cell._genotype_counter = start                       # a fresh process for the second patient
+    b = _grow(grow_steps=60)(seed=2)
+    Cell._genotype_counter = max(after_a, Cell._genotype_counter)
+    ids_a = set(a.genotypes_counts) - set(normal_names)
+    ids_b = set(b.genotypes_counts) - set(normal_names)
+    assert ids_a & ids_b, "the two tasks should reuse genotype ids"
+    keys_a = {clone_key(0, g) for g in ids_a}
+    keys_b = {clone_key(1, g) for g in ids_b}
+    assert keys_a.isdisjoint(keys_b)
+    assert clone_key(3, "17") == "P3::17"
+
+
+def test_cohort_grows_the_paper_regime_with_a_planted_network():
+    """The paper's own growth function is a Cohort's `grow` (through functools.partial), the layout
+    seed reaches the tumour, and a planted epistasis network rides in through selection_params."""
+    import os
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                    "validation", "paper"))
+    import regime as RG
+    tiny = dict(grid_size=24, n_glands=2, min_gland_sep=11,
+                origin_confinement=dict(RG.ORIGIN_CONFINEMENT, generations=10))
+    ep = {"n_events": 6, "event_size": 10, "lethal_death_rate": 2.5,
+          "planted": {"effects": 0.05, "interactions": [(0, 1, 0.4)], "exclusive": [(2, 3)],
+                      "constraints": [(4, 5)]}}
+    grow = functools.partial(RG.grow, scale="small", target_cancer=300, spatial=tiny,
+                             selection={"epistasis_params": ep,
+                                        "dependency_params": {"gating_mode": "accessibility"}})
+    co = Cohort(grow, patient_seeds=[5, 6])
+    a = co.grow_patient(1)
+    b = grow(seed=6)                                     # the same tumour, grown on its own
+    assert a.reached_target and a.layout_seed == DEFAULT_LAYOUT_SEED
+    assert a.get_cancer_size() == b.get_cancer_size()
+    assert sorted((int(a.genotypes[g].ord), c) for g, c in a.genotypes_counts.items()) == \
+        sorted((int(b.genotypes[g].ord), c) for g, c in b.genotypes_counts.items())
+    gt = a.epistasis_ground_truth()
+    assert gt["planted"] and gt["edges"] == [(0, 1, 0.4)] and gt["exclusive_pairs"] == [(2, 3)]
+    assert gt["dag_edges"] == [(4, 5)] and gt["gating_mode"] == "accessibility"
+    # the layout seed is forwarded: another one draws other event modules (built only, not grown)
+    other = Cohort(grow, patient_seeds=[5], layout_seed=7).grow_patient(0, max_steps=0)
+    assert other.layout_seed == 7
+    assert not all(np.array_equal(x, y) for x, y in zip(other.selection.epistasis.event_genes,
+                                                        a.selection.epistasis.event_genes))
 
 
 # ================================ patient -> batch mapping ==============================

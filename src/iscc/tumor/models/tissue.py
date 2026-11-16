@@ -100,6 +100,16 @@ class TissueMixin:
                     f"(requested d1={_d1:g}, clamped by maximum_death_rate={self.maximum_death_rate:g}). "
                     f"Raise BOTH crowding_d1 and maximum_death_rate above max_birth_rate — a density "
                     f"cap expressed as a rate below the evolved division rate cannot bound a deme.")
+        # A synthetic-lethal genotype (both events of an exclusive pair) takes `lethal_death_rate` as
+        # its death rate, and every death rate is clamped to maximum_death_rate (the exact engine's
+        # event bound assumes it), so a lethal rate above the clamp would silently be lowered to it.
+        _net = self.selection.epistasis
+        if (_net is not None and _net.lethal and _net.exclusive_pairs
+                and _net.lethal_death_rate > self.maximum_death_rate):
+            raise ValueError(
+                f"lethal_death_rate={_net.lethal_death_rate:g} exceeds maximum_death_rate="
+                f"{self.maximum_death_rate:g}, which clamps every death rate; raise "
+                f"deme_params['maximum_death_rate'] to at least the lethal rate")
         # Division (demon's invasion mode: `cell_division` and the migration_type-0 branch of its main
         # loop): every division attempts a mutation with probability `mutation_rate`, and
         # independently one of the two daughters, picked at random, disperses with probability

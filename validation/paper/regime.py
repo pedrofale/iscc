@@ -184,7 +184,7 @@ def config(scale, selection=None, cancer=None, deme=None, spatial=None, genome=N
 
 def grow(seed, scale, target_cancer, spatial_snapshot_every=0, max_steps=3_000, chunk=20,
          expression_params="default", microenv_params="default", coarsen=RR.COARSEN,
-         on_chunk=None, **overrides):
+         on_chunk=None, layout_seed=None, **overrides):
     """Grow one paper-regime tumour to ``target_cancer`` cancer cells (counts only).
 
     Returns the tumour without materialised cell data; sample it with :mod:`realistic_regime`'s
@@ -197,12 +197,15 @@ def grow(seed, scale, target_cancer, spatial_snapshot_every=0, max_steps=3_000, 
     of a chunk, so ``t.get_cancer_size()`` is the size reached, just past the target, and ``t.time``
     the time it took.
     ``overrides`` are :func:`config`'s (the variant's blocks, ``update_mode``, ``tau``).
-    ``on_chunk(t)``, if given, is called after every chunk, for monitoring."""
+    ``on_chunk(t)``, if given, is called after every chunk, for monitoring.
+    ``layout_seed`` is :class:`GenotypeTumor`'s (``None``, the default, is the package's
+    ``DEFAULT_LAYOUT_SEED``), so ``functools.partial(grow, scale=..., target_cancer=...)`` is the
+    growth function of an :class:`iscc.cohort.Cohort`."""
     cfg = config(scale, coarsen=coarsen, **overrides)
     expr = expression() if expression_params == "default" else expression_params
     menv = copy.deepcopy(MICROENV) if microenv_params == "default" else microenv_params
-    t = GenotypeTumor(seed=seed, max_cells=1, expression_params=expr, microenv_params=menv,
-                      spatial_snapshot_every=spatial_snapshot_every, **cfg)
+    t = GenotypeTumor(seed=seed, layout_seed=layout_seed, max_cells=1, expression_params=expr,
+                      microenv_params=menv, spatial_snapshot_every=spatial_snapshot_every, **cfg)
     steps = 0
     while 0 < t.get_cancer_size() < target_cancer and steps < max_steps:
         t.grow(n_steps=chunk, seed=seed, target_cancer=target_cancer)
