@@ -101,6 +101,17 @@ N_EVENTS, EVENT_SIZE, LETHAL = 6, 10, 2.5
 PLANTED = {"effects": 0.05, "interactions": [(0, 1, 0.4)], "exclusive": [(2, 3)],
            "constraints": [(4, 5)]}
 EMPTY = {"effects": 0.05}                    # the same events, their own effects, no interaction
+def scale_planted(planted, s):
+    """The planted network with every fitness term (own effects and pairwise interactions) times s;
+    the lethal pair and the order constraint are not fitness terms and are kept (the registered
+    cap-share rule of decision-fig5-planted-network halves the event effects, s = 0.5)."""
+    out = dict(planted)
+    out["effects"] = float(planted["effects"]) * s
+    if "interactions" in planted:
+        out["interactions"] = [(i, j, float(w) * s) for i, j, w in planted["interactions"]]
+    return out
+
+
 PART2_ARMS = {"planted1": (PLANTED, 20_000), "planted2": (PLANTED, 21_000),
               "planted3": (PLANTED, 22_000), "empty": (EMPTY, 23_000)}
 PART2_PATIENTS = 300
@@ -519,6 +530,7 @@ def part2(args):
     n = args.n_patients or PART2_PATIENTS
     arm, b = _part_tasks(list(PART2_ARMS), n, args.block)[args.task]
     planted, s0 = PART2_ARMS[arm]
+    planted = scale_planted(planted, args.effect_scale)
     seeds = [s0 + i for i in range(n)]
     scale, spatial = field(args)
     scale = scale or "small"
@@ -530,7 +542,8 @@ def part2(args):
     recs, wall = _run_block(2, arm, b, args, lambda i: grow_kw, seeds, N_EVENTS)
     summary = dict(part="II", arm=arm, block=b, block_size=args.block, n_patients=n, scale=scale,
                    target_cancer=target, toy=bool(args.toy), commit=_commit(), epistasis_params=ep,
-                   dependency_params=sel["dependency_params"], detection=DETECTION,
+                   dependency_params=sel["dependency_params"], effect_scale=args.effect_scale,
+                   detection=DETECTION,
                    thresholds=list(THRESHOLDS), wall_s=round(wall, 1), patients=recs)
     path = write_json(os.path.join(out_dir(args), "part2", f"{arm}_b{b:03d}.json"), summary)
     print(f"[part2] {arm} block {b}: {len(recs)} patients -> {path}")
@@ -759,8 +772,10 @@ def collect(args, part):
                       flush=True)
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    truth = (dict(interactions=PLANTED["interactions"], exclusive=PLANTED["exclusive"],
-                  constraints=PLANTED["constraints"], effects=PLANTED["effects"],
+    sp = scale_planted(PLANTED, getattr(args, "effect_scale", 1.0))
+    truth = (dict(interactions=sp["interactions"], exclusive=sp["exclusive"],
+                  constraints=sp["constraints"], effects=sp["effects"],
+                  effect_scale=getattr(args, "effect_scale", 1.0),
                   note="events 0..5 are the decision's E1..E6; the empty arm plants effects only")
              if part == 2 else dict(note="no interaction planted; the order of breach, stromal and "
                                          "metastatic survival comes from tissue architecture"))
@@ -822,6 +837,9 @@ def main(argv=None):
         if name == "part3":
             p.add_argument("--target-range", type=lambda s: tuple(int(x) for x in s.split(",")),
                            default=None, help="lo,hi of the uniform target sizes (default 2000,15000)")
+        else:
+            p.add_argument("--effect-scale", type=float, default=1.0,
+                           help="multiply the planted fitness terms (0.5: the registered cap-share rule)")
     for name in ("part2-collect", "part3-collect"):
         p = sub.add_parser(name)
         common(p)
@@ -829,6 +847,9 @@ def main(argv=None):
                        else "cooc,mhn,treemhn",
                        help="cbn (EvAM-Tools) is Part II only by default, the first tool to cut")
         p.add_argument("--sizes", default=None, help="cohort sizes (default 50,100,200,300)")
+        if name == "part2-collect":
+            p.add_argument("--effect-scale", type=float, default=1.0,
+                           help="the scale the arms were grown with (recorded in the truth)")
         p.add_argument("--null-arms", default=None, help="arms resampled for the null")
         p.add_argument("--resamples", type=int, default=20, help="bootstrap resamples of a null arm")
         p.add_argument("--sensitivity", action="store_true", help="also fit the 1%% matrices")
