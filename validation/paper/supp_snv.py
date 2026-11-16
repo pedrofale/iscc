@@ -38,7 +38,12 @@ Everything a tool reads or writes lives under ``--work`` (node scratch); per tum
 drawn number to ``--out/supp_snv_numbers.json``::
 
     python validation/paper/supp_snv.py run --run R11 --task seed1 --out OUT --work $SNIC_TMP --fig4-c FIG4/c
-    python validation/paper/supp_snv.py figure --out OUT
+    python validation/paper/supp_snv.py cardelino --run R11 --task seed1 --out OUT --work $SNIC_TMP --fig4-c FIG4/c \
+        --keys true_smartseq3_10xdepth --cardelino-iter 2000,6000
+    ISCC_PAPER_DIR=PAPER ISCC_PAPER_TIER=full python validation/paper/supp_snv.py figure --out OUT [--no-numbers]
+
+``figure`` reads only the stored per-tumour outputs; ISCC_PAPER_TIER must be ``full`` or the figure is stamped as a
+preview (style.save).
 """
 import argparse
 import glob
@@ -886,7 +891,10 @@ def draw(recs, num):
     return S.save(fig, "supp_snv")
 
 
-def make_figure(out_dir, fig4_c=None):
+def make_figure(out_dir, fig4_c=None, write_numbers=True):
+    """Draw the figure from the stored per-tumour outputs under ``out_dir`` (summary.json and sites.tsv.gz; nothing
+    is simulated) into ``figures/paper1/`` of ``_paths.paper_dir()`` ($ISCC_PAPER_DIR), and write the drawn numbers
+    to ``out_dir/supp_snv_numbers.json`` unless ``write_numbers`` is False."""
     recs = collect(out_dir)
     if not recs:
         sys.exit(f"no summaries under {out_dir}")
@@ -903,10 +911,11 @@ def make_figure(out_dir, fig4_c=None):
     num["scdna_thinning"] = recs[0]["assays"]["scdna_site"]["thinning"]
     path = draw(recs, num)
     num["figure"] = [path, path[:-4] + ".png"]
-    with open(os.path.join(out_dir, "supp_snv_numbers.json"), "w") as f:
-        json.dump(num, f, indent=1, default=lambda x: x.item() if hasattr(x, "item") else str(x))
     print("figure:", path, flush=True)
-    print("numbers:", os.path.join(out_dir, "supp_snv_numbers.json"), flush=True)
+    if write_numbers:
+        with open(os.path.join(out_dir, "supp_snv_numbers.json"), "w") as f:
+            json.dump(num, f, indent=1, default=lambda x: x.item() if hasattr(x, "item") else str(x))
+        print("numbers:", os.path.join(out_dir, "supp_snv_numbers.json"), flush=True)
 
 
 def main():
@@ -918,6 +927,8 @@ def main():
     ap.add_argument("--work", help="scratch for every tool input and output (a job's $SNIC_TMP)")
     ap.add_argument("--fig4-c", help="Fig 4c's per-tumour outputs (OUT/c of fig4_chain.py): the sampling check "
                                      "and the optional scDNA-called clones for cardelino")
+    ap.add_argument("--no-numbers", action="store_true",
+                    help="figure step: draw only, leave supp_snv_numbers.json as it is (e.g. rendering into the paper)")
     ap.add_argument("--keys", default="", help="cardelino step: the runs to redo, e.g. true_10x,dna_smartseq3")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--n-dna", type=int, default=FC.N_DNA)
@@ -928,7 +939,7 @@ def main():
     a = ap.parse_args()
     warnings.filterwarnings("ignore", category=FutureWarning)
     if a.step == "figure":
-        make_figure(a.out, a.fig4_c)
+        make_figure(a.out, a.fig4_c, write_numbers=not a.no_numbers)
         return
     if not (a.task and a.work):
         sys.exit("run needs --task and --work")
