@@ -567,15 +567,20 @@ def rerun_cardelino(a):
                 and abs(entry["share_cells_no_read"] - old["share_cells_no_read"]) < 1e-12)
         if not same:
             raise RuntimeError(f"{key}: the rebuilt inputs differ from the stored run's")
-        entry["superseded"] = dict({f: old.get(f) for f in keep_fields},
-                                   n_iter=old["run"].get("n_iter"), min_iter=old["run"].get("min_iter"),
-                                   max_iter=old["run"].get("max_iter"), commit=rec.get("commit"))
+        prev = old.get("superseded")                 # earlier reruns of this run, oldest first
+        chain = (prev if isinstance(prev, list) else [prev]) if prev else []
+        entry["superseded"] = chain + [dict({f: old.get(f) for f in keep_fields},
+                                            n_iter=old["run"].get("n_iter"), min_iter=old["run"].get("min_iter"),
+                                            max_iter=old["run"].get("max_iter"),
+                                            percent_converged=old["run"].get("percent_converged"),
+                                            commit=old.get("rerun_commit", rec.get("commit")))]
         entry["rerun_commit"] = _commit()
         rec["cardelino"][key] = entry
         for c, v in cols.items():
             cells_tab[c] = v
         _print_cardelino(key, entry, rec["chance"])
-        print(f"    was {old['balanced_accuracy']:.3f} after {old['run'].get('n_iter')} iterations; "
+        print(f"    {entry['run'].get('percent_converged')}% of traces converged (cardelino stops above 99.5%); "
+              f"was {old['balanced_accuracy']:.3f} after {old['run'].get('n_iter')} iterations; "
               f"change {entry['balanced_accuracy'] - old['balanced_accuracy']:+.4f}", flush=True)
     t0 = _lap(wall, "cardelino", t0)
     rec.setdefault("cardelino_reruns", []).append(dict(keys=keys, cardelino_iter=list(a.cardelino_iter),

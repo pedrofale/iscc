@@ -47,6 +47,9 @@ colnames(prob) <- colnames(config)
 write.csv(prob, file.path(out_dir, "prob.csv"), quote = TRUE)
 
 num <- function(x) if (is.null(x)) NULL else as.numeric(x)
+# cardelino's own convergence check (clone_id_Gibbs): the share of the cell x clone probability traces whose
+# Geweke Z is within 2; the sampler stops early only when it exceeds 99.5%.
+conv <- tryCatch(abs(cardelino:::Geweke_Z(res$prob_all)) <= 2, error = function(e) NA)
 info <- list(
   cardelino = as.character(packageVersion("cardelino")),
   n_variants = nrow(A), n_cells = ncol(A), n_clones = ncol(config),
@@ -56,7 +59,8 @@ info <- list(
   relax_rate = num(res$relax_rate),
   theta0_mean = if (is.null(res$theta0)) NULL else mean(as.numeric(res$theta0)),
   theta1_mean = if (is.null(res$theta1)) NULL else mean(as.numeric(res$theta1)),
-  n_iter = if (is.null(res$prob_all)) NULL else nrow(res$prob_all)
+  n_iter = if (is.null(res$prob_all)) NULL else nrow(res$prob_all),
+  percent_converged = if (all(is.na(conv))) NULL else round(100 * mean(conv, na.rm = TRUE), 2)
 )
 writeLines(toJSON(info, auto_unbox = TRUE, null = "null", digits = 6), file.path(out_dir, "run.json"))
 cat(sprintf("cardelino: done in %.1f s\n", wall))
