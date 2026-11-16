@@ -500,9 +500,50 @@ def collect(out_dir):
     for p in glob.glob(os.path.join(out_dir, "*", "summary.json")):
         with open(p) as f:
             r = json.load(f)
+        r["_dir"] = os.path.dirname(p)
         recs[r["task"]] = r
     order = [t for t in TASK_ORDER if t in recs] + sorted(t for t in recs if t not in TASK_ORDER)
     return [recs[t] for t in order]
+
+
+ERR_ALPHA = 1e-3      # an error-aware call: >= MIN_ALT_SITE alt reads AND P(Binomial(total, ERROR_RATE) >= alt) < this
+
+
+def error_aware(recs):
+    """The site-level calls redone from each tumour's sites.tsv.gz with the error floor taken into account (a
+    diagnostic beside the >= 2-alt-read rule, which a deep pooled assay passes on error reads alone). Same shape
+    as ``numbers()["site_level"]`` (only the "all" part) and ``["specificity"]``."""
+    from scipy.stats import binom
+    site, spec = {}, {}
+    for k in ASSAYS:
+        acc = []
+        for r in recs:
+            s = pd.read_csv(os.path.join(r["_dir"], "sites.tsv.gz"), sep="\t")
+            if f"alt_{k}" not in s:
+                continue
+            alt, tot = s[f"alt_{k}"].to_numpy(), s[f"tot_{k}"].to_numpy()
+            call = (alt >= MIN_ALT_SITE) & (binom.sf(alt - 1, tot, ERROR_RATE) < ERR_ALPHA)
+            sfx = "sec" if k == "visium" else "dis"
+            som, non = s[f"somatic_{sfx}"].to_numpy() == 1, s[f"nonmut_{sfx}"].to_numpy() == 1
+            acc.append((r["task"], call, som, non, freq_bin(s[f"freq_{sfx}"].to_numpy())))
+        if not acc:
+            continue
+        bins = []
+        for kb in range(len(FREQ_LABELS)):
+            n = sum(int((som & (b == kb)).sum()) for _, call, som, non, b in acc)
+            d = sum(int((call & som & (b == kb)).sum()) for _, call, som, non, b in acc)
+            bins.append(dict(bin=FREQ_LABELS[kb], n_sites=n, n_detected=d, share=_share(d, n),
+                             per_tumour={t: _share((call & som & (b == kb)).sum(), (som & (b == kb)).sum())
+                                         for t, call, som, non, b in acc}))
+        n = sum(int(som.sum()) for _, call, som, non, b in acc)
+        d = sum(int((call & som).sum()) for _, call, som, non, b in acc)
+        site[k] = {"all": dict(n_sites=n, n_detected=d, share=_share(d, n), by_bin=bins,
+                               per_tumour={t: _share((call & som).sum(), som.sum()) for t, call, som, non, b in acc})}
+        nn = sum(int(non.sum()) for _, call, som, non, b in acc)
+        nf = sum(int((call & non).sum()) for _, call, som, non, b in acc)
+        spec[k] = dict(n_nonmut=nn, n_false=nf, false_share=_share(nf, nn), alpha=ERR_ALPHA, error_rate=ERROR_RATE,
+                       per_tumour={t: _share((call & non).sum(), non.sum()) for t, call, som, non, b in acc})
+    return site, spec
 
 
 def numbers(recs):
@@ -550,6 +591,7 @@ def numbers(recs):
                                             for r, x in zip(rs, src)})
             cl["unit"] = rs[0]["assays"][k].get("unit", "cell")
             num["cell_level"][k] = cl
+    num["site_level_error_aware"], num["specificity_error_aware"] = error_aware(recs)
     for r in recs:
         num["cardelino"][r["task"]] = dict(chance=r["chance"], n_true_clones=r["n_true_clones"],
                                            n_variants=r["cardelino_config"]["n_variants"],
@@ -563,7 +605,9 @@ def numbers(recs):
     return num
 
 
-def draw(recs, num):
+def draw(recs, num, rule="min_alt"):
+    """rule "min_alt": the >= 2-alt-read call (the spec); "error_aware": that call AND the binomial test against
+    the error floor (``error_aware``)."""
     import matplotlib.pyplot as plt
     from matplotlib.patches import FancyBboxPatch, Rectangle
     import style as S
@@ -575,7 +619,7 @@ def draw(recs, num):
     S.panel_letter(fig, "a", 2, 3)
     ax = S.ax_mm(fig, 6, 9, 80, 44)
     ax.set_xlim(-0.6, 10.4)
-    ax.set_ylim(-0.5, 6.4)
+    ax.set_ylim(-1.1, 6.4)
     ax.axis("off")
     L, W = 10.0, 3.9            # transcript drawn 0..L (5'..3'), window the last W (1,000 of ~2,500 b)
     rng = np.random.default_rng(3)
@@ -600,16 +644,19 @@ def draw(recs, num):
             ax.text(sx, y - 0.26, "read" if seen else "not read", ha="center", va="top", fontsize=4.5,
                     color=S.INK if seen else S.GREY)
     share = num["share_genes_in_3p_window"]
-    ax.text(-0.5, -0.45, "Transcript length log-normal (median 2,500 b), site uniform along it: "
-            f"{share:.0%} of sites lie in the 3′ window.\nWithin reach, a molecule is read at the site with "
-            "probability 0.1 (as germline SNPs).", ha="left", va="bottom", fontsize=5.0, color=S.INK, linespacing=1.3)
+    ax.text(-0.5, -1.05, "Transcript length log-normal (median 2,500 b), the site uniform along it:\n"
+            f"{share:.0%} of sites lie in the 3′ window. Within reach, a molecule is read at\n"
+            "the site with probability 0.1 (as germline SNPs).", ha="left", va="bottom", fontsize=5.0, color=S.INK,
+            linespacing=1.3)
 
     # (b) site-level detection ------------------------------------------------------------------------
     S.panel_letter(fig, "b", 94, 3)
-    ax = S.ax_mm(fig, 102, 9, 50, 40)
+    site_num = num["site_level"] if rule == "min_alt" else num["site_level_error_aware"]
+    spec_num = num["specificity"] if rule == "min_alt" else num["specificity_error_aware"]
+    ax = S.ax_mm(fig, 102, 15, 50, 34)
     xs = np.arange(len(FREQ_LABELS))
     for i, k in enumerate(DRAWN):
-        sl = num["site_level"].get(k)
+        sl = site_num.get(k)
         if sl is None:
             continue
         y = [b["share"] for b in sl["all"]["by_bin"]]
@@ -622,19 +669,21 @@ def draw(recs, num):
     ax.set_xticks(xs)
     ax.set_xticklabels(FREQ_LABELS)
     ax.set_xlabel("Site frequency among cancer cells")
-    ax.set_ylabel(f"Somatic sites called (≥{MIN_ALT_SITE} alt reads)")
+    ax.set_ylabel(f"Somatic sites called\n(≥{MIN_ALT_SITE} alt reads" + (")" if rule == "min_alt" else ", above error)"))
     ax.set_ylim(-0.02, 1.02)
-    ax.legend(loc="upper left", bbox_to_anchor=(0.0, 1.0), fontsize=5.0, ncol=1, handlelength=1.6)
+    ax.legend(loc="lower left", bbox_to_anchor=(-0.02, 1.01), fontsize=5.0, ncol=3, handlelength=1.6,
+              columnspacing=0.8)
     # false calls at non-mutated sites
-    ax = S.ax_mm(fig, 163, 9, 17, 40)
-    ks = [k for k in DRAWN if k in num["specificity"]]
-    v = [num["specificity"][k]["false_share"] for k in ks]
+    ax = S.ax_mm(fig, 163, 15, 17, 34)
+    ks = [k for k in DRAWN if k in spec_num]
+    v = [spec_num[k]["false_share"] for k in ks]
     ax.barh(np.arange(len(ks))[::-1], v, color=[col[k] for k in ks], height=0.7)
     ax.set_yticks(np.arange(len(ks))[::-1])
     ax.set_yticklabels([])
     ax.tick_params(axis="y", length=0)
     for j, (k, x) in enumerate(zip(ks, v)):
-        ax.text(x, len(ks) - 1 - j, f" {x:.2f}" if x >= 0.005 else f" {x:.3f}", va="center", ha="left", fontsize=4.8)
+        ax.plot(0, len(ks) - 1 - j, marker="s", ms=2.6, color=col[k], ls="none", clip_on=False, zorder=3)
+        ax.text(x, len(ks) - 1 - j, f"  {x:.2f}" if x >= 0.005 else f"  {x:.3f}", va="center", ha="left", fontsize=4.8)
     ax.set_xlim(0, max(0.05, max(v) * 1.6))
     ax.set_xlabel("Non-mutated sites\ncalled (share)")
     S.despine(ax, left=False)
@@ -645,7 +694,7 @@ def draw(recs, num):
     lab = [LABEL[k] + (" (spots)" if num["cell_level"][k]["unit"] == "spot" else "") for k in ks]
     for j, (metric, xl, logx, x0) in enumerate((("share_detected", "Carrier cell–site pairs\nwith ≥1 alt read",
                                                  False, 30),
-                                                ("mean_depth", "Mean reads over the site\nper carrier pair", True, 62))):
+                                                ("mean_depth", "Mean reads over the site\nper carrier pair", False, 62))):
         ax = S.ax_mm(fig, x0, 70, 24, 38)
         yy = np.arange(len(ks))[::-1]
         val = [num["cell_level"][k]["all"][metric] for k in ks]
@@ -694,16 +743,27 @@ def draw(recs, num):
     ax.set_ylim(0, 1.0)
     ax.set_ylabel("cardelino balanced accuracy")
     ax.legend(loc="lower left", bbox_to_anchor=(0.0, 1.0), ncol=5, fontsize=5.0, handlelength=1.2)
-    return S.save(fig, "supp_snv")
+    return S.save(fig, "supp_snv" if rule == "min_alt" else "supp_snv_error_aware")
 
 
-def make_figure(out_dir):
+def make_figure(out_dir, fig4_c=None):
     recs = collect(out_dir)
     if not recs:
         sys.exit(f"no summaries under {out_dir}")
     num = numbers(recs)
+    if fig4_c:                    # Fig 4c's clonealign (copy number) on the same cells, for reference only
+        for r in recs:
+            p = os.path.join(fig4_c, f"{r['run']}_{r['task']}", "score.json")
+            if os.path.exists(p):
+                with open(p) as f:
+                    fine = json.load(f)["fine"]
+                num["cardelino"][r["task"]]["fig4c_clonealign"] = dict(
+                    truth_arm=fine["truth_arm"]["balanced_accuracy"], dna_arm=fine["dna_arm"]["balanced_accuracy"],
+                    chance=fine["chance"])
     path = draw(recs, num)
+    path_e = draw(recs, num, rule="error_aware")
     num["figure"] = [path, path[:-4] + ".png"]
+    num["figure_error_aware"] = [path_e, path_e[:-4] + ".png"]
     with open(os.path.join(out_dir, "supp_snv_numbers.json"), "w") as f:
         json.dump(num, f, indent=1, default=lambda x: x.item() if hasattr(x, "item") else str(x))
     print("figure:", path, flush=True)
@@ -728,7 +788,7 @@ def main():
     a = ap.parse_args()
     warnings.filterwarnings("ignore", category=FutureWarning)
     if a.step == "figure":
-        make_figure(a.out)
+        make_figure(a.out, a.fig4_c)
         return
     if not (a.task and a.work):
         sys.exit("run needs --task and --work")
