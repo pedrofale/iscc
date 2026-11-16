@@ -33,6 +33,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 TOOLS_D = {"clonalscope": "Clonalscope", "clonalscope_dna": "Clonalscope, DNA prior", "calicost": "CalicoST"}
+# 4c: a tumour's truth arm counts as above chance when clonealign's balanced accuracy given the true clones
+# exceeds chance by at least this much; the DNA step's cost (the gap) is read only there
+CHANCE_MARGIN = 0.10
+
+
+def _reference(diag_dir, tag):
+    """The correlation classifier on the true profiles (fig4_diag.py's checks.json), as 4c's reference."""
+    p = os.path.join(diag_dir, tag, "checks.json") if diag_dir else ""
+    if not p or not os.path.exists(p):
+        return dict(acc_corr=np.nan, bal_corr=np.nan)
+    sig = json.load(open(p)).get("signal", {}).get("correlation", {})
+    return dict(acc_corr=sig.get("accuracy", np.nan), bal_corr=sig.get("balanced_accuracy", np.nan))
 
 
 def _majority_map(labels, counts):
@@ -126,7 +138,7 @@ def _oracle_set(out_dir, tag):
                 cells_in_found=r.get("share_of_cells_in_found", np.nan))
 
 
-def collect(out_dir):
+def collect(out_dir, diag_dir=None):
     rows_c, rows_d = [], []
     for f in sorted(glob.glob(os.path.join(out_dir, "c", "*", "score.json"))):
         r = json.load(open(f))
@@ -136,6 +148,7 @@ def collect(out_dir):
             rows_c.append(dict(tumour=f"{r['run']}_{r['task']}", resolution=res,
                                **_tumour(out_dir, f"{r['run']}_{r['task']}"),
                                **(_oracle_set(out_dir, f"{r['run']}_{r['task']}") if res == "fine" else {}),
+                               **(_reference(diag_dir, f"{r['run']}_{r['task']}") if res == "fine" else {}),
                                n_rna_cells=r["n_rna_cells"],
                                n_true_clones=x["n_true_clones"], n_called_clones=d.get("n_called_clones"),
                                acc_true=x["truth_arm"]["accuracy"], acc_dna=x["dna_arm"]["accuracy"], gap=x["gap"],
@@ -162,7 +175,10 @@ def collect(out_dir):
             for tool, name in TOOLS_D.items():
                 if tool in r:
                     rows_d.append(dict(base, tool=name, **r[tool]))
-    return pd.DataFrame(rows_c), pd.DataFrame(rows_d)
+    c = pd.DataFrame(rows_c)
+    if len(c):
+        c["above_chance"] = c["bal_true"] >= c["chance"] + CHANCE_MARGIN
+    return c, pd.DataFrame(rows_d)
 
 
 def _panel_c(ax, c, order, short, S, DNA, metric):
@@ -281,8 +297,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("out")
     ap.add_argument("--figures", default=None)
+    ap.add_argument("--diag", default=os.environ.get("FIG4_DIAG"), help="fig4_diag.py's output (4c's reference)")
     a = ap.parse_args()
-    c, d = collect(a.out)
+    c, d = collect(a.out, a.diag)
     c.to_csv(os.path.join(a.out, "scores_c.csv"), index=False)
     d.to_csv(os.path.join(a.out, "scores_d.csv"), index=False)
     with pd.option_context("display.width", 200, "display.max_columns", 30):
