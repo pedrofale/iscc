@@ -52,7 +52,8 @@ def _inputs(a):
     Y = pd.DataFrame(X[:, g].toarray().astype(float), index=rna_ids, columns=[f"{x}.{i}" for i, x in zip(g, ids)])
     L = pd.DataFrame(true_prof.to_numpy(float)[:, gene_seg[g]].T, index=Y.columns, columns=list(true_prof.index))
     arms = layer.genes["arm"].to_numpy()[g]
-    return dict(Y=Y, L=L, truth=t_fine, true_prof=true_prof, arms=arms, layer=layer, g=g)
+    lib = np.asarray(X.sum(axis=1)).ravel()                  # each cell's library over all human genes
+    return dict(Y=Y, L=L, truth=t_fine, true_prof=true_prof, arms=arms, layer=layer, g=g, lib=lib)
 
 
 def _check_inputs(inp, stored_dir):
@@ -113,11 +114,14 @@ def _signal(inp):
     # oracle: each true clone's mean profile
     cen = np.stack([r[truth == c].mean(axis=0) if (truth == c).any() else np.zeros(r.shape[1]) for c in clones])
     out["centroid_oracle"] = _assign_scores(truth, clones[corr_pred(cen)])
-    # realised dosage: per gene, slope of the clones' mean log expression on log copy number
+    # realised dosage: per gene, the slope of each clone's pooled expression (its counts over its cells'
+    # whole libraries; a mean of logs of sparse counts would be squeezed by the pseudocount) on copy
+    # number, both logged, over the clones with at least 30 cells and the genes with at least 50 counts
+    lib = inp["lib"]
     big = [k for k, c in enumerate(clones) if (truth == c).sum() >= 30]
-    means = np.stack([logp[truth == clones[k]].mean(axis=0) for k in big])
+    means = np.log(np.stack([Y[truth == clones[k]].sum(axis=0) / lib[truth == clones[k]].sum() for k in big]) + 1e-12)
     lx = np.log(Lm[big])
-    var = lx.var(axis=0) > 0
+    var = (lx.var(axis=0) > 0) & (Y.sum(axis=0) >= 50)
     xc = lx[:, var] - lx[:, var].mean(axis=0)
     yc = means[:, var] - means[:, var].mean(axis=0)
     slope = (xc * yc).sum(axis=0) / (xc ** 2).sum(axis=0)
