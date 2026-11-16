@@ -8,10 +8,16 @@ runners, ``pair_scores``, the trait order); nothing here changes what those comp
 
 Entry points (``python validation/paper/fig5_atlas.py <cmd> ...``, with ``PYTHONPATH=src``)::
 
-    count pilot|grow                    number of array tasks
-    pilot <task>                        one pilot tumour: (arm, grid of module sizes, patient)
-    pilot-collect                       per arm and grid: event frequencies at 5%, cap share, cost
-    grow <task> --sizes s0,...,s6       one cohort patient: events, trees, traits, cells for scRNA
+    count pilot|grow|cells              number of array tasks
+    pilot <task>                        one pilot tumour: (arm, grid of module sizes, patient);
+                                        --grid NAME=s0,...,s6 / --arms / --pilot-dir for a
+                                        confirming round
+    pilot-collect                       per arm and grid: event frequencies at 5%, cap share, cost,
+                                        and the registered choice of grid
+    grow <task> --sizes s0,...,s6       one cohort patient: events, trees, traits (and, unless
+                                        --no-cells, its dissociated cells for scRNA)
+    cells <task> --sizes s0,...,s6      regrow patient i from its seed, check it is the tumour grow
+                                        recorded, and dissociate it with per-patient settings
     integrate --level 10x|strong|intermediate
                                         the pooled scRNA of the cohort in both designs + the truth,
                                         integrated by none / Harmony / scVI and scored
@@ -36,7 +42,7 @@ of cancer cells at the division cap, and the cost; it computes no dependency bet
 Outputs (``--out``, default ``$ISCC_FIG5_OUT``, else ``<registry OUT>/fig5-atlas``)::
 
     pilot/<arm>_<grid>_p<k>.json  pilot/pilot_summary.json
-    grow/patient<NN>.json         cells/patient<NN>.npz        (one pair per array task)
+    grow/patient<NN>.json         cells/patient<NN>.npz        (grow, cells: one per array task)
     integrate/level_<L>.json      collect_summary.json
 
 Intermediates go to node-local scratch (``$SNIC_TMP``), never /tmp; no tumour is stored.
@@ -90,6 +96,7 @@ PILOT_GRID = {"g1": (1, 1, 1, 1, 1, 1, 2), "g2": (2, 2, 2, 2, 2, 2, 4), "g4": (4
 DETECTION = 0.05
 THRESHOLDS = (0.05, 0.01)
 CELLS_PER_PATIENT = 1000
+DISSOCIATION_SEED = 4_100                          # with the patient's seed: the cells step's draws
 N_BALANCED_BATCHES = 50
 LEVELS = F.LEVELS                                  # 10x, intermediate (exploratory), strong
 EMBED_LEVELS = ("10x", "strong")                   # 2-D embeddings kept for panel b
@@ -174,14 +181,31 @@ def _cost(t, c0, t0):
 
 # ================================================================== the pilot
 def pilot_grid(args):
-    """The grids of module sizes a pilot submission grows: PILOT_GRID, or one custom grid
-    (``--sizes``, named ``--grid-name``) for a confirming round at chosen sizes."""
-    sizes = getattr(args, "sizes", None)
-    return {args.grid_name: tuple(sizes)} if sizes else dict(PILOT_GRID)
+    """The grids of module sizes a pilot submission grows: PILOT_GRID, or the grids given as
+    ``--grid NAME=s0,...,s6`` (a confirming round at chosen sizes)."""
+    given = getattr(args, "grid", None)
+    if not given:
+        return dict(PILOT_GRID)
+    out = {}
+    for g in given:
+        name, sizes = g.split("=", 1)
+        if not name or name in out:
+            raise SystemExit(f"--grid {g!r}: give each grid a distinct NAME=s0,...,s6")
+        out[name] = tuple(parse_sizes(sizes))
+    return out
 
 
-def pilot_tasks(n, grid=PILOT_GRID):
-    return [(arm, g, k) for arm in PILOT_ARMS for g in grid for k in range(n)]
+def pilot_arms(args):
+    arms = getattr(args, "arms", None)
+    arms = arms.split(",") if arms else list(PILOT_ARMS)
+    unknown = [a for a in arms if a not in PILOT_ARMS]
+    if unknown:
+        raise SystemExit(f"--arms: unknown arm(s) {unknown}; known: {list(PILOT_ARMS)}")
+    return arms
+
+
+def pilot_tasks(n, grid=PILOT_GRID, arms=tuple(PILOT_ARMS)):
+    return [(arm, g, k) for arm in arms for g in grid for k in range(n)]
 
 
 def pilot(args):
@@ -189,7 +213,7 @@ def pilot(args):
     from iscc.tumor.diagnostics import division_cap_share
     n = args.n_patients or len(PILOT_SEEDS)
     grids = pilot_grid(args)
-    arm, grid, k = pilot_tasks(n, grids)[args.task]
+    arm, grid, k = pilot_tasks(n, grids, pilot_arms(args))[args.task]
     seeds = PILOT_SEEDS[:n]
     targets = ([args.target] * n if args.target else pilot_targets(n, args.target_range))
     scale, spatial = field(args)
@@ -206,7 +230,7 @@ def pilot(args):
                dependency_params=GATING, detection=DETECTION, names=EVENT_NAMES,
                present=present, cap_share=None if cap is None else round(float(cap), 5),
                **_cost(t, c0, t0))
-    path = F.write_json(os.path.join(out_dir(args), "pilot", f"{arm}_{grid}_p{k:02d}.json"), rec)
+    path = F.write_json(os.path.join(out_dir(args), args.pilot_dir, f"{arm}_{grid}_p{k:02d}.json"), rec)
     print(f"[pilot] {arm} {grid} patient {k} (seed {seeds[k]}, target {targets[k]}): {rec['cancer']} cells, "
           f"{rec['cpu_s']} s CPU, {rec['peak_mb']} MB -> {path}", flush=True)
 
@@ -220,8 +244,30 @@ def _fit_rate(sizes, present):
     return float(lam[int(np.argmax(ll))])
 
 
+def choose_grid(cells, fits, arm="network", lo=0.05, hi=0.40, aim=0.20):
+    """The choice rule fixed before the confirming round (coordinator, 2026-11-16): take the grid at
+    which all seven events fall in ``lo``-``hi`` of the patients; if several qualify, the one whose
+    median event frequency is closest to ``aim``; if none does, the per-event sizes the fitted rate
+    per gene predicts for ``aim`` (and one more confirming round at those sizes)."""
+    rows = {c["grid"]: c for c in cells.values() if c["arm"] == arm and c["frequency"]}
+    qual = {g: c for g, c in rows.items() if all(lo <= f <= hi for f in c["frequency"].values())}
+    med = {g: float(np.median(list(c["frequency"].values()))) for g, c in rows.items()}
+    out = dict(rule=f"all seven events in {lo:.0%}-{hi:.0%}; ties by the median event frequency closest "
+                    f"to {aim:.0%}; else sizes predicted for {aim:.0%} and one more round",
+               arm=arm, qualifying=sorted(qual), median_frequency=med)
+    if qual:
+        g = min(qual, key=lambda x: (abs(med[x] - aim), x))
+        out.update(grid=g, sizes=list(rows[g]["sizes"]), cap_share_median=rows[g]["cap_share"]["median"],
+                   another_round=False)
+    elif arm in fits:
+        sizes = [max(1, int(round(math.log(1 / (1 - aim)) / max(fits[arm][n]["rate_per_gene"], 1e-6))))
+                 for n in EVENT_NAMES]
+        out.update(grid=None, sizes=sizes, another_round=True)
+    return out
+
+
 def pilot_collect(args):
-    d = os.path.join(out_dir(args), "pilot")
+    d = os.path.join(out_dir(args), args.pilot_dir)
     recs = []
     for fn in sorted(os.listdir(d)):
         if fn.endswith(".json") and fn != "pilot_summary.json":
@@ -267,6 +313,8 @@ def pilot_collect(args):
         grids[r["grid"]] = r["sizes"]
     summary = dict(step="pilot-collect", commit=F._commit(), detection=DETECTION, grid=grids,
                    names=EVENT_NAMES, n_records=len(recs), cells=cells, fits=fits,
+                   effect_scale=sorted({r["effect_scale"] for r in recs}),
+                   choice=choose_grid(cells, fits) if any(c["arm"] == "network" for c in cells.values()) else None,
                    note="each event's presence at 5% detection, the cap share and the cost only; "
                         "no dependency between events is computed")
     path = F.write_json(os.path.join(d, "pilot_summary.json"), summary)
@@ -278,6 +326,8 @@ def pilot_collect(args):
                 f" max {c['cpu_s']['max']:.0f} s, peak {c['peak_mb_max']} MB")
     for arm, f in fits.items():
         print(f"[pilot] {arm} rate per gene: " + " ".join(f"{k}={v['rate_per_gene']}" for k, v in f.items()))
+    if summary["choice"]:
+        print(f"[pilot] choice rule: {json.dumps(summary['choice'])}")
     print(f"[pilot-collect] {len(recs)} records -> {path}")
 
 
@@ -311,13 +361,37 @@ def _tree_rows(df):
     return df[["Node_ID", "Mutation_ID", "Parent_ID", "n_cells"]].astype(int).values.tolist()
 
 
-def _cells(t, n_cells):
+def _cells(t, n_cells, settings=None, rng=None):
     """The dissociated primary (``n_cells`` cells) in the form Part I pools: expression, genotype,
     cell type ("cancer" or the normal type), cancer flag and the patient's clone (clades of at least
-    4% of the cancer cells, as Part I)."""
+    4% of the cancer cells, as Part I).
+
+    With ``settings`` (see :func:`dissociation_settings`), ``settings["materialise"]`` cells (default
+    twice ``n_cells``) are materialised, :class:`iscc.sample.dissociation.Dissociation` applies the
+    per-type recovery and the stress signature, and ``n_cells`` of the recovered cells are kept at
+    random. Without, the primary is dissociated to ``n_cells`` as Part I did. Returns the arrays, the
+    number of clones and the dissociation's own record."""
     import common as C
-    cd = RG.RR.resect(t).dissociate(max_cells=n_cells, layers="scrna")
-    gid = cd["cell_type"]["cell_id"].astype(str)
+    meta = dict(settings=settings or {})
+    if settings:
+        from iscc.sample.dissociation import Dissociation
+        m = int(settings.get("materialise", 2 * n_cells))
+        cd = RG.RR.resect(t).dissociate(max_cells=m, layers="scrna")
+        diss = Dissociation(cd, rng=rng, recovery_probs=settings.get("recovery_probs"),
+                            stress_strength=float(settings.get("stress_strength", 0.0)),
+                            n_stress_genes=settings.get("n_stress_genes"))
+        chosen, dmeta, exp_override = diss.run()
+        exp = exp_override if exp_override is not None else cd["cell_exp"]
+        chosen = np.asarray(chosen)
+        if len(chosen) > n_cells:
+            chosen = np.sort(rng.choice(chosen, size=n_cells, replace=False))
+        gid = cd["cell_type"]["cell_id"].loc[chosen].astype(str)
+        exp = exp.loc[chosen]
+        meta.update(materialised=int(len(cd["cell_type"])), dissociation=dmeta)
+    else:
+        cd = RG.RR.resect(t).dissociate(max_cells=n_cells, layers="scrna")
+        gid = cd["cell_type"]["cell_id"].astype(str)
+        exp = cd["cell_exp"]
     clones = C.Clones(t)
     is_cancer = np.array([g in t.genotypes and t._is_cancer(g) for g in gid.values])
     return dict(cells=np.asarray([str(c) for c in gid.index], dtype=str),
@@ -327,21 +401,86 @@ def _cells(t, n_cells):
                 is_cancer=np.asarray(is_cancer, dtype=bool),
                 clone=np.asarray([(clones.of(g) if c else "normal") for g, c in zip(gid.values, is_cancer)],
                                  dtype=str),
-                genes=np.asarray([str(g) for g in cd["cell_exp"].columns], dtype=str),
-                exp=cd["cell_exp"].values.astype(np.float32)), len(clones.labels)
+                genes=np.asarray([str(g) for g in exp.columns], dtype=str),
+                exp=exp.values.astype(np.float32)), len(clones.labels), meta
 
 
-def grow_patient(args):
+def fingerprint(t):
+    """SHA-256 of a grown tumour's state: every deme's genotype counts (primary and metastatic
+    lattice), each live genotype's count, event bits and parent, and the time reached. Genotype ids
+    come from a process-wide counter, so two growths agree only when each runs in a fresh process
+    (as every array task does)."""
+    import hashlib
+    h = hashlib.sha256()
+    for di, d in enumerate(t.demes):
+        for g, c in sorted(d.items(), key=lambda kv: str(kv[0])):
+            if c:
+                h.update(f"{di}:{g}:{c};".encode())
+    for g in sorted(t.genotypes_counts, key=str):
+        c = t.genotypes_counts[g]
+        if c > 0 and g in t.genotypes:
+            h.update(f"{g}:{c}:{getattr(t.genotypes[g], 'event_bits', 0)}:{t.genotypes_parents.get(g)};".encode())
+    h.update(f"t={float(t.time):.12g}".encode())
+    return h.hexdigest()
+
+
+def dna_record(t):
+    """The DNA side of one patient: event and trait fractions and presence at 5% and 1%, the
+    aggregated acquisition paths, the true trees (E0-E6; E0 and the traits; all ten) at 5%, the
+    traits' order from the genealogy, the cap share and the compartment sizes."""
     from iscc import integrations as ig
     from iscc.tumor.diagnostics import division_cap_share
-    import common  # noqa: F401  (imported before growth: the cells step needs it)
+    rec = dict(fingerprint=fingerprint(t))
+    if t.get_cancer_size() <= 0:
+        return dict(rec, names=EVENT_NAMES + list(TRAITS), cap_share=None)
+    tbl = ig.trait_table(t, with_events=True)
+    names = list(tbl.attrs["names"])
+    frac = ig.trait_cell_fractions(t, with_events=True)
+    ev = ig.event_cell_fractions(t)
+    rec["event_fraction_check"] = float(np.max(np.abs(frac.values[:N_EVENTS] - ev)))
+    rec["names"] = names
+    rec["fraction"] = [round(float(x), 5) for x in frac.values]
+    for thr in THRESHOLDS:
+        rec[f"present_{thr:g}"] = [int(x >= thr) for x in frac.values]
+    paths = _paths(tbl)
+    rec["paths"] = paths
+    rec["tree_events"] = _tree_rows(ig.to_mutation_tree(t, detection=DETECTION))
+    rec["tree_traits"] = _tree_rows(projected_tree(paths, names, PANEL_E_NAMES, DETECTION))
+    rec["tree_all"] = _tree_rows(ig.to_trait_tree(t, with_events=True, detection=DETECTION))
+    rec["order"] = F._trait_order(t)
+    rec["cap_share"] = round(float(division_cap_share(t)), 5)
+    rec.update(F._compartments(t))
+    return rec
+
+
+# what the cells step checks against the grow step's record before it samples any cell
+REGROW_KEYS = ("cancer", "generations", "n_genotypes", "fingerprint", "fraction", "present_0.05",
+               "present_0.01", "paths", "tree_events", "tree_traits", "tree_all", "order", "cap_share",
+               "gland_cells", "stroma_cells", "met_cells")
+
+
+def _patient(args):
+    """Patient ``args.task`` of the cohort (or of a smoke cohort): its seeds, targets, field and
+    network, exactly as grow and cells both use them."""
     n = args.n_patients or len(COHORT_SEEDS)
-    i = args.task
     seeds = COHORT_SEEDS[:n]
     targets = [args.target] * n if args.target else cohort_targets(n, args.target_range)
     scale, spatial = field(args)
-    planted = scaled(NETWORK, args.effect_scale)
-    ep = epistasis(args.sizes, planted)
+    ep = epistasis(args.sizes, scaled(NETWORK, args.effect_scale))
+    return args.task, seeds, targets, scale, spatial, ep
+
+
+def _write_cells(out, i, cells, meta):
+    os.makedirs(os.path.join(out, "cells"), exist_ok=True)
+    part = os.path.join(out, "cells", f"patient{i:02d}.part.npz")
+    np.savez_compressed(part, meta=np.asarray(json.dumps(meta, default=F._jsonable)), **cells)
+    os.replace(part, os.path.join(out, "cells", f"patient{i:02d}.npz"))
+    return f"cells/patient{i:02d}.npz"
+
+
+def grow_patient(args):
+    import common  # noqa: F401  (imported before growth: the cells step needs it)
+    i, seeds, targets, scale, spatial, ep = _patient(args)
     t0, c0 = time.time(), F._cpu()
     t = grow_one(seeds, targets, i, scale, spatial, ep)
     cost = _cost(t, c0, t0)
@@ -350,41 +489,83 @@ def grow_patient(args):
                effect_scale=args.effect_scale, epistasis_params=ep, dependency_params=GATING,
                selection_extra=RG.MET_SELECTION, spatial=spatial, detection=DETECTION,
                thresholds=list(THRESHOLDS), **cost)
-    if t.get_cancer_size() > 0:
-        tbl = ig.trait_table(t, with_events=True)
-        names = list(tbl.attrs["names"])
-        frac = ig.trait_cell_fractions(t, with_events=True)
-        ev = ig.event_cell_fractions(t)
-        rec["event_fraction_check"] = float(np.max(np.abs(frac.values[:N_EVENTS] - ev)))
-        rec["names"] = names
-        rec["fraction"] = [round(float(x), 5) for x in frac.values]
-        for thr in THRESHOLDS:
-            rec[f"present_{thr:g}"] = [int(x >= thr) for x in frac.values]
-        paths = _paths(tbl)
-        rec["paths"] = paths
-        rec["tree_events"] = _tree_rows(ig.to_mutation_tree(t, detection=DETECTION))
-        rec["tree_traits"] = _tree_rows(projected_tree(paths, names, PANEL_E_NAMES, DETECTION))
-        rec["tree_all"] = _tree_rows(ig.to_trait_tree(t, with_events=True, detection=DETECTION))
-        rec["order"] = F._trait_order(t)
-        rec["cap_share"] = round(float(division_cap_share(t)), 5)
-        rec.update(F._compartments(t))
-    else:
-        rec.update(names=EVENT_NAMES + list(TRAITS), cap_share=None)
+    rec.update(dna_record(t))
     out = out_dir(args)
-    tc = time.time()
-    cells, n_clones = _cells(t, args.cells or CELLS_PER_PATIENT)
-    rec.update(n_clones=n_clones, n_cells_sampled=int(len(cells["cells"])),
-               n_cancer_sampled=int(cells["is_cancer"].sum()), cells_wall_s=round(time.time() - tc, 1),
-               cells_file=f"cells/patient{i:02d}.npz")
-    os.makedirs(os.path.join(out, "cells"), exist_ok=True)
-    part = os.path.join(out, "cells", f"patient{i:02d}.part.npz")
-    np.savez_compressed(part, **cells)
-    os.replace(part, os.path.join(out, "cells", f"patient{i:02d}.npz"))
+    if not args.no_cells:
+        tc = time.time()
+        cells, n_clones, meta = _cells(t, args.cells or CELLS_PER_PATIENT)
+        rec.update(n_clones=n_clones, n_cells_sampled=int(len(cells["cells"])),
+                   n_cancer_sampled=int(cells["is_cancer"].sum()), cells_wall_s=round(time.time() - tc, 1),
+                   cells_file=_write_cells(out, i, cells, dict(meta, step="grow")))
     rec["cpu_s_total"], rec["peak_mb"] = round(F._cpu() - c0, 1), round(F._peak_mb())
     path = F.write_json(os.path.join(out, "grow", f"patient{i:02d}.json"), rec)
     print(f"[grow] patient {i} (seed {seeds[i]}, target {targets[i]}): {rec['cancer']} cells, "
-          f"{rec['cpu_s']} s CPU, cap share {rec['cap_share']}, {rec['n_cells_sampled']} cells kept "
-          f"-> {path}", flush=True)
+          f"{rec['cpu_s']} s CPU, cap share {rec['cap_share']}, "
+          + ("no cells kept" if args.no_cells else f"{rec['n_cells_sampled']} cells kept") + f" -> {path}",
+          flush=True)
+
+
+def dissociation_settings(i, seed, args):
+    """Per-patient dissociation settings for the cells step. A STUB until the registration states
+    their source: today they come from ``--dissociation-file`` (JSON ``{"<patient index>": {...}}``)
+    with ``--stress-strength`` / ``--recovery type=p,...`` / ``--materialise`` on top. Keys:
+    ``recovery_probs`` (per biological type), ``stress_strength``, ``n_stress_genes``,
+    ``materialise`` (cells materialised before recovery). An empty dict means Part I's plain
+    dissociation."""
+    st = {}
+    if args.dissociation_file:
+        with open(args.dissociation_file) as f:
+            st.update(json.load(f).get(str(i), {}))
+    if args.recovery:
+        st["recovery_probs"] = {k: float(v) for k, v in (x.split("=") for x in args.recovery.split(","))}
+    if args.stress_strength is not None:
+        st["stress_strength"] = args.stress_strength
+    if args.materialise is not None:
+        st["materialise"] = args.materialise
+    return st
+
+
+def cells_step(args):
+    """Regrow patient i from its seed in this (fresh) process, check that it is the tumour the grow
+    step recorded, and dissociate its primary with the patient's settings."""
+    import common  # noqa: F401
+    i, seeds, targets, scale, spatial, ep = _patient(args)
+    out = out_dir(args)
+    t0, c0 = time.time(), F._cpu()
+    t = grow_one(seeds, targets, i, scale, spatial, ep)
+    cost = _cost(t, c0, t0)
+    now = dict(cost, **dna_record(t))
+    check = dict(compared=False)
+    gpath = os.path.join(out, "grow", f"patient{i:02d}.json")
+    if os.path.exists(gpath):
+        with open(gpath) as f:
+            was = json.load(f)
+        if (was.get("sizes") != list(args.sizes) or was.get("effect_scale") != args.effect_scale
+                or was.get("target_cancer") != targets[i] or was.get("seed") != seeds[i]):
+            sys.exit(f"[cells] patient {i}: the grow record was made with other settings "
+                     f"(sizes {was.get('sizes')}, effect scale {was.get('effect_scale')}, target "
+                     f"{was.get('target_cancer')}, seed {was.get('seed')}); pass the same ones")
+        now_j = json.loads(json.dumps({k: now.get(k) for k in REGROW_KEYS}, default=F._jsonable))
+        differ = [k for k in REGROW_KEYS if now_j.get(k) != was.get(k)]
+        check = dict(compared=True, keys=list(REGROW_KEYS), differ=differ, identical=not differ)
+        if differ:
+            sys.exit(f"[cells] patient {i}: the regrown tumour differs from the grow record in {differ}; "
+                     "no cells written")
+    elif not args.no_check:
+        sys.exit(f"[cells] patient {i}: no grow record at {gpath} to check the regrown tumour against "
+                 "(run grow first, or pass --no-check)")
+    settings = dissociation_settings(i, seeds[i], args)
+    rng = np.random.default_rng([DISSOCIATION_SEED, seeds[i]])
+    tc = time.time()
+    cells, n_clones, meta = _cells(t, args.cells or CELLS_PER_PATIENT, settings, rng)
+    meta.update(step="cells", index=i, seed=seeds[i], commit=F._commit(), regrow=dict(check, **cost),
+                n_clones=n_clones, n_cells_sampled=int(len(cells["cells"])),
+                n_cancer_sampled=int(cells["is_cancer"].sum()), cells_wall_s=round(time.time() - tc, 1),
+                peak_mb=round(F._peak_mb()))
+    path = _write_cells(out, i, cells, meta)
+    print(f"[cells] patient {i} (seed {seeds[i]}): regrown in {cost['cpu_s']} s CPU, "
+          f"{'identical to the grow record' if check.get('identical') else 'not checked'}; "
+          f"{meta['n_cells_sampled']} cells -> {os.path.join(out, path)}", flush=True)
 
 
 # ================================================================== integration (panels b-c)
@@ -772,7 +953,7 @@ def collect(args):
 # ================================================================== CLI
 def count(args):
     if args.what == "pilot":
-        return len(pilot_tasks(args.n_patients or len(PILOT_SEEDS), pilot_grid(args)))
+        return len(pilot_tasks(args.n_patients or len(PILOT_SEEDS), pilot_grid(args), pilot_arms(args)))
     return args.n_patients or len(COHORT_SEEDS)
 
 
@@ -794,12 +975,13 @@ def main(argv=None):
                        help="multiply every planted fitness term (0.5: the cap-share rule)")
 
     def grid(p):
-        p.add_argument("--sizes", type=parse_sizes, default=None,
-                       help="one grid of module sizes E0..E6 instead of PILOT_GRID (a confirming round)")
-        p.add_argument("--grid-name", default="r2", help="the name of that grid in the records")
+        p.add_argument("--grid", action="append", default=None, metavar="NAME=s0,...,s6",
+                       help="a grid of module sizes E0..E6 (repeatable) instead of PILOT_GRID")
+        p.add_argument("--arms", default=None, help="comma-separated pilot arms (default network,null)")
+        p.add_argument("--pilot-dir", default="pilot", help="subdirectory of --out for this round")
 
     c = sub.add_parser("count")
-    c.add_argument("what", choices=["pilot", "grow"])
+    c.add_argument("what", choices=["pilot", "grow", "cells"])
     common(c)
     grid(c)
     p = sub.add_parser("pilot")
@@ -809,12 +991,25 @@ def main(argv=None):
     grid(p)
     p = sub.add_parser("pilot-collect")
     common(p)
+    p.add_argument("--pilot-dir", default="pilot", help="subdirectory of --out holding the round")
     p = sub.add_parser("grow")
     p.add_argument("task", type=int)
     common(p)
     growth(p)
     p.add_argument("--sizes", type=parse_sizes, required=True, help="module sizes of E0..E6, e.g. 2,1,1,2,2,2,4")
     p.add_argument("--cells", type=int, default=None, help="dissociated primary cells kept (default 1,000)")
+    p.add_argument("--no-cells", action="store_true", help="the DNA summary only (cells later: the cells step)")
+    p = sub.add_parser("cells")
+    p.add_argument("task", type=int)
+    common(p)
+    growth(p)
+    p.add_argument("--sizes", type=parse_sizes, required=True, help="the module sizes grow used")
+    p.add_argument("--cells", type=int, default=None, help="dissociated primary cells kept (default 1,000)")
+    p.add_argument("--dissociation-file", default=None, help="JSON of per-patient settings (a stub)")
+    p.add_argument("--recovery", default=None, help="type=p,... recovery probabilities (on top of the file)")
+    p.add_argument("--stress-strength", type=float, default=None)
+    p.add_argument("--materialise", type=int, default=None, help="cells materialised before recovery")
+    p.add_argument("--no-check", action="store_true", help="skip the check against the grow record")
     p = sub.add_parser("integrate")
     common(p)
     p.add_argument("--level", required=True, choices=list(LEVELS))
@@ -839,6 +1034,8 @@ def main(argv=None):
         pilot_collect(args)
     elif args.cmd == "grow":
         grow_patient(args)
+    elif args.cmd == "cells":
+        cells_step(args)
     elif args.cmd == "integrate":
         integrate(args)
     elif args.cmd == "collect":

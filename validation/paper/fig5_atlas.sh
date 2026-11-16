@@ -5,11 +5,14 @@
 #     [ISCC_TOOLS_DIR=<images>] [AFTER=<job id>] validation/paper/fig5_atlas.sh
 #
 # STEP is
-#   pilot          an array, one tumour per task (arm x grid x patient), 1 CPU each; SIZES=s0,...,s6
-#                  grows one grid at those sizes instead of the registered grid (a confirming round;
-#                  EXTRA="--grid-name r2" names it);
-#   pilot-collect  one small job;
+#   pilot          an array, one tumour per task (arm x grid x patient), 1 CPU each; PILOT_OPTS (e.g.
+#                  "--grid g2h=2,2,2,2,2,2,4 --arms network --pilot-dir pilot-half") sets a
+#                  confirming round's grids, arms and directory, for the count and every task;
+#   pilot-collect  one small job (PILOT_OPTS="--pilot-dir ..." for a confirming round);
 #   grow           an array, one cohort patient per task; needs SIZES=s0,...,s6 (E0..E6);
+#                  EXTRA=--no-cells keeps the DNA summary only;
+#   cells          an array: regrow each patient, check it against its grow record, dissociate it
+#                  (SIZES and EFFECT_SCALE as grow; EXTRA for the dissociation settings);
 #   integrate      one job per batch level: LEVEL=10x|strong|intermediate (16 CPUs: two scVI runs of
 #                  6 threads each beside four single-threaded none/Harmony runs);
 #   collect        one job, CPUS fits at a time.
@@ -30,17 +33,18 @@ ES=${EFFECT_SCALE:+--effect-scale $EFFECT_SCALE}
 DEP=${AFTER:+--dependency=afterany:$AFTER}
 SB=(sbatch --parsable -A "$SLURM_ACCOUNT" -p "${PARTITION:-cpu}" -n 1 --export=ALL ${DEP:-})
 case "$STEP" in
-  pilot|grow)
+  pilot|grow|cells)
     export ISCC_PAPER_TIER=full
-    [ "$STEP" = grow ] && : "${SIZES:?set SIZES=s0,...,s6 for grow}"
+    [ "$STEP" != pilot ] && : "${SIZES:?set SIZES=s0,...,s6 for $STEP}"
     SZ=${SIZES:+--sizes $SIZES}
-    N=$(PYTHONPATH="$REPO/src" "$ISCC_ENV/bin/python" "$HERE/fig5_atlas.py" count "$STEP" ${NP:-} ${SZ:-})
+    PO=$([ "$STEP" = pilot ] && echo "${PILOT_OPTS:-}" || true)
+    N=$(PYTHONPATH="$REPO/src" "$ISCC_ENV/bin/python" "$HERE/fig5_atlas.py" count "$STEP" ${NP:-} ${PO:-})
     "${SB[@]}" -J "fig5a-$STEP" -c 1 --mem="${MEM:-8G}" -t "${TIME:-01:00:00}" \
       --array="0-$((N - 1))%${MAX_PARALLEL:-100}" -o "$LOGS/%x-%A_%a.out" \
-      --wrap "export TMPDIR=\$SNIC_TMP; $PY $STEP \$SLURM_ARRAY_TASK_ID ${NP:-} ${ES:-} ${SZ:-} ${EXTRA:-}" ;;
+      --wrap "export TMPDIR=\$SNIC_TMP; $PY $STEP \$SLURM_ARRAY_TASK_ID ${NP:-} ${ES:-} ${SZ:-} ${PO:-} ${EXTRA:-}" ;;
   pilot-collect)
     "${SB[@]}" -J "fig5a-$STEP" -c 1 --mem="${MEM:-4G}" -t "${TIME:-00:30:00}" -o "$LOGS/%x-%j.out" \
-      --wrap "export TMPDIR=\$SNIC_TMP; $PY $STEP ${EXTRA:-}" ;;
+      --wrap "export TMPDIR=\$SNIC_TMP; $PY $STEP ${PILOT_OPTS:-} ${EXTRA:-}" ;;
   integrate)
     : "${LEVEL:?set LEVEL=10x|strong|intermediate}"
     "${SB[@]}" -J "fig5a-int-$LEVEL" -c "${CPUS:-16}" --mem="${MEM:-96G}" -t "${TIME:-08:00:00}" \
