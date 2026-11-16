@@ -16,7 +16,10 @@
 #                   clone_call.csv    cells -> hard clone call (argmax over clones)
 #                   run.csv           genes and cells dropped before the fit, and the seed that fit
 #
-# Usage: Rscript clonealign_runner.R <indir> <outdir> [max_iter] [n_repeats] [seed] [preprocess]
+# Usage: Rscript clonealign_runner.R <indir> <outdir> [max_iter] [n_repeats] [seed] [preprocess] [K]
+#
+# K (optional) is the dimension of clonealign's latent expression space; left out, the package's default
+# (1 below 100 genes, 6 above).
 #
 # preprocess = 1 applies the package's own preprocess_for_clonealign() with its defaults (genes with more
 # than 20 counts and copy number at most 6, outlying genes and genes with the same copy number in every
@@ -42,6 +45,7 @@ max_iter  <- if (length(args) >= 3) as.integer(args[3]) else 200L
 n_repeats <- if (length(args) >= 4) as.integer(args[4]) else 3L
 seed      <- if (length(args) >= 5) as.integer(args[5]) else 1L
 preprocess <- length(args) >= 6 && as.integer(args[6]) == 1L
+K_arg <- if (length(args) >= 7 && nzchar(args[7]) && args[7] != "NA") as.integer(args[7]) else NULL
 dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
 
 # ---- load inputs ----
@@ -80,8 +84,9 @@ fit <- NULL
 for (s in seed + 0:2) {
   set.seed(s)
   tf$compat$v1$set_random_seed(s)
-  fit <- tryCatch(run_clonealign(Yk, Lk, initial_shrinks = c(0, 5, 10), n_repeats = n_repeats,
-                                 print_elbos = FALSE, max_iter = max_iter, verbose = FALSE),
+  fit <- tryCatch(do.call(run_clonealign, c(list(Yk, Lk, initial_shrinks = c(0, 5, 10), n_repeats = n_repeats,
+                                                  print_elbos = FALSE, max_iter = max_iter, verbose = FALSE),
+                                             if (is.null(K_arg)) list() else list(K = K_arg))),
                   error = function(e) { message(sprintf("clonealign, seed %d: %s", s, conditionMessage(e))); NULL })
   if (!is.null(fit)) break
 }
@@ -95,5 +100,12 @@ probs[keep_c, ] <- fit$ml_params$clone_probs
 call <- rep(NA_character_, nrow(Y))
 call[keep_c] <- as.character(fit$clone)
 write.csv(as.data.frame(probs), file.path(outdir, "clone_probs.csv"))
+# the clones the package names against the columns of its probabilities: they must agree
+named <- as.character(fit$clone)
+by_prob <- colnames(Lk)[apply(fit$ml_params$clone_probs, 1, which.max)]
+ok_name <- named != "unassigned"
+cat(sprintf("clonealign: package clone calls agree with the argmax of its probabilities for %d of %d assigned cells\n",
+            sum(named[ok_name] == by_prob[ok_name]), sum(ok_name)))
+writeLines(colnames(Yk), file.path(outdir, "genes_used.txt"))
 write.csv(data.frame(clone = call, row.names = rownames(Y)), file.path(outdir, "clone_call.csv"))
 cat("clonealign done ->", outdir, "\n")
