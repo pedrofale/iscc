@@ -2,7 +2,7 @@
 
 `iscc` simulates a tumour growing in a tissue and then measures it the way an experiment would.
 This document describes how the package is built: what each part models, how the parts hand data to each other, and which module implements each one.
-The parameters of every part are documented in `PARAMETERS.md`; the on-disk layout of the CLI pipeline is in `SCHEMA.md`.
+The constructor parameters of each part are documented in the API reference of the package documentation, and `notebooks/example_config.yaml` sets them for the tutorials.
 
 ## The flow: growth, sampling, assays
 
@@ -63,7 +63,7 @@ The engine is split by concern into mixins of `GenotypeTumor`, all in `tumor/mod
 
 ## Simulation algorithms
 
-`iscc` simulates its tumour model with two standard algorithms and introduces none of its own (vault: `decision-standard-simulation-algorithms`).
+`iscc` simulates its tumour model with two standard algorithms and introduces none of its own.
 This section is written for a reader who knows CINner's or demon's algorithm; the model (the rates) is described elsewhere in this document and is kept apart from the algorithm that steps it.
 
 ### The process
@@ -157,11 +157,11 @@ Residents (epithelium, stroma, immune, host) are seeded once and never divide.
   Residents add a death hazard at the fixed reference rate `resident_pressure_ref`.
 - **Dispersal.** A division sends a daughter out with probability `dispersal_rate`, independently of whether it mutates (demon's rule).
   The daughter goes to a random von Neumann neighbour, hops to another gland's lumen (`cross_gland_kappa`, the intraductal route), or, from a primary stroma deme, attempts to seed the metastasis.
-- **Compartments.** Leaving a duct for the stroma crosses the basement membrane: it succeeds with probability equal to the clone's breach trait, and a daughter that fails stays home (`breach_gated_invasion`).
+- **Compartments.** Leaving a duct for the stroma crosses the basement membrane: it succeeds with probability equal to the breach trait of the clone, and a daughter that fails stays in the duct (`breach_gated_invasion`).
   The stroma adds a death hazard attenuated by stromal survival (`stromal_hazard`), the epithelium one attenuated by breach (`epithelial_barrier`), and immune cells one attenuated by immune resistance.
 - **Origin confinement.** The founding acinus holds its cells in for `generations` generations after it is half full, so an early alteration can become truncal.
 - **Metastasis** (`tumor/models/metastasis.py`). An optional second lattice of host parenchyma with one vessel deme.
-  Seeding cells survive transit in proportion to their metastatic-survival trait, and the host adds a death hazard attenuated by it.
+  A seeding cell survives transit with probability `f + (1 - f) m`, where `m` is the metastatic-survival trait of the clone and `f` the floor `met_transit_floor`, and the host adds a death hazard attenuated by the same trait.
 
 Treatment (`tumor/models/therapy.py`, `iscc.treatment`) acts during growth through the death rate (chemotherapy, targeted therapy), immune resistance (immunotherapy) or by removing cells (surgery), with either label-based or mechanistic responses.
 
@@ -203,7 +203,8 @@ Every assay subclasses `data/assay.py` and draws its technical noise from a seed
 - **Visium** (`data/visium.py`).
   Hexagonal spots aggregate the section's cells, lateral diffusion mixes neighbouring spots, a spatially correlated batch field and spot swapping (`data/visium_background.py`, SpotClean's bleed model) add spatial artefacts, and spots outside the tissue receive bled counts.
 - **Imaging** (`data/imaging.py`, `scSpatial`).
-  A targeted panel at single-cell resolution, reusing the scRNA count machinery.
+  A targeted panel measured cell by cell, reusing the scRNA count machinery.
+  Cell positions are resolved only to the deme and scattered at random within it, so the assay does not model structure below the deme.
 - **Reads** (`data/reads/`).
   FASTQ and BAM emission from the count matrices, through external simulators (DWGSIM, ART) and a synthetic or real reference.
 
