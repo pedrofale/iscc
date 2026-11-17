@@ -438,13 +438,16 @@ def _sparse_doublets(batch, counts):
     return (counts + (add @ counts)).tocsr().astype(np.int32), is_doublet
 
 
-# scRNA constructor arguments a per-batch override may set: the technical hyper-parameters (and
-# their aliases). The cells, labels and seeds are the design's, so `run_scrna_batches` owns them.
+# scRNA constructor arguments a per-batch override may set: the technical hyper-parameters, by
+# their own names. The aliases (`n_reads`, `lib_size_sigma`) are refused, so a batch's settings
+# name each parameter once. The cells, labels and seeds are the design's, so `run_scrna_batches`
+# owns them.
 BATCH_OVERRIDE_KEYS = (
-    "n_reads", "lib_size_sigma", "dispersion", "sigma_batch", "mu_lib", "sigma_lib",
+    "dispersion", "sigma_batch", "mu_lib", "sigma_lib",
     "ambient_frac", "doublet_rate", "dropout_mid", "dropout_shape", "well_sigma", "n_wells",
     "n_plates", "plate_sigma", "depth_batch_sigma", "kappa",
 )
+_BATCH_ALIASES = {"n_reads": "mu_lib", "lib_size_sigma": "sigma_lib"}
 
 
 def _check_batch_kwargs(batch_kwargs, n_batches):
@@ -458,6 +461,10 @@ def _check_batch_kwargs(batch_kwargs, n_batches):
     out = []
     for i, kw in enumerate(batch_kwargs):
         kw = dict(kw or {})
+        alias = sorted(set(kw) & set(_BATCH_ALIASES))
+        if alias:
+            raise ValueError(f"batch_kwargs[{i}] uses the alias(es) {alias}; per-batch settings take the "
+                             f"parameters' own names ({[_BATCH_ALIASES[a] for a in alias]})")
         bad = sorted(set(kw) - set(BATCH_OVERRIDE_KEYS))
         if bad:
             raise ValueError(f"batch_kwargs[{i}] sets {bad}, which are not per-batch technical "

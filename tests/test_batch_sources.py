@@ -90,6 +90,10 @@ def test_batch_kwargs_are_checked():
     with pytest.raises(ValueError, match="not per-batch technical"):
         run_scrna_batches(cd, n_batches=2, design="split", n_cells=50,
                           batch_kwargs=[{}, {"seed": 1}])
+    for alias in ("n_reads", "lib_size_sigma"):
+        with pytest.raises(ValueError, match="alias"):
+            run_scrna_batches(cd, n_batches=2, design="split", n_cells=50,
+                              batch_kwargs=[{alias: 1000.0}, {}])
 
 
 def test_concat_records_each_batchs_hyperparameters():

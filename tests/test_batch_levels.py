@@ -30,7 +30,16 @@ def _fits(n_tumours=7, ambient=True, n_patients=12):
                             stress_strength=float(max(rng.normal(0.1, 0.2), 0.0)))
     rec = {str(p): {"cancer": 0.9, "immune": float(rng.uniform(0.2, 0.6)), "stromal": 0.6,
                     "epithelial": 0.8, "host": 0.8} for p in range(n_patients)}
-    return {"wu": {"vectors": vec}, "recovery": {"per_patient": rec}}
+    needs = [t for t, v in vec.items() if v["ambient_frac"] is None]
+    return {"wu": {"vectors": vec, "ambient": {"needs_range": needs}}, "recovery": {"per_patient": rec},
+            "ambient_range": None}
+
+
+def _with_range(f, lo=0.03, hi=0.11):
+    f = dict(f)
+    f["ambient_range"] = dict(rho_low=lo, rho_high=hi, ambient_frac_low=lo / (1 - lo),
+                              ambient_frac_high=hi / (1 - hi), source="test")
+    return f
 
 
 PATIENTS = list(range(10))
@@ -141,17 +150,42 @@ def test_recovery_is_the_patients_own_at_every_level():
     for d in BL.DESIGNS:
         for lv, s in BL.levels(f, PATIENTS, d).items():
             r = {p: v["recovery_probs"] for p, v in s["patients"].items()}
-            assert r == {str(p): f["recovery"]["per_patient"][str(i)] for i, p in enumerate(PATIENTS)}
+            assert r == {str(p): f["recovery"]["per_patient"][str(p)] for p in PATIENTS}
             rec = rec or r
             assert r == rec
 
 
-def test_unfitted_ambient_needs_a_stated_range():
+def test_unfitted_ambient_needs_the_registered_range_in_the_fits():
     f = _fits(ambient=False)
-    with pytest.raises(ValueError, match="ambient_range"):
+    with pytest.raises(RuntimeError, match="registered range"):
         BL.level_settings(f, PATIENTS, "balanced", "fitted")
-    s = BL.level_settings(f, PATIENTS, "balanced", "fitted", ambient_range=(0.02, 0.08))
-    assert all(0.02 <= kw["ambient_frac"] <= 0.08 for kw in s["batches"])
+    s = BL.level_settings(_with_range(f), PATIENTS, "balanced", "fitted")
+    assert all(0.03 / 0.97 <= kw["ambient_frac"] <= 0.11 / 0.89 for kw in s["batches"])
+    assert all(src.startswith("drawn") for src in s["batch_ambient_source"])
+    # one draw per batch, the same at every level that varies the ambient fraction
+    arm = BL.level_settings(_with_range(f), PATIENTS, "balanced", "ambient")
+    assert [kw["ambient_frac"] for kw in arm["batches"]] == [kw["ambient_frac"] for kw in s["batches"]]
+    assert len({kw["ambient_frac"] for kw in s["batches"]}) == len(s["batches"])
+    # with nothing fitted, the shared level sits at the middle of the range
+    sh = BL.level_settings(_with_range(f), PATIENTS, "balanced", "shared")
+    assert sh["batches"][0]["ambient_frac"] == pytest.approx(0.07 / 0.93)
+
+
+def test_partly_fitted_ambient_mixes_fits_and_draws():
+    f = _fits()
+    f["wu"]["vectors"]["T1"]["ambient_frac"] = None
+    f["wu"]["ambient"]["needs_range"] = ["T1"]
+    with pytest.raises(RuntimeError):
+        BL.level_settings(f, PATIENTS, "balanced", "fitted", n_balanced_batches=30)
+    s = BL.level_settings(_with_range(f), PATIENTS, "balanced", "fitted", n_balanced_batches=30)
+    for kw, t, src in zip(s["batches"], s["batch_tumours"], s["batch_ambient_source"]):
+        if t == "T1":
+            assert src.startswith("drawn")
+        else:
+            assert src == "fitted" and kw["ambient_frac"] == pytest.approx(f["wu"]["vectors"][t]["ambient_frac"])
+    # the median is over the fitted values only
+    fitted = [v["ambient_frac"] for t, v in f["wu"]["vectors"].items() if t != "T1"]
+    assert s["median_vector"]["ambient_frac"] == pytest.approx(np.median(fitted))
 
 
 def test_too_many_patients_for_the_recovery_draws():

@@ -1,67 +1,73 @@
 """Fig 5's batch panel: ``iscc``'s batch effects against a real technical-replicate contrast and
 against Splatter's batch model.
 
-Registered in exp-paper1-fig5-cohort, "Amendment, 2026-11-16 night", section "The new panel"; the
-model is decision-scrna-batches-from-technical-sources. Every fit it uses was made beforehand by
-``batch_fits.py`` and is read from fits.json (its SHA-256 is recorded); nothing here is fitted to a
-statistic except Splatter's two tuned parameters, as registered.
+Registered in exp-paper1-fig5-cohort, "Amendment, 2026-11-16 night", section "The new panel", with
+its "Clarifications before any run (2026-11-17)"; the model is
+decision-scrna-batches-from-technical-sources. Every fit it uses, the cell types included, was made
+beforehand by ``batch_fits.py`` and is read from fits.json (its SHA-256 is recorded); nothing here is
+fitted to a statistic except Splatter's two tuned parameters, as registered. It refuses to run while a
+run's ambient fraction needs the registered range and fits.json does not carry it.
 
     PYTHONPATH=src python validation/paper/batch_validation.py run --fits $D/batchval/fits.json \\
         --ding-dir $D/realdata/GSE132044 --pbmcsca-meta $D/realdata/pbmcsca/pbmcsca_meta.tsv.gz \\
         --out $D/batchval/validation.json --work $SNIC_TMP/bv --tools-dir $R/tools
     PYTHONPATH=src python validation/paper/batch_validation.py figure --validation $D/batchval/validation.json
 
-**The contrast.** Ding et al. 2020's PBMC1 in two 10x Chromium v2 runs, A and B: the same blood
-sample, so their differences are technical. Cell types are the authors' (``batch_fits.load_ding``);
-"Unassigned" cells are left out. Three versions of the A-B contrast:
+**The contrast.** Ding et al. 2020's PBMC1 in two 10x Chromium v2 runs, A and B, every cell: the same
+blood sample, so their differences are technical. Cell types as fits.json gives them (the authors'
+labels, transferred to the cells they left unlabelled; ``batch_fits.transfer_labels``). Three
+versions of the A-B contrast:
 
 * **real**;
 * **iscc**: the biology is the pooled real cells' mean profile per cell type (each type's mean of
   count / library over runs A and B); each simulated batch holds A's or B's cells, type by type, in
-  their real numbers; each batch's technical parameters are the run's own fit in fits.json
-  (``estimate_rna`` within types, the run's doublet rate and ambient fraction), ``sigma_batch`` 0.10
-  and ``depth_batch_sigma`` 0 (``mu_lib`` is the batch's own, so depth is not counted twice); count
-  model NB, protocol 10x. Not tuned to the real effect.
-* **Splatter** (Zappia et al. 2017, Splatter 1.34.0 in the datasim-r image): ``splatEstimate`` on the
-  pooled real counts; groups in the real types' proportions; ``de.facLoc`` tuned (de.prob,
-  de.downProb, de.facScale at Splatter's defaults) so that the cell-type silhouette matches the real
-  one, without a batch effect; then two batches of the real runs' sizes with ``batch.facLoc`` 0 and
-  ``batch.facScale`` tuned so that S0 matches the real one. Tuning is a grid, a finer grid inside the
-  bracketing interval, and linear interpolation, at a tuning seed (:data:`TUNE_SEED`) outside the
-  five evaluation seeds.
+  their real numbers; each batch's technical parameters are the run's own vector in fits.json (the
+  fits within types, combined as registered; the run's doublet rate; its ambient fraction, or, where
+  not identifiable, one drawn per seed from the registered range), ``sigma_batch`` 0.10 and
+  ``depth_batch_sigma`` 0 (``mu_lib`` is the batch's own, so depth is not counted twice); count model
+  NB, protocol 10x. Not tuned to the real effect.
+* **Splatter** (Zappia, Phipson & Oshlack 2017, Genome Biol 18:174, doi:10.1186/s13059-017-1305-0;
+  Splatter 1.34.0 in the datasim-r image): ``splatEstimate`` on the pooled real counts; groups in the
+  real types' proportions; ``de.facLoc`` tuned (de.prob, de.downProb, de.facScale at Splatter's
+  defaults) so that the cell-type silhouette matches the real one, without a batch effect; then two
+  batches of the real runs' sizes with ``batch.facLoc`` 0 and ``batch.facScale`` tuned so that S0
+  matches the real one. Tuning is a grid, a finer grid inside the bracketing interval, and linear
+  interpolation, at a tuning seed (:data:`TUNE_SEED`) outside the five evaluation seeds.
 
 iscc and Splatter are each run at five seeds (:data:`SEEDS`).
 
-**The statistics** (registered), per cell type, on genes whose mean is at least 0.05 counts per cell
-in the type in each of A and B, counts normalised to the dataset's median library size, the fold
-change B over A:
+**The statistics** (registered), per cell type, counts normalised to the dataset's median library
+size, the fold change B over A, on the genes whose mean normalised count over the type's cells of
+both batches, pooled, is at least 0.05; the log2 fold change carries a pseudocount of
+:data:`PSEUDOCOUNT` normalised counts per cell on each batch's mean (a gene kept by the pooled
+filter can have a zero mean in one batch):
 
 * S0, size: the standard deviation over genes of log2 FC; the median over types.
-* S1, dependence on expression level: Spearman correlation of the signed log2 FC with the log mean
-  (of the two runs' means); the ratio of the log2 FC's standard deviation in the lowest to the highest
-  tercile of mean expression; each the median over types.
+* S1, dependence on expression level: Spearman correlation of the signed log2 FC with the log of the
+  pooled mean; the ratio of the log2 FC's standard deviation in the lowest to the highest tercile of
+  the pooled mean; each the median over types.
 * S2, detection against mean: the OLS slope of the change in detection rate (share of cells with a
-  count, B minus A) on the change in log2 mean, within each tercile of mean expression; the median
-  over types, per tercile.
+  count, B minus A) on the log2 FC, within each tercile of the pooled mean; the median over types, per
+  tercile.
 * S3, differences between types: the median over pairs of types of the Pearson correlation of their
   per-gene log2 FCs (genes kept in both).
-* S4, embedding: 50 principal components of the log-normalised pooled counts (integrate.py's
-  ``lognorm_pca``, as Fig 5): the silhouette by batch and by cell type (sklearn, Euclidean), and
-  iLISI over the batch and cLISI over the type (k = 30, scib's normalisation; integrate.py's
-  ``lisi_scaled`` in the integration image, as Fig 5).
+* S4, embedding: 50 principal components of the pooled counts normalised to the median library size
+  and log-transformed (``batch_fits.lognorm_pca``): the silhouette by batch and by cell type (sklearn,
+  Euclidean), and iLISI over the batch and cLISI over the type (k = 30, scib's normalisation;
+  integrate.py's ``lisi_scaled`` in the integration image, as Fig 5).
 
 Fixed here before any statistic (operational details the registration leaves open): cell types
-enter the statistics when they have at least :data:`MIN_TYPE_CELLS` cells in each real run;
-the comparison uses the genes with at least one count in the pooled real cells.
+enter the statistics when they have at least :data:`MIN_TYPE_CELLS` cells in each real run; the
+comparison uses the genes with at least one count in the pooled real cells.
 
 **Scoring (registered).** Per statistic, iscc reproduces it when the median over its seeds is closer
-to the real value than Splatter's median. Statistics with several summaries (S1: 2, S2: 3) are scored
-per summary, and the statistic counts as reproduced when every summary is. S0 of iscc is reported
-against the real one; if they differ by more than a factor of 1.5 a Splatter version matched to
-iscc's S0 is added and the scoring is also reported against it. S4 has no expectation.
+to the real value than Splatter's median; a statistic with several summaries (S1: 2, S2: 3) counts
+as reproduced only when iscc is closer on every one. S0 of iscc is reported against the real one;
+when they differ by more than a factor of 1.5 the primary comparison is with a Splatter version
+matched to iscc's S0, and the version matched to the real S0 is reported beside it; if that version
+cannot be tuned, the run stops. S4 has no expectation.
 """
 import argparse
-import hashlib
 import json
 import os
 import platform
@@ -81,11 +87,13 @@ import pandas as pd  # noqa: E402
 import scipy.sparse as sp  # noqa: E402
 
 MIN_MEAN = 0.05
+PSEUDOCOUNT = 0.005                # normalised counts per cell, on each batch's mean in the log2 FC
 MIN_TYPE_CELLS = 20
 K = 30
 N_PCS = 50
 SEEDS = (1, 2, 3, 4, 5)
 TUNE_SEED = 101
+AMBIENT_SEED = 7_300               # with the iscc seed and the run: the per-seed ambient draw
 SIGMA_BATCH = 0.10
 SIZE_FACTOR = 1.5
 DE_GRID = (0.02, 0.05, 0.1, 0.2, 0.3, 0.45, 0.6, 0.8, 1.0, 1.3, 1.7, 2.2, 3.0)
@@ -116,12 +124,12 @@ def contrast_stats(X, batch, ctype, types, curves=True):
             continue
         mA = np.asarray(norm[a].mean(0)).ravel()
         mB = np.asarray(norm[b].mean(0)).ravel()
+        pooled = (mA * len(a) + mB * len(b)) / (len(a) + len(b))
         dA = np.asarray(det[a].mean(0)).ravel()
         dB = np.asarray(det[b].mean(0)).ravel()
-        keep = (mA >= MIN_MEAN) & (mB >= MIN_MEAN)
-        g = np.flatnonzero(keep)
-        fc = np.log2(mB[g] / mA[g])
-        lm = np.log(0.5 * (mA[g] + mB[g]))
+        g = np.flatnonzero(pooled >= MIN_MEAN)
+        fc = np.log2((mB[g] + PSEUDOCOUNT) / (mA[g] + PSEUDOCOUNT))
+        lm = np.log(pooled[g])
         dd = (dB - dA)[g]
         q1, q2 = np.quantile(lm, [1 / 3, 2 / 3])
         terc = [lm <= q1, (lm > q1) & (lm <= q2), lm > q2]
@@ -129,8 +137,9 @@ def contrast_stats(X, batch, ctype, types, curves=True):
         for m in terc:
             x, y = fc[m], dd[m]
             slopes.append(float(np.polyfit(x, y, 1)[0]) if m.sum() >= 3 and np.ptp(x) > 0 else float("nan"))
-        rec = dict(n_A=int(len(a)), n_B=int(len(b)), n_genes=int(len(g)), S0=float(np.std(fc, ddof=1)),
-                   S1_spearman=float(spearmanr(fc, lm).correlation),
+        rec = dict(n_A=int(len(a)), n_B=int(len(b)), n_genes=int(len(g)),
+                   n_genes_zero_in_a_batch=int(((mA[g] == 0) | (mB[g] == 0)).sum()),
+                   S0=float(np.std(fc, ddof=1)), S1_spearman=float(spearmanr(fc, lm).correlation),
                    S1_spread_ratio=float(np.std(fc[terc[0]], ddof=1) / np.std(fc[terc[2]], ddof=1)),
                    S2_slope_low=slopes[0], S2_slope_mid=slopes[1], S2_slope_high=slopes[2],
                    mean_fc=float(fc.mean()))
@@ -157,12 +166,9 @@ def contrast_stats(X, batch, ctype, types, curves=True):
 
 
 def embedding(X, seed=0):
-    """50 PCs of the log-normalised counts (integrate.py's ``lognorm_pca``, as Fig 5)."""
-    import anndata as ad
-    from integrate import lognorm_pca
-    a = ad.AnnData(X=sp.csr_matrix(X, dtype=np.float32))
-    pca, n = lognorm_pca(a, N_PCS, seed)
-    return pca
+    """S4's 50 PCs: counts normalised to the median library size, log1p (``batch_fits.lognorm_pca``)."""
+    import batch_fits as BF
+    return BF.lognorm_pca(X, N_PCS, seed)[0]
 
 
 def silhouettes(pca, batch, ctype):
@@ -172,11 +178,15 @@ def silhouettes(pca, batch, ctype):
 
 
 # ------------------------------------------------------------------ the versions
-def real_data(ding_dir, labels):
+def real_data(ding_dir, labels, fits):
+    """Every cell of runs A and B, typed as fits.json types them."""
     import batch_fits as BF
     X, genes, obs = BF.load_ding(ding_dir, labels)
-    keep = obs["cell_type"].notna().to_numpy() & (obs["cell_type"] != BF.UNASSIGNED).to_numpy()
-    X, obs = X[np.flatnonzero(keep)], obs[keep]
+    lab = fits["ding"]["labels"]["cell_type"]
+    missing = [c for c in obs.index if c not in lab]
+    if missing:
+        raise RuntimeError(f"{len(missing)} cells have no type in fits.json, e.g. {missing[:3]}")
+    obs["cell_type"] = [lab[c] for c in obs.index]
     gk = np.flatnonzero(np.asarray(X.sum(0)).ravel() > 0)
     X = X[:, gk].tocsr()
     X.data = X.data.astype(np.int64)
@@ -208,9 +218,15 @@ def synthetic_data(seed=0, n_genes=1500, n_a=900, n_b=600):
 
 
 def synthetic_fits():
-    run = lambda mu: dict(combined=dict(mu_lib=mu, sigma_lib=0.4, dispersion=0.2, dropout_mid=0.0, dropout_shape=1.0),
-                          doublet_rate=0.03, ambient_frac=0.03, ambient_source="synthetic")
-    return dict(created="synthetic", ding=dict(runs=dict(A=run(2500.0), B=run(1800.0))))
+    """Fits for the synthetic smoke: run B's ambient is not identifiable, so the per-seed draw from a
+    (synthetic) range is exercised too."""
+    def run(mu, amb):
+        return dict(combined=dict(mu_lib=mu, sigma_lib=0.4, dispersion=0.2, dropout_mid=0.0, dropout_shape=1.0,
+                                  ambient_frac=amb, ambient_source="synthetic"), doublet_rate=0.03)
+    return dict(created="synthetic", ding=dict(runs=dict(A=run(2500.0, 0.03), B=run(1800.0, None)),
+                                               needs_range=["B"]),
+                ambient_range=dict(rho_low=0.02, rho_high=0.08, ambient_frac_low=0.02 / 0.98,
+                                   ambient_frac_high=0.08 / 0.92, source="synthetic"))
 
 
 def type_set(obs):
@@ -219,20 +235,26 @@ def type_set(obs):
     return sorted(ok.index.astype(str)), {t: {r: int(v) for r, v in row.items()} for t, row in n.iterrows()}
 
 
-def iscc_settings(fits, run):
-    """The run's technical parameters for the iscc version, from fits.json (no tuning)."""
+def iscc_settings(fits, run, seed):
+    """The run's technical parameters for the iscc version at one seed, from fits.json (no tuning):
+    its combined vector, and an ambient fraction drawn from the registered range at this seed when
+    the run's own is not identifiable."""
+    import batch_fits as BF
     rr = fits["ding"]["runs"][run]
     c = rr["combined"]
     kw = dict(mu_lib=c["mu_lib"], sigma_lib=c["sigma_lib"], dispersion=c["dispersion"],
               dropout_mid=c["dropout_mid"], dropout_shape=c["dropout_shape"],
               doublet_rate=rr["doublet_rate"], sigma_batch=SIGMA_BATCH, depth_batch_sigma=0.0)
-    src = dict(ambient_frac=rr.get("ambient_source"))
-    if rr.get("ambient_frac") is not None:
-        kw["ambient_frac"] = rr["ambient_frac"]
-    else:   # estimate_rna's own rule for what counts cannot identify: carried from the 10x preset
-        from iscc.data.rna import PROTOCOL_PRESETS
-        kw["ambient_frac"] = float(PROTOCOL_PRESETS["10x"]["ambient_frac"])
-        src["ambient_frac"] = "carried from the 10x preset (not identifiable)"
+    if c.get("ambient_frac") is not None:
+        kw["ambient_frac"] = c["ambient_frac"]
+        src = dict(ambient_frac="fitted", ambient_detail=c.get("ambient_source"))
+    else:
+        rng_range = BF.require_ambient_range(fits)
+        if not rng_range:
+            raise RuntimeError(f"run {run} has no ambient fraction and fits.json no range")
+        a, rho = BF.draw_ambient(rng_range, np.random.default_rng([AMBIENT_SEED, int(seed), "AB".index(run)]))
+        kw["ambient_frac"] = a
+        src = dict(ambient_frac="drawn from the registered range at this seed", rho=rho, range=rng_range)
     return {k: float(v) for k, v in kw.items()}, src
 
 
@@ -249,7 +271,7 @@ def iscc_version(X, obs, fits, seed):
         sel = np.flatnonzero(obs["run"].to_numpy() == r)
         names = [f"{r}{i}" for i in range(len(sel))]
         exp = pd.DataFrame(np.vstack([profiles[t] for t in ctype[sel]]), index=names, columns=cols)
-        kw, src = iscc_settings(fits, r)
+        kw, src = iscc_settings(fits, r, seed)
         a = scRNA(protocol="10x", n_cells=len(sel), batch_label=r, seed=1000 * seed + off, **kw)
         a.run({"cell_exp": exp}, cell_subset=names)
         parts.append(sp.csr_matrix(a.observed_counts.loc[names].to_numpy()))
@@ -347,7 +369,8 @@ def _interp(xs, ys, target):
 
 
 def tune(splat, name, grid, target, stat, fixed):
-    """Grid, a finer grid inside the bracket, linear interpolation; returns (value, trace)."""
+    """Grid, a finer grid inside the bracket, linear interpolation; returns (value, trace). Raises when
+    the target is outside what the grid reaches: the registered comparison needs the tuned version."""
     trace = []
 
     def evaluate(values, tag):
@@ -362,7 +385,8 @@ def tune(splat, name, grid, target, stat, fixed):
     pts = sorted(trace, key=lambda d: d["value"])
     x, br = _interp([d["value"] for d in pts], [d["stat"] for d in pts], target)
     if x is None:
-        return None, dict(target=target, trace=trace, matched=False)
+        raise RuntimeError(f"Splatter cannot be tuned: {name} on {list(grid)} gives "
+                           f"{[round(d['stat'], 4) for d in pts]}, never {target:.4f}")
     fine = np.linspace(br[0], br[1], N_REFINE + 2)[1:-1]
     evaluate(fine, f"{name}_f")
     pts = sorted(trace, key=lambda d: d["value"])
@@ -372,35 +396,43 @@ def tune(splat, name, grid, target, stat, fixed):
 
 # ------------------------------------------------------------------ run
 def run(a):
+    import batch_fits as BF
     t0 = time.time()
     if os.path.exists(a.out):
         sys.exit(f"{a.out} exists; remove it deliberately to rerun")
     if a.synthetic:
         fits, fits_sha = synthetic_fits(), None
     else:
-        with open(a.fits, "rb") as f:
-            fits_sha = hashlib.sha256(f.read()).hexdigest()
+        fits_sha = BF.file_sha256(a.fits)
         with open(a.fits) as f:
             fits = json.load(f)
+    BF.require_ambient_range(fits)                   # the order is hard: the range before any statistic
     os.makedirs(a.work, exist_ok=True)
     work = a.work
-    res = dict(registered="exp-paper1-fig5-cohort, Amendment 2026-11-16 night (the new panel)",
-               fits=dict(path=os.path.abspath(a.fits), sha256=fits_sha, created=fits.get("created")),
-               settings=dict(min_mean=MIN_MEAN, min_type_cells=MIN_TYPE_CELLS, k=K, n_pcs=N_PCS, seeds=SEEDS,
-                             tune_seed=TUNE_SEED, sigma_batch=SIGMA_BATCH, size_factor=SIZE_FACTOR,
-                             de_grid=DE_GRID, batch_grid=BATCH_GRID, n_refine=N_REFINE,
-                             summaries=SUMMARIES),
+    res = dict(registered="exp-paper1-fig5-cohort, Amendment 2026-11-16 night (the new panel), with the "
+                          "Clarifications before any run (2026-11-17)",
+               fits=dict(path=None if a.synthetic else os.path.abspath(a.fits), sha256=fits_sha,
+                         created=fits.get("created"), ambient_range=fits.get("ambient_range")),
+               settings=dict(min_mean=MIN_MEAN, gene_filter="pooled mean over both batches within the type",
+                             pseudocount=PSEUDOCOUNT, pseudocount_units="normalised counts per cell, added to "
+                             "each batch's mean in log2((mB + c) / (mA + c))", normalisation="median library size",
+                             min_type_cells=MIN_TYPE_CELLS, k=K, n_pcs=N_PCS, seeds=SEEDS, tune_seed=TUNE_SEED,
+                             ambient_seed=AMBIENT_SEED, sigma_batch=SIGMA_BATCH, size_factor=SIZE_FACTOR,
+                             de_grid=DE_GRID, batch_grid=BATCH_GRID, n_refine=N_REFINE, summaries=SUMMARIES),
                host=platform.node(), commit=_commit(), versions={})
     import iscc
     res["versions"].update(python=platform.python_version(), numpy=np.__version__, pandas=pd.__version__,
                            iscc=getattr(iscc, "__version__", None))
     try:
-        X, genes, obs = synthetic_data() if a.synthetic else real_data(a.ding_dir, a.pbmcsca_meta)
+        if a.synthetic:
+            X, genes, obs = synthetic_data()
+        else:
+            X, genes, obs = real_data(a.ding_dir, a.pbmcsca_meta, fits)
         res["synthetic"] = bool(a.synthetic)
         types, counts = type_set(obs)
         res["data"] = dict(n_cells={r: int((obs["run"] == r).sum()) for r in ("A", "B")}, n_genes=int(X.shape[1]),
                            cells_by_type_and_run=counts, types_scored=types)
-        print(f"[bv] real: {X.shape[0]} cells x {X.shape[1]} genes; types scored {types}", flush=True)
+        print(f"[bv] data: {X.shape[0]} cells x {X.shape[1]} genes; types scored {types}", flush=True)
         versions, embeds = {}, {}
 
         def record(name, Xv, batch, ctype, extra=None):
@@ -440,35 +472,32 @@ def run(a):
         def s0(Xv, batch, ct):
             return contrast_stats(Xv, batch, ct, types, curves=False)["summary"]["S0"]
 
+        res["splatter"] = dict(estimate=est, group_prob=dict(zip(all_types, prob)), batch_cells=[nA, nB])
         de, de_trace = tune(splat, "de_facLoc", DE_GRID, real["S4"]["silhouette_celltype"], sil_type,
                             dict(batch_facScale=0.0))
-        res["splatter"] = dict(estimate=est, group_prob=dict(zip(all_types, prob)), batch_cells=[nA, nB],
-                               de_tuning=de_trace, de_facLoc=de)
-        if de is None:
-            raise RuntimeError("Splatter's cell-type silhouette cannot reach the real one on the DE grid")
+        res["splatter"].update(de_tuning=de_trace, de_facLoc=de)
         bf, bf_trace = tune(splat, "batch_facScale", BATCH_GRID, real["summary"]["S0"], s0, dict(de_facLoc=de))
         res["splatter"].update(batch_tuning=bf_trace, batch_facScale=bf)
-        if bf is None:
-            raise RuntimeError("Splatter's S0 cannot reach the real one on the batch grid")
         out = splat.simulate([dict(name=f"splatter_s{s}", seed=s, de_facLoc=de, batch_facScale=bf) for s in SEEDS], "eval")
         for name, (Xs, bs, ts) in out.items():
-            record(name, Xs, bs, ts, dict(splatter=dict(de_facLoc=de, batch_facScale=bf)))
+            record(name, Xs, bs, ts, dict(splatter=dict(de_facLoc=de, batch_facScale=bf, matched_to="real S0")))
         del out
 
         iscc_s0 = float(np.median([versions[f"iscc_s{s}"]["summary"]["S0"] for s in SEEDS]))
         ratio = iscc_s0 / real["summary"]["S0"]
-        res["S0"] = dict(real=real["summary"]["S0"], iscc_median=iscc_s0, ratio=ratio,
-                         differs_by_more_than_factor=bool(max(ratio, 1 / ratio) > SIZE_FACTOR),
+        differs = bool(max(ratio, 1 / ratio) > SIZE_FACTOR)
+        res["S0"] = dict(real=real["summary"]["S0"], iscc_median=iscc_s0, ratio=ratio, differs_by_more_than_factor=differs,
                          splatter_median=float(np.median([versions[f"splatter_s{s}"]["summary"]["S0"] for s in SEEDS])))
-        if res["S0"]["differs_by_more_than_factor"]:
+        if differs:
             bf2, bf2_trace = tune(splat, "batch_facScale", BATCH_GRID, iscc_s0, s0, dict(de_facLoc=de))
             res["splatter"].update(batch_tuning_iscc_size=bf2_trace, batch_facScale_iscc_size=bf2)
-            if bf2 is not None:
-                out = splat.simulate([dict(name=f"splatteriscc_s{s}", seed=s, de_facLoc=de, batch_facScale=bf2)
-                                      for s in SEEDS], "evaliscc")
-                for name, (Xs, bs, ts) in out.items():
-                    record(name, Xs, bs, ts, dict(splatter=dict(de_facLoc=de, batch_facScale=bf2)))
-                del out
+            out = splat.simulate([dict(name=f"splatteriscc_s{s}", seed=s, de_facLoc=de, batch_facScale=bf2)
+                                  for s in SEEDS], "evaliscc")
+            for name, (Xs, bs, ts) in out.items():
+                record(name, Xs, bs, ts, dict(splatter=dict(de_facLoc=de, batch_facScale=bf2, matched_to="iscc S0")))
+            del out
+            res["S0"]["splatter_iscc_size_median"] = float(np.median(
+                [versions[f"splatteriscc_s{s}"]["summary"]["S0"] for s in SEEDS]))
         res["splatter"]["runner_log"] = splat.log
 
         # S4's LISI in the integration image (scib-metrics, as Fig 5)
@@ -476,7 +505,7 @@ def run(a):
         for name, v in lisi.items():
             versions[name]["S4"].update(v)
         res["versions_stats"] = versions
-        res["score"] = score(versions, res["S0"]["differs_by_more_than_factor"])
+        res["score"] = score(versions, differs)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     res["wall_s"] = round(time.time() - t0, 1)
@@ -528,14 +557,21 @@ def lisi_cmd(listing, out):
 
 
 def score(versions, size_differs):
-    """The registered criterion, per summary and per statistic."""
+    """The registered criterion, per summary and per statistic. The primary comparison is with the
+    Splatter version matched to the real S0, or, when iscc's S0 differs from it by more than a factor
+    of 1.5, with the version matched to iscc's S0; the other is reported beside it."""
     def med(prefix, key):
         vals = [versions[f"{prefix}_s{s}"]["summary"][key] for s in SEEDS if f"{prefix}_s{s}" in versions]
         return float(np.median(vals)) if vals else None
 
-    out = {}
-    against = ["splatter"] + (["splatteriscc"] if size_differs and "splatteriscc_s1" in versions else [])
-    for ref in against:
+    if size_differs and "splatteriscc_s1" not in versions:
+        raise RuntimeError("iscc's S0 differs from the real one by more than 1.5x and there is no Splatter "
+                           "version matched to iscc's size: the registered comparison cannot be scored")
+    primary = "splatteriscc" if size_differs else "splatter"
+    out = dict(primary=f"against_{primary}",
+               primary_reason=("iscc's S0 differs from the real one by more than a factor of 1.5: Splatter "
+                               "matched to iscc's size" if size_differs else "Splatter matched to the real S0"))
+    for ref in (["splatteriscc", "splatter"] if size_differs else ["splatter"]):
         per = {}
         for stat, keys in SUMMARIES.items():
             comp = {}
@@ -569,6 +605,11 @@ def _commit():
         return None
 
 
+def _check_run_args(a):
+    if not a.synthetic and not (a.fits and a.ding_dir and a.pbmcsca_meta):
+        sys.exit("run needs --fits, --ding-dir and --pbmcsca-meta (or --synthetic)")
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -595,11 +636,6 @@ def main(argv=None):
     else:
         import batch_figure
         batch_figure.main(a.validation)
-
-
-def _check_run_args(a):
-    if not a.synthetic and not (a.fits and a.ding_dir and a.pbmcsca_meta):
-        sys.exit("run needs --fits, --ding-dir and --pbmcsca-meta (or --synthetic)")
 
 
 if __name__ == "__main__":
