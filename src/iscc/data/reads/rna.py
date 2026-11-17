@@ -379,8 +379,51 @@ def emit_scrna_reads(cell_data, obs_fidelity=0.5, protocol="10x", error_rate=0.0
     SyntheticReference). Supplying a real `reference` + `template_bam` selects the scReadSim seam
     instead (realism on real sequence), skipped gracefully when the binary is absent.
 
-    Returns a dict: ``alt``/``ref``/``total``/``obs_vaf`` (cells x genes), ``dna_vaf`` (true,
-    aligned), ``obs_fidelity``, ``status``, ``fastq`` (paths when emitted) and ``n_reads``.
+    Parameters
+    ----------
+    cell_data : dict
+        Materialised per-cell tables of a tumour or a sample; must hold ``cell_rna_vaf``.
+    obs_fidelity : float, optional
+        Probability that a mutant transcript is reported as mutant (default 0.5), so the observed
+        RNA-VAF is ``cell_rna_vaf * obs_fidelity``. One scalar for monoallelic expression,
+        bursting, RNA editing and reverse-transcription error.
+    protocol : {"10x", "smartseq3"}, optional
+        The scRNA protocol of the assay (default ``"10x"``), which also sets the read window when
+        ``site_coverage_model`` is on.
+    error_rate : float, optional
+        Per-base error rate of the reads (default 0.001).
+    seed : int, optional
+        Seed of the assay and of the allele split (default 42).
+    cell_subset : sequence, optional
+        Cells to assay (default all).
+    emit_fastq : bool, optional
+        Write paired FASTQ on a synthetic transcriptome (default False, counts only).
+    read_length : int, optional
+        Length of the cDNA read of the synthetic transcriptome (default 90).
+    transcriptome : SyntheticTranscriptome, optional
+        A synthetic transcriptome to reuse (default None, built from the genes and ``seed``).
+    reference, template_bam : str, optional
+        A real reference and a template BAM, which select the scReadSim path instead of the
+        synthetic transcriptome. It is skipped when the ``scReadSim`` binary is absent.
+    outdir : str, optional
+        Output directory (default ``"scrna_reads_out"``).
+    genome_seed : int, optional
+        Seed of the transcript lengths and variant-site positions, shared by every run and modality
+        (default 20240601).
+    site_coverage_model : bool, optional
+        Read a variant site only where the protocol reaches it (default False). A 3' protocol
+        (10x) reads a site only within the last 1,000 bases of its transcript and a full-length
+        protocol (Smart-seq3) anywhere, and a molecule within reach is read at the site with
+        probability 0.1, as in the paper. When False, every molecule is read at the site.
+    **scrna_kwargs
+        Passed to [`scRNA`][iscc.data.scRNA].
+
+    Returns
+    -------
+    dict
+        ``alt``/``ref``/``total``/``obs_vaf`` (cells x genes), ``dna_vaf`` (true, aligned),
+        ``obs_fidelity``, ``protocol``, ``site_cover``, ``status``, ``fastq`` (paths when emitted)
+        and ``n_reads``.
     """
     from ..rna import scRNA
 
