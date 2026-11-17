@@ -310,7 +310,7 @@ def render_g(ax):
 
 def render_h(fig, x, y):
     d = _cached("h")
-    ax1, ax2 = S.ax_mm(fig, x, y, 21, 21), S.ax_mm(fig, x + 26, y, 9, 21)
+    ax1, ax2 = S.ax_mm(fig, x, y, 18, 21), S.ax_mm(fig, x + 26, y, 9, 21)
     if d is None:
         pending(ax1)
         pending(ax2, "")
