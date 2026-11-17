@@ -16,8 +16,8 @@ copy number, SNVs, programmes and niche. ``L`` loads iscc's named programmes on 
 sets, with the growth dictionary's loading distribution; programmes without a Hallmark counterpart
 load on random human genes. The cell's program activities ``z`` are the growth model's.
 
-Nothing here builds a cells × human-genes matrix: :meth:`HumanExpression.cell_expression` works on
-chunks of cells, and :meth:`HumanExpression.pool_spots` pools a Visium section per cell type on the
+Nothing here builds a cells × human-genes matrix: [`HumanExpression.cell_expression`][iscc.data.human.HumanExpression.cell_expression] works on
+chunks of cells, and [`HumanExpression.pool_spots`][iscc.data.human.HumanExpression.pool_spots] pools a Visium section per cell type on the
 growth genes and lifts the pools, computing only the programme genes cell by cell.
 
 With ``permute_programmes`` the ``z`` of the programme factor are shuffled among the cells of each type
@@ -38,9 +38,9 @@ TINY = 1e-30
 class HumanExpression:
     """The human-gene expression of a tumour's cells, for the assays' ``gene_lift``.
 
-    Pass it as ``gene_lift`` to :meth:`scRNA.run <iscc.data.scRNA.run>` (counts are drawn in chunks
-    of cells and kept sparse) or :meth:`Visium.run <iscc.data.Visium.run>` (spots are pooled per cell
-    type). Build it with :meth:`HumanGenomeLayer.expression`.
+    Pass it as ``gene_lift`` to [`scRNA.run`][iscc.data.scRNA.run] (counts are drawn in chunks
+    of cells and kept sparse) or [`Visium.run`][iscc.data.Visium.run] (spots are pooled per cell
+    type). Build it with [`HumanGenomeLayer.expression`][iscc.data.human.HumanGenomeLayer.expression].
 
     Parameters
     ----------
@@ -197,7 +197,7 @@ class HumanExpression:
 
         Cells are pooled per type on the growth genes, then lifted with their type's baseline; the
         programme genes are summed cell by cell. Also keeps the per-type pools of homolog-``p``
-        expression for :meth:`spot_hap_fraction`."""
+        expression for [`spot_hap_fraction`][iscc.data.human.HumanExpression.spot_hap_fraction]."""
         placed, members = grid["placed"], grid["members"]
         cells = np.asarray(placed["cell_exp"].index)
         n_spots = len(members)
@@ -238,7 +238,7 @@ class HumanExpression:
 
     def spot_hap_fraction(self, spot_rows, human_genes):
         """Fraction from homolog ``p`` of a spot's expression of a human gene, for entries
-        ``(spot_rows[i], human_genes[i])`` (after :meth:`pool_spots`)."""
+        ``(spot_rows[i], human_genes[i])`` (after [`pool_spots`][iscc.data.human.HumanExpression.pool_spots])."""
         if self._spot is None:
             raise ValueError("pool a Visium section first (Visium.run with gene_lift=this)")
         pos = np.full(self._spot["n_spots"], -1)

@@ -72,8 +72,11 @@ def morans_i(values, coords, lengthscale=None):
 class Visium(Assay):
     """Visium spatial assay: lays spots over the section, aggregates cells, applies a `VisiumBatch`.
 
-    Any hyper-parameter below can be overridden explicitly (``None`` keeps the default, which
-    is calibrated to a real 10x Visium section). Aliases are accepted: ``n_reads`` maps
+    Any hyper-parameter below can be overridden explicitly, and ``None`` keeps the default. The
+    defaults of the spot depth and the capture field (``mu_counts``, ``sigma_counts``,
+    ``field_lengthscale``, ``field_sigma``) were fitted to a 10x Visium breast-cancer section, and
+    the others are set by hand. Spot swapping (``bleed_rate``) is off by default, and ambient RNA
+    within each spot (``ambient_frac``, 0.05) is on. Aliases are accepted: ``n_reads`` maps
     onto ``mu_counts``, and a spot grid requested via ``n_spots_x`` / ``n_spots_y`` derives
     ``spot_pitch`` from ``grid_side`` at run time. The number of spots (and cells per spot)
     follows from ``grid_side`` (passed to ``run``) and the sampled ``cell_data``, so there is
@@ -136,10 +139,10 @@ class Visium(Assay):
     section_frac : float, optional
         Take a thin physical **section** of a count-based (deme) tumor before assaying: place
         each deme's cells within its unit cell and keep this fraction of each deme's 3-D column
-        (see :func:`iscc.sample.spatialize`). The tissue is then centred on the fixed slide and a
+        (see [`iscc.sample.spatialize`][iscc.sample.spatialize]). The tissue is then centred on the fixed slide and a
         morphology *image* is attached to the output. ``None`` (default) uses ``cell_crd`` as
         given (no placement) — appropriate when the coordinates are already at cell resolution.
-        This thins the same 3-D column as :meth:`iscc.sample.Resection.slice`'s ``depth_frac``, so
+        This thins the same 3-D column as [`iscc.sample.Resection.slice`][iscc.sample.Resection.slice]'s ``depth_frac``, so
         the two **compose multiplicatively** — keep one at ``1.0`` (the tutorials slice via
         ``Resection`` and pass ``section_frac=1.0`` here).
     placement : tuple of float, optional
@@ -269,7 +272,7 @@ class Visium(Assay):
     def _place_section(self, cell_data, spot_coords):
         """Place a thin section of a deme-based tumor onto the fixed spot array.
 
-        :func:`iscc.sample.spatialize` (seeded by ``self.seed``) gives sub-deme cell positions; the
+        [`iscc.sample.spatialize`][iscc.sample.spatialize] (seeded by ``self.seed``) gives sub-deme cell positions; the
         section is then rotated by ``self.rotation`` degrees about the placement point and that point
         is shifted onto the centre of ``spot_coords``. The placement point is the section centroid, or
         ``self.placement`` — so a section larger than the slide is imaged at a chosen location and
@@ -292,7 +295,7 @@ class Visium(Assay):
         """Place the fixed spot grid on a section WITHOUT assaying it, and store the placement.
 
         Lays the slide over the (placed, optionally rotated) section, records which spots cover tissue,
-        and renders the section's H&E over its whole extent. Afterwards :meth:`to_anndata` returns a
+        and renders the section's H&E over its whole extent. Afterwards [`to_anndata`][iscc.data.Visium.to_anndata] returns a
         standard 10x AnnData of the spot grid on the full H&E — with an ``in_tissue`` flag but ZERO
         expression — ready to plot with squidpy/scanpy to judge the placement before assaying::
 
@@ -300,12 +303,12 @@ class Visium(Assay):
             sq.pl.spatial_scatter(vz.to_anndata(), color="in_tissue", img=True)   # check the placement
             vz.run()                                                              # then assay it
 
-        :meth:`run` calls this itself if you did not, and reuses it if you did.
+        [`run`][iscc.data.Visium.run] calls this itself if you did not, and reuses it if you did.
 
         Parameters
         ----------
         cell_data : dict
-            The section to image (e.g. from :meth:`Resection.slice`).
+            The section to image (e.g. from [`Resection.slice`][iscc.sample.Resection.slice]).
         grid_side : int, optional
             Capture-area side; ``None`` (default) uses the fixed v1 slide.
         px : int, default 6
@@ -344,10 +347,10 @@ class Visium(Assay):
         """Render the placed tissue section as an H&E-like image, **without** running the assay.
 
         Preview the slide's tissue morphology before assaying it. This runs the *same*
-        :meth:`place_grid` step the assay uses (frame, placement, rotation and ``px`` all match), so
+        [`place_grid`][iscc.data.Visium.place_grid] step the assay uses (frame, placement, rotation and ``px`` all match), so
         the returned image is byte-identical to the ``img=True`` background of the AnnData that
-        :meth:`to_anndata` / :meth:`run` produce. It also leaves the grid placed, so a following
-        :meth:`run` (with no argument) reuses this exact placement. Requires ``section_frac`` to be
+        [`to_anndata`][iscc.data.Visium.to_anndata] / [`run`][iscc.data.Visium.run] produce. It also leaves the grid placed, so a following
+        [`run`][iscc.data.Visium.run] (with no argument) reuses this exact placement. Requires ``section_frac`` to be
         set (otherwise there is no placement to render).
 
         Parameters
@@ -357,12 +360,12 @@ class Visium(Assay):
         grid_side : int, optional
             Capture-area side; ``None`` (default) uses the fixed v1 slide (4,992 spots).
         px : int, default 6
-            Pixels per coordinate unit (must match :meth:`place_grid` to align with the assay).
+            Pixels per coordinate unit (must match [`place_grid`][iscc.data.Visium.place_grid] to align with the assay).
 
         Returns
         -------
         numpy.ndarray, shape (H, W, 3), float32
-            The H&E-like tissue-morphology image (see :func:`iscc.sample.tissue_image`).
+            The H&E-like tissue-morphology image (see [`iscc.sample.tissue_image`][iscc.sample.tissue_image]).
         """
         if self.section_frac is None:
             raise ValueError("section_image requires section_frac to be set on the Visium assay")
@@ -386,25 +389,25 @@ class Visium(Assay):
     def run(self, cell_data=None, grid_side=None, gene_lift=None):
         """Assay a 10x Visium spatial-transcriptomics section over the placed spot grid.
 
-        The slide is a **fixed** capture grid laid over the section (see :meth:`place_grid`): it pools
+        The slide is a **fixed** capture grid laid over the section (see [`place_grid`][iscc.data.Visium.place_grid]): it pools
         each spot's cells, applies lateral mRNA diffusion and a smooth spatial capture field, and draws
-        per-spot UMI counts. If you called :meth:`place_grid` first, ``run`` reuses that placement;
+        per-spot UMI counts. If you called [`place_grid`][iscc.data.Visium.place_grid] first, ``run`` reuses that placement;
         otherwise pass the section here and ``run`` places it itself (per ``placement`` / ``rotation``).
-        A morphology tissue image is attached to :meth:`to_anndata` for ``img=True`` overlays.
+        A morphology tissue image is attached to [`to_anndata`][iscc.data.Visium.to_anndata] for ``img=True`` overlays.
 
         Parameters
         ----------
         cell_data : dict, optional
-            The section to assay; omit only if :meth:`place_grid` was already called. Passing it
+            The section to assay; omit only if [`place_grid`][iscc.data.Visium.place_grid] was already called. Passing it
             (re-)places the grid.
         grid_side : int, optional
             Capture-area side; ``None`` (default) uses the fixed 10x v1 slide (4,992 spots).
         gene_lift : GeneLift or HumanExpression, optional
             Count human genes instead of the growth genes, before diffusion and counting. A
-            ``GeneLift`` (:attr:`HumanGenomeLayer.lift <iscc.data.human.HumanGenomeLayer>`) lifts each
+            ``GeneLift`` ([`HumanGenomeLayer.lift`][iscc.data.human.HumanGenomeLayer]) lifts each
             spot's pooled expression; it is linear, so pooling first keeps the cost at the growth
             genes' size. A ``HumanExpression``
-            (:meth:`HumanGenomeLayer.expression <iscc.data.human.HumanGenomeLayer.expression>`) pools
+            ([`HumanGenomeLayer.expression`][iscc.data.human.HumanGenomeLayer.expression]) pools
             each spot's cells per cell type and lifts each pool with that type's atlas baseline, with
             the programme genes summed cell by cell. Default None counts the growth genes.
 
@@ -412,7 +415,7 @@ class Visium(Assay):
         -------
         Visium
             ``self``, with the spot-by-gene UMI matrix in ``spot_counts`` etc. Export with
-            :meth:`to_anndata` / ``write``.
+            [`to_anndata`][iscc.data.Visium.to_anndata] / ``write``.
         """
         if cell_data is not None or self._grid is None:
             if cell_data is None:
@@ -507,8 +510,8 @@ class Visium(Assay):
 
     # -- outputs -----------------------------------------------------------------------
     def to_anndata(self):
-        """Standard 10x AnnData of the spot grid. Works after :meth:`place_grid` (the placed grid on
-        the H&E, ``X`` all zero — just the placement) or after :meth:`run` (with UMI counts)."""
+        """Standard 10x AnnData of the spot grid. Works after [`place_grid`][iscc.data.Visium.place_grid] (the placed grid on
+        the H&E, ``X`` all zero — just the placement) or after [`run`][iscc.data.Visium.run] (with UMI counts)."""
         import anndata as ad
         if self._grid is None:
             raise ValueError("call place_grid(section) or run(section) before to_anndata()")

@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # Splatter's version of the Ding et al. A-B contrast, for batch_validation.py (Fig 5's batch panel,
-# registered in exp-paper1-fig5-cohort, "Amendment, 2026-11-16 night"). Runs in the datasim-r image
+# registered before any run). Runs in the datasim-r image
 # (Splatter 1.34.0; Zappia, Phipson & Oshlack 2017, Genome Biol 18:174, doi:10.1186/s13059-017-1305-0),
 # never in envs/iscc.
 #

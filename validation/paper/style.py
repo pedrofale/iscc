@@ -1,7 +1,7 @@
 """House style for the paper-1 figures: one place for sizes, fonts, colours and export.
 
 The spec is measured from Pe'er-lab Nature Biotechnology figures (Spectra, SEACells, ENVI) and the
-LN's t-test Figure 1; the reasoning is in the research vault's ``roadmap/paper1-style-guide``. Every
+LN's t-test Figure 1. Every
 ``fig*.py`` script calls :func:`setup` first and saves through :func:`save`, so a style change is
 made here once and every figure follows.
 

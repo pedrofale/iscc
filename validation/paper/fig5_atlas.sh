@@ -4,6 +4,9 @@
 #   STEP=pilot ISCC_ENV=<conda env> SLURM_ACCOUNT=<account> ISCC_FIG5_OUT=<summary dir> \
 #     [ISCC_TOOLS_DIR=<images>] [AFTER=<job id>] validation/paper/fig5_atlas.sh
 #
+# ISCC_TOOLS_DIR, the directory of the tool images, is needed by the steps that run the tools;
+# fig5_atlas.py stops with a message when such a step finds it unset.
+#
 # STEP is
 #   pilot          an array, one tumour per task (arm x grid x patient), 1 CPU each; PILOT_OPTS (e.g.
 #                  "--grid g2h=2,2,2,2,2,2,4 --arms network --pilot-dir pilot-half") sets a
@@ -24,7 +27,6 @@ set -euo pipefail
 : "${ISCC_FIG5_OUT:?set ISCC_FIG5_OUT}"
 HERE=$(cd "$(dirname "$0")" && pwd)
 export REPO=$(cd "$HERE/../.." && pwd) ISCC_FIG5_OUT
-export ISCC_TOOLS_DIR=${ISCC_TOOLS_DIR:-/nobackup/proj/flash/naiss2025-22-1610/personal/pedrof/iscc/tools}
 LOGS=$ISCC_FIG5_OUT/logs
 mkdir -p "$LOGS"
 PY="PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=\$REPO/src $ISCC_ENV/bin/python \$REPO/validation/paper/fig5_atlas.py"

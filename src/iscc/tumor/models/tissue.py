@@ -1,7 +1,7 @@
 """The tissue: the ductal field, slots and eviction, compartment composition, origin
 confinement and the dispersal routes (with the basement-membrane gate).
 
-A mixin of :class:`~iscc.tumor.models.count.GenotypeTumor`; it holds no state of its own."""
+A mixin of [`GenotypeTumor`][iscc.tumor.GenotypeTumor]; it holds no state of its own."""
 
 import numpy as np
 from ..geometry import bresenham_circumference, get_inside
@@ -299,7 +299,7 @@ class TissueMixin:
     def _slot_cap_of(self, deme_idx):
         """The deme's structural slot count — ``crowding_overfill`` x its carrying capacity.
 
-        Separate from :meth:`_cap_of`, which stays the DENSITY REFERENCE K used by the crowding law.
+        Separate from ``_cap_of``, which stays the DENSITY REFERENCE K used by the crowding law.
         At the default overfill of 1.0 the two coincide and a deme is hard-capped at K. Above 1.0 the
         deme may overshoot into the accelerating region of the density term, which is what makes the
         Noble-style over-capacity response reachable instead of dead code."""

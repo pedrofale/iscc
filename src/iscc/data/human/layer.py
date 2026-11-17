@@ -4,12 +4,12 @@ Growth never reads this module. It maps each growth gene to a stretch of a human
 that every human gene in that stretch inherits the growth gene's copy number per homolog and its
 expression, and it gives the patient a germline of real heterozygous SNPs. The assays then draw
 counts over the human genes (``scRNA.run(..., gene_lift=layer.lift)``, ``Visium.run(...,
-gene_lift=layer.lift)``), and :meth:`HumanGenomeLayer.allele_counts` adds per-haplotype counts at the
+gene_lift=layer.lift)``), and [`HumanGenomeLayer.allele_counts`][iscc.data.human.HumanGenomeLayer.allele_counts] adds per-haplotype counts at the
 SNPs that a 3' library covers.
 
 With ``layer.lift`` a human gene simply takes the expression of the growth gene that covers it.
-:meth:`HumanGenomeLayer.expression` is the realistic path: reference-atlas baselines per cell type and
-Hallmark programmes on the human genes (:class:`~iscc.data.human.HumanExpression`); only what the
+[`HumanGenomeLayer.expression`][iscc.data.human.HumanGenomeLayer.expression] is the realistic path: reference-atlas baselines per cell type and
+Hallmark programmes on the human genes ([`HumanExpression`][iscc.data.human.HumanExpression]); only what the
 genotype and the niche do is read off the growth genes.
 """
 import warnings
@@ -40,7 +40,7 @@ class GeneLift:
 
     ``lift(X)`` returns ``X[:, cover]``: column ``h`` is the growth gene that covers human gene
     ``h``. The map is linear, so lifting before or after pooling cells into spots gives the same
-    result, which lets :class:`~iscc.data.Visium` pool on the small growth axis first.
+    result, which lets [`Visium`][iscc.data.Visium] pool on the small growth axis first.
 
     Attributes
     ----------
@@ -106,7 +106,7 @@ class HumanGenomeLayer:
     function of the growth genome and ``seed``; growth never reads it, so a tumour grows identically
     with or without it.
 
-    With an arm-homologous genome (``genome_params["arms"]``, as :func:`~iscc.data.human.arm_genome`
+    With an arm-homologous genome (``genome_params["arms"]``, as [`arm_genome`][iscc.data.human.arm_genome]
     builds), growth segment ``s`` is arm ``arms[s]``, and growth gene ``j`` of its ``n`` genes covers
     the ``j``-th of ``n`` equal slices of the arm, whatever ``n`` is. Any other genome is laid along
     the 39 arms end to end (``allow_linear=True``): its segments then straddle chromosome boundaries,
@@ -121,7 +121,7 @@ class HumanGenomeLayer:
         ``n_segments``, ``segment_sizes`` (or ``segment_size``) and, for an arm-homologous genome,
         ``arms``.
     reference : HumanReference, optional
-        Default :func:`~iscc.data.human.load_reference` (with SNPs if ``ISCC_HUMAN_REF`` points at
+        Default [`load_reference`][iscc.data.human.load_reference] (with SNPs if ``ISCC_HUMAN_REF`` points at
         them).
     seed : int, optional
         Seed of the germline draw. Default the tumour's ``layout_seed``, so patients grown from one
@@ -310,9 +310,9 @@ class HumanGenomeLayer:
         counts : pandas.DataFrame, numpy.ndarray or scipy.sparse matrix
             Barcodes x human genes UMI counts, in the layer's gene order.
         frac_p : numpy.ndarray or callable
-            Barcodes x growth genes expected fraction from homolog ``p`` (see :meth:`hap_fraction`), or
+            Barcodes x growth genes expected fraction from homolog ``p`` (see [`hap_fraction`][iscc.data.human.HumanGenomeLayer.hap_fraction]), or
             a function ``frac_p(barcode_rows, human_genes)`` giving it per entry (a Visium spot whose
-            cell types weight its genes differently, :meth:`HumanExpression.spot_hap_fraction`).
+            cell types weight its genes differently, [`HumanExpression.spot_hap_fraction`][iscc.data.human.HumanExpression.spot_hap_fraction]).
         barcodes : list of str
             Row labels.
         seed : int, default 0
@@ -364,17 +364,17 @@ class HumanGenomeLayer:
         return AlleleCounts(A, B, snps, list(barcodes))
 
     def scrna_allele_counts(self, assay, cell_data, tumor=None, seed=0):
-        """Allele counts for an :class:`~iscc.data.scRNA` assay run with ``gene_lift=self.lift``."""
+        """Allele counts for an [`scRNA`][iscc.data.scRNA] assay run with ``gene_lift=self.lift``."""
         cells = list(assay.observed_counts.index)
         frac = self.hap_fraction(cell_data, cells, tumor)
         counts = getattr(assay, "counts_csr", None)
         return self.allele_counts(assay.observed_counts if counts is None else counts, frac, cells, seed=seed)
 
     def visium_allele_counts(self, assay, tumor=None, seed=0):
-        """Allele counts for a :class:`~iscc.data.Visium` assay run with ``gene_lift=self.lift``.
+        """Allele counts for a [`Visium`][iscc.data.Visium] assay run with ``gene_lift=self.lift``.
 
         A spot's haplotype fraction for a gene pools its cells' allele-resolved expression, after the
-        same lateral diffusion the assay applied to the counts; with :class:`HumanExpression` as the
+        same lateral diffusion the assay applied to the counts; with [`HumanExpression`][iscc.data.human.HumanExpression] as the
         lift, each cell type weighs in with its own baseline for the gene. Spots without cells can
         hold counts bled in from the tissue (spot swapping); they lie outside it, so no allele counts
         are drawn there. At a tissue spot the fraction is its own cells', which leaves out the alleles
@@ -406,7 +406,7 @@ class HumanGenomeLayer:
 
     def expression(self, tumor, **kwargs):
         """The human-gene expression of ``tumor``'s cells from atlas baselines and Hallmark programmes
-        (:class:`~iscc.data.human.HumanExpression`; keyword arguments go to it). Pass it to the assays
+        ([`HumanExpression`][iscc.data.human.HumanExpression]; keyword arguments go to it). Pass it to the assays
         as ``gene_lift``."""
         from .expression import HumanExpression
         return HumanExpression(self, tumor, **kwargs)

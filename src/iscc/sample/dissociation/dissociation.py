@@ -20,8 +20,8 @@ here; those belong to the scRNA assay. This module is the sample-prep biology:
   whatever genes the expression table has, it differs between two dissociations with different
   RNGs (two patients, unless they share a seed or an explicit list), and the recovered cells do
   not depend on it. Every chosen gene of every recovered cell is multiplied by the same
-  ``1 + stress_strength``, whatever the cell's type. :func:`choose_stress_genes` and
-  :func:`apply_stress` expose the two steps, so a caller can fix one gene set and apply the
+  ``1 + stress_strength``, whatever the cell's type. ``choose_stress_genes`` and
+  ``apply_stress`` expose the two steps, so a caller can fix one gene set and apply the
   signature at several strengths to the same recovered cells.
 
 The recovery probabilities and the realized composition shift are returned for
@@ -63,11 +63,11 @@ def biological_type(genotype_id):
 
 
 def choose_stress_genes(genes, n_stress_genes=None, rng=None):
-    """The stress-gene set as :class:`Dissociation` draws it.
+    """The stress-gene set as [`Dissociation`][iscc.sample.Dissociation] draws it.
 
     ``n_stress_genes`` genes (default 5% of ``genes``, at least one, at most all) drawn uniformly
     without replacement with ``rng`` and returned in their column order. This is exactly the draw
-    :class:`Dissociation` makes after its recovery draw, so passing a generator in the same state
+    [`Dissociation`][iscc.sample.Dissociation] makes after its recovery draw, so passing a generator in the same state
     gives the same set.
     """
     genes = list(genes)

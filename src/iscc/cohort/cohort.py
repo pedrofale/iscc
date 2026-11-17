@@ -114,27 +114,36 @@ def clone_key(patient_id, genotype_id):
 
 
 class Cohort:
-    """A cohort of patient tumours over one shared, layout-determined landscape.
+    """A cohort of patient tumours grown over one shared gene layout.
+
+    Each patient is grown by the same function from its own evolution seed and the shared layout
+    seed, so the patients share their driver genes, baseline expression, programs and epistasis
+    network and differ in their evolution. `Cohort` holds nothing of the tumour model: it calls
+    ``grow`` once per patient and keeps what it returns.
 
     Parameters
     ----------
     grow : callable
-        Grows ONE tumour and returns it. Called as ``grow(seed=..., layout_seed=..., **kwargs)``; any
-        function of that shape works — :func:`grow_tumor` for a :class:`GenotypeTumor` grown a fixed
-        number of steps, or the paper regime's ``grow`` (through ``functools.partial`` for its scale
-        and target size).
-    patient_seeds : sequence[int]
-        One **evolution** seed per patient (private dynamics). ``n_patients = len(patient_seeds)``.
-    layout_seed : int
-        The shared **layout** seed (default :data:`DEFAULT_LAYOUT_SEED`), passed to every patient:
-        driver identities, baseline expression, programs and the epistasis network come from it.
-    patient_kwargs : sequence[dict] | None
-        Per-patient overrides of ``grow``'s keywords (one dict per patient), e.g. a subgroup's
-        ``selection_params`` or a patient's ``germline_mutations``; see :func:`patient_overrides`.
-    subgroups : sequence[Subgroup] | None
-        Per-patient subgroup LABELS, for the ground-truth tables (bookkeeping only: what a subgroup
-        changes in growth is in ``patient_kwargs``). ``None`` puts every patient in one subgroup,
-        ``"all"``.
+        The function that grows one tumour and returns it, called as
+        ``grow(seed=..., layout_seed=..., **kwargs)``. Any function of that form works, for example
+        [`grow_tumor`][iscc.cohort.grow_tumor], which grows a
+        [`GenotypeTumor`][iscc.tumor.GenotypeTumor] for a fixed number of steps, or the ``grow`` of
+        ``validation/paper/regime.py`` through ``functools.partial`` for its scale and target size.
+    patient_seeds : sequence of int
+        One evolution seed per patient. The number of patients is ``len(patient_seeds)``.
+    layout_seed : int, optional
+        The layout seed shared by every patient (default ``iscc.constants.DEFAULT_LAYOUT_SEED``,
+        42). The driver genes, baseline expression, programs and epistasis network are drawn from
+        it.
+    patient_kwargs : sequence of dict, optional
+        One dict per patient of keywords passed to ``grow`` on top of the shared ones, for example
+        a subgroup's ``selection_params`` or a patient's ``germline_mutations``
+        (``iscc.cohort.patient_overrides`` builds them). They may not set ``seed`` or
+        ``layout_seed``. Default None, no overrides.
+    subgroups : sequence of Subgroup, optional
+        One ``iscc.cohort.Subgroup`` label per patient, used by the ground-truth tables only. What a
+        subgroup changes in growth is passed in ``patient_kwargs``. Default None, which puts every
+        patient in one subgroup named ``"all"``.
     """
 
     def __init__(self, grow, patient_seeds, layout_seed=DEFAULT_LAYOUT_SEED, patient_kwargs=None,
@@ -168,19 +177,22 @@ class Cohort:
         return [s.name for s in self.subgroups]
 
     def subgroup_of(self, patient_idx):
+        """The subgroup of patient ``patient_idx``."""
         return self.subgroups[patient_idx]
 
     def grow_patient(self, patient_idx, **overrides):
-        """Grow patient ``patient_idx`` and return the tumour — what one Slurm array task calls.
+        """Grow patient ``patient_idx`` and return the tumour, for example in one task of a job array.
 
-        ``overrides`` go on top of the patient's own ``patient_kwargs`` (e.g. ``treatment=...`` for a
-        treated run of the same patient: the tumour is a pure function of its seeds and keywords, so the
-        untreated and treated runs share their whole pre-therapy history)."""
+        ``overrides`` are passed on top of the patient's own ``patient_kwargs``, for example
+        ``treatment=...`` for a treated run of the same patient. A tumour is determined by its seeds
+        and keywords, so the untreated and treated runs share their history before therapy."""
         kwargs = {**self.patient_kwargs[patient_idx], **overrides}
         return self.grow(seed=self.patient_seeds[patient_idx], layout_seed=self.layout_seed, **kwargs)
 
     def run(self, **overrides):
-        """Grow every patient, one at a time, and keep a :class:`PatientResult` per patient."""
+        """Grow every patient, one at a time, and return the cohort.
+
+        The tumours are kept in ``patients``, one ``PatientResult`` per patient."""
         self.patients = []
         for i in range(self.n_patients):
             t = self.grow_patient(i, **overrides)
@@ -191,8 +203,10 @@ class Cohort:
 
     @property
     def selection(self):
-        """The shared gene-role layout (a grown patient's ``Selection``; identical across patients).
-        Before :meth:`run`, build it with :func:`shared_selection`."""
+        """The gene-role layout shared by the patients, the ``Selection`` of the first grown patient.
+
+        Before [`run`][iscc.cohort.Cohort.run], build the same layout with
+        ``iscc.cohort.shared_selection``."""
         if not self.patients:
             raise RuntimeError("no patient grown yet: run the cohort first, or build the shared "
                                "layout with iscc.cohort.shared_selection(genome_params, ...)")
@@ -202,13 +216,35 @@ class Cohort:
 # ---------------------------------------------------------------------------------- growth function
 def grow_tumor(seed, layout_seed=DEFAULT_LAYOUT_SEED, grow_steps=400, treatment=None,
                germline_mutations=(), **tumor_params):
-    """Build one :class:`GenotypeTumor`, seed its inherited germline variants, and grow it for
-    ``grow_steps`` steps (optionally under ``treatment``); its cell data are materialised at the end.
+    """Build one [`GenotypeTumor`][iscc.tumor.GenotypeTumor], write its germline variants, and grow it.
 
-    ``tumor_params`` are :class:`GenotypeTumor`'s keywords (``genome_params``, ``selection_params``,
-    ``cancer_cell_params``, ``deme_params``, ``spatial_params``, the normal-cell blocks,
-    ``expression_params``, ``microenv_params``, ``update_mode``, ...). ``germline_mutations`` (flat gene
-    indices) are written into every cell of the patient before growth (see :class:`Subgroup`)."""
+    The tumour is grown for ``grow_steps`` steps, under ``treatment`` if one is given, and its cell
+    data are materialised at the end.
+
+    Parameters
+    ----------
+    seed : int
+        The evolution seed of the patient.
+    layout_seed : int, optional
+        The layout seed shared by the cohort (default ``iscc.constants.DEFAULT_LAYOUT_SEED``, 42).
+    grow_steps : int, optional
+        Number of growth steps (default 400).
+    treatment : Treatment, optional
+        A therapy applied during growth, as in
+        [`GenotypeTumor.grow`][iscc.tumor.GenotypeTumor.grow] (default None).
+    germline_mutations : sequence of int, optional
+        Flat gene indices of inherited variants, written into every cell of the patient before
+        growth (default none).
+    **tumor_params
+        Keywords of [`GenotypeTumor`][iscc.tumor.GenotypeTumor] (``genome_params``,
+        ``selection_params``, ``cancer_cell_params``, ``deme_params``, ``spatial_params``, the
+        normal-cell blocks, ``expression_params``, ``microenv_params``, ``update_mode``, ...).
+
+    Returns
+    -------
+    GenotypeTumor
+        The grown tumour.
+    """
     t = GenotypeTumor(seed=seed, layout_seed=layout_seed, **tumor_params)
     if len(germline_mutations):
         _apply_germline_mutations(t, list(germline_mutations))

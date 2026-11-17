@@ -6,8 +6,8 @@ growth curve, Noble's evolutionary-mode indices (n, D, J1) over driver-mutation 
 driver-clone sizes, and the clonal territories (how often neighbouring demes share their dominant
 clone), so the supplementary figure (``supp_demon_match.py``) can compare them.
 
-iscc runs on either of its two engines, both on the code after the standard-algorithms change
-(vault: decision-standard-simulation-algorithms, decision-paper-regime-v3):
+iscc runs on either of its two engines, both on the code after the change to standard simulation
+algorithms:
 
 * ``exact``: Gillespie's direct method in demon's hierarchical form, the algorithm demon uses, with
   the drawn exponential waiting times as its clock;

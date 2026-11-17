@@ -379,8 +379,10 @@ class RNABatchHyperParams:
     Holds the protocol-typical magnitudes of the scRNA count model: the batch and
     library-size scales, the NB overdispersion and logistic dropout curve, and the
     ambient / doublet contamination rates. The [`scRNA`][iscc.data.scRNA] assay builds
-    one from its protocol preset and lets you override any field, and
-    [`estimate_rna`][iscc.data.estimate_rna] fits these same parameters from real data.
+    one from its protocol preset and lets you override any field.
+    [`estimate_rna`][iscc.data.estimate_rna] fits the library size and the dispersion from real
+    data, the batch spreads when the data hold several batches, and the dropout curve only with
+    ``fit_dropout=True``.
 
     Attributes
     ----------
@@ -676,7 +678,7 @@ class DNABatchHyperParams:
     gc_curve_sigma : float
         Per-batch GC->coverage curve strength (the GC bias a panel-of-normals fits).
     mappability_sigma : float
-        Unused placeholder kept for symmetry with the genome mappability field.
+        Not used by the DNA assay.
     capture_sigma : float
         Per-target (WES) / per-amplicon (panel) capture-efficiency LogNormal sd.
     error_rate : float

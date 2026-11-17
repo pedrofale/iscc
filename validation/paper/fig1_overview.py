@@ -1,6 +1,6 @@
 """Figure 1: one structured tumour, many modalities, one answer key.
 
-The panels of the figure plan (vault: roadmap/paper1-figure-plan, "Fig 1"), all on the showcase
+The panels of Fig 1, all on the showcase
 tumour (registry R0/seed1: a 170 x 170 primary field with a 170 x 170 metastatic lattice appended):
   (a) the workflow, left to right: the tissue setup (glands in stroma, the metastatic site and its
       vessel); the grown tumour coloured by clone, with the metastasis as an inset; the sampling (the
@@ -96,7 +96,7 @@ def _parent(par, g):
 def _blocks(t, k=N_BLOCKS, half=BLOCK_HALF):
     """``k`` square blocks over cancer-dense demes, as far apart as farthest-point sampling allows.
 
-    Copied from validation/paper/fig3_biases.py:_blocks (branch paper1/fig3-biases), so that Fig 1a
+    Copied from validation/paper/fig3_biases.py:_blocks, so that Fig 1a
     and Fig 3a cut the same four blocks."""
     G = t.grid_size
     dens = np.zeros(G * G)
@@ -125,7 +125,7 @@ def clone_tree(t, cl):
     """The clones' genealogy: clade roots joined at their branch points (unary nodes contracted), each
     node with its birth time and the live cancer cells of its subtree in the primary and the metastasis.
 
-    Adapted from validation/paper/fig2_niche.py:clone_tree (branch paper1/fig2-niche), without the
+    Adapted from validation/paper/fig2_niche.py:clone_tree, without the
     seeding records."""
     par = cl.parents
     below = defaultdict(set)

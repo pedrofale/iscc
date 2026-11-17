@@ -1,6 +1,6 @@
 """Figure 2: selection depends on the niche, and the tumours resemble real ones.
 
-The panels of the figure plan (vault: roadmap/paper1-figure-plan, "Fig 2"):
+The panels of Fig 2:
   (a) one tumour's history up to metastasis (R0 seed 1, the showcase): five snapshots coloured by
       clone, and the cancer cells in gland, stroma and metastasis over generations, with clone births,
       the first invasion and the first seeding of the metastasis;
@@ -78,7 +78,7 @@ WINDOW = 10.0            # generations after the first invasion in which crossin
 # about a third of the median time from first invasion to the target size in R10's barrier arm
 SHOWCASE = "R0/seed1"
 STAND_IN = "R12/seed1"   # panel a and e(i) are built and tested on it until R0 is grown
-RUNTIME_LOGS = "/nobackup/proj/disk/naiss2025-22-1610/personal/pedrof/iscc/logs/runtime-v4"
+RUNTIME_LOGS = ("logs", "runtime-v4")         # under $ISCC_DATA_DIR, unless --runtime-logs is given
 RUNTIME_VARIANT = "v4"                          # the regime the runtime runs grew on
 # Line colours of the three compartments (darker versions of style.COMPARTMENT's tissue fills) and of
 # where a clone's cells live in the tree of panel e.
@@ -1105,7 +1105,8 @@ def main():
     ap.add_argument("--source", default=None, help="run/task of panel a (default R0/seed1, else the stand-in)")
     ap.add_argument("--jobs", type=int, default=1)
     ap.add_argument("--force", action="store_true")
-    ap.add_argument("--runtime-logs", default=RUNTIME_LOGS)
+    ap.add_argument("--runtime-logs", default=None,
+                    help="directory of the runtime logs (default $ISCC_DATA_DIR/logs/runtime-v4)")
     ap.add_argument("--one", nargs=2, metavar=("PART", "RUN/TASK"), help=argparse.SUPPRESS)
     a = ap.parse_args()
     if a.one:
@@ -1118,7 +1119,8 @@ def main():
         _write("a", compute_a(src))
         print(f"part a: cached from {src}")
     elif a.part == "g":
-        compute_g(a.runtime_logs)
+        import _paths as P
+        compute_g(a.runtime_logs or P.data_dir(*RUNTIME_LOGS))
     elif a.part:
         compute_part(a.part, a.jobs, a.force)
     else:

@@ -26,7 +26,7 @@ import numpy as np  # noqa: E402
 import style as S  # noqa: E402
 
 # One colour per entity for the whole paper: iscc and real from style.SOURCE; Splatter's is the
-# data-simulator supplement's (style.TOOL["Splatter"] on paper1/datasim-comparison).
+# data-simulator supplement's (style.TOOL["Splatter"]).
 COL = {"real": S.SOURCE["real"], "iscc": S.SOURCE["iscc"], "splatter": S.TOOL.get("Splatter", "#A50026"),
        "splatteriscc": S.TOOL.get("Splatter", "#A50026")}
 LABEL = {"real": "real (Ding A vs B)", "iscc": "iscc", "splatter": "Splatter",

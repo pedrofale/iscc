@@ -379,7 +379,7 @@ def to_anndata(source, X="cell_exp", layers=None, obs_extra=True, spatial="xy",
     ----------
     source : GenotypeTumor or dict
         A grown tumour, or the per-cell tables it materialised (``tumor.cell_data``, or the dict a
-        :class:`iscc.sample.Resection` returns). Given a tumour, the export also carries the
+        [`Resection`][iscc.sample.Resection] returns). Given a tumour, the export also carries the
         tumour-level ground truth: gene roles, the clone tree, the program dictionary, the clonal
         trace and the run parameters. Given a tumour with nothing materialised yet, the cells are
         materialised first (bounded by the tumour's own cell cap).
@@ -406,6 +406,17 @@ def to_anndata(source, X="cell_exp", layers=None, obs_extra=True, spatial="xy",
         differently in every tumour. An integer fixes it by hand; ``None`` skips the clade
         labelling and falls back to the genotype id. Either way ``uns["clone_definition"]`` and the
         ``clone_*`` entries next to it record what the labels mean and how many cells fell outside.
+
+    Returns
+    -------
+    anndata.AnnData
+        Cells by genes. ``X`` is the matrix named by ``X``, ``layers`` the other per-cell gene
+        matrices (SNV allele fractions, copy number, RNA allele fractions, allele-resolved
+        expression), and ``obs`` the per-cell annotations, with the coarse cell type and the clone
+        label. ``obsm["spatial"]`` holds the tissue coordinates and ``obsm["program"]`` the program
+        activities when the program layer is on. Given a tumour, ``var`` holds the role and segment
+        of each gene, ``varm`` the program loadings, and ``uns`` the clone tree, the clone trace and
+        the run parameters.
     """
     import anndata as ad
 
@@ -520,7 +531,7 @@ _DERIVED_OBS = ("genotype", "cell_type", "clone", "row", "col")
 
 
 def from_anndata(adata, X="cell_exp"):
-    """Rebuild a ``cell_data``-style dict from an :func:`to_anndata` export.
+    """Rebuild a ``cell_data``-style dict from a [`to_anndata`][iscc.integrations.to_anndata] export.
 
     Returns the per-cell tables (``cell_exp`` and every layer as cells x genes frames, plus
     ``cell_crd`` / ``cell_type`` / ``cell_program`` when the export carried them) so a written

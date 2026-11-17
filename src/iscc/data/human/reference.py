@@ -5,9 +5,9 @@ filtered as 10x documents), and the arms are the 39 autosomal arms of the real-g
 acrocentric short arms excluded), with their Cancer Gene Census counts. Both ship with the package;
 ``validation/data/build_human_reference.py`` rebuilds them from the sources.
 
-The SNP list is too large to ship. :func:`fetch_snps` downloads the 1000 Genomes phase-3 list of
+The SNP list is too large to ship. [`fetch_snps`][iscc.data.human.fetch_snps] downloads the 1000 Genomes phase-3 list of
 common SNPs (allele frequency above 5%, on GRCh38) that cellsnp-lite distributes, checks it, and
-keeps only the SNPs inside the modelled genes; :func:`load_reference` finds the result through the
+keeps only the SNPs inside the modelled genes; [`load_reference`][iscc.data.human.load_reference] finds the result through the
 ``ISCC_HUMAN_REF`` environment variable or an explicit path.
 """
 import gzip
@@ -53,7 +53,7 @@ class HumanReference:
         ``chrom``, ``length`` for chr1-22, X and Y.
     snps : pandas.DataFrame or None
         Common SNPs inside the modelled genes: ``chrom``, ``pos`` (1-based), ``ref``, ``alt``, ``af``
-        and ``gene`` (row index into ``genes``). None until :func:`fetch_snps` has prepared them;
+        and ``gene`` (row index into ``genes``). None until [`fetch_snps`][iscc.data.human.fetch_snps] has prepared them;
         expression needs no SNPs, allele counts do.
     """
     genes: pd.DataFrame
@@ -78,8 +78,8 @@ def load_reference(snps=None):
     Parameters
     ----------
     snps : str, pandas.DataFrame or False, optional
-        The SNPs: a path to the ``snps_in_genes.npz`` that :func:`fetch_snps` writes, or a table with
-        the columns of :attr:`HumanReference.snps`. Default None looks for ``snps_in_genes.npz`` in the
+        The SNPs: a path to the ``snps_in_genes.npz`` that [`fetch_snps`][iscc.data.human.fetch_snps] writes, or a table with
+        the columns of ``HumanReference.snps``. Default None looks for ``snps_in_genes.npz`` in the
         directory named by the ``ISCC_HUMAN_REF`` environment variable and leaves ``snps`` empty if
         there is none; False never loads them.
 
@@ -120,7 +120,7 @@ def load_hallmark_programs():
 
 
 def read_snps(path):
-    """Read a ``snps_in_genes.npz`` written by :func:`prepare_snps` into a table."""
+    """Read a ``snps_in_genes.npz`` written by ``prepare_snps`` into a table."""
     z = np.load(path)
     return pd.DataFrame({
         "chrom": np.char.add("chr", z["chrom"].astype(str)),
@@ -144,7 +144,7 @@ def fetch_snps(dest=None, url=SNP_URL, sha256=SNP_SHA256):
     """Download the 1000 Genomes common-SNP list, check it, and prepare the in-gene subset.
 
     Writes ``genome1K.phase3.SNP_AF5e2.chr1toX.hg38.vcf.gz`` (92 MB) and ``snps_in_genes.npz`` into
-    ``dest``. Point ``ISCC_HUMAN_REF`` at ``dest`` afterwards and :func:`load_reference` finds them.
+    ``dest``. Point ``ISCC_HUMAN_REF`` at ``dest`` afterwards and [`load_reference`][iscc.data.human.load_reference] finds them.
 
     Parameters
     ----------

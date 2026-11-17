@@ -35,8 +35,8 @@ What is fit (and from what), per modality:
     doublet_rate      NOT identifiable from counts -> prior-only (flagged)  (carried from preset)
     breadth, depth_model  chosen, not estimated (you know the assay)
 
-The ``_PRIOR_ONLY`` escape that ``estimate_rna()`` uses (ambient/doublet) carries the genuinely
-unidentifiable fields honestly instead of pretending to fit them. ``ado_rate`` /
+The ``_PRIOR_ONLY`` escape that ``estimate_rna()`` uses (ambient/doublet) carries the
+unidentifiable fields from the preset instead of fitting them. ``ado_rate`` /
 ``beta_binom_conc`` are the per-cell amplification/dropout layer — fittable only from single-cell
 data; they are flagged not-fit (and carried from the preset) on bulk data, and ``kappa`` means
 different things per modality (large from pooled bulk, small from lumpy MDA/MALBAC single-cell).
@@ -73,7 +73,7 @@ def _preset_hypers(modality, breadth, depth_model):
 
     Reconstructs exactly what ``bulkDNA`` / ``scDNA`` would build from the breadth preset +
     ``mode_defaults`` (incl. the single-cell ``depth_scale``), so prior-only / not-fit fields are
-    carried honestly from the same place the generator uses.
+    carried from the same place the generator uses.
     """
     if modality not in _MODE_DEFAULTS:
         raise ValueError(f"modality must be 'bulk' or 'sc', got {modality!r}")
@@ -96,7 +96,7 @@ class DNAEstimate:
     the hyper fields (minus ``breadth`` / ``depth_model``, which are explicit assay constructor
     args) as a kwargs dict, so the fit splats straight back into the assay without redefinition.
     ``fitted`` lists the fields actually learned from this data; everything else is carried from
-    the (modality, breadth) preset and flagged honestly. ``diagnostics`` keeps realized intermediate
+    the (modality, breadth) preset and flagged as such. ``diagnostics`` keeps realized intermediate
     quantities (per-sample kappa, realized GC/capture spread, het-BAF variance) for reporting.
     """
     hypers: DNABatchHyperParams
@@ -528,7 +528,7 @@ def estimate_dna_from_assay(assay, *, batch_depths=None, het_atol=0.15):
 
     Pulls coverage / alt / **true CN** (the perfect-caller stand-in: in synthetic recovery the CN
     is exact, exactly the two-pass conditioning) / GC / mappability / C-site / variant + het masks
-    from the assay's surfaced ground truth, then defers to :func:`estimate_dna`. Modality and
+    from the assay's surfaced ground truth, then defers to [`estimate_dna`][iscc.data.estimate_dna]. Modality and
     breadth are read off the assay. ``het_mask`` is loci whose true alt fraction is ~0.5.
     """
     from .dna import bulkDNA, scDNA, genome_features

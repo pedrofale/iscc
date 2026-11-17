@@ -26,7 +26,7 @@ so the raw mean-variance slope ``S = (Var-mean)/mean^2`` measures ``phi*(1+c2)+c
 ``phi``: library-size variation inflates it. We back out the negative-binomial dispersion as
 ``phi = (S - c2) / (1 + c2)``. On synthetic data with cell-constant biology this recovers the
 true ``phi``; on real data (which also has biological cell-cell variation) it is an effective
-dispersion, reported honestly.
+dispersion, reported as such.
 
 Dropout is not fit by default. The logistic curve is fit to the total zero fraction, which already
 includes the zeros the negative binomial draws, and the generator applies the dropout on top of

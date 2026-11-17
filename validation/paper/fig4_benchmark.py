@@ -24,6 +24,8 @@ checkout) and every number it draws to ``$FIG4_DEV/fig4_benchmark_numbers.json``
 
     FIG4_OUT=.../fig4-v4 FIG4_DIAG=.../fig4-v4-diag FIG4_DEV=.../fig4-dev/v4 ISCC_PAPER_DIR=.../fig4-dev/v4 \\
         python validation/paper/fig4_benchmark.py
+
+A ``FIG4_*`` variable that is not set falls back to the same directory under ``$ISCC_DATA_DIR``.
 """
 import json
 import os
@@ -36,12 +38,13 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 
+import _paths as P  # noqa: E402
 import style as S  # noqa: E402
 
-D = "/nobackup/proj/disk/naiss2025-22-1610/personal/pedrof/iscc"
-OUT = os.environ.get("FIG4_OUT", f"{D}/fig4-v4")
-DIAG = os.environ.get("FIG4_DIAG", f"{D}/fig4-v4-diag")
-DEV = os.environ.get("FIG4_DEV", f"{D}/fig4-dev/v4")
+# The Fig 4 job outputs: each from its own variable, else under $ISCC_DATA_DIR (``_paths.data_dir``).
+OUT = os.environ.get("FIG4_OUT") or P.data_dir("fig4-v4")
+DIAG = os.environ.get("FIG4_DIAG") or P.data_dir("fig4-v4-diag")
+DEV = os.environ.get("FIG4_DEV") or P.data_dir("fig4-dev", "v4")
 TUMOURS = os.environ.get("FIG4_TUMOURS", "seed1,seed2,disp0.1_seed1,disp0.9_seed1,disp0.9_seed2").split(",")
 
 # niche colours, validated with the dataviz palette check (all pairs, light): CVD and normal vision pass

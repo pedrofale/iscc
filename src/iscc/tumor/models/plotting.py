@@ -1,6 +1,6 @@
 """Plots and images of a GenotypeTumor (Muller plots, tissue maps, phylogenies, H&E).
 
-A mixin of :class:`~iscc.tumor.models.count.GenotypeTumor`; it holds no state of its own."""
+A mixin of [`GenotypeTumor`][iscc.tumor.GenotypeTumor]; it holds no state of its own."""
 
 import numpy as np
 from ...constants import normal_names
@@ -123,8 +123,9 @@ class PlottingMixin:
             heatmap. ``"clone"``: colour each cancer deme by its dominant clone's DRIVER-clone colour
             (the same driver-collapsed palette as ``plot_muller(by_drivers=True)`` and
             ``plot_phylogeny``), on a pale-stroma background. ``"stage"``: colour each cancer deme by
-            the STAGE-dominant trait of its dominant clone (none / proliferation / invasion / …; see
-            ``_stage_of``) on a pale-stroma background.
+            the most advanced trait of its dominant clone (none, proliferation, breach, stromal
+            survival, metastatic survival, drug tolerance, chemotherapy resistance) on a pale-stroma
+            background.
         min_freq : float, optional
             For ``color="clone"``, the size threshold (fraction of the cancer population) below which
             driver clones are merged into their nearest surviving ancestor before colouring — matched
@@ -296,8 +297,8 @@ class PlottingMixin:
         high-contrast image. Cancer nuclei tint toward hematoxylin purple; stroma stays eosin pink.
 
         The image is in the raw deme-grid frame (``px`` pixels per deme). To overlay a placed Visium
-        slide, shift the spot coordinates back into this frame by the placement translation
-        (``spot_coords.mean(0) - section_cell_crd.mean(0)``); see notebook ``03``.
+        slide, shift the spot coordinates back into this frame by the placement translation,
+        ``spot_coords.mean(0) - section_cell_crd.mean(0)``.
 
         Parameters
         ----------

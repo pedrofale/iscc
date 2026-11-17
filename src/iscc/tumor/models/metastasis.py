@@ -1,7 +1,7 @@
 """The metastatic deposit: a second lattice of host parenchyma, its vessel deme and the
 transit of seeding cells.
 
-A mixin of :class:`~iscc.tumor.models.count.GenotypeTumor`; it holds no state of its own."""
+A mixin of [`GenotypeTumor`][iscc.tumor.GenotypeTumor]; it holds no state of its own."""
 
 from collections import Counter
 import numpy as np

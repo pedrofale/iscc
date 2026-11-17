@@ -7,7 +7,7 @@ Top row, the evolution front's tests (registry tumours):
   (c) whole-genome-duplication prevalence across rates against the PCAWG range (R5).
 No 1/f panel: the 6,000-gene genome saturates at tumour scale, so the infinite-sites test does not apply.
 No PCAWG arm-landscape panel: fitting arm selection to PCAWG is CINner's result, and iscc takes its cell
-law from CINner (decision-pcawg-fit-out-of-paper1).
+law from CINner.
 Bottom row, the data front's tests, each fit on a real reference and re-simulated on the showcase
 tumour (R0):
   (d) scRNA against PBMC3k: library size, mean-variance, zero fraction;

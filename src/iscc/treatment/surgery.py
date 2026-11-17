@@ -8,8 +8,8 @@ class Surgery(Treatment):
 
     Implemented through the ``discrete_event`` hook, which the base ``Treatment`` defines as a no-op.
     ``get_dosage`` returns 0 always, so ``Surgery`` never
-    contributes a death-rate modifier — its only effect is the discrete resection. The genealogy is
-    not pruned, so a 2-band Muller still shows the resected compartment's band cliff to 0 at ``start``.
+    contributes a death-rate modifier, and its only effect is the discrete resection. The genealogy is
+    not pruned, so a two-band Muller plot shows the resected compartment falling to zero at ``start``.
 
     A whole-compartment resection cures that compartment by construction. A partial one (``region``)
     clears only the specimen's demes, cancer and normal residents alike; everything outside keeps

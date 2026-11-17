@@ -1,8 +1,8 @@
 """Write human-gene assays in the formats copy-number tools read, with the truth beside them.
 
-:func:`write_visium` writes a Space Ranger-style directory (for CalicoST, Clonalscope, CopyKAT on
+[`write_visium`][iscc.data.human.write_visium] writes a Space Ranger-style directory (for CalicoST, Clonalscope, CopyKAT on
 spots, CancerFinder via the h5), CalicoST's ``snp_dir``, Clonalscope's references and the truth;
-:func:`write_scrna` writes the same for single cells. Observations and truth go to separate folders,
+[`write_scrna`][iscc.data.human.write_scrna] writes the same for single cells. Observations and truth go to separate folders,
 and nothing in ``outs/`` reveals the truth.
 """
 import gzip
@@ -161,7 +161,7 @@ def write_visium(out_dir, assay, layer, allele=None, tumor=None, seed=0):
         Run with ``gene_lift=layer.lift`` and ``kappa=HUMAN_VISIUM_KAPPA`` (warns otherwise).
     layer : HumanGenomeLayer
     allele : AlleleCounts, optional
-        From :meth:`HumanGenomeLayer.visium_allele_counts`; without it no ``snp_dir`` is written.
+        From [`HumanGenomeLayer.visium_allele_counts`][iscc.data.human.HumanGenomeLayer.visium_allele_counts]; without it no ``snp_dir`` is written.
     tumor : GenotypeTumor, optional
         Needed for the copy-number truth.
     seed : int, default 0
@@ -221,7 +221,7 @@ def write_scrna(out_dir, assay, layer, cell_data, allele=None, tumor=None, seed=
     cell_data : dict
         The sample the assay drew from.
     allele : AlleleCounts, optional
-        From :meth:`HumanGenomeLayer.scrna_allele_counts`.
+        From [`HumanGenomeLayer.scrna_allele_counts`][iscc.data.human.HumanGenomeLayer.scrna_allele_counts].
     tumor : GenotypeTumor, optional
         Needed for the truth.
     seed : int, default 0

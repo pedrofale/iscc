@@ -1,0 +1,30 @@
+# Citation metadata for iscc (https://citation-file-format.github.io/).
+#
+# Pending, to be filled in when they exist (no placeholder values are given for them):
+#   - version and date-released: set when release v0.4.0 is made;
+#   - doi: assigned when release v0.4.0 is archived;
+#   - preferred-citation: the preprint that describes iscc, which is in preparation.
+# The author list follows the author block of the preprint. That block is still empty in the
+# manuscript, so only the author of the software (LICENSE, pyproject.toml) is listed here for now.
+cff-version: 1.2.0
+message: "If you use iscc, please cite it as below, together with the preprint that describes it once it is available."
+title: "iscc: in silico cancer center"
+abstract: >-
+  iscc (in silico cancer center) is a Python package that grows a tumor under copy-number and
+  driver selection in a field of glands, stroma and an optional metastatic site, where selection
+  depends on the niche, and carries the same cells through biopsy and dissociation into bulk and
+  single-cell DNA, RNA and spatial transcriptomics data, down to sequencing reads, while keeping
+  the ground truth of every cell, clone and niche.
+type: software
+authors:
+  - family-names: Ferreira
+    given-names: Pedro F.
+repository-code: "https://github.com/pedrofale/iscc"
+url: "https://pedrofale.github.io/iscc/"
+license: MIT
+keywords:
+  - tumor evolution
+  - simulation
+  - single-cell sequencing
+  - spatial transcriptomics
+  - benchmarking

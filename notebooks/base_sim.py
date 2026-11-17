@@ -23,7 +23,7 @@ design choices baked in here (see the per-notebook narratives for why they matte
   ``stromal_survival`` is then selected. This gate replaces the older leaky ``epithelial_barrier``
   death-hazard; a go-or-grow cost keeps each trait net-favoured only in its own compartment.
 * **CINner-style selection** (``prop_driver``) drives clonal evolution; **WGD on** (``wgd_rate=0.05``,
-  PCAWG-like); **allele-specific expression on** and the **gene-program layer on** (via the vetted
+  five times the paper regime's 0.01); **allele-specific expression on** and the **gene-program layer on** (via the vetted
   ``validation/programs_common.expression_params``).
 * **The genetic-vs-niche emt confound.** The invasive ``emt`` program is driven by BOTH ``breach``
   (route-1 genetic arm, in ``DEFAULT_PHENOTYPE_PROGRAM_MAP``) AND the epithelial compartment field
@@ -61,9 +61,10 @@ NORMALS = RR.NORMALS               # from the engine, via realistic_regime -- in
 GENOME = dict(RR.GENOME)                       # 12 × 500 = 6000 genes (same as the tutorials)
 # Realistic breach-gated selection (met/treatment axes OFF; MET_SELECTION turns them on for the arc).
 SELECTION = dict(RR.SELECTION)
-# WGD turned UP to PCAWG-like: the tutorial config keeps WGD rare for a clean single-clone story, but
-# the science notebooks (wgd_allele_cna especially) need frequent WGD + copy-number churn to have a
-# signal, so bump wgd_rate and cnv_prob above the tutorial defaults.
+# WGD turned up. The tutorial config keeps WGD rare for a clean single-clone story, but the science
+# notebooks (wgd_allele_cna especially) need frequent WGD and copy-number change to have a signal, so
+# wgd_rate and cnv_prob are raised above the tutorial defaults. PCAWG's 30-50% is the share of tumours
+# with a doubling, not of cells, so it does not set this rate.
 CANCER = {**RR.CANCER, "wgd_rate": 0.05, "cnv_prob": 0.15}
 DEME = dict(RR.DEME)
 # The realistic cm-scale ductal field (grid 170, 8 breach-gated ducts, K_duct 60 / K_stroma 30). Same

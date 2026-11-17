@@ -3,10 +3,10 @@
     python iscc_runtime_v3.py <n_cancer> <seed> <scale>
 
 As iscc_runtime.py with --layers visium --low-memory (the "visium-low" variant), but the tumour is
-grown through regime.grow, the regime's one source since the compaction (vault:
-decision-paper-regime-v3: binomial tau deaths, Cao-Gillespie-Petzold steps at eps 0.01, driver effect
-1.03, wgd_rate 0.01), stopping at the first leap that reaches n_cancer. Run from a copy of iscc at
-paper1/standard-algorithms (cwd), with src on PYTHONPATH.
+grown through regime.grow, the regime's one source since the compaction (binomial tau deaths,
+Cao-Gillespie-Petzold steps at eps 0.01, driver effect 1.03, wgd_rate 0.01), stopping at the first
+leap that reaches n_cancer. Run from a copy of iscc at the commit of that regime (cwd), with src on
+PYTHONPATH.
 
 The timings in ``results/runtime.csv`` (variant ``v3``) are Slurm array 5323338 on Arrhenius, one core
 per run, sizes 2,500 / 7,500 / 25,000 / 75,000 and seeds 1-3 (scale small / small / mid / cm), at

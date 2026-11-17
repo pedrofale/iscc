@@ -2,15 +2,14 @@
 
 Every tumour in the paper is grown by tau-leaping: binomial deaths (Tian and Burrage 2004; Chatterjee
 et al. 2005) and each leap chosen by the epsilon-bounded rule of Cao, Gillespie and Petzold (2006) at
-epsilon 0.01 (``regime.DEME``; vault: decision-paper-regime-v3). This figure checks it against the
+epsilon 0.01 (``regime.DEME``). This figure checks it against the
 exact engine, which realises the same continuous-time Markov jump process one event at a time and
-keeps Gillespie's clock. The comparison is built to be able to show a bias (vault:
-decision-standard-simulation-algorithms, its F4-F6):
+keeps Gillespie's clock. The comparison is built to be able to show a bias:
 
 * **it varies the leap, not the record interval.** Besides the paper's tau-leaping it runs the same
   rule at a coarser epsilon (0.03, 0.1), the critical-channel rule (Cao, Gillespie and Petzold 2005),
-  which fires the channels of demes at or above K one at a time, and the historical leap (capped
-  Poisson deaths, a fixed sub-step), whose biases the algorithm reviews of 2026-11-14 measured. The
+  which fires the channels of demes at or above K one at a time, and the earlier leap (capped
+  Poisson deaths, a fixed sub-step), whose biases were measured against the exact engine. The
   rule's bound is max(epsilon c, 1) per (deme, clone) count c, and no count exceeds the slot cap
   floor(1.5 K) = 90 here, so every epsilon at or below 1/90 picks the same leap: epsilon 0.003 is run
   on a few seeds only, to show that it reproduces the paper's runs exactly;

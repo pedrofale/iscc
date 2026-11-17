@@ -2,17 +2,17 @@
 
 A specimen is physically divided by two orthogonal cuts before any assay runs:
 
-* an **in-plane cut** (:meth:`Resection.bisect`) splits the 2-D tissue into disjoint parts — one is
+* an **in-plane cut** ([`Resection.bisect`][iscc.sample.Resection.bisect]) splits the 2-D tissue into disjoint parts — one is
   dissociated for the sequencing assays (bulk DNA / scDNA / scRNA), the rest is kept for imaging;
-* a **depth cut** (:meth:`Resection.slice`) thins a part to ~one layer — a thin histology / Visium
+* a **depth cut** ([`Resection.slice`][iscc.sample.Resection.slice]) thins a part to ~one layer — a thin histology / Visium
   section that keeps the 2-D structure but lowers each deme-column's occupancy (a deme's ``K`` stands
   for the cells in its 3-D column).
 
 The cuts operate on the tumour's per-deme genotype counts and materialise only what each sample needs
-(via :meth:`GenotypeTumor.make_cell_data`), so ``Resection`` stays memory-safe at cm-scale — you never
+(via [`GenotypeTumor.make_cell_data`][iscc.tumor.GenotypeTumor.make_cell_data]), so ``Resection`` stays memory-safe at cm-scale — you never
 materialise the whole tumour just to sample a piece of it.
 
-Taking a sample does not change the tumour: :meth:`dissociate` and :meth:`slice` RETURN their
+Taking a sample does not change the tumour: ``dissociate`` and ``slice`` RETURN their
 per-cell tables and leave ``tumor.cell_data`` exactly as they found it, so cutting a section never
 silently redefines what ``to_anndata(tumor)`` / ``tumor.write_h5ad(...)`` export. Pass
 ``install=True`` when you *want* the sample to become the tumour's own table — that is what the
@@ -25,7 +25,7 @@ class _CellDataGuard:
     """Context manager that leaves ``tumor.cell_data`` as it found it.
 
     ``make_cell_data`` both returns the sample AND installs it on the tumour. A sample is not the
-    tumour, so :class:`Resection` runs it inside this guard: the returned tables are unaffected
+    tumour, so [`Resection`][iscc.sample.Resection] runs it inside this guard: the returned tables are unaffected
     (``make_cell_data`` rebinds ``cell_data`` to a fresh dict rather than mutating the old one), and
     the tumour keeps whatever it had before the cut. That includes the stale flag
     ``grow(materialize=False)`` sets: ``make_cell_data`` clears it, and the restored tables are as
@@ -67,8 +67,8 @@ class Resection:
         Which grid the specimen is taken from. ``"primary"`` (default) resects only the primary
         tumour; ``"met"`` resects only the metastatic deposit (errors if the tumour has no
         metastasis); ``"both"`` resects both grids (falls back to the primary alone when there is
-        no metastasis). This sets the deme set that :meth:`bisect` partitions and that
-        :meth:`dissociate` / :meth:`slice` default to when ``region`` is ``None``.
+        no metastasis). This sets the deme set that [`bisect`][iscc.sample.Resection.bisect] partitions and that
+        [`dissociate`][iscc.sample.Resection.dissociate] / [`slice`][iscc.sample.Resection.slice] default to when ``region`` is ``None``.
 
     Examples
     --------
@@ -97,7 +97,7 @@ class Resection:
 
         Primary demes occupy indices ``0 .. grid_size**2 - 1``; the metastasis (when present) is a
         ``met_grid_size`` lattice appended at ``n_primary_demes``. Returns one entry per included
-        grid so :meth:`bisect` can cut each in-plane and :meth:`dissociate` / :meth:`slice` can
+        grid so [`bisect`][iscc.sample.Resection.bisect] can cut each in-plane and [`dissociate`][iscc.sample.Resection.dissociate] / [`slice`][iscc.sample.Resection.slice] can
         enumerate their demes.
         """
         t = self.tumor
@@ -123,8 +123,8 @@ class Resection:
     def bisect(self, frac=0.5, axis="x"):
         """In-plane cut: split the specimen into two disjoint 2-D parts.
 
-        Cuts each grid of the resected :attr:`compartment` at ``frac`` of its side along ``axis`` and
-        returns the deme indices on each side, ready to pass to :meth:`dissociate` / :meth:`slice`
+        Cuts each grid of the resected ``compartment`` at ``frac`` of its side along ``axis`` and
+        returns the deme indices on each side, ready to pass to [`dissociate`][iscc.sample.Resection.dissociate] / [`slice`][iscc.sample.Resection.slice]
         (or ``make_cell_data(region=)``). For ``compartment="both"`` each grid is cut at the same
         fraction and the parts are unioned.
 
@@ -168,7 +168,7 @@ class Resection:
 
         By default that is all: every materialised cell is returned, as it was in the tissue. With
         ``recovery_probs`` and/or ``stress_strength`` the dissociation's own biology is applied too,
-        through :class:`iscc.sample.dissociation.Dissociation`: each cell is recovered with its
+        through [`iscc.sample.Dissociation`][iscc.sample.Dissociation]: each cell is recovered with its
         biological type's probability (composition bias) and the recovered cells' expression picks
         up the stress signature. This is how per-patient dissociation settings reach a cohort: call
         ``resect(t).dissociate(..., recovery_probs=..., stress_strength=..., seed=...)`` per patient.
@@ -176,13 +176,13 @@ class Resection:
         ``recovery_probs`` the recovered cells are the same whatever the stress strength, and so is
         the stress-gene set (unless ``stress_genes`` names it). The dissociation's record (recovery
         probabilities, compositions before and after, the stress genes) is kept in
-        :attr:`dissociation_meta`; it is None after a plain dissociation.
+        ``dissociation_meta``; it is None after a plain dissociation.
 
         Parameters
         ----------
         region : iterable of int, optional
-            Deme indices of the part to dissociate (e.g. the first element of :meth:`bisect`). ``None``
-            dissociates the whole resected :attr:`compartment` (the primary by default).
+            Deme indices of the part to dissociate (e.g. the first element of [`bisect`][iscc.sample.Resection.bisect]). ``None``
+            dissociates the whole resected ``compartment`` (the primary by default).
         max_cells : int, optional
             Cap on materialised cells (a representative subsample above it).
         install : bool, default False
@@ -197,7 +197,7 @@ class Resection:
         recovery_probs : dict or "default", optional
             Per-biological-type recovery probability (``cancer``, ``epithelial``, ``host``,
             ``stromal``, ``immune``), merged over
-            :data:`~iscc.sample.dissociation.DEFAULT_RECOVERY`; ``"default"`` (or an empty dict)
+            ``DEFAULT_RECOVERY``; ``"default"`` (or an empty dict)
             uses the defaults as they are. ``None`` (default) recovers every cell, unless a stress
             signature is asked for, in which case every type is recovered with probability 1.
         stress_strength : float, default 0.0
@@ -262,8 +262,8 @@ class Resection:
         Parameters
         ----------
         region : iterable of int, optional
-            Deme indices of the part to section (e.g. the remainder from :meth:`bisect`). ``None``
-            sections the whole resected :attr:`compartment` (the primary by default).
+            Deme indices of the part to section (e.g. the remainder from [`bisect`][iscc.sample.Resection.bisect]). ``None``
+            sections the whole resected ``compartment`` (the primary by default).
         depth_frac : float, default 0.5
             Fraction of each deme's column kept in the slice. Note this thins the same 3-D column
             that ``Visium(section_frac=...)`` thins, so the two **compose multiplicatively**: keep
@@ -271,7 +271,7 @@ class Resection:
         max_cells : int, optional
             Cap on materialised cells (bounds the section at cm-scale).
         install : bool, default False
-            Also make this section the tumour's own ``cell_data`` — see :meth:`dissociate`. Off by
+            Also make this section the tumour's own ``cell_data`` — see [`dissociate`][iscc.sample.Resection.dissociate]. Off by
             default, so taking a section never changes what the tumour itself exports.
         layers : str or iterable of str, optional
             The gene-wide frames to build, by frame or assay name; ``"visium"`` builds only the

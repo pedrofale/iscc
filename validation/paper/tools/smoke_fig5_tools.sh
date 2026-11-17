@@ -6,12 +6,13 @@
 #   sbatch -A <account> -p cpu -c 4 --mem=16G -t 01:00:00 \
 #     --wrap "validation/paper/tools/smoke_fig5_tools.sh integration"      # or mhn, treemhn
 #
-# ISCC_TOOLS_DIR holds the images (default: the project's tools/ directory).
+# ISCC_TOOLS_DIR holds the images and must be set.
 set -euo pipefail
 TOOL=$1
 HERE=$(dirname "$(readlink -f "$0")")
 BIN=$HERE/bin
-export ISCC_TOOLS_DIR=${ISCC_TOOLS_DIR:-/nobackup/proj/flash/naiss2025-22-1610/personal/pedrof/iscc/tools}
+: "${ISCC_TOOLS_DIR:?set ISCC_TOOLS_DIR to the directory of the tool images}"
+export ISCC_TOOLS_DIR
 export ISCC_WORK_DIR=${SNIC_TMP:?run as a Slurm job}/fig5t-smoke
 D=$ISCC_WORK_DIR/data
 mkdir -p "$D"

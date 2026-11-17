@@ -1,16 +1,18 @@
 """Operating-envelope QC — read-only diagnosis of a grown tumour.
 
-After growth, :func:`diagnose` computes phenotype metrics and flags each **degenerate regime**
+After growth, ``diagnose`` computes phenotype metrics and flags each **degenerate regime**
 (extinct / monoclonal / no-subclones / hypermutated / well-mixed / no-microenvironment-gradient /
-CNA-runaway / trivial-genome) against an overridable threshold, with an ACTIONABLE hint pointing at the culprit
-knob. It answers the user question "did my run produce a crappy tumour?" and protects the headline
-benchmarks: the *well-mixed* and *no-gradient* regimes silently break the PEtracer lineage–space
-confound and the multi-region-phylogeny demos, so those get their own flags.
+CNA-runaway / trivial-genome) against a threshold that can be overridden, with a hint at the
+parameter to change. It answers whether a run produced a degenerate tumour. The *well-mixed* and
+*no-gradient* regimes break the lineage-against-space analyses and the multi-region phylogenies
+without any error, so they have their own flags. The fit of the allele-frequency spectrum to the 1/f
+law is reported and gates nothing. On a finite genome nearly every gene is mutated in more than one
+lineage, so that fit is not a test of neutral growth.
 
 This is a **read-only readout** (like the microenvironment ground truth): it never draws from the
 tumour's rng and never mutates the counts, so it cannot change simulation output. It reads the grown
 state through the genotype-count interface (``genotypes_counts`` / ``genotypes`` / ``_is_cancer`` /
-``demes`` / ``deme_coords`` / ``selection``), which both the count and cell engines expose.
+``demes`` / ``deme_coords`` / ``selection``).
 """
 import numpy as np
 

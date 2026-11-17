@@ -252,9 +252,9 @@ class scRNA(Assay):
             default every sampled cell is used.
         gene_lift : GeneLift or HumanExpression, optional
             Count human genes instead of the growth genes. A ``GeneLift``
-            (:attr:`HumanGenomeLayer.lift <iscc.data.human.HumanGenomeLayer>`) copies each growth
+            ([`HumanGenomeLayer.lift`][iscc.data.human.HumanGenomeLayer]) copies each growth
             gene's expression to the human genes it covers. A ``HumanExpression``
-            (:meth:`HumanGenomeLayer.expression <iscc.data.human.HumanGenomeLayer.expression>`) uses
+            ([`HumanGenomeLayer.expression`][iscc.data.human.HumanGenomeLayer.expression]) uses
             atlas baselines per cell type and Hallmark programmes; its counts are drawn in chunks of
             cells and kept sparse (``counts_csr``, and ``observed_counts`` as a sparse frame), so no
             cells x human-genes dense matrix is formed. Default None counts the growth genes.
@@ -310,7 +310,7 @@ class scRNA(Assay):
         return self
 
     def _run_human(self, cell_data, target_cells, expr):
-        """The ``HumanExpression`` path of :meth:`run`: the same batch, library, count, ambient,
+        """The ``HumanExpression`` path of [`run`][iscc.data.scRNA.run]: the same batch, library, count, ambient,
         dropout and doublet steps, drawn in chunks of ``expr.chunk`` cells into a sparse matrix."""
         import scipy.sparse as sp
         import warnings

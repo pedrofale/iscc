@@ -1,8 +1,6 @@
 """Fig 5's batch levels, from the fitted technical parameters (``batch_fits.py``'s fits.json).
 
-Registered in exp-paper1-fig5-cohort, "Amendment, 2026-11-16 night", section "The levels of panels
-b-c", with its "Clarifications before any run (2026-11-17)"; the model is
-decision-scrna-batches-from-technical-sources. Given the fits, the cohort's patients and a pooling
+The levels of panels b-c and the batch model were registered before any run. Given the fits, the cohort's patients and a pooling
 design, :func:`levels` returns, for each level, the scRNA overrides of every batch
 (``run_scrna_batches(batch_kwargs=...)`` in the balanced design, one ``scRNA(**kwargs)`` per patient
 in the confounded design) and every patient's dissociation settings (recovery, stored with the

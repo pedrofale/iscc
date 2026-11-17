@@ -82,7 +82,7 @@ def tissue_image(coords, grid_side, px=14, darkness=0.85, sigma_frac=0.32, stain
     Parameters
     ----------
     coords : array-like, shape (n_cells, 2)
-        Sub-deme cell positions as ``(row, col)`` (e.g. from :func:`spatialize`).
+        Sub-deme cell positions as ``(row, col)`` (e.g. from [`spatialize`][iscc.sample.spatialize]).
     grid_side : int or tuple of int
         Capture-area extent in coordinate units: a scalar for a square area, or ``(rows, cols)``
         to match a non-square spot array (e.g. the 78 x 64 Visium v1 slide).
