@@ -4,8 +4,7 @@ The notebooks published under **Tutorials** on the docs site, in three groups: h
 works, what data it emits, and what real analysis tools do with that data.
 
 `docs/tutorials/*.ipynb` are symlinks to this folder, so editing here is editing the site. Every
-notebook is committed **with its outputs** — re-execute with `jupyter nbconvert --execute --inplace`
-and then run `python scripts/clean_notebook_outputs.py notebooks/*.ipynb` to drop progress-bar noise.
+notebook is committed **with its outputs**. Re-execute one with `jupyter nbconvert --execute --inplace`.
 
 ## Overview
 
@@ -21,14 +20,15 @@ and then run `python scripts/clean_notebook_outputs.py notebooks/*.ipynb` to dro
 - **`compartment_selection_confound.ipynb`** — the DCIS→IDC transition (a lumen founder confined by
   the gland wall + stroma until escape traits evolve) and the **genetic-vs-niche** expression
   confound.
-- **`treatment_escape_modes.ipynb`** — the four routes to therapy escape (Kane & Maley), all
-  reproduced on one treatment model.
-- **`metastasis.ipynb`** — seeding, dormancy and outgrowth at a distant site.
+- **`treatment_escape_modes.ipynb`** — the four modes of clonal expansion under treatment (Kane et
+  al. 2026), all reproduced on one treatment model.
+- **`metastasis.ipynb`** — seeding of a metastatic deposit from the stroma, resection of the primary,
+  chemotherapy and relapse.
 
 ## Data generation
 
-Per-modality demos of the assay layer's realism (counts/coverage, and how parameters are fit to real
-references). Generated from the matching `_build_*.py` scripts.
+One notebook per modality: the counts or coverage each assay generates, and how its parameters are
+estimated from real reference data.
 
 - **`assay_dna.ipynb`** — bulk + single-cell DNA: copy-number-dependent and GC-biased coverage, het
   allele-fraction spread with allelic dropout, `estimate_dna` round-trips.
@@ -65,17 +65,13 @@ tool never sees. Two rules hold throughout:
 - **`tool_mhn_bulk.ipynb`** — MHN: the same cohort read cross-sectionally, order discarded.
 - **`tool_scdef_cohort.ipynb`** — scDEF: recover programs shared across a five-patient cohort
   despite batch effects.
+- **`tool_cellchat_R.ipynb`** — CellChat: find the one ligand–receptor channel wired into the
+  simulation among unwired decoys.
 
-## Shared example data
+## Shared example configuration
 
-`01` and `02` read a small shared dataset under `example_out/` (git-ignored), produced by:
-
-```bash
-python notebooks/generate_example.py          # ~2s; skips if already present
-python notebooks/generate_example.py --force  # regenerate
-```
-
-The notebooks regenerate it automatically on first run if it is missing. `example_config.yaml` is
-the small tumour config they share.
+`01` and `02` grow their tumour inline from `example_config.yaml`, the tumour configuration the
+tutorials share. `01` also shows the equivalent command-line run, which writes its outputs to
+`example_out/` (git-ignored).
 
 The production-tool benchmarks these examples point to live under `validation/`.

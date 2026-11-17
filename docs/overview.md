@@ -8,38 +8,53 @@
 [![Tests](https://github.com/pedrofale/iscc/actions/workflows/main.yaml/badge.svg)](https://github.com/pedrofale/iscc/actions/workflows/main.yaml)
 [![Docs](https://github.com/pedrofale/iscc/actions/workflows/docs.yml/badge.svg)](https://pedrofale.github.io/iscc/)
 
-`iscc` (in silico cancer center) is a multi-modal tumor evolution data simulator. It grows one
-selection-driven, spatially-structured tumor, optionally treats it, samples it, and generates
-single-cell and bulk DNA, RNA, and spatial data, down to sequencing reads. Because every run knows
-the true clones, mutations, copy numbers, cell states, spatial niches, and lineages, `iscc` provides
-a realistic ground truth for benchmarking computational tumor evolution methods.
+`iscc` (in silico cancer center) is a Python package that simulates a growing tumor and the
+molecular data measured from it. It grows a tumor under copy-number and driver selection in a field
+of glands, stroma and an optional metastatic site, where selection depends on the niche. It then
+carries the same cells through biopsy and dissociation into bulk and single-cell DNA, RNA and spatial
+transcriptomics data, down to sequencing reads, and therapies can be applied during growth. `iscc`
+records the ground truth of every cell, clone and niche, and of where and when each clone arose, so
+that methods that profile tumor heterogeneity, including those that integrate several data layers,
+can be scored against it.
 
 ## Main features
 
-- **Multi-modal data generation.** DNA, RNA, and spatial data are emitted from the same evolving cells, so cross-modal relationships are coherent by construction.
-- **Ground truth for benchmarking.** Every run knows the true clones, copy numbers, mutations, cell
-  states, spatial niches, and lineage.
-- **Calibrated to real data.** Assay parameters can be fit from a pilot dataset, and the defaults were pre-tuned to fit real data.
+- **Selection that depends on the niche.** A lesion founded in a gland stays there until a clone
+  carries the breach trait, resident stromal cells add a death hazard that a stromal-survival trait
+  offsets, and a metastatic site is entered through a vessel, with a host hazard that a third trait
+  offsets.
+- **One tumor, many modalities.** DNA, RNA and spatial data come from the same cells, so the
+  relationships between data layers follow from one generative process.
+- **Ground truth for benchmarking.** The ground truth contains the clone, lineage, genotype, copy
+  number, niche and program activity of every cell, and the place and time at which every clone
+  arose.
+- **Biases fitted to real data.** The technical parameters of each assay can be estimated from a real
+  reference dataset. Some defaults were fitted to public reference data, and the others are set by
+  hand.
 
 ## The pipeline
 
-`iscc` is a pipeline with a command-line tool associated with the main steps:
+`iscc` is a pipeline with a command-line tool for each of its main steps:
 
 | Stage | CLI | Does |
 |---|---|---|
-| 1. Grow | `isccsim` | grow (and treat) a tumor; write ground-truth genotypes / CNVs / expression / spatial state |
-| 2. Sample | `isccsample` | biopsy / dissociate the tumor into a sample of cells |
-| 3. Assay | `isccdata` | generate single-cell & bulk DNA/RNA and spatial-transcriptomics data |
-| 4. Visualize | `isccfig`, `isccgif` | Muller plot, 2D slice, clone tree, and growth animations |
+| Grow | `isccsim` | grow (and treat) a tumor; write ground-truth genotypes / CNVs / expression / spatial state |
+| Sample | `isccsample` | biopsy / dissociate the tumor into a sample of cells |
+| Assay | `isccdata` | generate bulk & single-cell DNA, RNA, and spatial-transcriptomics data |
+| Visualize | `isccfig`, `isccgif` | Muller plot, 2D slice, clone tree, and growth animations |
 
 ## Quickstart
 
 ```bash
-isccsim --sim-config config.yaml --steps 2000 --random-seed 0 -o sim_out
+isccsim --sim-config notebooks/example_config.yaml --steps 320 --random-seed 2 -o sim_out
 ```
 
-The shipped defaults produce a realistic multi-clone tumor, and `tumor.diagnose()` flags a degenerate
-tumor after growth and tells you which knob to turn.
+`notebooks/example_config.yaml` configures the tumor of the tutorials, a ductal field grown by
+tau-leaping. It keeps the package default driver effect of 1.1, at which almost every cell reaches the
+maximum division rate during the in-situ phase, so competition between clones is nearly neutral
+afterwards. The settings of the paper are in `validation/paper/regime.py`. After growth,
+`tumor.diagnose()` flags degenerate tumors, such as extinct, monoclonal or well-mixed ones, and names
+the parameter to change.
 
 ## Reproducing the landing animation
 
@@ -73,3 +88,10 @@ and the Muller plots:
 | green | stromal survival |
 | purple | metastasis establishment |
 | red | chemotherapy resistance |
+
+## Citing iscc
+
+If you use `iscc`, please cite the preprint that describes it and the release you used. The preprint
+is in preparation, and release v0.4.0 will be archived with a DOI. Both references will be listed here
+when they are available. Until then, the citation of the software is in `CITATION.cff` in the
+repository.
