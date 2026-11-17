@@ -318,9 +318,10 @@ def _sources(mod, d0):
 
 
 def _missing(ax, mod):
+    """Stop rather than draw a panel without a competitor: the figure carries no "not run" notes."""
     miss = [n for n in COMPETITORS[mod] if _load(f"{mod}_{n}") is None]
     if miss:
-        S.stat(ax, "not run: " + ", ".join(miss), "upper right")
+        sys.exit(f"{mod}: no summary for {', '.join(miss)} in {SUM}: run it before rendering")
 
 
 def _density(ax, values, bins, colour, label):
@@ -389,13 +390,13 @@ def render():
         axes[1].plot(d["curve_m"], d["curve_v"], color=col, lw=0.8)
         axes[2].plot(d["curve_m"], d["curve_z"], color=col, lw=0.8)
     xs = np.linspace(-3.5, 2, 10)
-    axes[1].plot(xs, xs, color=S.BG_CELLS, lw=0.5, ls=":", zorder=0)
+    axes[1].plot(xs, xs, color=S.BG_CELLS, lw=0.5, ls=":", zorder=0, label="Poisson")
     axes[0].set_xlabel("log$_{10}$ UMIs per cell")
     axes[0].set_ylabel("Density")
     axes[0].legend(fontsize=5, loc="upper left")
     axes[1].set_xlabel("log$_{10}$ mean")
     axes[1].set_ylabel("log$_{10}$ variance")
-    S.stat(axes[1], "dotted: Poisson", "lower right")
+    axes[1].legend(fontsize=5, loc="lower right")
     axes[2].set_xlabel("log$_{10}$ mean")
     axes[2].set_ylabel("Zero fraction")
     _missing(axes[0], "scrna")
@@ -413,7 +414,7 @@ def render():
     ax1.set_xlabel("log$_{10}$ UMIs per spot")
     ax1.set_ylabel("Density")
     ax1.legend(fontsize=5, loc="upper left")
-    _dots(ax2, [(lab, col, d["moran"]) for lab, col, d in src], "Moran's I, spot depth")
+    _dots(ax2, [(lab, col, d["moran"]) for lab, col, d in src], "Moran's I of spot depth")
     ax2.set_ylim(0, 1)
     _missing(ax1, "visium")
     out["d"] = {lab: d["moran"] for lab, _, d in src}
