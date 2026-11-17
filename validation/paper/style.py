@@ -122,9 +122,9 @@ def ax_mm(fig, x, y, w, h, **kw):
 
 
 def panel_letter(fig, letter, x_mm, y_mm, size=8):
-    """A bold lowercase panel letter; reuse one x per column and one y per row."""
+    """A bold uppercase panel letter (given as "a" or "A"); reuse one x per column and one y per row."""
     W, H = fig.get_size_inches() / MM
-    fig.text(x_mm / W, 1 - y_mm / H, letter, fontsize=size, fontweight="bold",
+    fig.text(x_mm / W, 1 - y_mm / H, letter.upper(), fontsize=size, fontweight="bold",
              ha="left", va="top", color=INK)
 
 
