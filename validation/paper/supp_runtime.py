@@ -58,13 +58,14 @@ def main():
     S.setup()
     runs = pd.read_csv(os.path.join(RES, "runtime.csv"))
     runs = runs[(runs.tool != "iscc") | (runs.variant == ISCC_VARIANT)]
-    df = runs[runs.ok.astype(bool) & (runs.n_cancer > 0)]   # failed attempts and stCNASim's own size
+    df = runs[runs.ok.astype(bool) & (runs.n_cancer > 0)].copy()   # failed attempts and stCNASim's own size
+    df["peak_gb"] = df.peak_mb / 1000.0           # GB as the paper states it (743.9 MB is 0.74 GB)
     lower = runs["wall_lower_s"] if "wall_lower_s" in runs else pd.Series(np.nan, index=runs.index)
     unfinished = runs[lower.notna()]
     fig = S.figure("double", 72)
     axes = [S.ax_mm(fig, 14, 6, 70, 40), S.ax_mm(fig, 104, 6, 70, 40)]
     handles, bounds = [], []
-    for ax, col, ylab in zip(axes, ("wall_s", "peak_mb"), ("wall time (s)", "peak memory (MB)")):
+    for ax, col, ylab in zip(axes, ("wall_s", "peak_gb"), ("Wall time (s)", "Peak memory (GB)")):
         for tool, colour in SIM.items():
             sub = df[df.tool == tool]
             if sub.empty:
@@ -84,7 +85,7 @@ def main():
         ax.set_xticks(sizes)
         ax.set_xticklabels([f"{n:,}" for n in sizes])
         ax.minorticks_off()
-        ax.set_xlabel("cancer cells")
+        ax.set_xlabel("Cancer cells")
         ax.set_ylabel(ylab)
     # one legend for both panels, below them, so that it covers no series
     fig.legend(handles=handles + bounds, loc="upper left", bbox_to_anchor=(14 / 183, 1 - 55 / 72), ncol=4,
