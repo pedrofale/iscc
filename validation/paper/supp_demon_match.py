@@ -53,8 +53,8 @@ ROWS = {
     "selection": [("demon", "gillespie", "selection", "demon", DEMON),
                   ("iscc", "exact", "selection", "iscc exact", ISCC),
                   ("iscc", "tau", "selection", "iscc τ-leap", ISCC),
-                  ("iscc", "exact", "realised", "exact, s = 0.2", REALISED),
-                  ("iscc", "tau", "realised", "τ-leap, s = 0.2", REALISED)],
+                  ("iscc", "exact", "realised", "iscc exact, s = 1.2", REALISED),
+                  ("iscc", "tau", "realised", "iscc τ-leap, s = 1.2", REALISED)],
 }
 TERR = [("demon", "gillespie", "demon", DEMON), ("iscc", "exact", "iscc exact", ISCC),
         ("iscc", "tau", "iscc τ-leap", ISCC)]
@@ -125,7 +125,7 @@ def main():
             ax.set_xlim(-0.6, len(series) - 0.4)
             ax.set_xticks(range(len(series)))
             ax.set_xticklabels([s[3] for s in series], rotation=90)
-            ax.set_title({"J1": "$J_1$"}.get(ind, ind))
+            ax.set_title({"J1": "$J^1$"}.get(ind, ind))
         if row == 0:
             for letter, x in zip("abcd", (x0, x0 + w + gap, x0 + 2 * (w + gap), xi)):
                 S.panel_letter(fig, letter, x - 9, 2)
