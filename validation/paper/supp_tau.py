@@ -569,9 +569,8 @@ def render(a):
           "historical": "s"}
     short = {"exact": "exact", "paper": "paper, ε 0.01", "eps0.003": "ε 0.003", "eps0.03": "ε 0.03",
              "eps0.1": "ε 0.1", "critical": "critical", "historical": "historical"}
-    long = {"exact": "exact (Gillespie)", "paper": "paper: binomial, CGP ε 0.01",
-            "eps0.03": "CGP ε 0.03", "eps0.1": "CGP ε 0.1", "critical": "critical channels exact",
-            "historical": "historical: Poisson, fixed step"}
+    long = {"exact": "exact", "paper": "paper, ε 0.01", "eps0.03": "ε 0.03", "eps0.1": "ε 0.1",
+            "critical": "critical channels", "historical": "historical"}
     order = ["exact", "paper", "eps0.03", "eps0.1", "critical", "historical"]
     fig = S.figure("double", 178)
 
@@ -609,7 +608,7 @@ def render(a):
             ax.plot(nn, h[lo_n:hi_n + 1], "-", lw=0.7, color=col[arm])
     ax.set_yscale("log")
     ax.set_ylim(1e-5, 1.5)
-    ax.set_xlabel("Cells in the deme (K = 60)")
+    ax.set_xlabel("Cells in the deme")
     ax.set_ylabel("Fraction of time")
     ax.set_title("One deme at capacity", loc="left")
     S.stat(ax, "bars: exact law", loc="upper left")
@@ -646,7 +645,7 @@ def render(a):
     ax.axhline(1, color=S.GREY, lw=0.4)
     xaxis(ax, arms_c)
     ax.set_ylabel("P(fixation) / E[1/N₀]")
-    ax.set_title("Neutral fixation, K = 30", loc="left")
+    ax.set_title("Neutral fixation", loc="left")
 
     # (d) time to fixation
     S.panel_letter(fig, "d", 146, 9)
@@ -689,13 +688,11 @@ def render(a):
     ax.set_xlim(-CLIP, CLIP)
     ax.set_ylim(-0.5, len(TUMOUR_STATS) - 0.5)
     ax.set_yticks(range(len(TUMOUR_STATS)))
-    fol = sorted({tum[m].get("in_situ_followed", 0) for m in arms_f}, reverse=True)
-    labs = [lab + (f"\n(first {' or '.join(str(x) for x in fol)} seeds)" if key == "in_situ" else "")
-            for key, lab in TUMOUR_STATS]
+    labs = [lab for key, lab in TUMOUR_STATS]
     ax.set_yticklabels(labs[::-1], fontsize=5.5)
     ax.tick_params(axis="y", length=0)
-    ax.set_xlabel("Difference from exact (% of the exact mean, 95% CI)")
-    ax.set_title(f"Paper-regime tumours at {TARGET:,} cells (n in g)", loc="left")
+    ax.set_xlabel("Difference from exact (% of exact mean)")
+    ax.set_title(f"Tumors at {TARGET:,} cells", loc="left")
 
     # (f) drivers per cell at the 5% detection limit, absolute
     S.panel_letter(fig, "f", 146, 63)
