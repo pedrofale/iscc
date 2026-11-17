@@ -72,8 +72,11 @@ def morans_i(values, coords, lengthscale=None):
 class Visium(Assay):
     """Visium spatial assay: lays spots over the section, aggregates cells, applies a `VisiumBatch`.
 
-    Any hyper-parameter below can be overridden explicitly (``None`` keeps the default, which
-    is calibrated to a real 10x Visium section). Aliases are accepted: ``n_reads`` maps
+    Any hyper-parameter below can be overridden explicitly, and ``None`` keeps the default. The
+    defaults of the spot depth and the capture field (``mu_counts``, ``sigma_counts``,
+    ``field_lengthscale``, ``field_sigma``) were fitted to a 10x Visium breast-cancer section, and
+    the others are set by hand. Spot swapping (``bleed_rate``) is off by default, and ambient RNA
+    within each spot (``ambient_frac``, 0.05) is on. Aliases are accepted: ``n_reads`` maps
     onto ``mu_counts``, and a spot grid requested via ``n_spots_x`` / ``n_spots_y`` derives
     ``spot_pitch`` from ``grid_side`` at run time. The number of spots (and cells per spot)
     follows from ``grid_side`` (passed to ``run``) and the sampled ``cell_data``, so there is
