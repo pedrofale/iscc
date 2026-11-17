@@ -194,11 +194,11 @@ def draw(df, res):
             ax.axvline(v, color=S.GREY, lw=0.5, ls=":")
         ax.set_xlim(-0.6, 1.8)
         ax.set_yticks([])
-        ax.set_xlabel("per-gene dosage slope")
+        ax.set_xlabel("Per-gene dosage slope")
         ax.set_title(titles[name], fontsize=7, color=S.INK)
         S.despine(ax, left=False)
         if i == 0:
-            ax.set_ylabel("density of genes")
+            ax.set_ylabel("Density of genes")
             ax.legend(frameon=False, fontsize=5.5, loc="upper left")
     print(S.save(fig, "supp_dosage", stamp=False))
 
