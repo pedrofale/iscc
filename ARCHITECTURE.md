@@ -108,6 +108,8 @@ The step is therefore chosen by a published rule, set by `deme_params["tau_step"
 - `"fixed"`, with `tau_deaths="poisson"`: the earlier scheme, which splits each record interval into equal sub-steps bounded by the largest per-cell rate and caps Poisson deaths at the clone size. It is not a leap condition and is biased near `K`; it stays for tumours grown with it, which keep it when pickled and grown further.
 
 Against the exact mode, on small systems: `"cgp_critical"` reproduces a deme at capacity, neutral fixation and 5,000-cell tumours, but in a paper tumour most demes are full, so it costs more than the exact mode; `"cgp"` reproduces neutral fixation and 5,000-cell tumours and holds a full deme about 1% below the exact occupancy, at about five times the cost of the fixed step at ε 0.01.
+While every clone holds fewer than about 1/ε cells, the rule allows one expected event per leap, so growth from a few founder cells is slower than in the exact mode: from one cell, 8 generations of well-mixed growth end with about 40% fewer cells on average (27 against 45 over 200 seeds; the fixed step, about 24% fewer), with the right extinction probability.
+Once any clone is large, every leap is short and new single-cell mutants are resolved.
 The paper runs the defaults, `"cgp"` at ε 0.01 with binomial deaths, set explicitly in `validation/paper/regime.py`; the critical-channel rule stays available for runs that need exact-quality crowding at a deme and can afford its cost.
 
 **Births and free slots.**

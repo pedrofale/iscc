@@ -46,7 +46,7 @@ def _grow_to(mode, seed, target=1500, cap=100000, cancer=LOW_DEATH):
 
 
 def test_builds_grows_and_materialises_schema():
-    t = _tau(seed=1, gens=12)
+    t = _tau(seed=1, gens=12, deme={"carrying_capacity": None, "initial_cancer_cells": 5})
     cd = t.cell_data
     assert {"cell_snv", "cell_cnv", "cell_exp", "cell_crd", "cell_type", "cell_deme", "cell_evo"} <= set(cd)
     n = t.get_tumor_size()

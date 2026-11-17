@@ -112,7 +112,10 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         with the number of clones and generations instead of the number of cells. ``tau`` sets the
         generation length, the interval between records. The earlier scheme, a fixed sub-step with
         Poisson deaths capped at the clone size, is ``tau_step="fixed"`` with ``tau_deaths="poisson"``;
-        it is faster and biased near the carrying capacity.
+        it is faster and biased near the carrying capacity. While every clone holds fewer than about
+        1/epsilon cells, the step rule allows one expected event per leap, so growth from a handful of
+        cells is slower than under the exact mode (both tau schemes are); once any clone is large,
+        the leaps are short.
     tau : float, optional
         Tau-leaping generation length, used only when ``update_mode="tau"`` (default 1.0).
     snapshot_every : int, optional

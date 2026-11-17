@@ -35,7 +35,10 @@ STATE_ON = {"resistance_state_genetic": True, "resistance_state_effect": 0.9,
             "resistance_state_relax": 0.2}
 CANCER = {"division_rate": 0.6, "death_rate": 0.02, "max_birth_rate": 1.2, "mutation_rate": 0.6,
           "dispersal_rate": 0.2}
-DEME = {"carrying_capacity": 10, "initial_cancer_cells": 5, "maximum_death_rate": 2.0}
+# The pinned digests below were recorded under the earlier tau-leaping scheme, which is set here so
+# that these tests check the treatment and resection code rather than the default scheme.
+DEME = {"carrying_capacity": 10, "initial_cancer_cells": 5, "maximum_death_rate": 2.0,
+        "tau_deaths": "poisson", "tau_step": "fixed"}
 SPATIAL = {"grid_size": 12, "n_structures": 1, "structure_radius": 0, "immune_density": 0.3}
 
 

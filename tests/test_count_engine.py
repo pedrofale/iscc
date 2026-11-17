@@ -77,7 +77,8 @@ def test_well_mixed_disables_crowding():
     # unbounded (the role the old carrying_capacity=1 hack played; K=1 now caps at ~1 cell).
     cancer = {**LOW_DEATH, "dispersal_rate": 0.0, "mutation_rate": 0.0}
     t = GenotypeTumor(seed=1, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
-                      cancer_cell_params=cancer, deme_params={"carrying_capacity": None},
+                      cancer_cell_params=cancer,
+                      deme_params={"carrying_capacity": None, "initial_cancer_cells": 5},
                       spatial_params={"grid_size": 1, "structure_radius": 0},
                       update_mode="tau", tau=1.0)
     assert t._crowding is False

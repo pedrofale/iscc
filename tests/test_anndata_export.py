@@ -84,7 +84,10 @@ def clonal():
     """
     t = GenotypeTumor(seed=3, genome_params=GENOME_PARAMS, selection_params=SEL,
                       cancer_cell_params=CANCER,
-                      deme_params={"carrying_capacity": 16, "initial_cancer_cells": 5},
+                      # the earlier tau scheme, under which this seed grows the branching tree
+                      # the labelling tests need
+                      deme_params={"carrying_capacity": 16, "initial_cancer_cells": 5,
+                                   "tau_deaths": "poisson", "tau_step": "fixed"},
                       spatial_params={"grid_size": 22, "structure_radius": 3,
                                       "immune_density": 0.1},
                       update_mode="tau", tau=1.0)

@@ -17,11 +17,14 @@ from iscc.tumor.components.cell import Cell
 from iscc.tumor.models import GenotypeTumor
 from iscc.treatment import Surgery
 
-DEME = {"carrying_capacity": 10, "initial_cancer_cells": 5}
+# The pinned digests below were recorded under the earlier tau-leaping scheme, which is set here so
+# that these tests check the treatment and resection code rather than the default scheme.
+DEME = {"carrying_capacity": 10, "initial_cancer_cells": 5, "tau_deaths": "poisson", "tau_step": "fixed"}
 SPATIAL = {"grid_size": 24, "n_structures": 1, "structure_radius": 0}
 # The metastasis tests' structured field + deposit: the only setting where a whole-primary
 # resection leaves something to keep growing.
-MET_DEME = {"carrying_capacity": 16, "initial_cancer_cells": 6, "resident_pressure_ref": 0.2}
+MET_DEME = {"carrying_capacity": 16, "initial_cancer_cells": 6, "resident_pressure_ref": 0.2,
+            "tau_deaths": "poisson", "tau_step": "fixed"}
 MET_SPATIAL = {"grid_size": 16, "structure_radius": 3, "n_glands": 3, "gland_radius": 3,
                "min_gland_sep": 8, "K_duct": 28, "K_stroma": 18, "stroma_fill_frac": 0.3,
                "cross_gland_kappa": 0.05, "epithelial_barrier": 1.2, "stromal_hazard": 0.7,
