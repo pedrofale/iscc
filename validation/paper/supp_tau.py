@@ -455,7 +455,8 @@ TUMOUR_STATS = [
     ("D5", "clonal diversity, 5% detection"), ("D0", "clonal diversity, full census"),
     ("genotypes", "genotypes"), ("fga", "fraction of genome altered"), ("ploidy", "mean ploidy"),
     ("occ_full", "occupancy of demes that reached K"), ("occ_acinus", "acinus occupancy, confined"),
-    ("release", "release of the acinus"), ("growth", "release to 5,000 cells"), ("in_situ", "in-situ phase"),
+    ("release", "release of the acinus (generations)"), ("growth", "release to 5,000 cells (generations)"),
+    ("in_situ", "in-situ phase (generations)"),
 ]
 
 
@@ -610,40 +611,46 @@ def render(a):
     ax.set_xlabel("Cells in the deme")
     ax.set_ylabel("Fraction of time")
     ax.set_title("One deme at capacity", loc="left")
-    S.stat(ax, "bars: exact law", loc="upper left")
+    from matplotlib.patches import Patch
+    ax.legend(handles=[Patch(color=S.BG_CELLS, lw=0, label="exact law")], loc="upper left", fontsize=5)
 
-    # (b) the mean size of a deme at K, against the exact law
+    # (b) the mean size of a deme at K beside the exact law's mean (gray line), one axis per K, each on
+    # its own scale in cells
     S.panel_letter(fig, "b", 57, 9)
-    ax = S.ax_mm(fig, 67, 15, 30, 31)
     arms_b = [m for m in order if m in dem]
-    for j, arm in enumerate(arms_b):
-        for K, dx in ((30, -0.17), (60, 0.17)):
-            d = sd.get(f"K{K}", {}).get(arm)
-            if d is None:
-                continue
-            an = sd[f"K{K}"]["analytic"]
-            m, lo, hi = (100 * (d[x] - an) / K for x in ("mean", "lo", "hi"))
-            ax.errorbar(j + dx, m, yerr=[[m - lo], [hi - m]], fmt=mk[arm], ms=2.4, color=col[arm],
-                        mfc=col[arm] if K == 60 else "white", lw=0.7, capsize=0)
-    ax.axhline(0, color=S.GREY, lw=0.4)
-    xaxis(ax, arms_b)
-    ax.set_ylabel("Mean size − exact law (% of K)")
-    ax.set_title("Mean size at capacity", loc="left")
-    ax.plot([], [], "o", ms=2.4, color=S.GREY, label="K = 60")
-    ax.plot([], [], "o", ms=2.4, color=S.GREY, mfc="white", label="K = 30")
-    ax.legend(loc="lower left", fontsize=5)
+    for i, K in enumerate((60, 30)):
+        ax = S.ax_mm(fig, 67, 15 + i * 17, 30, 14)
+        sk = sd.get(f"K{K}", {})
+        _ci_points(ax, [j for j, m in enumerate(arms_b) if m in sk], [sk[m] for m in arms_b if m in sk],
+                   [m for m in arms_b if m in sk], col, mk)
+        if "analytic" in sk:
+            ax.axhline(sk["analytic"], color=S.GREY, lw=0.5, zorder=0)
+        S.stat(ax, f"K = {K}", loc="lower left")
+        if i == 0:
+            ax.set_xticks(range(len(arms_b)))
+            ax.set_xticklabels([])
+            ax.set_xlim(-0.6, len(arms_b) - 0.4)
+            ax.set_title("Mean size at capacity", loc="left")
+        else:
+            xaxis(ax, arms_b)
+    S.text_mm(fig, 58.5, 30.5, "Mean deme size (cells)", rotation=90, ha="center", va="center",
+              fontsize=6.5)
 
-    # (c) neutral fixation in a full deme of K = 30
+    # (c) neutral fixation in a full deme of K = 30: the fixation probability (Wilson 95% interval)
+    # beside its neutral expectation E[1/N0] (gray tick), both per algorithm
     fx = sm.get("fix", {})
     S.panel_letter(fig, "c", 104, 9)
     ax = S.ax_mm(fig, 114, 15, 26, 31)
     arms_c = [m for m in order if m in fx]
     _ci_points(ax, range(len(arms_c)),
-               [dict(mean=fx[m]["ratio"], lo=fx[m]["ratio_lo"], hi=fx[m]["ratio_hi"]) for m in arms_c],
+               [dict(mean=fx[m]["p"], lo=fx[m]["ratio_lo"] * fx[m]["E_inv_n0"],
+                     hi=fx[m]["ratio_hi"] * fx[m]["E_inv_n0"]) for m in arms_c],
                arms_c, col, mk)
-    ax.axhline(1, color=S.GREY, lw=0.4)
+    ax.plot(range(len(arms_c)), [fx[m]["E_inv_n0"] for m in arms_c], ls="none", marker="_", ms=7,
+            mew=0.8, color=S.GREY, zorder=0, label="neutral expectation")
+    ax.legend(loc="upper left", fontsize=5)
     xaxis(ax, arms_c)
-    ax.set_ylabel("P(fixation) / E[1/N₀]")
+    ax.set_ylabel("Fixation probability")
     ax.set_title("Neutral fixation", loc="left")
 
     # (d) time to fixation
@@ -657,41 +664,36 @@ def render(a):
     ax.set_ylabel("Time to fixation (generations)")
     ax.set_title("Fixation time", loc="left")
 
-    # (e) tumours at 5,000 cells: every statistic of every tau arm against exact
+    # (e) tumors at 5,000 cells: one axis per statistic, on its own scale, with every algorithm's mean
+    # and 95% interval side by side, the exact engine's mean (black line) and 5% either side of it
+    # (light blue)
+    from matplotlib.ticker import MaxNLocator
     tum = sm.get("tumours", {})
     arms_f = [m for m in order if m in tum]
     S.panel_letter(fig, "e", 2, 63)
-    ax = S.ax_mm(fig, 47, 69, 84, 98)
-    arms_e = [m for m in order if m in tum and m != "exact"]
-    CLIP = 20.0
+    row_h = 98.0 / len(TUMOUR_STATS)
     for i, (key, lab) in enumerate(TUMOUR_STATS):
-        y0 = len(TUMOUR_STATS) - 1 - i
-        if i % 2 == 0:
-            ax.axhspan(y0 - 0.5, y0 + 0.5, color=S.PASTEL["grey"], lw=0, zorder=0)
-        for j, arm in enumerate(arms_e):
-            d = tum[arm].get(key, {}).get("vs_exact")
-            if d is None:
+        ax = S.ax_mm(fig, 47, 69 + i * row_h, 84, row_h - 3.0)
+        e = tum.get("exact", {}).get(key, {}).get("mean")
+        if e is not None:
+            ax.axvspan(0.95 * e, 1.05 * e, color=S.PASTEL["blue"], lw=0, zorder=0, alpha=0.6)
+            ax.axvline(e, color=S.INK, lw=0.5, zorder=1)
+        for j, arm in enumerate(arms_f):
+            d = tum[arm].get(key, {})
+            if d.get("mean") is None:
                 continue
-            y = y0 + 0.32 - j * 0.64 / max(len(arms_e) - 1, 1)
-            m, lo, hi = 100 * d["rel"], 100 * d["lo"], 100 * d["hi"]
-            ax.plot([max(lo, -CLIP), min(hi, CLIP)], [y, y], color=col[arm], lw=0.7)
-            if abs(m) > CLIP:                        # off the scale: an arrowhead and the value
-                s = np.sign(m)
-                ax.plot(s * CLIP, y, ">" if s > 0 else "<", ms=2.6, color=col[arm], clip_on=False)
-                ax.text(s * (CLIP + 1.5), y, f"{m:+.0f}%", fontsize=4.5, va="center",
-                        ha="left" if s > 0 else "right")
-            else:
-                ax.plot(m, y, mk[arm], ms=2.4, color=col[arm])
-    ax.axvspan(-5, 5, color=S.PASTEL["blue"], lw=0, zorder=0, alpha=0.6)
-    ax.axvline(0, color=S.INK, lw=0.5)
-    ax.set_xlim(-CLIP, CLIP)
-    ax.set_ylim(-0.5, len(TUMOUR_STATS) - 0.5)
-    ax.set_yticks(range(len(TUMOUR_STATS)))
-    labs = [lab for key, lab in TUMOUR_STATS]
-    ax.set_yticklabels(labs[::-1], fontsize=5.5)
-    ax.tick_params(axis="y", length=0)
-    ax.set_xlabel("Difference from exact (% of exact mean)")
-    ax.set_title(f"Tumors at {TARGET:,} cells", loc="left")
+            y = len(arms_f) - 1 - j
+            if d.get("lo") is not None:
+                ax.plot([d["lo"], d["hi"]], [y, y], color=col[arm], lw=0.7)
+            ax.plot(d["mean"], y, mk[arm], ms=2.0, color=col[arm])
+        ax.set_ylim(-0.8, len(arms_f) - 0.2)
+        ax.set_yticks([])
+        ax.spines["left"].set_visible(False)
+        ax.set_ylabel(lab, rotation=0, ha="right", va="center", fontsize=5.5, labelpad=3)
+        ax.xaxis.set_major_locator(MaxNLocator(4))
+        ax.tick_params(axis="x", labelsize=4.5, length=1.5, pad=1)
+        if i == 0:
+            ax.set_title(f"Tumors at {TARGET:,} cells", loc="left")
 
     # (f) drivers per cell at the 5% detection limit, absolute
     S.panel_letter(fig, "f", 146, 63)
@@ -706,17 +708,15 @@ def render(a):
     ax.set_ylabel("Drivers per cell, 5% detection")
     ax.set_title("At 5,000 cells", loc="left")
 
-    # (g) cost of growth to 5,000 cells, per tumour (median and quartiles; n above): the CPU time of
-    # the one process that grew it, which is its wall time on an unshared core (the jobs ran on shared
-    # nodes, where wall time also measures the neighbours)
+    # (g) cost of growth to 5,000 cells, per tumour (median and quartiles): the CPU time of the one
+    # process that grew it, which is its wall time on an unshared core (the jobs ran on shared nodes,
+    # where wall time also measures the neighbours); the tumours per arm are stated in the caption
     S.panel_letter(fig, "g", 146, 114)
     ax = S.ax_mm(fig, 157, 120, 24, 40)
     for j, arm in enumerate(arms_f):
         w = tum[arm]["cpu_s"]
         ax.errorbar(j, w["median"], yerr=[[w["median"] - w["q25"]], [w["q75"] - w["median"]]],
                     fmt=mk[arm], ms=2.4, color=col[arm], lw=0.7, capsize=0)
-        ax.text(j, w["q75"] * 1.3, f"n = {tum[arm]['n']:,}", fontsize=4.2, ha="center", va="bottom",
-                rotation=90)
     ax.set_yscale("log")
     ax.set_ylim(top=ax.get_ylim()[1] * 6)
     xaxis(ax, arms_f)
