@@ -40,18 +40,18 @@ BIASES = [
     # --- sampling: the sample-prep biology, before any library is made -------------------------------
     Bias("sampling", ("scDNA", "scRNA"), "cell-type recovery", "recovery_probs",
          "immune 0.4 ... cancer 0.9", SET, None,
-         (f"{_DIS}:34",), None),                                       # DEFAULT_RECOVERY
+         (f"{_DIS}:46",), None),                                       # DEFAULT_RECOVERY
     Bias("sampling", ("scRNA",), "dissociation stress", "stress_strength", "0 (random 5% of genes)", SET, None,
-         (f"{_DIS}:71", f"{_DIS}:117"), None),
+         (f"{_DIS}:127", f"{_DIS}:78"), None),
     Bias("sampling", ("Visium",), "section thickness", "depth_frac", "0.5", SET, None,
-         (f"{_RES}:192",), None),
+         (f"{_RES}:256",), None),
     # --- library: capture and amplification ------------------------------------------------------------
     Bias("library", ("WGS", "scDNA"), "GC bias", "gc_curve_sigma", "0.20 (panel 0.05)", COND, "needs GC",
          (f"{_D}:41", f"{_D}:47"), (f"{_ED}:449",)),
     Bias("library", ("WGS", "scDNA"), "capture variability", "capture_sigma", "0 (panel 0.45)", COND,
          "WES or panel", (f"{_D}:41", f"{_D}:47"), (f"{_ED}:475",)),
     Bias("library", ("WGS", "scDNA"), "FFPE C>T damage", "ffpe_ct_rate", "0", COND, "needs C>T mask",
-         (f"{_B}:709",), (f"{_ED}:492",)),
+         (f"{_B}:711",), (f"{_ED}:492",)),
     Bias("library", ("scDNA",), "amplification lumpiness", "kappa", "5", FIT, None,
          (f"{_D}:530",), (f"{_ED}:470",)),
     Bias("library", ("scDNA",), "allelic dropout", "ado_rate", "0.20", COND, "needs het sites",
@@ -69,32 +69,32 @@ BIASES = [
     Bias("library", ("scRNA",), "doublets", "doublet_rate", "0.05", SET, None,
          (f"{_R}:41",), (f"{_ER}:60",)),
     Bias("library", ("Visium",), "count overdispersion", "kappa", "50", FIT, None,
-         (f"{_B}:930",), (f"{_EV}:631",)),
+         (f"{_B}:932",), (f"{_EV}:631",)),
     Bias("library", ("Visium",), "ambient RNA", "ambient_frac", "0.05", SET, None,
-         (f"{_B}:928",), (f"{_EV}:64",)),                              # estimate_visium _PRIOR_ONLY
+         (f"{_B}:930",), (f"{_EV}:64",)),                              # estimate_visium _PRIOR_ONLY
     # --- sequencing: depth and its dispersion -----------------------------------------------------------
     Bias("sequencing", ("WGS", "scDNA"), "depth", "mu_depth", "30 (x0.3 single cell)", FIT, None,
          (f"{_D}:41", f"{_D}:270"), (f"{_ED}:440",)),
     Bias("sequencing", ("WGS",), "depth dispersion", "kappa", "2000", FIT, None,
          (f"{_D}:360",), (f"{_ED}:470",)),
     Bias("sequencing", ("WGS", "scDNA"), "base errors", "error_rate", "0.001", COND, "needs variant mask",
-         (f"{_B}:704",), (f"{_ED}:488",)),
+         (f"{_B}:706",), (f"{_ED}:488",)),
     Bias("sequencing", ("scRNA",), "library size", "mu_lib, sigma_lib", "4000, 0.35", FIT, None,
          (f"{_R}:40",), (f"{_ER}:324",)),
     Bias("sequencing", ("Visium",), "spot depth", "mu_counts, sigma_counts", "20000, 0.45", FIT, None,
-         (f"{_B}:917", f"{_B}:918"), (f"{_EV}:614",)),
+         (f"{_B}:919", f"{_B}:920"), (f"{_EV}:614",)),
     # --- spatial: Visium only (the dissociated assays lose cell positions) ----------------------------
     Bias("spatial", ("Visium",), "capture field", "field_sigma, field_lengthscale", "0.70, 18", FIT, None,
-         (f"{_B}:919", f"{_B}:920"), (f"{_EV}:616", f"{_EV}:619")),
+         (f"{_B}:921", f"{_B}:922"), (f"{_EV}:616", f"{_EV}:619")),
     Bias("spatial", ("Visium",), "edge falloff", "edge_sigma", "0.30", COND, "needs off-tissue spots",
-         (f"{_B}:921",), (f"{_EV}:586",)),
-    Bias("spatial", ("Visium",), "spot bleed", "bleed_rate", "0 (off)", COND, "needs off-tissue spots",
-         (f"{_B}:924",), (f"{_EV}:579",)),
+         (f"{_B}:923",), (f"{_EV}:586",)),
+    Bias("spatial", ("Visium",), "spot swapping", "bleed_rate", "0 (off)", COND, "needs off-tissue spots",
+         (f"{_B}:926",), (f"{_EV}:579",)),
     Bias("spatial", ("Visium",), "lateral diffusion", "diffusion_sigma", "0", SET, None,
-         (f"{_B}:923",), (f"{_EV}:64",)),
+         (f"{_B}:925",), (f"{_EV}:64",)),
     # --- batch: what differs between two runs of the same assay ---------------------------------------
     Bias("batch", ("WGS", "scDNA"), "depth shift", "depth_batch_sigma", "0.05", COND, ">=2 batches",
-         (f"{_B}:705",), (f"{_ED}:511",)),
+         (f"{_B}:707",), (f"{_ED}:511",)),
     Bias("batch", ("scRNA",), "per-gene factor", "sigma_batch", "0.10", COND, ">=2 batches",
          (f"{_R}:40",), (f"{_ER}:343",)),
     Bias("batch", ("scRNA",), "depth shift", "depth_batch_sigma", "0.05", COND, ">=2 batches",
@@ -102,7 +102,7 @@ BIASES = [
     Bias("batch", ("scRNA",), "plate depth", "plate_sigma, well_sigma", "0, 0.15 (Smart-seq3)", SET, None,
          (f"{_R}:53",), (f"{_ER}:61",)),
     Bias("batch", ("Visium",), "per-gene factor", "sigma_batch", "0.10", COND, ">=2 sections",
-         (f"{_B}:927",), (f"{_EV}:641",)),
+         (f"{_B}:929",), (f"{_EV}:641",)),
 ]
 
 
@@ -132,7 +132,7 @@ PLAIN = {
     ("spot depth", "mu_counts, sigma_counts", "20000, 0.45"): "mean 20000, log-normal SD 0.45",
     ("capture field", "field_sigma, field_lengthscale", "0.70, 18"): "strength 0.70, length scale 18",
     ("edge falloff", "edge_sigma", "0.30"): "strength 0.30",
-    ("spot bleed", "bleed_rate", "0 (off)"): "rate 0",
+    ("spot swapping", "bleed_rate", "0 (off)"): "rate 0",
     ("lateral diffusion", "diffusion_sigma", "0"): "kernel SD 0",
     ("depth shift", "depth_batch_sigma", "0.05"): "log-normal SD 0.05",
     ("per-gene factor", "sigma_batch", "0.10"): "log-normal SD 0.10",
