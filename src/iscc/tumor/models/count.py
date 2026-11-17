@@ -87,7 +87,9 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         ``maximum_death_rate``). Crowding is demon's two-valued death step under a structural slot
         cap, and division is demon's invasion rule: a division attempts a mutation with probability
         ``mutation_rate`` and, independently, one of its two daughters disperses with probability
-        ``dispersal_rate``.
+        ``dispersal_rate``. Under ``update_mode="tau"``, ``tau_deaths`` (default ``"binomial"``),
+        ``tau_step`` (default ``"cgp"``) and ``tau_epsilon`` (default 0.01) choose the tau-leaping
+        scheme (see ``update_mode``).
     spatial_params : dict, optional
         Grid and tissue geometry, given as keys of this dict (not as individual
         constructor arguments): ``grid_size``, ``dispersal_rate``, ``structure_radius`` /
@@ -103,9 +105,14 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
     genome_spec : GenomeSpec, optional
         Real-genome specification (required when ``genome_mode="real"``).
     update_mode : {"exact", "tau"}, optional
-        ``"exact"`` (default) is the reference one-event-per-update Gillespie engine;
-        ``"tau"`` is tau-leaping (``tau`` sets the generation length), whose cost scales
-        with number-of-clones × number-of-generations instead of number-of-cells.
+        ``"exact"`` (default) is Gillespie's direct method, one event per update with an exponential
+        waiting time. ``"tau"`` is Poisson tau-leaping with binomial deaths (Tian and Burrage 2004;
+        Chatterjee et al. 2005), each leap chosen by the epsilon-bounded rule of Cao, Gillespie and
+        Petzold (2006) with epsilon ``deme_params["tau_epsilon"]`` (default 0.01); its cost scales
+        with the number of clones and generations instead of the number of cells. ``tau`` sets the
+        generation length, the interval between records. The earlier scheme, a fixed sub-step with
+        Poisson deaths capped at the clone size, is ``tau_step="fixed"`` with ``tau_deaths="poisson"``;
+        it is faster and biased near the carrying capacity.
     tau : float, optional
         Tau-leaping generation length, used only when ``update_mode="tau"`` (default 1.0).
     snapshot_every : int, optional
@@ -157,8 +164,10 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         the tumour has the clonal peak real sequencing shows.
     """
 
-    # Tau-leaping options (see ``_init_tau``). Class-level defaults, so tumours pickled before the
-    # options existed read today's behaviour.
+    # Tau-leaping options (see ``_init_tau``). These class-level values are the scheme that tumours
+    # pickled before the options existed were grown with (the fixed sub-step and capped Poisson
+    # deaths), so such a tumour keeps it if it is grown further; new tumours take ``_init_tau``'s
+    # defaults.
     _tau_deaths = "poisson"
     _tau_step = "fixed"
     _tau_epsilon = 0.03
@@ -305,25 +314,27 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
     def _init_tau(self, p):
         """The tau-leaping options, read from ``deme_params``.
 
-        ``tau_deaths``: ``"poisson"`` (default) draws Poisson(d c dt) deaths per (deme, clone), capped
-        at c; ``"binomial"`` draws Binomial(c, min(1, d dt)), binomial tau-leaping for a first-order
-        channel (Tian and Burrage 2004; Chatterjee et al. 2005), which cannot overshoot c.
+        ``tau_deaths``: ``"binomial"`` (default) draws Binomial(c, min(1, d dt)), binomial tau-leaping
+        for a first-order channel (Tian and Burrage 2004; Chatterjee et al. 2005), which cannot
+        overshoot c; ``"poisson"`` draws Poisson(d c dt) deaths per (deme, clone), capped at c, the
+        earlier scheme.
 
-        ``tau_step``: ``"fixed"`` (default) splits a generation into ceil(r_max tau / 0.34) equal
-        sub-steps; ``"cgp"`` chooses each sub-step by the epsilon-bounded rule of Cao, Gillespie and
-        Petzold (2006) with ``tau_epsilon`` (default 0.03; ``_cgp_dt``); ``"cgp_critical"`` is
+        ``tau_step``: ``"cgp"`` (default) chooses each sub-step by the epsilon-bounded rule of Cao,
+        Gillespie and Petzold (2006) with ``tau_epsilon`` (default 0.01; ``_cgp_dt``); ``"fixed"``
+        splits a generation into ceil(r_max tau / 0.34) equal sub-steps, the earlier scheme, which is
+        biased near the carrying capacity; ``"cgp_critical"`` is
         tau-leaping with critical reactions (Cao, Gillespie and Petzold 2005): the channels of demes at
         or above K fire one event at a time and the rest are leaped with the "cgp" step
         (``_tau_leaps_critical``). It needs a carrying capacity."""
-        self._tau_deaths = str(p.deme.get("tau_deaths", "poisson"))
+        self._tau_deaths = str(p.deme.get("tau_deaths", "binomial"))
         if self._tau_deaths not in ("poisson", "binomial"):
             raise ValueError(f"tau_deaths must be 'poisson' or 'binomial', got {self._tau_deaths!r}")
-        self._tau_step = str(p.deme.get("tau_step", "fixed"))
+        self._tau_step = str(p.deme.get("tau_step", "cgp"))
         if self._tau_step not in ("fixed", "cgp", "cgp_critical"):
             raise ValueError(f"tau_step must be 'fixed', 'cgp' or 'cgp_critical', got {self._tau_step!r}")
         if self._tau_step == "cgp_critical" and not self._crowding:
             raise ValueError("tau_step 'cgp_critical' needs a carrying capacity")
-        self._tau_epsilon = float(p.deme.get("tau_epsilon", 0.03))
+        self._tau_epsilon = float(p.deme.get("tau_epsilon", 0.01))
 
     def _init_genome(self, p):
         """The genome layout (shared by every run of a config): segments, the gene roles, the

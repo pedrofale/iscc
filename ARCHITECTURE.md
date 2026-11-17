@@ -92,7 +92,7 @@ The exact mode is the reference against which the tau mode is checked.
 Within a leap of length `dt`, every channel of every clone in every deme fires a random number of times at its rate at the start of the leap (Gillespie 2001, *J Chem Phys* 115:1716), in `_tau_substep`:
 
 - divisions are `Poisson(b c dt)`;
-- deaths are `Binomial(c, min(1, d dt))`, binomial tau-leaping for a first-order channel (Tian and Burrage 2004, *J Chem Phys* 121:10356; Chatterjee et al. 2005, *J Chem Phys* 122:024112), so no count goes negative.
+- deaths are `Binomial(c, min(1, d dt))` (the default, `tau_deaths="binomial"`), binomial tau-leaping for a first-order channel (Tian and Burrage 2004, *J Chem Phys* 121:10356; Chatterjee et al. 2005, *J Chem Phys* 122:024112), so no count goes negative.
 
 **How CINner does it, for comparison.**
 CINner (Dinh et al. 2025, `CINner_step_1.r`) uses a fixed step, draws the total number of events of each clone from a Poisson distribution (a normal one above 1,000), redraws a count that exceeds the clone, and splits it multinomially into deaths, divisions and divisions with a new genotype.
@@ -100,13 +100,15 @@ CINner (Dinh et al. 2025, `CINner_step_1.r`) uses a fixed step, draws the total 
 
 **The step.**
 In the paper's crowding law the death rate of every cancer cell in a deme jumps from `d0` to `d1` (0.05 to 5) when the deme passes its capacity `K`, so a leap that freezes the rates lets a full deme lose several cells where the process loses one.
-The step is therefore chosen by a published rule, set by `deme_params["tau_step"]` and applied in `_tau_generation` (the historical default, `"fixed"`, splits each record interval into equal sub-steps bounded by the largest per-cell rate; it is not a leap condition and goes once the paper's rule is chosen):
+The step is therefore chosen by a published rule, set by `deme_params["tau_step"]` and applied in `_tau_generation`:
 
-- `"cgp"`: the species-based ε-bounded step selection of Cao, Gillespie and Petzold (2006, *J Chem Phys* 124:044109), with each clone in each deme as a species of highest reaction order 1: `dt = min over species of max(ε c, 1) / |(b - d) c|` and `max(ε c, 1)^2 / ((b + d) c)` (`_cgp_dt`, ε = `tau_epsilon`, read by `_init_tau`);
+- `"cgp"` (the default): the species-based ε-bounded step selection of Cao, Gillespie and Petzold (2006, *J Chem Phys* 124:044109), with each clone in each deme as a species of highest reaction order 1: `dt = min over species of max(ε c, 1) / |(b - d) c|` and `max(ε c, 1)^2 / ((b + d) c)` (`_cgp_dt`, ε = `tau_epsilon`, default 0.01, read by `_init_tau`);
 - `"cgp_critical"`: tau-leaping with critical reactions (Cao, Gillespie and Petzold 2005, *J Chem Phys* 123:054104): the channels of demes at or above `K` are critical (`_classify_critical`); each leap takes the ε-bounded step over the other channels and an exponential time for the critical ones, and fires one critical event exactly, through the exact mode's `_event_in_deme`, when its time comes first (`_tau_leaps_critical`).
 
-Against the exact mode (small systems of the 2026-11-14 algorithm reviews): `"cgp_critical"` reproduces a deme at capacity, neutral fixation and 5,000-cell tumours, but in a paper tumour most demes are full, so it costs more than the exact mode; `"cgp"` reproduces neutral fixation and 5,000-cell tumours and holds a full deme about 1% below the exact occupancy, at about five times the cost of the historical fixed step at ε 0.01.
-The paper runs `"cgp"` at ε 0.01 with binomial deaths (`validation/paper/regime.py`, vault: `decision-paper-regime-v3`); the critical-channel rule stays available for runs that need exact-quality crowding at a deme and can afford its cost.
+- `"fixed"`, with `tau_deaths="poisson"`: the earlier scheme, which splits each record interval into equal sub-steps bounded by the largest per-cell rate and caps Poisson deaths at the clone size. It is not a leap condition and is biased near `K`; it stays for tumours grown with it, which keep it when pickled and grown further.
+
+Against the exact mode, on small systems: `"cgp_critical"` reproduces a deme at capacity, neutral fixation and 5,000-cell tumours, but in a paper tumour most demes are full, so it costs more than the exact mode; `"cgp"` reproduces neutral fixation and 5,000-cell tumours and holds a full deme about 1% below the exact occupancy, at about five times the cost of the fixed step at ε 0.01.
+The paper runs the defaults, `"cgp"` at ε 0.01 with binomial deaths, set explicitly in `validation/paper/regime.py`; the critical-channel rule stays available for runs that need exact-quality crowding at a deme and can afford its cost.
 
 **Births and free slots.**
 A deme holds at most `ρK` cells; a birth that reaches a full deme displaces a resident normal cell if there is one, and is lost otherwise.
