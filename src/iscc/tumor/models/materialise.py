@@ -769,7 +769,8 @@ class MaterialiseMixin:
         max_cells : int, optional
             Cap on the number of cells materialised (defaults to the tumour's ``self.max_cells``).
             When the tumour is larger, a representative subsample is materialised instead of every
-            cell (see ``_materialize_plan``) so the dense frames stay memory-bounded at cm-scale.
+            cell, with each (deme, genotype) group thinned binomially, so the dense frames stay
+            memory-bounded at cm-scale.
             ``None`` materialises every cell.
         region : iterable of int, optional
             Deme indices to restrict materialisation to, at FULL local density (subject to

@@ -54,10 +54,12 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
     Typical flow: construct, call ``grow`` to run the dynamics, then read the per-cell
     ground truth off ``make_cell_data`` and quality-check it with ``diagnose``.
 
-    The constructor takes **either** a single ``config`` YAML path (the usual entry point;
-    see ``notebooks/example_config.yaml``) **or** the individual nested-dict parameter
-    blocks below. Only the top-level blocks are summarised here — every knob, with its
-    default, valid range and effect, is covered in the parameter documentation.
+    The constructor takes either a ``config`` YAML path, the usual entry point (see
+    ``notebooks/example_config.yaml``), or the nested parameter blocks below. Without a config,
+    ``genome_params``, ``selection_params``, ``deme_params`` and ``spatial_params`` must be given
+    as dicts, of which only ``genome_params["n_segments"]`` and ``spatial_params["grid_size"]`` are
+    required keys. Every other key takes its default when it is left out, and the main keys of each
+    block are listed below.
 
     Parameters
     ----------
@@ -70,31 +72,61 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         EVOLUTION seed (default 42): drives the per-run stochastic dynamics and the
         spatial seeding. Two runs differing only in ``seed`` are two patients with the
         same genome landscape but different evolution.
-    genome_params : dict, optional
-        Genome geometry — ``n_segments`` × ``segment_size`` set the gene count
-        (default 5 × 200 = 1000 genes).
-    selection_params : dict, optional
-        The CINner fitness model — driver / dispersal / resistance proportions and
-        effect sizes, viability limits, and the optional ``epistasis_params`` /
-        ``dependency_params`` network layers.
+    genome_params : dict
+        Genome geometry. ``n_segments`` (required) times ``segment_size`` (default 1000) sets the
+        number of genes, and ``segment_sizes`` gives one size per segment instead.
+    selection_params : dict
+        The CINner fitness model and the traits: the proportions of driver and trait genes
+        (``prop_driver``, ``prop_breach``, ``prop_stromal_survival``, ``prop_met_survival``, ...),
+        their effects (``driver_effects``, default 1.1, ``breach_effects``, ...), the cost of each
+        trait (``breach_cost``, ``stromal_survival_cost``, ...), the viability limits, and the
+        optional ``epistasis_params`` / ``dependency_params`` network layers.
     cancer_cell_params : dict, optional
-        Cancer-cell dynamics — ``division_rate``, ``death_rate``, ``mutation_rate``,
-        ``n_snvs_per_allele``, ``snv_prob`` / ``cnv_prob``, ``amp_prob``, ``wgd_rate``.
-    deme_params : dict, optional
-        Per-deme demography — ``initial_cancer_cells``, ``carrying_capacity``,
-        ``maximum_death_rate``, and the crowding law's ``crowding_overfill`` (the slot cap as a
-        multiple of K, default 1.5) and ``crowding_d1`` (the death rate above K, default
-        ``maximum_death_rate``). Crowding is demon's two-valued death step under a structural slot
+        Cancer-cell dynamics: ``division_rate``, ``death_rate``, ``max_birth_rate``,
+        ``mutation_rate``, ``dispersal_rate``, ``n_snvs_per_allele``, ``snv_prob`` / ``cnv_prob``,
+        ``amp_prob`` and ``wgd_rate``, or a breast ``subtype`` preset (``"ER+"`` or ``"TNBC"``) that
+        sets ``cnv_prob``, ``wgd_rate`` and ``mutation_rate``.
+    deme_params : dict
+        Per-deme demography: ``initial_cancer_cells`` (default 1), ``carrying_capacity`` (K,
+        default 10), ``maximum_death_rate`` (default 1.0), ``resident_pressure_ref`` (the reference
+        rate of the resident hazard, default the founder division rate), and the crowding law's
+        ``crowding_overfill`` (the slot cap as a multiple of K, default 1.5) and ``crowding_d1``
+        (the death rate above K, default ``maximum_death_rate``). Crowding is demon's two-valued death step under a structural slot
         cap, and division is demon's invasion rule: a division attempts a mutation with probability
         ``mutation_rate`` and, independently, one of its two daughters disperses with probability
         ``dispersal_rate``. Under ``update_mode="tau"``, ``tau_deaths`` (default ``"binomial"``),
         ``tau_step`` (default ``"cgp"``) and ``tau_epsilon`` (default 0.01) choose the tau-leaping
         scheme (see ``update_mode``).
-    spatial_params : dict, optional
-        Grid and tissue geometry, given as keys of this dict (not as individual
-        constructor arguments): ``grid_size``, ``dispersal_rate``, ``structure_radius`` /
-        ``n_structures`` (glandular substrate), and the optional compartment-selection
-        hazards (``epithelial_barrier``, ``stromal_hazard``).
+    spatial_params : dict
+        The lattice, the tissue and the metastatic site, given as keys of this dict.
+
+        - Lattice: ``grid_size`` (required, the side of the square lattice in demes) and
+          ``immune_density`` (immune cells seeded per deme, as a fraction of K; default 0).
+        - Ductal field: ``structure_radius`` (default 0, no glands), ``n_glands`` (default 1),
+          ``gland_radius`` (default ``structure_radius``), ``min_gland_sep`` (the minimum
+          distance between gland centres), ``stroma_fill_frac`` (stromal cells seeded per stroma
+          deme, as a fraction of its capacity; default 1.0), ``K_duct`` and ``K_stroma`` (the
+          capacities of duct and stroma demes; default ``carrying_capacity``),
+          ``cross_gland_kappa`` (a fraction kappa / (1 + kappa) of the daughters that leave a gland
+          jump to the lumen of another gland; default 0), ``cross_gland_lambda`` (the length of the
+          distance kernel of that jump, in demes; default None, uniform) and
+          ``origin_confinement`` (default None, off). With ``origin_confinement``, a dict of
+          ``dispersal_factor``, ``established_at`` and ``generations``, dispersal out of the
+          founding deme is scaled by ``dispersal_factor`` for ``generations`` generations after the
+          deme reaches the fraction ``established_at`` of its capacity.
+        - Selection by compartment: ``breach_gated_invasion`` (a daughter crosses from a gland
+          into the stroma with a probability equal to the breach level of the clone; default
+          False), ``stromal_hazard`` (sigma, a death hazard sigma * phi_s * (1 - stromal survival)
+          in a deme of stromal fraction phi_s; default 0) and ``epithelial_barrier`` (a death
+          hazard in epithelial demes offset by breach; default 0).
+        - Metastatic site: ``met_grid_size`` (the side of a second lattice; default 0, off),
+          ``K_met``, ``host_fill_frac`` (host cells seeded per deme, as a fraction of ``K_met``;
+          default 1.0), ``met_vessel`` (the vessel deme, the only entry; default the centre),
+          ``met_seed_kappa`` (a fraction kappa_m / (1 + kappa_m) of the daughters that leave a
+          stroma deme of the primary attempt to seed; default 0), ``met_transit_floor`` (f, a
+          seeding cell survives transit with probability f + (1 - f) m, where m is the
+          metastatic-survival level of the clone; default 0) and ``met_hazard`` (h, a death hazard
+          h * phi * (1 - m) in a deme of host fraction phi; default 0).
     epithelial_cell_params, stromal_cell_params, immune_cell_params, host_cell_params : dict, optional
         Seeding parameters for each non-cancer (static) cell type — the tissue
         structure, cell-type labels and local immune density that the cancer death
@@ -1639,14 +1671,17 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
 
     # --- operating-envelope QC (read-only) ------------------------------------
     def diagnose(self, thresholds=None, verbose=False):
-        """Flag degenerate ("crappy") tumour regimes after growth, with actionable hints.
+        """Flag degenerate tumours after growth, each with a hint at the parameter to change.
 
-        Computes phenotype metrics (size, clonal diversity, TMB, clone spatial confinement,
-        fraction-genome-altered, hypoxia core–rim contrast, 1/f fit) and checks each against an
-        overridable threshold: extinct / monoclonal / hypermutated / well-mixed /
-        no-microenvironment-gradient / CNA-runaway / trivial-genome. Returns a ``TumorDiagnosis``.
-        Read-only — it never draws from ``self.rng`` or changes the counts, so it cannot alter
-        simulation output (like the microenvironment ground truth)."""
+        Computes phenotype metrics (size, clonal diversity, mutational burden, spatial confinement
+        of the clones, fraction of the genome altered and the contrast of hypoxia between core and
+        rim) and checks each against a threshold that ``thresholds`` can override, flagging
+        extinct, monoclonal, hypermutated, well-mixed, copy-number runaway and trivial-genome
+        tumours and a missing microenvironment gradient. It also reports the fit of the cumulative
+        allele-frequency spectrum to the 1/f law, which gates nothing. That fit is not a test of
+        neutral growth, which does not apply to ``iscc`` tumours at this genome size, where nearly
+        every gene is mutated in more than one lineage. Returns a ``TumorDiagnosis``. The diagnosis
+        draws no random numbers and changes no counts, so it cannot alter the simulation."""
         from ..diagnostics import diagnose
         return diagnose(self, thresholds=thresholds, verbose=verbose)
 
