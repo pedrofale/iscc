@@ -209,6 +209,9 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
     # Demes whose cells changed since the last reset; recorded by _add/_remove only while a
     # tau_step "cgp_critical" generation runs (None otherwise: no bookkeeping).
     _dirty = None
+    # Per-deme leap rates kept within one tau generation (``_leap_rates``); _add/_remove drop the
+    # entry of a deme whose cells change. None outside a generation: no bookkeeping.
+    _rate_cache = None
 
     def __init__(self, config=None, seed=42, genome_params=None, selection_params=None,
                  cancer_cell_params=None, deme_params=None, spatial_params=None,
@@ -653,6 +656,8 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
     def _add(self, deme_idx, gid, n):
         if self._dirty is not None:
             self._dirty.add(deme_idx)
+        if self._rate_cache is not None:
+            self._rate_cache.pop(deme_idx, None)
         deme = self.demes[deme_idx]
         deme[gid] = deme.get(gid, 0) + n
         self.genotypes_counts[gid] += n
@@ -665,6 +670,8 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
     def _remove(self, deme_idx, gid, n):
         if self._dirty is not None:
             self._dirty.add(deme_idx)
+        if self._rate_cache is not None:
+            self._rate_cache.pop(deme_idx, None)
         deme = self.demes[deme_idx]
         deme[gid] -= n
         if deme[gid] <= 0:
@@ -1260,6 +1267,30 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         if n_fold:
             self._add(di, gid, n_fold)
 
+    def _leap_rates(self, demes):
+        """The channels of a leap over ``demes`` (ascending indices), in the current state: for each
+        non-empty deme ``(di, deme, entry)``, where ``entry[0]`` lists its cancer clones with their
+        rates (``_clone_rates``) and ``entry[1]`` is the deme's own step under the Cao-Gillespie-Petzold
+        rule, filled in by ``_cgp_dt`` (None until then).
+
+        Within a tau generation the entry of a deme is kept in ``_rate_cache`` until its cells change
+        (``_add`` and ``_remove`` drop it). Nothing else the rates read can change before the
+        generation ends (the treatment overrides are set between generations), so the step rule and the
+        leap share one evaluation, and a deme no event touched is not evaluated again."""
+        cache = self._rate_cache
+        out = []
+        for di in demes:
+            deme = self.demes[di]
+            if not deme:
+                continue
+            entry = None if cache is None else cache.get(di)
+            if entry is None:
+                entry = [self._clone_rates(di, deme), None]
+                if cache is not None:
+                    cache[di] = entry
+            out.append((di, deme, entry))
+        return out
+
     def _tau_substep(self, rng, dt, demes=None):
         """One synchronous tau-leap of length `dt`.
 
@@ -1298,12 +1329,9 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         deaths, dispersals, mutants, stayers = [], [], [], []
         mut_disp, swaps = [], []     # mutated births that leave, or whose parent copy leaves
         binomial = self._tau_deaths == "binomial"
-        for di in (self._active_demes() if demes is None else demes):
-            deme = self.demes[di]
-            if not deme:
-                continue
+        for di, deme, (clones, _) in self._leap_rates(self._active_demes() if demes is None else demes):
             esc = self._escape_factor(di)
-            for gid, c, rep, div, death in self._clone_rates(di, deme):
+            for gid, c, rep, div, death in clones:
                 n_div = int(rng.poisson(div * c * dt))
                 if binomial:
                     n_death = int(rng.binomial(c, min(1.0, death * dt)))
@@ -1417,19 +1445,23 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         standard deviation within max(eps c, 1) is
             min(max(eps c, 1) / |mu|, max(eps c, 1)^2 / sigma^2),
         and the step is the minimum over all species. Inflow by dispersal is not credited, which only
-        shortens the step. ``demes`` restricts the species to those demes (default: every active one)."""
+        shortens the step. ``demes`` restricts the species to those demes (default: every active one).
+        The minimum is taken per deme first and kept with the deme's rates (``_leap_rates``), which
+        selects the same value."""
         best = np.inf
-        for di in (self._active_demes() if demes is None else demes):
-            deme = self.demes[di]
-            if not deme:
-                continue
-            for _, c, _, b, d in self._clone_rates(di, deme, by_ord=False):
-                bound = max(eps * c, 1.0)
-                mu, var = abs(b - d) * c, (b + d) * c
-                if mu > 0:
-                    best = min(best, bound / mu)
-                if var > 0:
-                    best = min(best, bound * bound / var)
+        for _, _, entry in self._leap_rates(self._active_demes() if demes is None else demes):
+            step = entry[1]
+            if step is None:
+                step = np.inf
+                for _, c, _, b, d in entry[0]:
+                    bound = max(eps * c, 1.0)
+                    mu, var = abs(b - d) * c, (b + d) * c
+                    if mu > 0:
+                        step = min(step, bound / mu)
+                    if var > 0:
+                        step = min(step, bound * bound / var)
+                entry[1] = step
+            best = min(best, step)
         return best
 
     def _classify_critical(self, di):
@@ -1539,29 +1571,33 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         self._clock = self.step
         reached = (lambda: target_cancer is not None and self.get_cancer_size() >= target_cancer)
         stopped = None                  # the time simulated when the target stopped the generation
-        if self._tau_step == "cgp_critical":
-            elapsed = self._tau_leaps_critical(rng, tau, target_cancer)
-            if reached():
-                stopped = elapsed
-        elif self._tau_step == "cgp":
-            left = tau
-            while left > 1e-12:
-                dt = min(left, self._cgp_dt(self._tau_epsilon))
-                self._tau_substep(rng, dt)
-                self._n_substeps = getattr(self, "_n_substeps", 0) + 1
-                left -= dt
+        self._rate_cache = {}
+        try:
+            if self._tau_step == "cgp_critical":
+                elapsed = self._tau_leaps_critical(rng, tau, target_cancer)
                 if reached():
-                    stopped = tau - left if left > 1e-12 else tau
-                    break
-        else:
-            ACCURACY = 0.34  # keep rate*dt <= this so Poisson tau-leaping stays accurate
-            n_sub = max(1, int(np.ceil(self._max_cell_rate() * tau / ACCURACY)))
-            dt = tau / n_sub
-            for k in range(n_sub):
-                self._tau_substep(rng, dt)
-                if reached():
-                    stopped = (k + 1) * dt if k + 1 < n_sub else tau
-                    break
+                    stopped = elapsed
+            elif self._tau_step == "cgp":
+                left = tau
+                while left > 1e-12:
+                    dt = min(left, self._cgp_dt(self._tau_epsilon))
+                    self._tau_substep(rng, dt)
+                    self._n_substeps = getattr(self, "_n_substeps", 0) + 1
+                    left -= dt
+                    if reached():
+                        stopped = tau - left if left > 1e-12 else tau
+                        break
+            else:
+                ACCURACY = 0.34  # keep rate*dt <= this so Poisson tau-leaping stays accurate
+                n_sub = max(1, int(np.ceil(self._max_cell_rate() * tau / ACCURACY)))
+                dt = tau / n_sub
+                for k in range(n_sub):
+                    self._tau_substep(rng, dt)
+                    if reached():
+                        stopped = (k + 1) * dt if k + 1 < n_sub else tau
+                        break
+        finally:
+            self._rate_cache = None
         partial = stopped is not None and stopped < tau
         # Drug-induced resistance-state entry/exit, once per generation on the settled counts, before
         # the snapshot. Gated: no draw / no genotype minted when the feature is off.
