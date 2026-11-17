@@ -69,7 +69,7 @@ This section is written for a reader who knows CINner's or demon's algorithm; th
 ### The process
 
 The state is, for every deme, the number of cells of each genotype (`GenotypeTumor.demes`, a list of `{genotype id: count}`), over a registry of genotypes shared by all demes (`genotypes`).
-Every cancer clone in every deme has two event channels with per-cell rates: division at `b` and death at `d` (`_div_rate`, `_death_rate` in `count.py`).
+Every cancer clone in every deme has two event channels with per-cell rates: division at `b` and death at `d` (`_rates` in `count.py` forms them for the clones of a deme; `_div_rate` and `_death_rate` give one clone's).
 Mutation and dispersal are not channels of their own: they are outcomes of a division, decided when it fires (demon's invasion rule: `_divide_noble` in the exact mode, `_split_births_noble` in the tau mode, and `_mutate_daughter` for the new genome in both), and a dispersing daughter is routed by `_route_one` (exact) or `_route_births` (tau) in `tissue.py`.
 The rates depend on the clone's genome and on its deme (crowding, the resident and stromal hazards, the compartment), so the population is a continuous-time Markov jump process whose propensities are piecewise constant between events.
 Time is measured in generations, the unit of the rates.
@@ -107,7 +107,7 @@ The step is therefore chosen by a published rule, set by `deme_params["tau_step"
 
 - `"fixed"`, with `tau_deaths="poisson"`: the earlier scheme, which splits each record interval into equal sub-steps bounded by the largest per-cell rate and caps Poisson deaths at the clone size. It is not a leap condition and is biased near `K`; it stays for tumours grown with it, which keep it when pickled and grown further.
 
-Against the exact mode, on small systems: `"cgp_critical"` reproduces a deme at capacity, neutral fixation and 5,000-cell tumours, but in a paper tumour most demes are full, so it costs more than the exact mode; `"cgp"` reproduces neutral fixation and 5,000-cell tumours and holds a full deme about 1% below the exact occupancy, at about five times the cost of the fixed step at ε 0.01.
+Against the exact mode, on small systems: `"cgp_critical"` reproduces a deme at capacity, neutral fixation and 5,000-cell tumours, but in a paper tumour most demes are full, so it costs more than the exact mode; `"cgp"` reproduces neutral fixation and 5,000-cell tumours and holds a full deme about 1% below the exact occupancy, at two to three times the cost of the fixed step at ε 0.01.
 While every clone holds fewer than about 1/ε cells, the rule allows one expected event per leap, so growth from a few founder cells is slower than in the exact mode: from one cell, 8 generations of well-mixed growth end with about 40% fewer cells on average (27 against 45 over 200 seeds; the fixed step, about 24% fewer), with the right extinction probability.
 Once any clone is large, every leap is short and new single-cell mutants are resolved.
 The paper runs the defaults, `"cgp"` at ε 0.01 with binomial deaths, set explicitly in `validation/paper/regime.py`; the critical-channel rule stays available for runs that need exact-quality crowding at a deme and can afford its cost.
@@ -143,7 +143,7 @@ Before growth, `tumor/germline.py` writes the patient's germline variants into e
 
 `tumor/components/selection.py` draws the gene layout once per configuration (from `layout_seed`, so a cohort shares it): which genes are oncogenes and tumour suppressors, and which carry each trait (dispersal, immune resistance, treatment resistance, breach, stromal survival, metastatic survival, drug tolerance).
 The division rate follows CINner's dosage model: each oncogene and suppressor copy contributes a factor relative to the diploid wild type, with the exponent scaled by ploidy, and the product multiplies the baseline division rate, capped at `max_birth_rate` (`update_division_rate`).
-Each trait is a value in [0, 1] computed from the copies and mutations of its genes; each costs a fraction of division wherever it is carried and pays off only in its compartment (`proliferation_cost`, and the hazards in `_death_rate`).
+Each trait is a value in [0, 1] computed from the copies and mutations of its genes; each costs a fraction of division wherever it is carried and pays off only in its compartment (`proliferation_cost`, and the hazards in `_rates`).
 `selection_mode="arm"` replaces the gene model with per-arm copy-number fitness (the real-genome mode, `inference/genome.py`, `inference/realgenome.py`).
 An optional epistasis network (`tumor/components/epistasis.py`) adds pairwise interactions and dependency gating between planted events.
 
