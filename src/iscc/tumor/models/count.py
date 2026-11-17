@@ -212,6 +212,8 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
     # Per-deme leap rates kept within one tau generation (``_leap_rates``); _add/_remove drop the
     # entry of a deme whose cells change. None outside a generation: no bookkeeping.
     _rate_cache = None
+    # Per-genotype death-law factors (``_death_terms``) kept while an engine runs; None otherwise.
+    _clone_terms = None
 
     def __init__(self, config=None, seed=42, genome_params=None, selection_params=None,
                  cancer_cell_params=None, deme_params=None, spatial_params=None,
@@ -726,12 +728,12 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         ``(total, n_normal, n_immune, n_epithelial, n_stromal, n_host)``, so one composition scan
         serves every clone of the deme. The factors every clone of the deme shares (the crowding
         step, the resident share, each hazard coefficient times its compartment fraction) are formed
-        once, in the order the per-clone expression multiplies them, and the treatment overrides are
-        consulted only while a treatment is active."""
+        once, and so are each clone's own factors (``_death_terms``; kept per genotype within a tau
+        generation), in the order the per-clone expression multiplies them. The treatment overrides
+        are consulted only while a treatment is active."""
         total, n_normal, n_immune, n_epi, n_stro, n_host = comp
         crowding = self._crowding
         if crowding:
-            steep = 1.0 + self.crowding_margin
             # Per-deme carrying capacity: duct demes cap at K_duct, stroma at K_stroma, otherwise the
             # scalar carrying_capacity.
             K = self.carrying_capacity if self._deme_capacity is None else self._deme_capacity[deme_idx]
@@ -747,7 +749,7 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
             # immortal normal cells add death at the fixed reference rate `_resident_ref`; it carries
             # no `div` either.
             resident = n_normal / K if n_normal else None
-        ref, max_death = self._resident_ref, self.maximum_death_rate
+        max_death = self.maximum_death_rate
         immune = self._immune_prob_kill * (n_immune / total if total else 0.0)
         # Compartment-dependent selection: each resident compartment adds a local hazard,
         # attenuated by the clone's matching heritable trait — the exact shape of the immune term.
@@ -765,31 +767,38 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         # return the untreated values, so they are skipped.
         treated = (bool(self._tx_treatment is not None or self._tx_death_add or self._tx_immune_resist)
                    and self._tx_applies(deme_idx))
+        kept = None if treated else self._clone_terms
         rates = []
         for gid, rep in clones:
-            ep = rep.evolutionary_parameters
-            base = ep["death_rate"]
+            if treated:
+                # Immune resistance may be transiently stripped by immunotherapy; that override is
+                # gated to the treated compartment(s), so an untreated site keeps the clone's
+                # baseline resistance.
+                terms = self._death_terms(rep, self._tx_immune_resist_for(
+                    gid, rep, rep.evolutionary_parameters["immune_resistance"]))
+            else:
+                terms = None if kept is None else kept.get(gid)
+                if terms is None:
+                    terms = self._death_terms(rep, rep.evolutionary_parameters["immune_resistance"])
+                    if kept is not None:
+                        kept[gid] = terms
+            base, slope, immune_open, wall_open, stroma_open, host_open = terms
             if crowding:
-                death = base if d1 is None else max(base, d1)
+                death = base if d1 is None or base >= d1 else d1          # max(base, d1)
                 if resident is not None:
-                    death += max(0.0, ref - base) * steep * resident
+                    death += slope * resident
             else:
                 # well-mixed regime (carrying_capacity None/0): no crowding ceiling -> unbounded growth.
                 death = base
-            death = min(death, max_death)
-            # Immune resistance may be transiently stripped by immunotherapy; that override is gated
-            # to the treated compartment(s), so an untreated site keeps the clone's baseline resistance.
-            ir = ep["immune_resistance"]
-            if treated:
-                ir = self._tx_immune_resist_for(gid, rep, ir)
-            ir = min(max(ir, 0.0), 1.0)
-            death += immune * (1.0 - ir)
+            if death > max_death:
+                death = max_death
+            death += immune * immune_open
             if epithelial is not None:
-                death += epithelial * (1.0 - min(max(ep["breach"], 0.0), 1.0))
+                death += epithelial * wall_open
             if stromal is not None:
-                death += stromal * (1.0 - min(max(ep["stromal_survival"], 0.0), 1.0))
+                death += stromal * stroma_open
             if host is not None:
-                death += host * (1.0 - min(max(ep["met_survival"], 0.0), 1.0))
+                death += host * host_open
             # Chemo/targeted death hazard. A genotype minted mid-step is absent from _tx_death_add
             # (frozen by this step's _apply_treatment); _tx_death_add_for computes and memoises its
             # hazard on demand rather than letting a bare `.get(..., 0.0)` grant it a drug-free step.
@@ -798,21 +807,36 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
             rates.append(death)
         return rates
 
+    def _death_terms(self, rep, ir):
+        """A clone's own factors in the death law (``_death_rates``): its baseline death rate d0, the
+        resident-pressure slope ``max(0, resident_ref - d0) * (1 + crowding_margin)``, and one minus
+        each trait that attenuates a hazard: the immune resistance ``ir`` and the breach,
+        stromal-survival and met-survival traits, each clamped to [0, 1] (None for a hazard that is
+        off). A registered genotype's parameters do not change while the engines run, so a tau
+        generation, or an exact-engine ``grow`` between treatment steps, keeps them in
+        ``_clone_terms`` (a clone under an active treatment takes fresh ones)."""
+        ep = rep.evolutionary_parameters
+        base = ep["death_rate"]
+        return (base,
+                max(0.0, self._resident_ref - base) * (1.0 + self.crowding_margin),
+                1.0 - min(max(ir, 0.0), 1.0),
+                1.0 - min(max(ep["breach"], 0.0), 1.0) if self._epithelial_barrier else None,
+                1.0 - min(max(ep["stromal_survival"], 0.0), 1.0) if self._stromal_hazard else None,
+                1.0 - min(max(ep["met_survival"], 0.0), 1.0) if self._met_hazard else None)
+
     def _clone_rates(self, deme_idx, deme, by_ord=True):
         """The cancer clones of a deme with their rates, from one composition scan: a list of
         ``(gid, count, rep, division, death)``, in creation order (``by_ord``, the order every
         engine draws in) or in the deme's own order."""
-        G = self.genotypes
-        gids = []
-        comp = self._deme_comp(deme, gids)
+        clones = []
+        comp = self._deme_comp(deme, clones)
         if by_ord:
-            gids.sort(key=lambda g: G[g].ord)
-        clones = [(gid, G[gid]) for gid in gids]
+            clones.sort(key=lambda clone: clone[1].ord)
         deaths = self._death_rates(deme_idx, comp, clones)
-        dose_div = bool(self._tx_div_mult)
-        return [(gid, deme[gid], rep,
-                 self._div_rate(gid, deme_idx, rep) if dose_div
-                 else rep.evolutionary_parameters["division_rate"], death)
+        if self._tx_div_mult:
+            return [(gid, deme[gid], rep, self._div_rate(gid, deme_idx, rep), death)
+                    for (gid, rep), death in zip(clones, deaths)]
+        return [(gid, deme[gid], rep, rep.evolutionary_parameters["division_rate"], death)
                 for (gid, rep), death in zip(clones, deaths)]
 
     def _cancer_gids(self, deme):
@@ -1110,25 +1134,32 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         self._spatial_snapshot()
         prev_dose = 0.0
         done = n_steps
-        for local_step in range(n_steps - 1):
-            if target_cancer is not None and self._cancer_count() >= target_cancer:
-                done = local_step
-                break
-            self._clock = self.step + local_step
-            rng = self._run_rng(seed, self.step + local_step, _STREAM_GROW)
-            if treatment is not None:
-                treatment.discrete_event(self, self.step + local_step)  # e.g. surgical resection
-                dose = treatment.get_dosage(self.step + local_step, self.get_tumor_size())
-                self._apply_treatment(treatment, dose)
-                # death rates changed for every genotype while a dose is on (or just turned
-                # off); refresh the whole rate vector so event sampling stays correct.
-                if dose > 0 or prev_dose > 0:
-                    self.deme_rates = np.array(
-                        [self._deme_rate(i) for i in range(len(self.demes))], dtype=float)
-                prev_dose = dose
-            self.update(rng)
-            self.traces.append(self._trace_snapshot())
-            self._spatial_snapshot()
+        # The clones' death-law factors are kept across events (``_death_terms``), and dropped
+        # whenever a treatment step could have touched the tumour.
+        self._clone_terms = {}
+        try:
+            for local_step in range(n_steps - 1):
+                if target_cancer is not None and self._cancer_count() >= target_cancer:
+                    done = local_step
+                    break
+                self._clock = self.step + local_step
+                rng = self._run_rng(seed, self.step + local_step, _STREAM_GROW)
+                if treatment is not None:
+                    self._clone_terms = {}
+                    treatment.discrete_event(self, self.step + local_step)  # e.g. surgical resection
+                    dose = treatment.get_dosage(self.step + local_step, self.get_tumor_size())
+                    self._apply_treatment(treatment, dose)
+                    # death rates changed for every genotype while a dose is on (or just turned
+                    # off); refresh the whole rate vector so event sampling stays correct.
+                    if dose > 0 or prev_dose > 0:
+                        self.deme_rates = np.array(
+                            [self._deme_rate(i) for i in range(len(self.demes))], dtype=float)
+                    prev_dose = dose
+                self.update(rng)
+                self.traces.append(self._trace_snapshot())
+                self._spatial_snapshot()
+        finally:
+            self._clone_terms = None
         self.step += done
         self._clock = self.step
         if materialize:
@@ -1581,7 +1612,7 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         self._clock = self.step
         reached = (lambda: target_cancer is not None and self._cancer_count() >= target_cancer)
         stopped = None                  # the time simulated when the target stopped the generation
-        self._rate_cache = {}
+        self._rate_cache, self._clone_terms = {}, {}
         try:
             if self._tau_step == "cgp_critical":
                 elapsed = self._tau_leaps_critical(rng, tau, target_cancer)
@@ -1607,7 +1638,7 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
                         stopped = (k + 1) * dt if k + 1 < n_sub else tau
                         break
         finally:
-            self._rate_cache = None
+            self._rate_cache = self._clone_terms = None
         partial = stopped is not None and stopped < tau
         # Drug-induced resistance-state entry/exit, once per generation on the settled counts, before
         # the snapshot. Gated: no draw / no genotype minted when the feature is off.
