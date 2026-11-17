@@ -30,8 +30,8 @@ the autocorrelation amplitude ``a`` at zero lag) and a NON-SPATIAL nugget (the i
 This is exactly what separates the spatial technical layer from the per-spot depth noise — the
 spatial analogue of the scRNA estimator's library-size de-biasing of the dispersion.
 
-The ``_PRIOR_ONLY`` escape (as in ``estimate_rna``/``estimate_dna``) carries the genuinely
-unidentifiable-from-one-section fields honestly: ``ambient_frac`` (needs off-tissue/background
+The ``_PRIOR_ONLY`` escape (as in ``estimate_rna``/``estimate_dna``) carries the fields
+that one section cannot identify from the preset: ``ambient_frac`` (needs off-tissue/background
 spots), ``edge_sigma`` and ``diffusion_sigma`` (confounded with biology in a single section), and
 ``sigma_batch`` on single-section data (the per-gene factor is constant within a section, so it is
 confounded with the true expression — identifiable only across >=2 sections, exactly as the scRNA
@@ -71,7 +71,7 @@ class VisiumEstimate:
     ``hypers`` is a ``VisiumBatchHyperParams`` with the fitted magnitudes; ``visium_kwargs()``
     returns the hyper fields (minus ``count_model``, an explicit assay constructor arg) as a kwargs
     dict, so the fit splats straight back into the assay without redefinition. ``fitted`` lists the
-    fields actually learned; everything else is carried from the preset and flagged honestly.
+    fields actually learned, and everything else is carried from the preset and flagged as such.
     ``spots_per_tissue`` / ``occupied_fraction`` are spatial-extent diagnostics (not hyper fields).
     """
     hypers: VisiumBatchHyperParams
@@ -218,7 +218,7 @@ def _fit_count_overdispersion(counts, count_model):
       * NB: ``phi = <((y-mu)^2 - mu)/mu^2>`` (NB method-of-moments), median over spots.
 
     The section-mean composition stands in for the per-spot expectation; biological heterogeneity
-    inflates it, so this is an *effective* overdispersion, reported honestly.
+    inflates it, so this is an *effective* overdispersion, reported as such.
     """
     total = counts.sum(axis=1)
     occ = total > 0

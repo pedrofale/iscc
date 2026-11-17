@@ -678,7 +678,7 @@ class DNABatchHyperParams:
     gc_curve_sigma : float
         Per-batch GC->coverage curve strength (the GC bias a panel-of-normals fits).
     mappability_sigma : float
-        Unused placeholder kept for symmetry with the genome mappability field.
+        Not used by the DNA assay.
     capture_sigma : float
         Per-target (WES) / per-amplicon (panel) capture-efficiency LogNormal sd.
     error_rate : float
