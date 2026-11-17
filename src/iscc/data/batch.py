@@ -655,7 +655,7 @@ class DNABatchHyperParams:
     allele layer (sequencing error, single-cell ADO, beta-binomial overdispersion,
     doublets, FFPE C>T). The [`scDNA`][iscc.data.scDNA] / [`bulkDNA`][iscc.data.bulkDNA]
     assays build one and let you override any field, and
-    [`estimate_dna`][iscc.data.estimate_dna] fits these same parameters from real data.
+    [`estimate_dna`][iscc.data.estimate_dna.estimate_dna] fits these same parameters from real data.
 
     Attributes
     ----------
@@ -672,7 +672,7 @@ class DNABatchHyperParams:
         about ``n_loci / kappa``, so a ``kappa`` fitted on one locus count gives a different
         coverage spread on another. When set, the depth draw rescales ``kappa`` to its own locus
         count (``kappa * n_loci / kappa_loci``), so a fit transfers. ``None`` (the default) uses
-        ``kappa`` as given. [`estimate_dna`][iscc.data.estimate_dna] sets it.
+        ``kappa`` as given. [`estimate_dna`][iscc.data.estimate_dna.estimate_dna] sets it.
     nb_dispersion : float
         NB per-bin overdispersion phi (only for depth_model="nb").
     gc_curve_sigma : float
@@ -860,7 +860,7 @@ class VisiumBatchHyperParams:
     capture-efficiency field (lengthscale, strength, tissue-edge falloff), lateral mRNA
     diffusion, and the shared per-gene batch factor / ambient soup / pluggable count
     model. The [`Visium`][iscc.data.Visium] assay builds one and lets you override any
-    field, and [`estimate_visium`][iscc.data.estimate_visium] fits these same parameters
+    field, and [`estimate_visium`][iscc.data.estimate_visium.estimate_visium] fits these same parameters
     from real data.
 
     Attributes

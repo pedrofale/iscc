@@ -91,10 +91,10 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         default 10), ``maximum_death_rate`` (default 1.0), ``resident_pressure_ref`` (the reference
         rate of the resident hazard, default the founder division rate), and the crowding law's
         ``crowding_overfill`` (the slot cap as a multiple of K, default 1.5) and ``crowding_d1``
-        (the death rate above K, default ``maximum_death_rate``). Crowding is demon's two-valued death step under a structural slot
-        cap, and division is demon's invasion rule: a division attempts a mutation with probability
-        ``mutation_rate`` and, independently, one of its two daughters disperses with probability
-        ``dispersal_rate``. Under ``update_mode="tau"``, ``tau_deaths`` (default ``"binomial"``),
+        (the death rate above K, default ``maximum_death_rate``). Crowding is demon's two-valued
+        death step under a structural slot cap, and division is demon's invasion rule: a division
+        attempts a mutation with probability ``mutation_rate`` and, independently, one of its two
+        daughters disperses with probability ``dispersal_rate``. Under ``update_mode="tau"``, ``tau_deaths`` (default ``"binomial"``),
         ``tau_step`` (default ``"cgp"``) and ``tau_epsilon`` (default 0.01) choose the tau-leaping
         scheme (see ``update_mode``).
     spatial_params : dict

@@ -653,7 +653,7 @@ def estimate_visium_from_assay(assay, *, section_labels=None):
     """Fit from a *run* ``Visium`` instance (extracts per-spot counts + coords + occupancy).
 
     The synthetic recovery convenience: pulls the spot count matrix, the spot coordinates, and the
-    on-tissue fraction straight from the run assay, then defers to [`estimate_visium`][iscc.data.estimate_visium].
+    on-tissue fraction straight from the run assay, then defers to [`estimate_visium`][iscc.data.estimate_visium.estimate_visium].
     """
     counts = assay.spot_counts.values
     coords = assay.spot_coords
