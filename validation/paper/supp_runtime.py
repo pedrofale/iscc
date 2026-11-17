@@ -43,10 +43,7 @@ RES = os.path.join(HERE, "comparisons", "results")
 SIM = {"iscc": S.SOURCE["iscc"], "demon": "#E69F00", "OncoSpot": "#D55E00", "stCNASim": "#56B4E9",
        "CINner": "#009E73", "SISTEM": "#CC79A7"}
 MARKER = {"stCNASim": "s", "demon": "D"}
-LABEL = {"iscc": "iscc: grow, resect, section, Visium", "demon": "demon: grow (drivers only)",
-         "OncoSpot": "OncoSpot: end to end",
-         "stCNASim": "stCNASim: spots, counts, reads",
-         "CINner": "CINner: grow, sample, phylogeny", "SISTEM": "SISTEM: grow, sample, read counts"}
+LABEL = {tool: tool for tool in SIM}
 ISCC_VARIANT = "v4"
 
 
@@ -80,7 +77,7 @@ def main():
             if col == "wall_s" and len(lb):
                 ax.plot(lb.index, lb.values, ls="none", marker="^", ms=4, mfc="white", mec=colour)
                 bounds.append(Line2D([], [], ls="none", marker="^", ms=4, mfc="white", mec=colour,
-                                     label=f"{tool}: cancelled unfinished, at least this long"))
+                                     label=f"{tool}, cancelled unfinished"))
         ax.set_xscale("log")
         ax.set_yscale("log")
         sizes = sorted(df.n_cancer.unique())
@@ -92,9 +89,6 @@ def main():
     # one legend for both panels, below them, so that it covers no series
     fig.legend(handles=handles + bounds, loc="upper left", bbox_to_anchor=(14 / 183, 1 - 55 / 72), ncol=4,
                fontsize=5.5)
-    S.text_mm(fig, 14, 70, "Median and range of three runs per size, each tool's whole run on one core. "
-              "The runs do different work (after each tool's name),\nso the panels compare what a run "
-              "costs, not speed at equal work.", fontsize=5.5, color=S.GREY, va="bottom")
     S.panel_letter(fig, "a", 2, 2)
     S.panel_letter(fig, "b", 92, 2)
     S.save(fig, "supp_runtime", stamp=False)

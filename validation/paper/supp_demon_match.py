@@ -46,14 +46,14 @@ ISCC, REALISED = S.SOURCE["iscc"], "#9DB7E0"
 LS = {"gillespie": "-", "exact": (0, (2.5, 1.2)), "tau": "-"}
 # Each row's series: (model, engine, condition in the results, label, colour).
 ROWS = {
-    "neutral (s = 0)": [("demon", "gillespie", "neutral", "demon", DEMON),
-                        ("iscc", "exact", "neutral", "iscc exact", ISCC),
-                        ("iscc", "tau", "neutral", "iscc τ-leap", ISCC)],
-    "selection (s = 0.1)": [("demon", "gillespie", "selection", "demon", DEMON),
-                            ("iscc", "exact", "selection", "iscc exact", ISCC),
-                            ("iscc", "tau", "selection", "iscc τ-leap", ISCC),
-                            ("iscc", "exact", "realised", "exact, s = 0.2", REALISED),
-                            ("iscc", "tau", "realised", "τ-leap, s = 0.2", REALISED)],
+    "neutral": [("demon", "gillespie", "neutral", "demon", DEMON),
+                ("iscc", "exact", "neutral", "iscc exact", ISCC),
+                ("iscc", "tau", "neutral", "iscc τ-leap", ISCC)],
+    "selection": [("demon", "gillespie", "selection", "demon", DEMON),
+                  ("iscc", "exact", "selection", "iscc exact", ISCC),
+                  ("iscc", "tau", "selection", "iscc τ-leap", ISCC),
+                  ("iscc", "exact", "realised", "exact, s = 0.2", REALISED),
+                  ("iscc", "tau", "realised", "τ-leap, s = 0.2", REALISED)],
 }
 TERR = [("demon", "gillespie", "demon", DEMON), ("iscc", "exact", "iscc exact", ISCC),
         ("iscc", "tau", "iscc τ-leap", ISCC)]
@@ -124,15 +124,15 @@ def main():
             ax.set_xlim(-0.6, len(series) - 0.4)
             ax.set_xticks(range(len(series)))
             ax.set_xticklabels([s[3] for s in series], rotation=90)
-            ax.set_title(ind)
+            ax.set_title({"J1": "$J_1$"}.get(ind, ind))
         if row == 0:
             for letter, x in zip("abcd", (x0, x0 + w + gap, x0 + 2 * (w + gap), xi)):
                 S.panel_letter(fig, letter, x - 9, 2)
 
     # --- row 3: territories against dispersal ----------------------------------------------------
     y = 114
-    S.text_mm(fig, x0, y - 1, "clonal territories against dispersal (neutral marks at 2e-2 per "
-              "division, 20,000 cancer cells)", fontsize=6.5, va="bottom", fontweight="bold")
+    S.text_mm(fig, x0, y - 1, "clonal territories against dispersal", fontsize=6.5, va="bottom",
+              fontweight="bold")
     terr = runs[np.isclose(runs.mu, MU_TERR) & (runs.cond == "neutral")].copy()
     terr["score"] = terr.assortment / terr.assortment_expected
     disps = sorted(terr.migration.unique())
@@ -169,21 +169,13 @@ def main():
             ax.set_xticks(disps)
             ax.set_xticklabels([f"{d:g}" for d in disps])
         ax.minorticks_off()
-    f.set_ylabel("same-clone neighbours\nover random placement")
+    f.set_ylabel("same-clone neighbors\nover random placement")
     g.set_ylabel("clones above 4% of cells")
     f.legend(loc="upper right", handlelength=1.8)
     if len(terr):
-        S.stat(g, f"mean ± sd, {terr.groupby(['model', 'engine', 'migration']).size().min()} seeds",
-               "upper right")
+        S.stat(g, "mean ± sd", "upper right")
     S.panel_letter(fig, "f", 64, y + 2)
     S.panel_letter(fig, "g", 122, y + 2)
-    S.text_mm(fig, 3, 179, "Matched: K = 16, demon's death step above K (d1 = 100; the paper's tumours use 5), "
-              "invasion at 0.1 per division, one founding cell, no tissue.\n"
-              "Not matched: iscc mutates one daughter (the rate of new drivers per division is matched), its "
-              "24,000 driver sites are finite, its driver effect is fixed\nwhere demon's is drawn "
-              "(1 + s·Exp(1)), and its lattice is fixed (81 × 81, reflecting edges, never reached) where "
-              "demon's grows with the tumour.\nMaps: seed 1 of each sweep; clone colours by size rank within "
-              "a map, grey above every clone.", fontsize=5.5, color=S.GREY, va="bottom")
     S.save(fig, "supp_demon_match", stamp=False)
 
 
