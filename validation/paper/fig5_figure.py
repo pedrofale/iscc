@@ -4,9 +4,8 @@ Draws ``figures/paper1/fig5_cohort.pdf`` (through ``validation/_paths.py``; ``IS
 the paper checkout) from the summaries :mod:`fig5_atlas` writes under ``$ISCC_FIG5_OUT`` (or
 ``--out``), and from nothing else: ``collect_summary.json`` (panels a, d, e) and
 ``integrate/level_<L>.json`` (panels b, c). A panel whose summaries are missing is drawn as a
-placeholder that says so. Registered design and expectations: vault note exp-paper1-fig5-cohort,
-"Amendment, 2026-11-16 evening: one atlas-scale cohort". (The earlier design's figure, from
-``fig5_cohort.py``'s summaries, is in this file's history at 38937d4.)
+placeholder that says so. The design and its expectations were registered before the run. (The
+earlier design's figure, from ``fig5_cohort.py``'s summaries, is in this file's history at 38937d4.)
 
 a. The cohort and the planted network: 50 patients over one shared landscape, each grown to its own
    size; their dissociated cells pooled two ways (one batch per patient; patients spread over 50

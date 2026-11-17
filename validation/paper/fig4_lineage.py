@@ -142,7 +142,7 @@ def panel(out):
 
 def _stalled(run, task):
     """A tumour whose registry record says it never reached its target size (it stalled, in the glands for
-    the R1 seeds at about 11,200 cells; vault question 0f)."""
+    the R1 seeds at about 11,200 cells)."""
     p = os.path.splitext(REG.task_path(run, task))[0] + ".json"
     try:
         with open(p) as fh:

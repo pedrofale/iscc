@@ -40,11 +40,11 @@ OUT = os.path.join(os.environ.get("ISCC_PAPER_OUT") or os.path.join(REPO, "analy
 T = RG.T
 SEEDS = list(range(1, T["seeds"] + 1))
 # The dispersal sweep. Under demon's division rule `dispersal_rate` is a per-division probability, so
-# the sweep stays within (0, 1]; the old 2.0 and 4.0 arms ran at the cap of 1 (vault:
-# decision-noble-division-law). 0.9 is the paper regime's own value. The low end is 0.05, not 0.03: at
-# 0.03 two of five preview seeds never left the founding duct in 1,500 generations (Pedro, 2026-11-13).
+# the sweep stays within (0, 1]; the old 2.0 and 4.0 arms ran at the cap of 1. 0.9 is the paper
+# regime's own value. The low end is 0.05, not 0.03: at 0.03 two of five preview seeds never left the
+# founding duct in 1,500 generations.
 R1_DISPERSAL = (0.05, 0.1, 0.3, 0.6, 0.9)
-R5_WGD = (0.0, 0.002, 0.005, 0.01, 0.02)     # brackets the paper's 0.01 (vault: decision-paper-regime-v3)
+R5_WGD = (0.0, 0.002, 0.005, 0.01, 0.02)     # brackets the paper's 0.01
 SWEEP, SHOW = T["sweep_scale"], T["showcase_scale"]
 
 
@@ -129,7 +129,7 @@ def _runs():
     # regime's; the copy-number events per division are scaled by 39/12, with the SNV and WGD events per
     # division held fixed (cnv_prob is a weight against snv_prob inside a mutating division, mutation_rate
     # the chance a division mutates at all, wgd_rate per mutating division). Calibrated on three to five
-    # seeds per design (vault: exp-r11-arm-calibration). The designs are R0 seed1 and R1 at dispersal 0.9
+    # seeds per design. The designs are R0 seed1 and R1 at dispersal 0.9
     # and 0.1; at 0.1, seed 1 is swept by a genome doubling on this genome, so seed 2 is grown beside it.
     from iscc.data.human import arm_genome
     ag = arm_genome(total_genes=6000, driver_scale=0.4)
@@ -137,7 +137,7 @@ def _runs():
     p = 0.045 / (0.045 + 0.5)                      # the ER+ preset's copy-number share of a mutating division
     k = 1.0 - p + f * p
     # wgd_rate follows the regime's (0.005, about 0.0042 here), so a duplication per division stays the
-    # regime's (vault: decision-paper-regime-wgd-rate); it was 0.001 / k before the regime moved to 0.005.
+    # regime's; it was 0.001 / k before the regime moved to 0.005.
     arm_rates = {"cnv_prob": 0.045 * f, "mutation_rate": RG.CANCER["mutation_rate"] * k,
                  "wgd_rate": RG.CANCER["wgd_rate"] / k}
     arm = dict(genome=ag["genome_params"], selection=ag["selection_params"])
@@ -229,8 +229,7 @@ def load(run, task):
     if hyp is not None:
         hyp.update(RG.O2)
     # Two more readout settings that can post-date a stored tumour: chunked materialisation of the
-    # program multiplier, and the bound on a program's log-fold (vault: decision-chunked-materialisation,
-    # decision-program-log-fold-bound). Neither touches growth, so they apply without regrowing; on code
+    # program multiplier, and the bound on a program's log-fold. Neither touches growth, so they apply without regrowing; on code
     # that predates them the attributes are simply unused.
     if not hasattr(t, "low_memory"):
         t.low_memory = True
@@ -242,7 +241,7 @@ def load(run, task):
 
 def _apply_dosage(t):
     """Give a stored tumour the regime's per-gene dosage (``regime.DOSAGE``, calibrated on TCGA breast
-    tumours; vault: decision-dosage-total-law). Dosage is a readout drawn from its own sub-stream of the
+    tumours). Dosage is a readout drawn from its own sub-stream of the
     layout seed when the program model is built, so a fresh model with the regime's settings carries
     exactly the dosage a tumour grown today would; only its sensitivities and law are copied over, and
     the rest of the stored program model is kept."""

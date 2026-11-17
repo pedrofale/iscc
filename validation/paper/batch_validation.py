@@ -1,9 +1,7 @@
 """Fig 5's batch panel: ``iscc``'s batch effects against a real technical-replicate contrast and
 against Splatter's batch model.
 
-Registered in exp-paper1-fig5-cohort, "Amendment, 2026-11-16 night", section "The new panel", with
-its "Clarifications before any run (2026-11-17)"; the model is
-decision-scrna-batches-from-technical-sources. Every fit it uses, the cell types included, was made
+The panel and the batch model were registered before any run. Every fit it uses, the cell types included, was made
 beforehand by ``batch_fits.py`` and is read from fits.json (its SHA-256 is recorded); nothing here is
 fitted to a statistic except Splatter's two tuned parameters, as registered. It refuses to run while a
 run's ambient fraction needs the registered range and fits.json does not carry it.

@@ -1,8 +1,7 @@
 """Fig 5's scRNA batch model: each batch's technical parameters fitted to real data.
 
-Registered in the vault note exp-paper1-fig5-cohort, section "Amendment, 2026-11-16 night: batches
-from named technical sources, and a panel validating them", with its "Clarifications before any run
-(2026-11-17)"; the model choice is decision-scrna-batches-from-technical-sources. This script makes
+The design, batches from named technical sources and a panel validating them, was registered before
+any run. This script makes
 every fit ONCE and writes them to one summary file, before any statistic of the validation panel
 (``batch_validation.py``) or any integration is computed::
 
@@ -11,7 +10,7 @@ every fit ONCE and writes them to one summary file, before any statistic of the 
         --ding-dir $D/realdata/GSE132044 --pbmcsca-meta $D/realdata/pbmcsca/pbmcsca_meta.tsv.gz \\
         --orthology-dir $D/realdata/orthology --work $SNIC_TMP/fits
     PYTHONPATH=src python validation/paper/batch_fits.py set-ambient-range --fits $D/batchval/fits.json \\
-        --low 0.03 --high 0.11 --source "..." --registered "vault <commit>"
+        --low 0.03 --high 0.11 --source "..." --registered "<where the range was registered>"
 
 The archives are extracted into ``--work`` (node-local scratch) and deleted with it. The pbmcsca
 metadata TSV is made by ``tools/pbmcsca_meta.R``.
@@ -43,7 +42,7 @@ greater than 200 and 250, respectively, and a mitochondrial percentage less than
   doi:10.1093/gigascience/giaa151): genes specific to one other cell type, counted in the T cells,
   are soup (:func:`ambient_estimate`, fixed before the fit). Each tumour by itself; a tumour whose
   estimate is not identifiable takes a value drawn per seed (per batch in the cohort) from the range
-  in fits.json's ``ambient_range``, set by ``set-ambient-range``. The registered range (vault bc210df)
+  in fits.json's ``ambient_range``, set by ``set-ambient-range``. The registered range
   is the soup share rho uniform on [0.03, 0.11], from Janssen et al. 2023 (Genome Biol 24:140,
   doi:10.1186/s13059-023-02978-x; Results, "Background noise fractions differ between replicates and
   cells", Fig. 2A, PMC10278251): in their scRNA-seq of dissociated tissue, replicate 3's cells mostly
@@ -63,7 +62,7 @@ greater than 200 and 250, respectively, and a mitochondrial percentage less than
 in two 10x Chromium v2 runs, A (5,172 cells) and B (3,057 cells), every cell of both. Cell types
 (:func:`transfer_labels`): the authors' annotation (``CellType`` of the Single Cell Portal study
 SCP424's metadata, as packaged in SeuratData's pbmcsca 3.0.0, CC BY 4.0) where it exists; every other
-cell (and any the authors marked "Unassigned", registered in vault bc210df) takes the majority label
+cell (and any the authors marked "Unassigned", as registered) takes the majority label
 of its 15 nearest labelled
 cells on 50 principal components of the pooled counts, normalised to the median library size and
 log-transformed; the leave-one-out accuracy of that rule on the labelled cells is recorded. The fits
@@ -71,7 +70,7 @@ per run "by type" (:func:`ding_fits`, :func:`combine_by_type`): ``estimate_rna``
 within each cell type, and the ambient attempt in each type's cells against the other types'
 markers; one vector per run, the cell-weighted mean over types of ``mu_lib``, ``sigma_lib``,
 dispersion and the ambient fraction (a run's ambient fraction counts only when the types whose
-estimate is identifiable hold more than half its cells, registered in vault bc210df); dropout only
+estimate is identifiable hold more than half its cells, as registered); dropout only
 when types holding more than half the run's cells have a fitted midpoint above 0, then the
 cell-weighted mean of those types' midpoints and shapes.
 No dissociation (blood).

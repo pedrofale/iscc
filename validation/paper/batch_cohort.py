@@ -1,7 +1,6 @@
 """Fig 5's cohort scRNA at the registered batch levels, on top of ``fig5_atlas.py``'s cells.
 
-Registered in exp-paper1-fig5-cohort, "Amendment, 2026-11-16 night" (the batch model and the levels
-of panels b-c) and its "Clarifications before any run (2026-11-17)". ``fig5_atlas.py`` is not
+The batch model and the levels of panels b-c were registered before any run. ``fig5_atlas.py`` is not
 changed here; this module supplies the two pieces its cells and integrate steps need:
 
     dissociation-file --out <json>

@@ -37,49 +37,46 @@ T = TIERS[TIER]
 # genes (~12 breach genes); at today's 6,000 genes it is 120, and one heterozygous hit gives a 64%
 # chance of crossing the wall per attempt (breach_effects 2.8). Breach then arises within a couple of
 # generations inside the founding acinus and the tumour invades as soon as the acinus opens: there is
-# no in-situ phase to speak of (measured on the small field, paper1 probe, 2026-10-31). The values
+# no in-situ phase to speak of (measured on the small field). The values
 # below restore the intended target size (12 breach genes) and make a single hit a weak advantage at
 # the wall (a 1% crossing chance per attempt). Measured over 3 seeds on the small field: breach
 # carriers are ~0% when the acinus opens (the early breach clones are purged by their cost instead
 # of fixing), and every first stromal invasion is by breach-carrying cells. The in-situ phase is still
 # short at this scale (10-55 generations from release to invasion).
-# Stromal survival is selected where it pays (vault: decision-stromal-survival-selected,
-# exp-stromal-survival-selection): its proliferation cost is 0.05 (the tutorial's 0.6 cost a third of
+# Stromal survival is selected where it pays: its proliferation cost is 0.05 (the tutorial's 0.6 cost a third of
 # the division rate for one hit, far more than it saved in the stroma, so it was never selected), one
 # hit protects more (effect 4.0, level 0.75, against 2.2 and 0.545), and the stromal hazard it offsets
 # is 0.9 (STROMA below). Its target stays 0.2% of genes: at three times that the trait, nearly neutral
 # at this cost, spreads in every tumour whether or not the stroma selects it.
 # Driver effect 1.03 in CINner's dosage law (the package default is 1.1): at 1.1 the division rate of
 # almost every cell reaches max_birth_rate during the in-situ phase, so after the release clones in a
-# full deme no longer differ in division rate (code audit 2026-11-14, finding A: 99.8-100% of cells at
-# the cap in the full-tier registry). At 1.03 most cells stay below the cap and the between-clone
-# spread of division rates is about 7%, and the regime still meets every registered tuning criterion
-# (vault: decision-paper-regime-v3).
+# full deme no longer differ in division rate (99.8-100% of cells at the cap in the full-tier
+# registry). At 1.03 most cells stay below the cap and the between-clone spread of division rates is
+# about 7%, and the regime still meets every registered tuning criterion.
 SELECTION = {"prop_breach": 0.002, "prop_stromal_survival": 0.002, "breach_effects": 1.01,
              "driver_effects": 1.03, "stromal_survival_cost": 0.05, "stromal_survival_effects": 4.0}
 # The hazard resident stromal cells add to cancer cells, sigma * (stromal share of the deme) * (1 -
 # stromal survival); with the effect of 4.0 per hit, 0.9 makes stromal survival enriched about 5.6-fold
 # in the stroma over tumours grown without the hazard (median of ten seeds; 20% of stromal cancer cells
 # carry it) and not in the gland, within every registered criterion; at 1.2 genome doublings sweep most
-# tumours (vault: exp-stromal-survival-selection).
+# tumours.
 STROMA = {"stromal_hazard": 0.9}
 
 # The founding acinus stays closed for 200 generations after it is half full: long enough for a
 # truncal copy-number layer, short enough that the in-situ phase is not one deme for most of the run.
 # The clock counts generations (the default counts tau steps, so the earlier `generations: 400` at tau
-# 0.5 was this same window; issues note N8).
+# 0.5 was this same window).
 ORIGIN_CONFINEMENT = dict(RR._CFG["spatial_params"]["origin_confinement"], generations=200,
                           clock="generations")
 
-# The cell law (vault: decision-cell-law-from-reference-simulators). Division follows demon's invasion
+# The cell law. Division follows demon's invasion
 # rule: a division attempts a mutation with probability `mutation_rate` and, independently, one of its
 # daughters disperses with probability `dispersal_rate`. Crowding is demon's two-valued death step,
 # the same for every clone in a deme: the baseline death rate up to the capacity K, and `crowding_d1`
 # above it, so clones in a full deme keep competing through their division rates. The slot cap sits at
 # `crowding_overfill` x K, which has to exceed 1 for a deme to pass K and meet the step at all, and
 # `maximum_death_rate` clamps every death rate, so it is raised with `crowding_d1`.
-# The values were chosen on preview runs against criteria registered before any run (vault:
-# exp-regime-v2-tuning): overfill 1.5 and d1 5 keep the in-situ phase, breach-gated invasion and the
+# The values were chosen on preview runs against criteria registered before any run: overfill 1.5 and d1 5 keep the in-situ phase, breach-gated invasion and the
 # cost; d1 20 doubles the cost (tau substeps scale with it) and lets genome doubling sweep. Selection
 # now acts inside full demes, so the same mutation supply alters more of the genome: `mutation_rate`
 # 0.15 (the ER+ preset is 0.30) brings the fraction of genome altered back to the old law's.
@@ -87,22 +84,22 @@ CROWDING_OVERFILL, CROWDING_D1 = 1.5, 5.0
 # `wgd_rate` 0.01 (the ER+ preset is 0.001): with driver effect 1.03 on the corrected tau-leaping, 30%
 # of tumours carry a whole-genome duplication at 0.01 (the lower edge of PCAWG's 30-50%), against 15% at
 # 0.005 (20 tumours per rate at the sweep scale). It is an effective rate for this lesion size, whose
-# lineages are a few doublings shallower than a real lesion's (vault: decision-paper-regime-v3, which
-# supersedes decision-paper-regime-wgd-rate's 0.005).
+# lineages are a few doublings shallower than a real lesion's (an earlier version of the regime used
+# 0.005).
 CANCER = {"mutation_rate": 0.15, "wgd_rate": 0.01}
-# Tau-leaping (vault: decision-standard-simulation-algorithms, decision-paper-regime-v3): binomial deaths
+# Tau-leaping: binomial deaths
 # (Tian and Burrage 2004; Chatterjee et al. 2005) and each leap chosen by the epsilon-bounded rule of Cao,
-# Gillespie and Petzold (2006) at epsilon 0.01. The historical fixed sub-step let a full deme lose about a
+# Gillespie and Petzold (2006) at epsilon 0.01. The earlier fixed sub-step let a full deme lose about a
 # quarter of its cells in one leap under the d1 step, and its capped Poisson deaths favoured small clones.
 DEME = {"crowding_overfill": CROWDING_OVERFILL, "crowding_d1": CROWDING_D1,
         "maximum_death_rate": CROWDING_D1,
         "tau_deaths": "binomial", "tau_step": "cgp", "tau_epsilon": 0.01}
 
-# The metastatic deposit (Fig 1a, 2a, 2e; vault: paper1-figure-plan): the keys of configs/landing.yaml that
+# The metastatic deposit (Fig 1a, 2a, 2e): the keys of configs/landing.yaml that
 # add the heritable met-survival trait and a second lattice reached through a vessel deme, without the
 # landing's treatment resistance. A variant passes MET_SELECTION as `selection` and met_spatial(scale)
-# as `spatial`. On regime v3 the trait stays rare in the primary (1-5% of cells in the smoke of
-# 2026-11-15) and seeding follows the release of the acinus by 30-200 generations.
+# as `spatial`. The trait stays rare in the primary (1-5% of cells in a smoke run) and seeding
+# follows the release of the acinus by 30-200 generations.
 MET_SELECTION = {"prop_met_survival": 0.015, "met_survival_effects": 3.0, "met_survival_cost": 0.15}
 
 
@@ -113,11 +110,9 @@ def met_spatial(scale):
             "met_seed_kappa": 0.03, "met_hazard": 3.5, "met_transit_floor": 0.001}
 
 
-# Visium spot swapping, fitted to 10x's V1_Breast_Cancer_Block_A_Section_1 (vault:
-# decision-visium-spot-swapping, exp-visium-bleed): SpotClean's model with a bleeding rate of 0.31, a
+# Visium spot swapping, fitted to 10x's V1_Breast_Cancer_Block_A_Section_1: SpotClean's model with a bleeding rate of 0.31, a
 # distal share of 0.30 (the slide-wide floor, so no in-spot ambient soup) and a kernel sd of 3.25 spot
-# pitches, and the edge falloff measured from the tissue's outermost ring. Needs the iscc branch
-# feat/visium-bleed.
+# pitches, and the edge falloff measured from the tissue's outermost ring.
 VISIUM = {"bleed_rate": 0.31, "bleed_distal": 0.30, "bleed_sigma": 6.5, "ambient_frac": 0.0,
           "edge_sigma": 0.29, "edge_reference": "tissue"}
 
@@ -134,14 +129,14 @@ VISIUM = {"bleed_rate": 0.31, "bleed_distal": 0.30, "bleed_sigma": 6.5, "ambient
 O2 = {"o2_source": "perfused", "o2_supply": 10.0, "o2_consumption": 1.0, "o2_diffusion": 4.0}
 MICROENV = copy.deepcopy(PC.MICROENV)
 # The bound on a program's log-fold, c in c * tanh(x / c): without it the paper's program settings
-# raise a gene up to e^32-fold in a few cells (vault: decision-program-log-fold-bound). Readout only;
+# raise a gene up to e^32-fold in a few cells. Readout only;
 # registry.load sets it on stored tumours.
 PROGRAM_MAX_LOG_FOLD = 5.0
 MICROENV["hypoxia"].update(O2)
 
 
 # Per-gene dosage, calibrated on TCGA breast tumours (validation/paper/supp_dosage.py, the fit in
-# validation/data/dosage_fit.json; vault: decision-dosage-total-law): the "total" law buffers gains and
+# validation/data/dosage_fit.json): the "total" law buffers gains and
 # losses alike, and s_g ~ clip(N(0.86, 0.61), 0, 1) matches the per-gene slopes of gains and of losses
 # together. The previous prior (0.7, 0.25) under the "haplotype" law could not buffer losses.
 DOSAGE = {"dosage_law": "total", "dosage_sensitivity_mean": 0.86, "dosage_sensitivity_sd": 0.61}
@@ -152,14 +147,14 @@ def expression():
     e = PC.expression_params(scatter=1.0)
     e["dosage_params"]["allele_specific"] = True
     # Cancer cells start from the baseline of the epithelium they transformed from, and differ from it
-    # only by what evolution did (vault: decision-cancer-cell-of-origin-baseline). Readout only.
+    # only by what evolution did. Readout only.
     e["cell_of_origin"] = "epithelial"
     cp = e["coupling_params"]
     cp["niche_program_map"] = {"epithelial": "emt", "hypoxia": "hypoxia"}
     cp["niche_program_strength"] = 3.0
     cp["phenotype_program_strength"] = {"breach": 1.0, "__default__": 0.5}
     e["dosage_params"].update(DOSAGE)
-    # The bound on a program's log-fold (vault: decision-program-log-fold-bound), set here so that a
+    # The bound on a program's log-fold, set here so that a
     # tumour grown by `grow` carries it; `registry.load` still sets it on tumours stored before.
     e["program_params"]["max_log_fold"] = PROGRAM_MAX_LOG_FOLD
     return e

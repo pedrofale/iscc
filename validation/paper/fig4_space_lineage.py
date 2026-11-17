@@ -18,7 +18,7 @@ Right, tissue architecture and copy-number evolution:
 
 Why the field and not gene categories: in the paper regime copy-number dosage makes nearly every
 gene genuinely heritable, so per-gene "called heritable" rates say little about the environment, and
-on measured expression the environmental genes' calls sit at chance (issues note, B1). The field
+on measured expression the environmental genes' calls sit at chance. The field
 carries the environment's signal without dosage.
 
 Run:  python validation/paper/fig4_space_lineage.py [--jobs 1]
@@ -116,7 +116,7 @@ def analyse(key):
                median_I_lin_merfish=float(np.median(meas.I_lineage)),
                median_I_sp_merfish=float(np.median(meas.I_spatial)),
                # per-gene calls on the true expression, kept for the record (not plotted: copy-number
-               # dosage makes nearly every gene heritable in this regime, see the issues note B1)
+               # dosage makes nearly every gene heritable in this regime)
                called_ext=conf["extrinsic"], called_intr=conf["intrinsic"], called_neu=conf["neutral"],
                **extra)
     os.makedirs(CACHE, exist_ok=True)

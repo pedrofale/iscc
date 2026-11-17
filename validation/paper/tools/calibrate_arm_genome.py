@@ -13,7 +13,7 @@ division fixed is::
     mutation_rate = mu * (1 - p + f * p)               (p = 0.045 / 0.545, the copy-number share)
     wgd_rate      = omega / (1 - p + f * p)
 
-with ``mu`` and ``omega`` the paper regime's (0.15 and, since decision-paper-regime-wgd-rate, 0.005;
+with ``mu`` and ``omega`` the paper regime's (0.15 and 0.005 at the time of this calibration;
 stages 1 and 2 ran at omega 0.001).
 
 ``f = 39 / 12`` restores the genome altered per division, to first order.

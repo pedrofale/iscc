@@ -600,7 +600,7 @@ F_ARMS = (("acc_chained", "linear\nchain", S.GREY), ("acc_oncospot", "OncoSpot\n
 
 
 def f_verdict(df, margin=0.05, alpha=0.05):
-    """The decision rule written before the run (vault note exp-paper1-fig3f-arms).
+    """The decision rule written before the run.
 
     With delta the mean of (OncoSpot arm - iscc) over tumours: delta >= margin and a paired Wilcoxon
     p < alpha means chaining as OncoSpot does it also makes integration easier (the claim holds);

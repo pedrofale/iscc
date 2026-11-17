@@ -1,6 +1,6 @@
 """Figure 2: selection depends on the niche, and the tumours resemble real ones.
 
-The panels of the figure plan (vault: roadmap/paper1-figure-plan, "Fig 2"):
+The panels of Fig 2:
   (a) one tumour's history up to metastasis (R0 seed 1, the showcase): five snapshots coloured by
       clone, and the cancer cells in gland, stroma and metastasis over generations, with clone births,
       the first invasion and the first seeding of the metastasis;

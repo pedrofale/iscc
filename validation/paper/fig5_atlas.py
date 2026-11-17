@@ -1,8 +1,7 @@
 """Fig 5, the atlas design: one cohort of 50 patients, and every panel from it.
 
-The registered design is the vault note exp-paper1-fig5-cohort, section "Amendment, 2026-11-16
-evening: one atlas-scale cohort"; the network is decision-fig5-planted-network (its final amendment)
-and the tool settings decision-fig5-progression-settings. The earlier design's driver,
+The design, the planted network and the tool settings were registered before any run. The earlier
+design's driver,
 :mod:`fig5_cohort`, supplies the shared pieces (the scRNA pooling and integration runner, the tool
 runners, ``pair_scores``, the trait order); nothing here changes what those compute.
 
@@ -73,7 +72,7 @@ import registry as REG  # noqa: E402
 # ------------------------------------------------------------------ the registered design
 N_EVENTS = 7
 EVENT_NAMES = [f"E{i}" for i in range(N_EVENTS)]
-# decision-fig5-planted-network, amendment of 2026-11-16 evening (package indices = event names)
+# the planted network (package indices = event names)
 NETWORK = {"effects": [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.2],
            "interactions": [(1, 2, 0.2), (3, 4, -0.1)],
            "constraints": [(5, 6)]}
@@ -245,7 +244,7 @@ def _fit_rate(sizes, present):
 
 
 def choose_grid(cells, fits, arm="network", lo=0.05, hi=0.40, aim=0.20):
-    """The choice rule fixed before the confirming round (coordinator, 2026-11-16): take the grid at
+    """The choice rule fixed before the confirming round: take the grid at
     which all seven events fall in ``lo``-``hi`` of the patients; if several qualify, the one whose
     median event frequency is closest to ``aim``; if none does, the per-event sizes the fitted rate
     per gene predicts for ``aim`` (and one more confirming round at those sizes)."""

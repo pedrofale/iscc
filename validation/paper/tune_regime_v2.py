@@ -1,7 +1,6 @@
-"""Retune the paper regime under demon's division and crowding laws (vault: exp-regime-v2-tuning).
+"""Retune the paper regime under demon's division and crowding laws.
 
-The criteria, the grid and the rule that picks the setting were registered in the vault note before
-any run. Each task grows one tumour on the small preview field and records what the criteria need:
+The criteria, the grid and the rule that picks the setting were registered before any run. Each task grows one tumour on the small preview field and records what the criteria need:
 the release of the founding acinus, the first cancer cell in the stroma and whether it carries a
 breach mutation, deme occupancy against capacity, wall time, and at the end the calibration and
 evolutionary-mode summaries. (The old law's ``v1`` arm was removed with the old laws.)

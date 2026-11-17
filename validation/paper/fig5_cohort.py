@@ -1,7 +1,6 @@
 """Fig 5 runs: cohorts through the thin Cohort, one Slurm array task -> ONE summary file.
 
-The registered design is the vault note exp-paper1-fig5-cohort; the tool settings are
-decision-fig5-progression-settings and the planted network decision-fig5-planted-network. Every
+The design, the tool settings and the planted network were registered before any run. Every
 tumour is grown by the paper regime's own ``grow`` (:mod:`regime`) through
 :class:`iscc.cohort.Cohort`; only summaries are written, intermediates go to node-local scratch
 (``$SNIC_TMP``), never /tmp.
@@ -87,16 +86,15 @@ CELLS_PER_PATIENT = 1000
 N_BALANCED_BATCHES = 6
 LEVELS = {"10x": {}, "intermediate": {"sigma_batch": 0.3, "depth_batch_sigma": 0.15},
           "strong": {"sigma_batch": 0.6, "depth_batch_sigma": 0.3}}
-# The intermediate level is the amendment of 2026-11-16 (exp-paper1-fig5-cohort, "Amendments before
-# any run"): added after the tool smoke test showed Harmony does not integrate at the strong level,
-# exploratory, with no expectation.
+# The intermediate level was added before any run, after the tool smoke test showed Harmony does not
+# integrate at the strong level; it is exploratory, with no expectation.
 LEVEL_STATUS = {"10x": "registered", "strong": "registered",
                 "intermediate": "exploratory: added 2026-11-16 after the tool smoke test, no expectation"}
 TRUTH_LEVEL = {"sigma_batch": 0.0, "depth_batch_sigma": 0.0}
 METHODS = ("none", "harmony", "scvi")
 K = 30
 
-# Part II: the network of decision-fig5-planted-network (its E1..E6 are events 0..5)
+# Part II: the planted network (its E1..E6 are events 0..5)
 N_EVENTS, EVENT_SIZE, LETHAL = 6, 10, 2.5
 PLANTED = {"effects": 0.05, "interactions": [(0, 1, 0.4)], "exclusive": [(2, 3)],
            "constraints": [(4, 5)]}
@@ -104,7 +102,7 @@ EMPTY = {"effects": 0.05}                    # the same events, their own effect
 def scale_planted(planted, s):
     """The planted network with every fitness term (own effects and pairwise interactions) times s;
     the lethal pair and the order constraint are not fitness terms and are kept (the registered
-    cap-share rule of decision-fig5-planted-network halves the event effects, s = 0.5)."""
+    cap-share rule halves the event effects, s = 0.5)."""
     out = dict(planted)
     out["effects"] = float(planted["effects"]) * s
     if "interactions" in planted:
