@@ -616,10 +616,10 @@ class TissueMixin:
                 routes.append((di, n_local, False))
             else:
                 idx = rng.integers(0, len(nbrs), size=n_local)
-                u, cnts = np.unique(idx, return_counts=True)
                 b = self._trait(rep, "breach")
-                for k, cnt in zip(u, cnts):
-                    tgt = nbrs[int(k)]; cnt = int(cnt)
+                for tgt, cnt in zip(nbrs, np.bincount(idx, minlength=len(nbrs)).tolist()):
+                    if not cnt:
+                        continue
                     if self._gated(di, tgt):
                         n_ok = int(rng.binomial(cnt, b)) if b > 0 else 0
                         if n_ok:

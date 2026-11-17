@@ -870,6 +870,12 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
     def get_cancer_size(self):
         return int(sum(c for g, c in self.genotypes_counts.items() if self._is_cancer(g)))
 
+    def _cancer_count(self):
+        """The cancer population from the per-deme cancer counts ``_add`` and ``_remove`` keep: the
+        value of ``get_cancer_size`` without its scan of every genotype, for the target check the
+        engines make after every event or leap."""
+        return sum(self._deme_cancer_n.values())
+
     def _trace_snapshot(self):
         """One trace snapshot: the global genotype counts plus, when the met is enabled, the
         per-compartment counts (``primary_counts`` / ``met_counts``). Met-off snapshots carry only the
@@ -1105,7 +1111,7 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         prev_dose = 0.0
         done = n_steps
         for local_step in range(n_steps - 1):
-            if target_cancer is not None and self.get_cancer_size() >= target_cancer:
+            if target_cancer is not None and self._cancer_count() >= target_cancer:
                 done = local_step
                 break
             self._clock = self.step + local_step
@@ -1329,18 +1335,20 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         deaths, dispersals, mutants, stayers = [], [], [], []
         mut_disp, swaps = [], []     # mutated births that leave, or whose parent copy leaves
         binomial = self._tau_deaths == "binomial"
+        poisson, binomial_draw = rng.poisson, rng.binomial
         for di, deme, (clones, _) in self._leap_rates(self._active_demes() if demes is None else demes):
             esc = self._escape_factor(di)
             for gid, c, rep, div, death in clones:
-                n_div = int(rng.poisson(div * c * dt))
+                n_div = poisson(div * c * dt)
                 if binomial:
-                    n_death = int(rng.binomial(c, min(1.0, death * dt)))
+                    p = death * dt
+                    n_death = binomial_draw(c, p if p < 1.0 else 1.0)
                 else:
-                    n_death = int(rng.poisson(death * c * dt))
+                    n_death = poisson(death * c * dt)
                 if n_death:
-                    deaths.append((di, gid, n_death))
+                    deaths.append((di, gid, int(n_death)))
                 if n_div:
-                    self._split_births_noble(rng, di, gid, rep, n_div, esc, mutants, stayers,
+                    self._split_births_noble(rng, di, gid, rep, int(n_div), esc, mutants, stayers,
                                              dispersals, mut_disp, swaps)
             if self._tx_death_add and self._tx_applies(di):
                 for gid in sorted((g for g in deme if g in self._tx_death_add and not self._is_cancer(g)),
@@ -1396,12 +1404,14 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         for tgt in sorted(cand):
             items = cand[tgt]
             keys = list(items)
-            a = np.array([items[k] for k in keys], dtype=np.int64)
+            counts = [items[k] for k in keys]
+            n_cand = sum(counts)
             n_slots = (max(0, self._slot_cap_of(tgt) - sum(self.demes[tgt].values()))
-                       if self._crowding else int(a.sum()))       # well-mixed: no slot cap
-            if int(a.sum()) <= n_slots:
-                acc = a
+                       if self._crowding else n_cand)       # well-mixed: no slot cap
+            if n_cand <= n_slots:
+                acc = counts
             else:
+                a = np.array(counts, dtype=np.int64)
                 acc = (rng.multivariate_hypergeometric(a, n_slots) if n_slots > 0
                        else np.zeros(len(a), dtype=np.int64))
                 leftover = a - acc
@@ -1536,7 +1546,7 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
                 for di in self._dirty:
                     self._classify_critical(di)
                 self._dirty.clear()
-                if target_cancer is not None and self.get_cancer_size() >= target_cancer:
+                if target_cancer is not None and self._cancer_count() >= target_cancer:
                     break
         finally:
             self._dirty = None
@@ -1569,7 +1579,7 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         the once-per-generation resistance-state transitions are skipped. The check draws nothing, so a
         generation that does not reach the target is unchanged."""
         self._clock = self.step
-        reached = (lambda: target_cancer is not None and self.get_cancer_size() >= target_cancer)
+        reached = (lambda: target_cancer is not None and self._cancer_count() >= target_cancer)
         stopped = None                  # the time simulated when the target stopped the generation
         self._rate_cache = {}
         try:
