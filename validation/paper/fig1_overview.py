@@ -980,7 +980,7 @@ def render_biases(fig, y0, nums):
     # legend and the steps with no bias
     lx, ly = 5.0, y0 + 14.0
     for k_, (how, txt) in enumerate(((SB.FIT, "fitted from real data"),
-                                     (SB.COND, "fitted when the real data suffice"),
+                                     (SB.COND, "fitted when the real data contain what the fit needs"),
                                      (SB.SET, "set by the user as a prior or preset"))):
         ax.plot([lx], [ly + 2.6 * k_], marker="o", ms=2.6, fillstyle=fill[how], color=S.INK, mec=S.INK,
                 mew=0.5, markerfacecoloralt="white", ls="none")
