@@ -14,7 +14,7 @@ statistic function, so a competitor and ``iscc`` are measured identically:
       Gaussian copula);
   (d) Visium: per-spot depth and its Moran's I (``iscc.data.morans_i`` on spot-pitch coordinates),
       against the real breast-cancer section, for SRTsim (``srtsim_fit`` on the section, counts placed
-      at the section's own spots by each gene's reference rank). stCNASim is not run (see NOT_RUN).
+      at the section's own spots by each gene's reference rank). stCNASim is not run (see COMPETITORS).
 
 The real and ``iscc`` values are read from Fig 3's cache (``$ISCC_FIG3_CACHE``, parts b-e), so this
 figure shows the same numbers as Fig 3. The simulators run in Slurm jobs that write their raw output
@@ -301,8 +301,6 @@ COMPETITORS = {"wgs": ["VISOR"], "scdna": ["CNAsim"], "scrna": ["Splatter", "scD
 # stCNASim is not run: it needs a STARsolo-aligned seed section and took ~5 h per 600-spot run on
 # 2026-11-14. Read from its code (cs/pp.calc_size_factors, not run): spot library sizes are drawn
 # independently per spot from a log-normal fitted to the seed, so its depth has no spatial structure.
-NOT_RUN = {"visium": "stCNASim not run. From its code (unverified by a run):\n"
-                     "spot depths are drawn independently from a\nlog-normal fitted to its seed section"}
 
 
 def _colour(name):
@@ -352,9 +350,7 @@ def render():
     out = {}
     # a. WGS
     S.panel_letter(fig, "a", 2, 4)
-    S.text_mm(fig, 10, 4, "WGS: GIAB HG002 (copy number 2 sites)", fontsize=6.5, va="top")
-    S.text_mm(fig, 10, 7.5, "VISOR reads at HG002's depth, same 20,000 sites; iscc at its modal copy number",
-              fontsize=5, va="top", color=S.GREY)
+    S.text_mm(fig, 10, 4, "WGS: GIAB HG002", fontsize=6.5, va="top")
     ax1, ax2 = S.ax_mm(fig, 14, 11, 38, 26), S.ax_mm(fig, 62, 11, 14, 26)
     src = _sources("wgs", d0)
     bins = np.linspace(0, 3, 61)
@@ -368,25 +364,21 @@ def render():
     out["a"] = {lab: d["cv"] for lab, _, d in src}
     # b. scDNA
     S.panel_letter(fig, "b", 92, 4)
-    S.text_mm(fig, 100, 4, "scDNA: DLP+ (500 kb bins)", fontsize=6.5, va="top")
+    S.text_mm(fig, 100, 4, "scDNA: DLP+", fontsize=6.5, va="top")
     ax = S.ax_mm(fig, 104, 11, 70, 26)
     src = [(lab, col, d if lab in ("real", "iscc") else d["cv_by_state"]) for lab, col, d in _sources("scdna", d0)]
     for lab, col, d in src:
         k = sorted(d, key=int)
         ax.plot([int(x) for x in k], [d[x] for x in k], "o-", color=col, ms=2.5, lw=0.8, label=lab)
-    ax.set_xlabel("Copy-number state")
+    ax.set_xlabel("Copy number state")
     ax.set_ylabel("Within-cell coverage CV")
     ax.set_ylim(0, None)
     ax.legend(fontsize=5, loc="upper right")
-    S.text_mm(fig, 100, 7.5, "CNAsim depth and Lorenz point from DLP+; states with \u2265 5% of a cell's bins",
-              fontsize=5, va="top", color=S.GREY)
     _missing(ax, "scdna")
     out["b"] = {lab: d for lab, _, d in src}
     # c. scRNA
     S.panel_letter(fig, "c", 2, 50)
     S.text_mm(fig, 10, 50, "scRNA: PBMC3k", fontsize=6.5, va="top")
-    S.text_mm(fig, 10, 53.5, "Splatter fitted by splatEstimate; scDesign3 negative binomial with mean by "
-              "cluster, Gaussian copula by cluster", fontsize=5, va="top", color=S.GREY)
     axes = [S.ax_mm(fig, 14 + i * 58, 57, 44, 30) for i in range(3)]
     src = _sources("scrna", d0)
     lo = min(min(d["loglib"]) for _, _, d in src)
@@ -410,7 +402,7 @@ def render():
     out["c"] = {lab: d["cv_lib"] for lab, _, d in src}
     # d. Visium
     S.panel_letter(fig, "d", 2, 100)
-    S.text_mm(fig, 10, 100, "Visium: breast-cancer section (in-tissue spots)", fontsize=6.5, va="top")
+    S.text_mm(fig, 10, 100, "Visium: breast-cancer section", fontsize=6.5, va="top")
     ax1, ax2 = S.ax_mm(fig, 14, 107, 44, 30), S.ax_mm(fig, 72, 107, 14, 30)
     src = _sources("visium", d0)
     lo = min(min(d["logdepth"]) for _, _, d in src)
@@ -424,10 +416,6 @@ def render():
     _dots(ax2, [(lab, col, d["moran"]) for lab, col, d in src], "Moran's I, spot depth")
     ax2.set_ylim(0, 1)
     _missing(ax1, "visium")
-    S.text_mm(fig, 100, 109, "SRTsim simulates at the section's own spots and puts each\n"
-              "gene's counts in the order of its real counts there.\n"
-              "iscc simulates its own tumour section.", fontsize=5.5, va="top", color=S.GREY)
-    S.text_mm(fig, 100, 124, NOT_RUN["visium"], fontsize=5.5, va="top", color=S.GREY)
     out["d"] = {lab: d["moran"] for lab, _, d in src}
     path = S.save(fig, "supp_datasim", stamp=False)
     print("wrote", path)
