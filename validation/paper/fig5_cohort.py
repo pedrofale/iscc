@@ -71,13 +71,12 @@ for p in (os.path.join(REPO, "src"), os.path.dirname(HERE), HERE):
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
+import _paths as P  # noqa: E402
 import regime as RG  # noqa: E402
 import registry as REG  # noqa: E402
 
 TOOLS = os.path.join(HERE, "tools")
 BIN = os.path.join(TOOLS, "bin")
-TOOLS_DIR = os.environ.get("ISCC_TOOLS_DIR",
-                           "/nobackup/proj/flash/naiss2025-22-1610/personal/pedrof/iscc/tools")
 
 # ------------------------------------------------------------------ the registered design
 # Part I
@@ -258,7 +257,7 @@ def _integrate(h5ad, prefix, method, args, log, threads=1):
     if args.max_epochs:
         cmd += ["--max-epochs", str(args.max_epochs)]
     cmd += ["--threads", str(threads)]
-    env = dict(os.environ, ISCC_WORK_DIR=os.path.dirname(h5ad), ISCC_TOOLS_DIR=TOOLS_DIR,
+    env = dict(os.environ, ISCC_WORK_DIR=os.path.dirname(h5ad), ISCC_TOOLS_DIR=P.tools_dir(),
                ISCC_THREADS=str(threads))
     t0 = time.time()
     r = subprocess.run(cmd, capture_output=True, text=True, env=env)
@@ -581,14 +580,14 @@ def part3(args):
 
 # ================================================================== the collectors (II, III)
 def _image(name):
-    return os.path.exists(os.path.join(TOOLS_DIR, f"{name}.sif"))
+    return os.path.exists(os.path.join(P.tools_dir(), f"{name}.sif"))
 
 
 def _fit_mhn(X, work, tag, seed=0):
     csv = os.path.join(work, f"{tag}.events.csv")
     X.to_csv(csv)
     pre = os.path.join(work, f"{tag}.mhn")
-    env = dict(os.environ, ISCC_WORK_DIR=work, ISCC_TOOLS_DIR=TOOLS_DIR, ISCC_THREADS="1")
+    env = dict(os.environ, ISCC_WORK_DIR=work, ISCC_TOOLS_DIR=P.tools_dir(), ISCC_THREADS="1")
     r = subprocess.run([os.path.join(BIN, "python-mhn"), os.path.join(TOOLS, "mhn_runner.py"), csv, pre,
                         "--seed", str(seed)], capture_output=True, text=True, env=env)
     if r.returncode:
@@ -615,7 +614,7 @@ def _fit_treemhn(trees, names, work, tag, seed=0):
     csv = os.path.join(work, f"{tag}.trees.csv")
     df.to_csv(csv, index=False)
     pre = os.path.join(work, f"{tag}.treemhn")
-    env = dict(os.environ, ISCC_WORK_DIR=work, ISCC_TOOLS_DIR=TOOLS_DIR, ISCC_THREADS="1")
+    env = dict(os.environ, ISCC_WORK_DIR=work, ISCC_TOOLS_DIR=P.tools_dir(), ISCC_THREADS="1")
     r = subprocess.run([os.path.join(BIN, "rscript-treemhn"), os.path.join(TOOLS, "treemhn_runner.R"), csv,
                         pre, "--n-events", str(len(names)), "--events", ",".join(names),
                         "--seed", str(seed)], capture_output=True, text=True, env=env)
@@ -635,7 +634,7 @@ def _fit_cbn(X, work, tag, seed=0):
     csv = os.path.join(work, f"{tag}.cbn.csv")
     X.to_csv(csv)
     pre = os.path.join(work, f"{tag}.cbn")
-    env = dict(os.environ, ISCC_WORK_DIR=work, ISCC_TOOLS_DIR=TOOLS_DIR, ISCC_THREADS="1")
+    env = dict(os.environ, ISCC_WORK_DIR=work, ISCC_TOOLS_DIR=P.tools_dir(), ISCC_THREADS="1")
     r = subprocess.run([os.path.join(BIN, "rscript-evamtools"), os.path.join(TOOLS, "cbn_runner.R"), csv, pre,
                         "--seed", str(seed)], capture_output=True, text=True, env=env)
     if r.returncode or not os.path.exists(pre + ".json"):
