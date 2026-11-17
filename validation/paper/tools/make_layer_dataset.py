@@ -116,6 +116,11 @@ def main():
     ap.add_argument("--driver-scale", type=float, default=0.4)
     ap.add_argument("--n-reads", type=float, default=10_000)
     ap.add_argument("--max-cells", type=int, default=None, help="default the tier's max_cells")
+    ap.add_argument("--section-max-cells", type=int,
+                    default=int(os.environ["ISCC_SECTION_MAX_CELLS"]) if os.environ.get("ISCC_SECTION_MAX_CELLS")
+                    else None,
+                    help="cells in the Visium section (default $ISCC_SECTION_MAX_CELLS, else --max-cells); "
+                         "Fig 4 uses 50,000, about 5 cells per spot")
     ap.add_argument("--max-log-fold", type=float, default=5.0)
     ap.add_argument("--min-clone-frac", type=float, default=0.03)
     a = ap.parse_args()
@@ -139,7 +144,7 @@ def main():
     max_cells = a.max_cells or RG.T["max_cells"]
     spec = RR.resect(t)
     dis = spec.dissociate(max_cells=max_cells)
-    sec = spec.slice(depth_frac=0.5, max_cells=max_cells)
+    sec = spec.slice(depth_frac=0.5, max_cells=a.section_max_cells or max_cells)
     lap("layer_and_sample")
 
     ready, sizes = [], {}

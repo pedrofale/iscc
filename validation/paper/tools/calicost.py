@@ -8,9 +8,14 @@ Points CalicoST at ``<dataset>/outs`` (the Space Ranger directory) and ``<datase
 phased allele counts, so its BAM preprocessing is skipped) with its GRCh38 resources, runs
 ``calicost_main.py``, and writes the common output of this directory (see calls.py): calls.tsv
 (clone = CalicoST's clone label; no malignant call, since which clone is normal is read from its
-copy-number profile), cn_arm.tsv (each spot's clone's total copy number per arm, from
-``cnv_seglevel.tsv``, scale "total_cn"), run.json, and CalicoST's own output in native/. The
-phylogeny (Startle, which needs CPLEX) is not run.
+copy-number profile), cn_arm.tsv (each spot's clone's total copy number per arm, scale "total_cn"),
+run.json, and CalicoST's own output in native/. The phylogeny (Startle, which needs CPLEX) is not run.
+
+The copy numbers are read from ``cnv_seglevel.tsv``, by name: the allele-specific copy numbers CalicoST
+infers (its README's key output). The other ``cnv_*_seglevel.tsv`` files (``_diploid``, ``_triploid``,
+``_tetraploid``) are the same inference with the ploidy forced, which a glob would pick up first. A run
+without ``cnv_seglevel.tsv`` fails; a clone CalicoST gave no integer copy numbers (its own fit failed) is
+listed in run.json and its spots get no per-arm value.
 """
 import argparse
 import glob
@@ -25,6 +30,10 @@ import pandas as pd
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import calls as CALLS  # noqa: E402
+
+# CalicoST's inferred allele-specific copy numbers per segment (not cnv_diploid_seglevel.tsv & co., which
+# force the ploidy)
+SEGLEVEL = "cnv_seglevel.tsv"
 
 
 def main():
@@ -74,27 +83,31 @@ def main():
     calls = pd.DataFrame({"barcode": lab.index.astype(str), "malignant": np.nan, "p_malignant": np.nan,
                           "clone": lab["clone_label"].astype(str).to_numpy()})
     cn_arm = None
-    seg_files = sorted(glob.glob(os.path.join(run_dir, "cnv*_seglevel.tsv")))
-    if seg_files:
-        seg = pd.read_csv(seg_files[0], sep="\t")
-        arm_table = CALLS.arms(a.dataset)
-        mid = ((seg["START"] + seg["END"]) // 2).to_numpy()
-        seg["arm"] = CALLS.arm_of(seg["CHR"], mid, arm_table)
-        seg["len"] = seg["END"] - seg["START"]
-        rows = []
-        for clone in calls["clone"].unique():
-            a_col, b_col = f"clone{clone} A", f"clone{clone} B"
-            if a_col not in seg or b_col not in seg:
-                continue
-            tot = (seg[a_col] + seg[b_col]) * seg["len"]
-            per_arm = (tot.groupby(seg["arm"]).sum() / seg["len"].groupby(seg["arm"]).sum()).drop("", errors="ignore")
-            rows.append(pd.DataFrame({"clone": clone, "arm": per_arm.index, "value": per_arm.to_numpy()}))
-        if rows:
-            per_clone = pd.concat(rows)
-            cn_arm = calls[["barcode", "clone"]].merge(per_clone, on="clone").drop(columns="clone").assign(scale="total_cn")
+    seg_file = os.path.join(run_dir, SEGLEVEL)
+    if not os.path.exists(seg_file):
+        present = sorted(os.path.basename(p) for p in glob.glob(os.path.join(run_dir, "cnv*_seglevel.tsv")))
+        sys.exit(f"CalicoST wrote no {SEGLEVEL} in {run_dir} (present: {present or 'none'}); "
+                 f"see {native}/calicost.log")
+    seg = pd.read_csv(seg_file, sep="\t")
+    arm_table = CALLS.arms(a.dataset)
+    mid = ((seg["START"] + seg["END"]) // 2).to_numpy()
+    seg["arm"] = CALLS.arm_of(seg["CHR"], mid, arm_table)
+    seg["len"] = seg["END"] - seg["START"]
+    rows, missing = [], []
+    for clone in calls["clone"].unique():
+        a_col, b_col = f"clone{clone} A", f"clone{clone} B"
+        if a_col not in seg or b_col not in seg:
+            missing.append(str(clone))
+            continue
+        tot = (seg[a_col] + seg[b_col]) * seg["len"]
+        per_arm = (tot.groupby(seg["arm"]).sum() / seg["len"].groupby(seg["arm"]).sum()).drop("", errors="ignore")
+        rows.append(pd.DataFrame({"clone": clone, "arm": per_arm.index, "value": per_arm.to_numpy()}))
+    if rows:
+        per_clone = pd.concat(rows)
+        cn_arm = calls[["barcode", "clone"]].merge(per_clone, on="clone").drop(columns="clone").assign(scale="total_cn")
     CALLS.write(a.out, calls, cn_arm, tool="calicost", code=a.code, n_clones=a.n_clones, seed=a.seed,
                 min_spots_per_clone=a.min_spots_per_clone, run_dir=os.path.basename(run_dir),
-                seglevel=os.path.basename(seg_files[0]) if seg_files else None, phylogeny="not run (Startle needs CPLEX)",
+                seglevel=SEGLEVEL, clones_without_cn=sorted(missing), phylogeny="not run (Startle needs CPLEX)",
                 wall_s=round(time.time() - t0, 1))
     print(f"calicost done: clones {calls['clone'].value_counts().to_dict()}", flush=True)
 
