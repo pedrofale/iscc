@@ -40,7 +40,7 @@ estimator needs >=2 batches).
 Spots outside the tissue lift two of those. Given a raw matrix of all spots with Space Ranger's
 ``in_tissue`` flag, a spot outside the tissue holds no cells, so its counts are bleed from the
 tissue, and ``_fit_bleed`` fits SpotClean's spot-swapping model to them (Ni et al. 2022, the model
-:func:`iscc.data.visium_background.bleed` simulates): the bleeding rate, its distal share (the
+[`iscc.data.visium_background.bleed`][iscc.data.visium_background.bleed] simulates): the bleeding rate, its distal share (the
 slide-wide floor) and the kernel sd become ``bleed_rate``, ``bleed_distal`` and ``bleed_sigma``,
 which replace ``ambient_frac`` and ``diffusion_sigma`` (both set to 0, since the bleed carries
 the floor and moves counts between spots). The spots within ``bleed_min_dist`` pitches of the tissue
@@ -326,7 +326,7 @@ def _fit_off_tissue(counts, coords, in_tissue, sigmas=None):
 
     with ``mu_in`` the mean total of a tissue spot, ``a`` the ambient floor as a fraction of it,
     ``beta`` the fraction of a spot's counts that bleeds to other spots, and ``K_sigma`` the
-    column-normalised kernel of :func:`_bleed_kernel`. For each ``sigma`` on a grid (in units of the
+    column-normalised kernel of ``_bleed_kernel``. For each ``sigma`` on a grid (in units of the
     spot pitch) ``(a, beta)`` is fit within [0, 1] under a robust ``soft_l1`` loss, since spots
     outside the tissue have heavy-tailed totals (debris, tissue the flag missed); the ``sigma`` with
     the least robust cost wins. The tissue geometry enters through ``K``, so a ragged or curved edge
@@ -415,7 +415,7 @@ def _fit_off_tissue(counts, coords, in_tissue, sigmas=None):
 def _fit_bleed(counts, coords, in_tissue, sigmas=None, min_dist=0.0):
     """SpotClean's spot-swapping parameters from the spots outside the tissue.
 
-    The model of :func:`iscc.data.visium_background.bleed`: a spot outside the tissue counts, as a
+    The model of [`iscc.data.visium_background.bleed`][iscc.data.visium_background.bleed]: a spot outside the tissue counts, as a
     fraction of the mean tissue spot,
 
         y_s = r (1 - g) sum_t W_sigma[s, t] src_t  +  r g mean_t(src_t)
@@ -535,7 +535,7 @@ def estimate_visium(adata, *, count_model="dm", coords=None, section_labels=None
         Per-spot tissue flag (Space Ranger's ``in_tissue``). Defaults to ``adata.obs['in_tissue']``
         when present. Given a raw matrix of ALL spots with this flag, the library, field and
         overdispersion fits use the tissue spots only, and the spots outside the tissue fit
-        SpotClean's spot-swapping model (:func:`_fit_bleed`): ``bleed_rate``, ``bleed_distal`` and
+        SpotClean's spot-swapping model (``_fit_bleed``): ``bleed_rate``, ``bleed_distal`` and
         ``bleed_sigma`` become fitted (``ambient_frac`` and ``diffusion_sigma`` are set to 0), and
         the fit is reported in ``diagnostics["bleed"]`` beside ``diagnostics["off_tissue"]``. Without
         it, every spot informs the fits and no bleed is fit.
@@ -653,7 +653,7 @@ def estimate_visium_from_assay(assay, *, section_labels=None):
     """Fit from a *run* ``Visium`` instance (extracts per-spot counts + coords + occupancy).
 
     The synthetic recovery convenience: pulls the spot count matrix, the spot coordinates, and the
-    on-tissue fraction straight from the run assay, then defers to :func:`estimate_visium`.
+    on-tissue fraction straight from the run assay, then defers to [`estimate_visium`][iscc.data.estimate_visium].
     """
     counts = assay.spot_counts.values
     coords = assay.spot_coords

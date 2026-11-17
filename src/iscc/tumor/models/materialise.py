@@ -1,7 +1,7 @@
 """Materialisation: from per-deme genotype counts to per-cell ground-truth tables, with the
 microenvironment fields and the coalescent re-creation of folded passengers.
 
-A mixin of :class:`~iscc.tumor.models.count.GenotypeTumor`; it holds no state of its own."""
+A mixin of [`GenotypeTumor`][iscc.tumor.GenotypeTumor]; it holds no state of its own."""
 
 import warnings
 from collections import Counter
@@ -687,7 +687,7 @@ class MaterialiseMixin:
 
         The founder starts with a blank genome, so a tumour's clonal layer is not planted: it fixes
         in the founding duct before the lesion spreads. There is nothing to look up, and
-        :attr:`seeded_truncal_sites` is empty unless ``founder_mutations`` was configured. This finds
+        ``seeded_truncal_sites`` is empty unless ``founder_mutations`` was configured. This finds
         the trunk the way a study does — the somatic sites carried by at least ``ccf`` of cancer
         cells. Germline variants are excluded: they sit in every cell, tumour and normal alike, so
         they would otherwise pass the same test.

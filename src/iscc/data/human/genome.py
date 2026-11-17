@@ -1,9 +1,9 @@
 """An arm-homologous growth genome: one growth segment per human chromosome arm.
 
 The growth model keeps a coarse genome (``genome_params`` / ``selection_params`` of
-:class:`~iscc.tumor.models.GenotypeTumor`); the human genome layer lifts it to real genes when cells
+[`GenotypeTumor`][iscc.tumor.GenotypeTumor]); the human genome layer lifts it to real genes when cells
 are measured. For that lift to be realistic, each growth segment has to be one contiguous human
-region inside one chromosome, so a copy-number event acts on one arm. :func:`arm_genome` builds such a
+region inside one chromosome, so a copy-number event acts on one arm. [`arm_genome`][iscc.data.human.arm_genome] builds such a
 genome at any resolution: how many growth genes each arm gets is the user's trade-off between the
 detail of the dynamics and their cost, and the layer works whatever it is.
 """

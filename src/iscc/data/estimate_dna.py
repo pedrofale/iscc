@@ -528,7 +528,7 @@ def estimate_dna_from_assay(assay, *, batch_depths=None, het_atol=0.15):
 
     Pulls coverage / alt / **true CN** (the perfect-caller stand-in: in synthetic recovery the CN
     is exact, exactly the two-pass conditioning) / GC / mappability / C-site / variant + het masks
-    from the assay's surfaced ground truth, then defers to :func:`estimate_dna`. Modality and
+    from the assay's surfaced ground truth, then defers to [`estimate_dna`][iscc.data.estimate_dna]. Modality and
     breadth are read off the assay. ``het_mask`` is loci whose true alt fraction is ~0.5.
     """
     from .dna import bulkDNA, scDNA, genome_features

@@ -1,6 +1,6 @@
 """Plots and images of a GenotypeTumor (Muller plots, tissue maps, phylogenies, H&E).
 
-A mixin of :class:`~iscc.tumor.models.count.GenotypeTumor`; it holds no state of its own."""
+A mixin of [`GenotypeTumor`][iscc.tumor.GenotypeTumor]; it holds no state of its own."""
 
 import numpy as np
 from ...constants import normal_names

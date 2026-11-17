@@ -12,7 +12,7 @@ uniformly over all ``N`` spots of the slide; the slide-wide ambient floor), and 
 kernel of sd ``sigma`` over the slide's spot grid, normalised over destination spots for each
 source. Total mass is conserved: the slide counts what the tissue released, redistributed.
 
-:func:`bleed` applies this to the expected counts of :class:`iscc.data.Visium` after pooling and
+[`bleed`][iscc.data.visium_background.bleed] applies this to the expected counts of [`iscc.data.Visium`][iscc.data.Visium] after pooling and
 before the count draw, so the draw's noise acts on the bled expectation, as in SpotClean's model.
 It applies only when ``bleed_rate > 0`` and draws no random numbers, so the assay's random stream
 is the same with bleeding on or off.
@@ -89,7 +89,7 @@ def bleed(lib, comp, coords, rate, distal=0.0, sigma=0.0, include_self=True):
     sigma : float, default 0.0
         Kernel sd. With ``sigma <= 0`` the proximal part stays at its source spot.
     include_self : bool, default True
-        Passed to :func:`bleed_kernel`.
+        Passed to [`bleed_kernel`][iscc.data.visium_background.bleed_kernel].
 
     Returns
     -------

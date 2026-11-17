@@ -1,7 +1,7 @@
 """Treatment on the count engine: dosing, the label and mechanistic drug responses,
 surgery, and the drug-induced resistance state.
 
-A mixin of :class:`~iscc.tumor.models.count.GenotypeTumor`; it holds no state of its own."""
+A mixin of [`GenotypeTumor`][iscc.tumor.GenotypeTumor]; it holds no state of its own."""
 
 from collections import Counter
 import numpy as np

@@ -1730,7 +1730,7 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         other per-cell matrices in layers, per-cell annotation in ``obs``, tissue coordinates in
         ``obsm``, gene roles in ``var``, and the clone tree / programs / run parameters in ``uns``.
         Reads back anywhere ``anndata`` is installed (``anndata.read_h5ad``). Extra keywords go to
-        :func:`iscc.integrations.to_anndata` (e.g. ``spatial="rowcol"``).
+        [`iscc.integrations.to_anndata`][iscc.integrations.to_anndata] (e.g. ``spatial="rowcol"``).
         """
         from ...integrations.anndata import to_anndata
         adata = to_anndata(self, **kwargs)
