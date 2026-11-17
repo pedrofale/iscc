@@ -1,8 +1,8 @@
 # API Reference
 
-`iscc`'s Python API mirrors the CLI pipeline — **grow → sample → assay**, with **treatment**
-applied during growth and optional **inference** of parameters from real data. Import the package
-as `import iscc`; see the [Overview](../overview.md) for how the stages connect.
+The Python API follows the stages of the CLI pipeline, **grow → sample → assay**, with
+**treatment** applied during growth and the **estimation** of parameters from real data. Import the
+package as `import iscc`, and see the [Overview](../overview.md) for how the stages connect.
 
 ## Tumor
 
@@ -14,6 +14,16 @@ tau-leaping.
 | | |
 |---|---|
 | [`iscc.tumor.GenotypeTumor`](GenotypeTumor.md) | The tumour engine: per-deme genotype **counts**, exact or tau-leaping. |
+
+## Cohort
+
+Grow several patients over one shared gene layout, so that they share their driver genes, baseline
+expression and programs and differ in their evolution.
+
+| | |
+|---|---|
+| [`iscc.cohort.Cohort`](Cohort.md) | A cohort of patient tumours grown over one shared gene layout. |
+| [`iscc.cohort.grow_tumor`](grow_tumor.md) | Grow one patient tumour for a fixed number of steps. |
 
 ## Treatment
 
@@ -67,7 +77,7 @@ for scRNA). The assays' technical defaults live in these hyper-parameter contain
 
 Lift the coarse growth genome onto the human genome when cells are measured: real GRCh38 genes, a
 germline of real heterozygous SNPs, haplotype allele counts, and the input files of copy-number
-tools (CopyKAT, CalicoST, Clonalscope, CancerFinder). Growth never reads it.
+tools (CopyKAT, CalicoST, Clonalscope, Cancer-Finder). Growth never reads it.
 
 | | |
 |---|---|
@@ -88,8 +98,9 @@ tools (CopyKAT, CalicoST, Clonalscope, CancerFinder). Growth never reads it.
 ## Reads
 
 Generate sequencing reads (FASTQ, optionally aligned BAM) from the assayed counts. DNA reads
-use DWGSIM/ART; RNA reads use a synthetic 10x transcriptome or the scReadSim template. These
-call external read simulators, so the corresponding binaries must be installed.
+use DWGSIM/ART, and RNA reads use a synthetic 10x transcriptome or the scReadSim template. These
+call external read simulators, so the corresponding binaries must be installed. The paper describes
+only the synthetic references, and the real-reference and scReadSim paths are not part of it.
 
 | | |
 |---|---|
@@ -97,10 +108,21 @@ call external read simulators, so the corresponding binaries must be installed.
 | [`iscc.data.reads.emit_scrna_reads`](emit_scrna_reads.md) | Mutation-aware single-cell RNA reads. |
 | [`iscc.data.reads.emit_visium_reads`](emit_visium_reads.md) | Spatial (Visium) reads. |
 
+## Integrations
+
+Hand the ground truth over in the forms that other tools read.
+
+| | |
+|---|---|
+| [`iscc.integrations.clones_from_clades`](clones_from_clades.md) | Clone labels of sampled cells, as clades of the true genealogy with enough sampled cells. |
+| [`iscc.integrations.clone_summary`](clone_summary.md) | One row per clone: its size, representative genotype and mutations. |
+| [`iscc.integrations.to_anndata`](to_anndata.md) | A tumour or a sample as one AnnData, with coordinates and ground truth. |
+
 ## Inference
 
-Fit the **tumor's evolutionary parameters** (division / mutation / dispersal / selection rates)
-to real data by Approximate Bayesian Computation over the growth simulator.
+Estimate the **evolutionary parameters of the tumor** (division, mutation, dispersal and selection
+rates) from real data by approximate Bayesian computation over the growth simulator. The paper does
+not use this module.
 
 | | |
 |---|---|
@@ -110,8 +132,9 @@ to real data by Approximate Bayesian Computation over the growth simulator.
 
 ## Calibration
 
-Fit each **assay's technical parameters** (library size, dispersion, dropout, capture field, …)
-to a real reference dataset, so simulated data matches a target platform.
+Estimate the **technical parameters of each assay** (library size, dispersion, capture field, …)
+from a real reference dataset, so that simulated data match a target platform. The scRNA dropout
+curve is fitted only on request (`fit_dropout=True`).
 
 | | |
 |---|---|

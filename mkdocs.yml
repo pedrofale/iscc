@@ -142,6 +142,9 @@ nav:
       - reference/index.md
       - Tumor:
           - GenotypeTumor: reference/GenotypeTumor.md
+      - Cohort:
+          - Cohort: reference/Cohort.md
+          - grow_tumor: reference/grow_tumor.md
       - Treatment:
           - Chemotherapy: reference/Chemotherapy.md
           - TargetedTherapy: reference/TargetedTherapy.md
@@ -182,6 +185,10 @@ nav:
           - emit_dna_reads: reference/emit_dna_reads.md
           - emit_scrna_reads: reference/emit_scrna_reads.md
           - emit_visium_reads: reference/emit_visium_reads.md
+      - Integrations:
+          - clones_from_clades: reference/clones_from_clades.md
+          - clone_summary: reference/clone_summary.md
+          - to_anndata: reference/to_anndata.md
       - Inference:
           - ABC: reference/ABC.md
           - Prior: reference/Prior.md
