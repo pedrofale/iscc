@@ -1,18 +1,18 @@
 from .treatment import Treatment
 
 class Chemotherapy(Treatment):
-    """Systemic cytotoxic therapy: raises the death rate of sensitive cancer cells.
+    """Systemic cytotoxic therapy, which adds a death hazard to sensitive cancer cells while dosed.
 
-    Every cancer cell is a target (normal cells are hit only via off-target
-    ``toxicity``). A treated cell's death rate is multiplied by
-    ``rate_multiplier ** (1 - treatment_resistance)``, so resistant clones
-    (``treatment_resistance`` → 1) escape while sensitive clones regress. Pass an
-    instance to [`GenotypeTumor`][iscc.tumor.GenotypeTumor]`.grow(..., treatment=chemo)`;
-    resistance is meant to **emerge** under this pressure rather than be pre-seeded.
+    Every cancer cell is a target, and normal cells take the off-target ``toxicity`` share of the
+    dose. The added hazard is set by ``kill_rate`` and ``kill_mode`` and scaled down by the
+    resistance of the clone, as described in [`Treatment`][iscc.treatment.Treatment], so resistant
+    clones (``treatment_resistance`` near 1) escape while sensitive clones regress. Pass an
+    instance to [`GenotypeTumor.grow`][iscc.tumor.GenotypeTumor.grow] as ``treatment=chemo``. The
+    therapy seeds no resistance, which arises by mutation and is selected under the dose.
 
-    Takes no targeting parameters of its own (every cancer cell is a target). See
-    [`Treatment`][iscc.treatment.Treatment] for the shared dosing / scheduling parameters
-    (``start``, ``duration``, ``rate_multiplier``, ``effectiveness``, ...).
+    Takes no targeting parameters of its own. See [`Treatment`][iscc.treatment.Treatment] for the
+    shared dosing parameters (``start``, ``duration``, ``kill_rate``, ``kill_mode``,
+    ``effectiveness``, ...).
     """
 
     def __init__(self, **kwargs):

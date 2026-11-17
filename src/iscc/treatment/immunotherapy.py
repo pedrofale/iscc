@@ -1,15 +1,17 @@
 from .treatment import Treatment
 
 class Immunotherapy(Treatment):
-    """Immunotherapy: strips a cancer cell's immune resistance so the local immune
-    microenvironment can kill it.
+    """Immunotherapy, which lowers the immune resistance of cancer cells so that immune cells kill them.
 
-    Unlike the death-rate therapies it does not kill directly — it *lowers*
-    ``immune_resistance`` (by ``rate_multiplier ** -(1 - treatment_resistance)``, so
-    cells that are also treatment-resistant are stripped less), and the killing is done
-    by the local immune density in the death-rate model. With no ``immune_checkpoints``
-    given it acts on every cancer cell; otherwise only on cells expressing the listed
-    checkpoints. Pass an instance to [`GenotypeTumor`][iscc.tumor.GenotypeTumor]`.grow(..., treatment=it)`.
+    It adds no death hazard of its own. While dosed, the immune resistance of a targeted clone is
+    multiplied by ``1 - x``, where ``x`` is the dose the clone takes (``effectiveness`` times
+    ``1 - treatment_resistance``, see [`Treatment`][iscc.treatment.Treatment]), so clones that are
+    also treatment-resistant keep more of it. Cancer clones that are not targets take the
+    ``toxicity`` share instead. The killing is done by the immune cells of the deme,
+    through the death hazard ``prob_kill`` (of ``immune_cell_params``) times the immune fraction of
+    the deme times one minus the immune resistance. With no ``immune_checkpoints`` the therapy acts
+    on every cancer cell, and otherwise only on cells that express the listed checkpoints. Pass an
+    instance to [`GenotypeTumor.grow`][iscc.tumor.GenotypeTumor.grow] as ``treatment=it``.
 
     Parameters
     ----------
@@ -20,7 +22,7 @@ class Immunotherapy(Treatment):
     **kwargs
         Forwarded to the [`Treatment`][iscc.treatment.Treatment] base. See
         [`Treatment`][iscc.treatment.Treatment] for the shared dosing / scheduling
-        parameters (``start``, ``duration``, ``rate_multiplier``, ``effectiveness``, ...).
+        parameters (``start``, ``duration``, ``effectiveness``, ...).
     """
 
     # Immunotherapy works by lowering the cell's immune resistance; the actual killing
