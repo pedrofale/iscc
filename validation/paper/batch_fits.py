@@ -43,7 +43,11 @@ greater than 200 and 250, respectively, and a mitochondrial percentage less than
   doi:10.1093/gigascience/giaa151): genes specific to one other cell type, counted in the T cells,
   are soup (:func:`ambient_estimate`, fixed before the fit). Each tumour by itself; a tumour whose
   estimate is not identifiable takes a value drawn per seed (per batch in the cohort) from the range
-  in fits.json's ``ambient_range``, set by ``set-ambient-range`` once registered. As first registered,
+  in fits.json's ``ambient_range``, set by ``set-ambient-range``. The registered range (vault bc210df)
+  is the soup share rho uniform on [0.03, 0.11], from Janssen et al. 2023 (Genome Biol 24:140,
+  doi:10.1186/s13059-023-02978-x; Results, "Background noise fractions differ between replicates and
+  cells", Fig. 2A, PMC10278251): in their scRNA-seq of dissociated tissue, replicate 3's cells mostly
+  below 3% background and replicate 2's median around 11%. As first registered,
   the estimates are used only if identifiable in at least half the tumours; otherwise every tumour
   takes the range.
 * Doublet rate: 10x's multiplet rate at the tumour's number of cells, from the Chromium Single Cell
@@ -59,14 +63,17 @@ greater than 200 and 250, respectively, and a mitochondrial percentage less than
 in two 10x Chromium v2 runs, A (5,172 cells) and B (3,057 cells), every cell of both. Cell types
 (:func:`transfer_labels`): the authors' annotation (``CellType`` of the Single Cell Portal study
 SCP424's metadata, as packaged in SeuratData's pbmcsca 3.0.0, CC BY 4.0) where it exists; every other
-cell (and any the authors marked "Unassigned") takes the majority label of its 15 nearest labelled
+cell (and any the authors marked "Unassigned", registered in vault bc210df) takes the majority label
+of its 15 nearest labelled
 cells on 50 principal components of the pooled counts, normalised to the median library size and
 log-transformed; the leave-one-out accuracy of that rule on the labelled cells is recorded. The fits
 per run "by type" (:func:`ding_fits`, :func:`combine_by_type`): ``estimate_rna`` (fit_dropout on)
 within each cell type, and the ambient attempt in each type's cells against the other types'
 markers; one vector per run, the cell-weighted mean over types of ``mu_lib``, ``sigma_lib``,
-dispersion and the ambient fraction; dropout only when types holding more than half the run's cells
-have a fitted midpoint above 0, then the cell-weighted mean of those types' midpoints and shapes.
+dispersion and the ambient fraction (a run's ambient fraction counts only when the types whose
+estimate is identifiable hold more than half its cells, registered in vault bc210df); dropout only
+when types holding more than half the run's cells have a fitted midpoint above 0, then the
+cell-weighted mean of those types' midpoints and shapes.
 No dissociation (blood).
 """
 import argparse
@@ -121,6 +128,12 @@ SOURCES = {
     "multiplet": dict(source="10x Genomics, Chromium Single Cell 3' Reagent Kits v2 User Guide, CG00052 "
                              "Rev B, p. 6 (multiplet rate by cells recovered), read 2026-11-16; applied to "
                              "Wu et al.'s 3' and 5' runs alike (the 5' kit's guide was not checked)"),
+    "ambient_range": dict(citation="Janssen P et al. The effect of background noise and its removal on the "
+                                   "analysis of single-cell expression data. Genome Biol 24, 140 (2023)",
+                          doi="10.1186/s13059-023-02978-x", pmc="PMC10278251",
+                          where="Results, 'Background noise fractions differ between replicates and cells' "
+                                "(Fig. 2A): scRNA-seq replicate 3, most cells below 3% background; replicate 2, "
+                                "median around 11%", registered="vault bc210df", rho=[0.03, 0.11]),
     "mgi_homology": dict(source="MGI HOM_MouseHumanSequence.rpt, downloaded 2026-11-16"),
     "hgnc": dict(source="HGNC hgnc_complete_set.txt, downloaded 2026-11-16"),
 }
@@ -211,6 +224,12 @@ def load_wu(tar, work):
     meta = meta.reindex(bcs)
     if meta.isna().all(axis=1).any():
         raise ValueError("Wu metadata misses some barcodes of the matrix")
+    missing = [c for c in ("orig.ident", "celltype_major") if c not in meta.columns]
+    if missing:
+        raise ValueError(f"Wu metadata lacks {missing} (columns: {list(meta.columns)}); stopping, not adapting")
+    if WU_T not in set(meta["celltype_major"].astype(str)):
+        raise ValueError(f"Wu metadata has no celltype_major {WU_T!r} (values: "
+                         f"{sorted(set(meta['celltype_major'].astype(str)))}); stopping, not adapting")
     shutil.rmtree(d)
     return X, genes, meta
 
@@ -232,7 +251,14 @@ def load_ding(ding_dir, labels_path):
     obs = pd.DataFrame({"run": [inv[r] for r in run],
                         "barcode": pd.Series(cells).str.rsplit(".", n=1).str[1].to_numpy()}, index=cells)
     lab = pd.read_csv(labels_path, sep="\t", low_memory=False)
+    missing = [c for c in ("cell", "Method", "CellType") if c not in lab.columns]
+    if missing:
+        raise ValueError(f"pbmcsca metadata lacks {missing} (columns: {list(lab.columns)}); stopping, not adapting")
     obs["author_label"] = _ding_labels(obs, lab)
+    for r in DING_RUNS:
+        n = int(obs.loc[obs["run"] == r, "author_label"].notna().sum())
+        if n == 0:
+            raise ValueError(f"no pbmcsca label matched run {r}'s cells; stopping, not adapting")
     return X, genes, obs
 
 
@@ -508,6 +534,8 @@ def wu_fits(X, genes, meta, orthology_dir):
               f"{rec['stress_score']:.4f}, ambient {rec['ambient']['rho']} ({rec['ambient']['n_sets']} sets, "
               f"identifiable {rec['ambient']['identifiable']}), doublets {rec['doublet_rate']:.4f}", flush=True)
     fitted = [t for t in tumours if "rna" in per[t]]
+    if len(fitted) < 2:
+        raise ValueError(f"only {len(fitted)} Wu tumour(s) have >= 50 T cells; stopping, not adapting")
     scores = np.array([per[t]["stress_score"] for t in fitted])
     med = float(np.median(scores))
     for t in fitted:
