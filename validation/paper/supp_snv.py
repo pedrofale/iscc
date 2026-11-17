@@ -834,6 +834,7 @@ def draw(recs, num):
     ax.set_ylim(-0.02, 1.13)                       # headroom above 1, kept from the specificity note's layout
     ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
     ax.spines["left"].set_bounds(0, 1)
+    ax.scatter([], [], s=1.2, color=S.INK, alpha=0.45, linewidths=0, label="one tumor")
     ax.legend(loc="lower left", bbox_to_anchor=(-0.02, 1.01), fontsize=5.0, ncol=3, handlelength=1.6,
               columnspacing=0.8)
     # the calls at non-mutated sites (specificity_note) are stated in the caption, not printed in the figure
@@ -868,6 +869,7 @@ def draw(recs, num):
         S.despine(ax, left=False)
     ax.plot([], [], marker="^", ms=2.4, color=S.INK, mfc="white", mew=0.5, ls="none", label="site in 3′ window")
     ax.plot([], [], marker="v", ms=2.4, color=S.INK, mfc="white", mew=0.5, ls="none", label="site outside")
+    ax.plot([], [], marker="|", ms=2.0, color=S.INK, alpha=0.5, mew=0.4, ls="none", label="one tumor")
     ax.legend(loc="lower right", bbox_to_anchor=(1.05, 1.0), fontsize=4.8, ncol=1, handletextpad=0.2)
 
     # (d) cardelino ------------------------------------------------------------------------------------------
@@ -891,7 +893,7 @@ def draw(recs, num):
     ax.set_xticks(np.arange(len(tasks)))
     ax.set_xticklabels([f"{_short(t)}\n{num['cardelino'][t]['n_true_clones']} clones" for t in tasks])
     ax.set_ylim(0, 1.0)
-    ax.set_ylabel("cardelino balanced accuracy")
+    ax.set_ylabel("Balanced accuracy of cardelino")
     ax.legend(loc="lower left", bbox_to_anchor=(0.0, 1.0), ncol=5, fontsize=5.0, handlelength=1.2)
     return S.save(fig, "supp_snv")
 
