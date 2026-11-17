@@ -765,15 +765,15 @@ def render_a(fig, T, Z, D, Dz, V, Vz, nums):
     fr, fc = divmod(T["founding_deme"], G)
     ax.scatter([fc], [fr], s=9, facecolors="none", edgecolors="#B2182B", lw=0.6)
     _frame(ax)
-    S.text_mm(fig, x0, MAP_Y + 24.3, f"{T['n_glands']} glands in stroma,\n{G} x {G} demes (1 cm);\n"
-              "ring: the founding deme", fontsize=4.6, color=S.GREY, va="top", linespacing=1.15)
+    S.text_mm(fig, x0, MAP_Y + 24.3, "glands in stroma;\nring: the founding deme", fontsize=4.6, color=S.GREY,
+              va="top", linespacing=1.15)
     if MG:
         axm = S.ax_mm(fig, x0, MAP_Y + 33.5, 9, 9)
         axm.imshow(np.tile(_hexrgb(S.COMPARTMENT["met"]), (MG, MG, 1)), interpolation="nearest")
         vr, vc = T["met_vessel"]
         axm.scatter([vc], [vr], s=6, color="#B2182B", lw=0)
         _frame(axm, NORMAL_COLOUR["host"], 0.5)
-        S.text_mm(fig, x0 + 10.2, MAP_Y + 34, f"metastatic site:\nhost tissue,\n{MG} x {MG} demes;\ndot: the vessel",
+        S.text_mm(fig, x0 + 10.2, MAP_Y + 34, "metastatic site\nof host tissue;\ndot: the vessel",
                   fontsize=4.6, color=S.GREY, va="top", linespacing=1.15)
     _arrow(fig, x0 + 23.6, MAP_Y + 11.5, STAGE_X["growth"] - 0.6, MAP_Y + 11.5)
 
@@ -799,8 +799,6 @@ def render_a(fig, T, Z, D, Dz, V, Vz, nums):
         axi.scatter([vc - c0], [vr - r0], s=4, facecolors="none", edgecolors="#B2182B", lw=0.4)
         _frame(axi, "#3E7CB1", 0.6)
         S.text_mm(fig, x1 + 29.2, MAP_Y + 11.4, "metastasis", fontsize=4.8, color="#3E7CB1", va="bottom")
-        S.text_mm(fig, x1 + 29.2, MAP_Y + 24.6, f"{side} x {side}-\ndeme crop", fontsize=4.2, color=S.GREY,
-                  va="top", linespacing=1.1)
         nums["a"]["met_crop"] = side
     S.text_mm(fig, x1, MAP_Y + 29.3, f"{T['cancer']:,} cancer cells after {T['time']:.0f} generations;\n"
               f"metastasis: {n_met:,} of them", fontsize=4.6, color=S.GREY, va="top", linespacing=1.15)
@@ -827,7 +825,7 @@ def render_a(fig, T, Z, D, Dz, V, Vz, nums):
     _frame(ax, "none")
     S.text_mm(fig, x2 + 7, MAP_Y - 0.4, "section", fontsize=4.8, color=c_sec, ha="center", va="bottom")
     S.text_mm(fig, x2 + 21, MAP_Y - 0.4, "dissociated", fontsize=4.8, color=c_dis, ha="center", va="bottom")
-    S.text_mm(fig, x2, MAP_Y + 29.3, "the resected primary, cut in half;\nfour blocks (1-4) for multi-region\n"
+    S.text_mm(fig, x2, MAP_Y + 29.3, "the resected primary, cut in half;\nfour blocks for multi-region\n"
               "sequencing; the metastasis is\nnot resected", fontsize=4.6, color=S.GREY, va="top", linespacing=1.15)
     # the blocks' clone fractions (truth, from the counts)
     for b in range(len(T["block_centres"])):
@@ -844,7 +842,7 @@ def render_a(fig, T, Z, D, Dz, V, Vz, nums):
         _frame(axb, "none")
         axb.text(0, -0.06, str(b + 1), transform=axb.get_xaxis_transform(), fontsize=4.4, ha="center", va="top")
         nums["a"].setdefault("blocks", {})[str(b + 1)] = {lab: round(cnt.get(lab, 0) / tot, 3) for lab in labels}
-    S.text_mm(fig, x2 + 22, MAP_Y + 40, "clone shares\nof the blocks\n(truth)", fontsize=4.4, color=S.GREY,
+    S.text_mm(fig, x2 + 22, MAP_Y + 40, "true clone\nshares of\nthe blocks", fontsize=4.4, color=S.GREY,
               va="top", linespacing=1.1)
     _arrow(fig, x2 + 28.6, MAP_Y + 11.5, STAGE_X["assays"] - 0.6, MAP_Y + 11.5)
 
@@ -887,8 +885,8 @@ def render_a(fig, T, Z, D, Dz, V, Vz, nums):
     else:
         _visium(axv, Vz, T, mode="clone")
         _frame(axv, "none")
-    S.text_mm(fig, x3, MAP_Y + 38.5, "Each output carries the answer key: per cell its clone, lineage, genotype,\n"
-              "copy number, niche and program activity; per clone where and when it arose.",
+    S.text_mm(fig, x3, MAP_Y + 38.5, "The answer key of every output: the clone, lineage, genotype, copy number,\n"
+              "niche and program activity of each cell, and where and when each clone arose.",
               fontsize=4.6, color=S.INK, va="top", linespacing=1.2)
     nums["a"].update(cancer=T["cancer"], generations=round(T["time"], 1), met_cells=n_met, glands=T["n_glands"],
                      grid=G, met_grid=MG, clone_sizes=T["sizes"])
@@ -981,15 +979,12 @@ def render_biases(fig, y0, nums):
         ax.text((a + b) / 2, yb + 0.6, st, fontsize=5.2, ha="center", va="top", fontweight="bold")
     # legend and the steps with no bias
     lx, ly = 5.0, y0 + 14.0
-    for k_, (how, txt) in enumerate(((SB.FIT, "fitted from real data (estimate_dna, _rna, _visium)"),
-                                     (SB.COND, "fitted when the real data carry what the fit needs"),
-                                     (SB.SET, "set by the user (a prior or preset)"))):
+    for k_, (how, txt) in enumerate(((SB.FIT, "fitted from real data"),
+                                     (SB.COND, "fitted when the real data contain what the fit needs"),
+                                     (SB.SET, "set by the user as a prior or preset"))):
         ax.plot([lx], [ly + 2.6 * k_], marker="o", ms=2.6, fillstyle=fill[how], color=S.INK, mec=S.INK,
                 mew=0.5, markerfacecoloralt="white", ls="none")
         ax.text(lx + 1.8, ly + 2.6 * k_, txt, fontsize=4.8, va="center")
-    ax.text(lx - 1, ly + 9.3, "Each bias at the step where it enters, per technology (rows).\n"
-            "Tissue and growth add none: the answer key is exact.\nSource: supp_biases.BIASES, traced to the code.",
-            fontsize=4.6, color=S.GREY, va="top", linespacing=1.25)
     counts = Counter(b.how for b in SB.BIASES)
     nums["d"] = dict(entries=len(SB.BIASES), by_status=dict(counts),
                      names={st: names[st] for st in SB.STEPS})
@@ -1032,11 +1027,11 @@ def render_b(fig, y0, T, nums):
                                  lw=0.5, zorder=5))
     ax.text(0, -12.6, "basement membrane", fontsize=4.2, ha="center", va="center", color=S.INK)
     texts.append(("Gland", [
-        "A closed acinus: the founding deme is held shut",
-        f"for {P['origin_generations']:.0f} generations once half full; leaving a",
-        "gland needs the breach trait, and a crossing",
-        "succeeds with probability equal to its level.",
-        f"Breach carriers here: {100 * car['gland']['breach']:.0f}% of gland cells,",
+        "The founding acinus is held closed at first.",
+        "Leaving a gland needs the breach trait, and",
+        "a crossing succeeds with probability equal",
+        "to the level of the trait.",
+        f"Breach carriers are {100 * car['gland']['breach']:.0f}% of gland cells and",
         f"{100 * car['stroma']['breach']:.0f}% of stroma cells."]))
 
     # the stroma: residents add a hazard that stromal survival offsets
@@ -1056,13 +1051,12 @@ def render_b(fig, y0, T, nums):
     _cell(ax, 7.0, -6.0, 1.05, "#BDBDBD", ec="white", z=3)
     ax.text(7.0, -6.0, "x", fontsize=5, ha="center", va="center", color=S.INK, zorder=4)
     texts.append(("Stroma", [
-        "Resident stromal cells add a death hazard",
-        r"$\sigma\,\phi_s\,(1-\beta_{ss})$, $\sigma$ = " + f"{P['stromal_hazard']:g}"
-        + r", with $\phi_s$ the stromal",
-        r"share of the deme and $\beta_{ss}$ the clone's",
-        "stromal survival, which offsets it.",
-        f"Carriers here: {100 * car['stroma']['stromal_survival']:.1f}% of stroma cells,",
-        f"{100 * car['gland']['stromal_survival']:.1f}% of gland cells (the trait stays rare)."]))
+        "The death hazard from resident stromal cells is",
+        r"$\sigma\,\phi_s\,(1-\beta_{ss})$, with $\phi_s$ the stromal share of",
+        r"the deme and $\beta_{ss}$ the stromal survival of the",
+        "clone, which offsets it.",
+        f"Carriers are {100 * car['stroma']['stromal_survival']:.1f}% of stroma cells and",
+        f"{100 * car['gland']['stromal_survival']:.1f}% of gland cells."]))
 
     # the metastasis: vessel entry with transit survival, a host hazard offset by met survival
     ax = S.ax_mm(fig, 3, ys[2], 27, h * 0.82)
@@ -1087,11 +1081,11 @@ def render_b(fig, y0, T, nums):
         _cell(ax, 4.5 + rr * np.cos(a), 1.5 + rr * np.sin(a), 1.0, col["clone 1"], ec="white", z=3)
     ax.text(-13.2, 9.6, "vessel", fontsize=4.4, color="#B2182B", va="bottom")
     texts.append(("Metastasis", [
-        "Entry only through the vessel deme, surviving",
-        r"transit with probability $f + (1-f)\,m$, $f$ = " + f"{P['transit_floor']:g};",
-        r"the host adds a hazard $h\,\phi_h\,(1-m)$, $h$ = " + f"{P['met_hazard']:g},",
-        r"offset by the clone's metastatic survival $m$.",
-        f"Carriers here: {100 * car['met']['met_survival']:.0f}% of metastatic cells,",
+        "Entry is only through the vessel deme, and",
+        r"transit survival has probability $f + (1-f)\,m$.",
+        r"A host hazard $h\,\phi_h\,(1-m)$ is offset by the",
+        r"metastatic survival $m$ of the clone.",
+        f"Carriers are {100 * car['met']['met_survival']:.0f}% of metastatic cells and",
         f"{100 * car['stroma']['met_survival']:.0f}% of stroma cells."]))
 
     for (name, lines), y in zip(texts, ys):
@@ -1101,10 +1095,8 @@ def render_b(fig, y0, T, nums):
     _box(fig, 3, yd, 64, 10.5, S.PASTEL["grey"], r=0.8)
     S.text_mm(fig, 5, yd + 1.4, "Everywhere: driver dosage sets the division rate", fontsize=5.4,
               fontweight="bold", va="top")
-    S.text_mm(fig, 5, yd + 4.6, r"$b=\min(b_{max},\,b_0\,s^{d})\,\prod_j(1-c_j\beta_j)$, $d$ the driver dosage (CINner), "
-              f"$s$ = {P['driver_effect']:g};\n"
-              f"each trait costs division wherever it is carried ($c$ = {P['breach_cost']:g}, "
-              f"{P['stromal_survival_cost']:g}, {P['met_survival_cost']:g}).",
+    S.text_mm(fig, 5, yd + 4.6, r"$b=\min(b_{max},\,b_0\,s^{d})\,\prod_j(1-c_j\beta_j)$, with $d$ the driver dosage;"
+              "\neach trait costs division wherever it is carried.",
               fontsize=4.8, va="top", linespacing=1.35)
     nums["b"] = dict(params=P, carriers=car)
     return yd + 10.5
@@ -1126,9 +1118,9 @@ def render_clone(fig, y0, T, D, Dz, V, Vz, nums):
     cons, modal = np.asarray(T["consensus"][k]), np.asarray(T["modal"])
     altered = np.nonzero(cons != modal)[0]
     edges = np.concatenate([[0], np.cumsum(T["segment_sizes"])])
-    S.text_mm(fig, 76, y0 + 4.6, f"{T['sizes'][k]:,} cancer cells ({100 * T['sizes'][k] / T['cancer']:.1f}%), "
-              f"born at generation {_node_time(T, k):.0f}; {len(altered)} of {len(cons)} segments differ "
-              f"from the tumour's modal profile", fontsize=4.8, color=S.GREY, va="center")
+    S.text_mm(fig, 76, y0 + 4.6, f"{T['sizes'][k]:,} of {T['cancer']:,} cancer cells, "
+              f"founded at generation {_node_time(T, k):.0f}; {len(altered)} of {len(cons)} segments differ "
+              f"from the modal profile of the tumor", fontsize=4.8, color=S.GREY, va="center")
     nd = dict(clone=k, cells=T["sizes"][k], altered_segments=(altered + 1).tolist(), consensus=cons.tolist(),
               modal=modal.tolist(), consensus_share=T["consensus_share"][k])
 
@@ -1150,7 +1142,7 @@ def render_clone(fig, y0, T, D, Dz, V, Vz, nums):
     ax.tick_params(axis="y", labelsize=4.6)
     ylab(ax, "truth\ncopies")
     S.despine(ax, True, False)
-    S.text_mm(fig, X0, y0 + 7.3, f"Truth: its consensus profile (solid), the tumour's modal profile (dashed)",
+    S.text_mm(fig, X0, y0 + 7.3, f"Consensus profile of {k} (solid) and modal profile of the tumor (dashed)",
               fontsize=4.4, va="center")
 
     if Dz is None:
@@ -1194,8 +1186,8 @@ def render_clone(fig, y0, T, D, Dz, V, Vz, nums):
         ylab(ax, "WGS\ncopies", S.MODALITY["DNA"])
         S.despine(ax, True, False)
         fb = wb["n_choice"] / wb["n_pooled"]
-        ax.text(0.0, 1.04, f"WGS of block {wb['block']}: depth (dots) on the cells' copies, {k} ({100 * fb:.0f}% of "
-                "cells) on top", transform=ax.transAxes, fontsize=4.4, va="bottom")
+        ax.text(0.0, 1.04, f"WGS of block {wb['block']}: depth (dots) over the pooled copy number, with {k} on top",
+                transform=ax.transAxes, fontsize=4.4, va="bottom")
         wh = D["wgs"]
         hn, ho, hk = parts(wh)
         h_obs, h_scale = observed(wh, Dz["wgs_rel"].astype(float))
@@ -1255,7 +1247,7 @@ def render_clone(fig, y0, T, D, Dz, V, Vz, nums):
         ylab(ax, "scDNA\ncells", S.MODALITY["DNA"])
         ax.yaxis.labelpad = 4.5
         n_ok, n_sing = int(ok[sing].sum()), int(ok[sing].size)
-        ax.text(0.0, 1.015, f"scDNA: integer calls of {len(order)} cells, its {nk} boxed; {n_ok:,} of {n_sing:,} "
+        ax.text(0.0, 1.015, f"scDNA: integer calls of {len(order)} cells, {k} boxed; {n_ok:,} of {n_sing:,} "
                 "singlet bins equal the truth", transform=ax.transAxes, fontsize=4.4, va="bottom")
         nd["scdna"] = dict(cells=int(len(order)), choice_cells=nk, bins=int(nb), doublets=int(dbl.sum()),
                            accuracy_singlets=round(acc_all, 6), accuracy_choice=round(acc_k, 6),
@@ -1290,7 +1282,7 @@ def render_clone(fig, y0, T, D, Dz, V, Vz, nums):
         ylab(ax, "scRNA\nlog$_2$ FC", S.MODALITY["RNA"])
         S.despine(ax, True, False)
         r = float(np.corrcoef(lfc_o, lfc_e)[0, 1])
-        ax.text(0.0, 1.04, f"scRNA: its expression shift (dots, {BIN} genes); line: dosage law on its true copies",
+        ax.text(0.0, 1.04, f"scRNA: expression shift of {k} (dots); line: dosage law on the true copy number",
                 transform=ax.transAxes, fontsize=4.4, va="bottom")
         S.stat(ax, f"r = {r:.2f}", "lower left")
         alt_obs = {str(s + 1): round(float(np.median(lfc_o[bin_seg == s])), 3) for s in altered}
@@ -1321,7 +1313,7 @@ def render_clone(fig, y0, T, D, Dz, V, Vz, nums):
         ax.set_ylim(xy[on, 0].max() + 2, xy[on, 0].min() - 2)
         ax.set_aspect("equal", adjustable="box")
         _frame(ax, "none")
-        ax.set_title(f"Visium: true share of {k}\nper spot (sectioned half)", fontsize=5.2,
+        ax.set_title(f"Visium: true share of {k}\nper spot", fontsize=5.2,
                      color=S.MODALITY["spatial"], pad=1.5, linespacing=1.1)
         cax = S.ax_mm(fig, XR + 3, y0 + 92, 12, 1.2)
         cb = fig.colorbar(sc, cax=cax, orientation="horizontal")
@@ -1425,7 +1417,7 @@ def _genealogy(ax, T, k, ck):
     S.despine(ax, False, True)
     ax.text(end + 48, -0.9, "in the\nmetastasis", fontsize=4.2, color="#3E7CB1", ha="center", va="bottom",
             linespacing=1.0)
-    ax.text(0.0, 1.02, "triangles: a copy gained or lost on the path to " + k + " (segment number)",
+    ax.text(0.0, 1.02, "triangles: copy number gains and losses on the path to " + k + ", labeled by segment",
             transform=ax.transAxes, fontsize=4.4, va="bottom")
     return dict(nodes=len(nodes), leaves=nxt[0], events=[[round(e[0], 1), e[1], e[2] + 1, e[3], e[4]] for e in ev],
                 met_cells_by_clone={n["label"]: n["sub_met"] for n in nodes.values() if n["label"]})

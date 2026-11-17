@@ -102,7 +102,7 @@ def render():
     ax.set_yticks(range(len(recs)))
     ax.set_yticklabels([f"patient {i + 1}" for i in range(len(recs))], fontsize=4.8)
     ax.set_xticks([])
-    ax.set_xlabel(f"Driver genes carried by at least {HIT:.0%} of a patient's cancer cells")
+    ax.set_xlabel("Driver genes carried by each patient")
     path = S.save(fig, "supp_s4_cohort")
     out = dict(n_patients=len(recs), genes_hit=len(genes), recurrent=rec_n,
                clones=[r["n_clones"] for r in recs], drivers_in_layout=recs[0]["n_drivers"] if recs else None,

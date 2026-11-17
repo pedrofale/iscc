@@ -179,17 +179,17 @@ def draw(df, res):
     new = {k: v for k, v in res["chosen"].items() if k in ("dist", "mean", "sd", "a", "b")}
     P_old, P_new = parts(df, PRIMARY, LAWS["haplotype"]), parts(df, PRIMARY, LAWS[law])
     real_c, old_c, new_c = S.SOURCE["real"], "#C9A227", S.SOURCE["iscc"]
-    titles = {"all": "all copy-number changes", "gain": "gains only", "loss": "losses only"}
+    titles = {"all": "all copy number changes", "gain": "gains only", "loss": "losses only"}
     for i, (name, letter) in enumerate((("all", "a"), ("gain", "b"), ("loss", "c"))):
         x0 = 12 + i * 58
         ax = S.ax_mm(fig, x0, 8, 48, 38)
         S.panel_letter(fig, letter, x0 - 10, 5)
         obs = P_new[name][0]
-        _density(ax, obs, real_c, "TCGA breast tumours", fill=True)
+        _density(ax, obs, real_c, "TCGA breast tumors", fill=True)
         o_obs, o_se, o_sg, o_m = P_old[name]
-        _density(ax, induced(OLD, o_sg, o_m, o_se), old_c, "iscc before (haplotype law, previous prior)", ls="--")
+        _density(ax, induced(OLD, o_sg, o_m, o_se), old_c, "iscc before calibration", ls="--")
         _, n_se, n_sg, n_m = P_new[name]
-        _density(ax, induced(new, n_sg, n_m, n_se), new_c, f"iscc calibrated ({law} law, fitted prior)", lw=1.2)
+        _density(ax, induced(new, n_sg, n_m, n_se), new_c, "iscc calibrated", lw=1.2)
         for v in (0.0, 1.0):
             ax.axvline(v, color=S.GREY, lw=0.5, ls=":")
         ax.set_xlim(-0.6, 1.8)
@@ -200,9 +200,6 @@ def draw(df, res):
         if i == 0:
             ax.set_ylabel("density of genes")
             ax.legend(frameon=False, fontsize=5.5, loc="upper left")
-    S.text_mm(fig, 12, 57.5, f"{res['n_genes']} genes in TCGA breast tumours of purity at least 0.7: slope of log "
-                           f"expression on log copy number relative to ploidy (0 = buffered, 1 = linear).\n"
-                           f"Each gene's estimation noise is added to iscc's slopes.", fontsize=5.5, color=S.GREY)
     print(S.save(fig, "supp_dosage", stamp=False))
 
 

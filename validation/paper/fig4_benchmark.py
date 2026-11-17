@@ -53,9 +53,9 @@ NICHE = {"duct_wall": ("duct wall", "#7570B3"), "hypoxic_core": ("hypoxic core",
 TOOL_D = {"Clonalscope": "#EB6834", "Clonalscope, DNA prior": S.MODALITY["DNA"], "CalicoST": "#1BAF7A"}
 # the tools that take a normal reference are given the sample's non-epithelial normals (Visium: the spots of
 # such normals only), and every tool is scored on the epithelial-lineage barcodes (fig4_tools.py)
-ROWS_B = [("scrna", "copykat", "CopyKAT"), ("scrna", "copykat-ref", "CopyKAT, normal ref."),
+ROWS_B = [("scrna", "copykat", "CopyKAT"), ("scrna", "copykat-ref", "CopyKAT, reference"),
           ("scrna", "numbat", "Numbat"), ("scrna", "infercnvpy", "inferCNV"),
-          ("visium", "copykat", "CopyKAT"), ("visium", "copykat-ref", "CopyKAT, normal ref."),
+          ("visium", "copykat", "CopyKAT"), ("visium", "copykat-ref", "CopyKAT, reference"),
           ("visium", "calicost", "CalicoST"), ("visium", "clonalscope", "Clonalscope"),
           ("visium", "cancerfinder", "Cancer-Finder")]
 
@@ -63,9 +63,9 @@ ROWS_B = [("scrna", "copykat", "CopyKAT"), ("scrna", "copykat-ref", "CopyKAT, no
 def _label(task, swept=False):
     if task.startswith("disp"):
         d, s = task[4:].split("_seed")
-        lab = f"disp. {d}, s{s}"
+        lab = f"dispersal {d}, seed {s}"
     else:
-        lab = f"showcase, s{task.replace('seed', '')}"
+        lab = f"showcase, seed {task.replace('seed', '')}"
     return lab + (" (WGD)" if swept else "")
 
 
@@ -107,14 +107,14 @@ def panel_a(fig, ov):
         x, y = cx + r * np.cos(th), cy + r * np.sin(th)
         ov.add_patch(Circle((x, y), 0.75, fc=cols[int((np.arctan2(y - cy, x - cx) + np.pi) / (np.pi / 2)) % 4],
                             ec="white", lw=0.2))
-    ov.text(cx, cy + 12.5, "one tumour", ha="center", va="top", fontsize=5.2)
+    ov.text(cx, cy + 12.5, "one tumor", ha="center", va="top", fontsize=5.2)
     # the four modalities
     mods = [("WGS", DNA, 6.0), ("scDNA", DNA, 16.0), ("scRNA", RNA, 26.0), ("Visium", SP, 36.0)]
     for name, col, y in mods:
         _box(ov, 33, y, 16, 7, name, pale[col], ec=col, bold=True)
         _arrow(ov, 26, cy, 33, y + 3.5, lw=0.45)
     # tools on each modality alone (b) and the chains across modalities (c, d)
-    _box(ov, 55, 15.5, 25, 8, "HMMcopy (DLP+)\n+ clustering", pale[DNA], ec=DNA)
+    _box(ov, 55, 15.5, 25, 8, "HMMcopy,\nthen clustering", pale[DNA], ec=DNA)
     _arrow(ov, 49, 19.5, 55, 19.5)
     _box(ov, 85, 15.5, 16, 8, "DNA clones\nand profiles", "white", ec=DNA)
     _arrow(ov, 80, 19.5, 85, 19.5)
@@ -122,24 +122,23 @@ def panel_a(fig, ov):
     _arrow(ov, 49, 29.5, 55, 29.5)
     _box(ov, 55, 35.5, 25, 8, "CopyKAT, CalicoST,\nClonalscope, Cancer-Finder", pale[SP], ec=SP, fs=4.6)
     _arrow(ov, 49, 39.5, 55, 39.5)
-    _box(ov, 108, 25.5, 22, 8, "clonealign\n(scRNA cells to clones)", pale[RNA], ec=RNA, fs=4.8)
+    _box(ov, 108, 25.5, 22, 8, "clonealign", pale[RNA], ec=RNA, fs=4.8)
     _arrow(ov, 101, 21.5, 108, 27.5, color=DNA)
     _arrow(ov, 49, 28.0, 108, 29.0, color="#BDBDBD", lw=0.4)
-    _box(ov, 108, 35.5, 22, 8, "Clonalscope with\na DNA prior (spots)", pale[SP], ec=SP, fs=4.8)
+    _box(ov, 108, 35.5, 22, 8, "Clonalscope with\na DNA prior", pale[SP], ec=SP, fs=4.8)
     _arrow(ov, 101, 22.5, 108, 37.5, color=DNA)
-    _box(ov, 108, 5.5, 22, 8, "lineage vs space\n(hypoxia field)", "white", ec=S.GREY, fs=4.8)
+    _box(ov, 108, 5.5, 22, 8, "lineage and space\nin the hypoxia field", "white", ec=S.GREY, fs=4.8)
     _arrow(ov, 26, 18, 108, 9.5, color="#BDBDBD", lw=0.4)
-    for x, y, lab in ((81, 29.5, "b"), (81, 39.5, "b"), (131.5, 29.5, "c"), (131.5, 39.5, "d"), (131.5, 9.5, "e")):
+    for x, y, lab in ((81, 29.5, "B"), (81, 39.5, "B"), (131.5, 29.5, "C"), (131.5, 39.5, "D"), (131.5, 9.5, "E")):
         ov.text(x, y, lab, fontsize=5.5, fontweight="bold", color=S.GREY, va="center")
     # the answer key, scored against every link
     _box(ov, 145, 9, 36, 31, "", "#F4F4F4", ec=S.INK)
     ov.text(163, 12, "answer key", ha="center", va="top", fontsize=5.6, fontweight="bold")
-    ov.text(163, 17.5, "true clones and genealogy\ncopy number per cell and arm\nmalignant or normal per cell\n"
-            "clone fractions per spot\nniche of every cell\nthe environment's fields", ha="center", va="top",
+    ov.text(163, 17.5, "true clones and genealogy\ncopy number per cell\nand chromosome arm\nmalignant or normal per cell\n"
+            "clone fractions per spot\nniche of every cell\nfields of the environment", ha="center", va="top",
             fontsize=4.7, linespacing=1.4, color=S.INK)
     for y in (9.5, 19.5, 29.5, 39.5):
         ov.plot([132 if y != 19.5 else 101, 145], [y, min(max(y, 12), 37)], color=S.INK, lw=0.35, ls=(0, (1.5, 1.5)))
-    ov.text(138.5, 44, "every link scored", ha="center", va="top", fontsize=4.6, color=S.GREY)
 
 
 def _numbers_b_all(df, nums):
@@ -177,7 +176,7 @@ def panel_b(fig, ov, nums):
     nums["b"] = {"tumours": sorted(set(df["tumour"])) if len(df) else []}
     _numbers_b_all(df, nums)
     for col, (metric, xlab, lim) in enumerate((("auc", "Malignancy AUC", (0.4, 1.0)),
-                                               ("cn_r", "Per-arm copy-number correlation", (-0.2, 1.0)))):
+                                               ("cn_r", "Copy number correlation per chromosome arm", (-0.2, 1.0)))):
         x0 = 36 + col * 77
         ax = S.ax_mm(fig, x0, 56, 52, 42)
         n = len(ROWS_B)
@@ -189,7 +188,7 @@ def panel_b(fig, ov, nums):
             vals = sub[sub["niche"].isin(NICHE)][metric] if len(sub) else pd.Series(dtype=float)
             if not len(sub) or not np.isfinite(vals.astype(float)).any():
                 failed = len(sub) and "status" in sub and sub["status"].astype(str).str.startswith("failed").all()
-                note = "pending" if not len(sub) else ("failed in every tumour" if failed else "no call")
+                note = "pending" if not len(sub) else ("failed in every tumor" if failed else "no call")
                 ax.text(lim[0] + 0.02 * (lim[1] - lim[0]), y, note, fontsize=4.4, color=S.GREY, va="center")
                 continue
             for k, (niche, (nlab, ncol)) in enumerate(NICHE.items()):
@@ -216,10 +215,7 @@ def panel_b(fig, ov, nums):
         else:
             ax.set_yticklabels([])
     h = [Line2D([], [], marker="o", ls="none", mfc=c, mec="white", ms=3.4, label=l) for l, c in NICHE.values()]
-    h.append(Line2D([], [], color=S.INK, lw=1.2, label="mean over tumours"))
-    S.text_mm(fig, 36, 53.0, "Reference: non-epithelial normals (Visium: their spots). AUC: epithelial-lineage barcodes "
-              "(spot malignant if half its cells are), where a niche has \u226510 normal epithelial",
-              fontsize=4.1, color=S.GREY, va="top")
+    h.append(Line2D([], [], color=S.INK, lw=1.2, label="mean over tumors"))
     fig.legend(handles=h, loc="upper left", bbox_to_anchor=(36 / 183, 1 - 48.6 / FIG_H), ncol=4, fontsize=4.8,
                frameon=False)
 
@@ -258,7 +254,7 @@ def panel_c(fig, ov, c, nums):
     h = [Line2D([], [], marker="o", ls="none", mfc=S.INK, mec="white", ms=4, label="true clones and profiles"),
          Line2D([], [], marker="o", ls="none", mfc=DNA, mec="white", ms=4, label="clones called from scDNA"),
          Line2D([], [], marker="o", ls="none", mfc="white", mec=S.INK, mew=0.6, ms=3.4,
-                label="true profiles of the clones scDNA found"),
+                label="true profiles of the clones found in scDNA"),
          Line2D([], [], marker="D", ls="none", mfc="#BDBDBD", mec="white", ms=3.0,
                 label="reference: correlation with the true profiles"),
          Line2D([], [], color=S.GREY, lw=0.6, label="chance")]
@@ -299,7 +295,7 @@ def panel_d(fig, ov, d, nums):
     ax.set_xticklabels([_label(t) for t in TUMOURS], fontsize=4.6, rotation=25, ha="right", rotation_mode="anchor")
     ax.set_xlim(-0.6, len(TUMOURS) - 0.4)
     ax.set_ylim(0, 1.02)
-    ax.set_ylabel("per-spot clone-fraction error")
+    ax.set_ylabel("Per-spot clone-fraction error")
     h = [Line2D([], [], marker="o", ls="none", mfc=TOOL_D[n], mec="white", ms=4, label=n) for n in names]
     h.append(Line2D([], [], color=S.GREY, lw=0.6, ls=":", label="largest clone everywhere"))
     fig.legend(handles=h, loc="upper left", bbox_to_anchor=(110 / 183, 1 - 105.5 / FIG_H), fontsize=4.4,
@@ -322,13 +318,7 @@ def panel_e(fig, ov, nums):
                 fig.colorbar(im, cax=cax).ax.tick_params(labelsize=4.3, length=1.5)
             S.despine(ax, False, False)
             ax.set_title(title, fontsize=5.2, pad=2)
-        S.text_mm(fig, 6, 193.5, f"(i) {z['run']} {z['task']}, ductal field", fontsize=4.5, color=S.GREY, va="top")
-    df0 = FL.load(DEV)
-    if len(df0) and "stalled" in df0 and df0["stalled"].any():
-        names = ", ".join(f"{r} {t.replace('_seed', ' s').replace('_', ' ')}" for r, t in
-                          zip(df0.run[df0.stalled], df0.task[df0.stalled]))
-        S.text_mm(fig, 6, 197.0, f"(ii, iii) open: {int(df0.stalled.sum())} tumours that stalled before their target "
-                  f"size\n({names})", fontsize=4.2, color=S.GREY, va="top", linespacing=1.2)
+        S.text_mm(fig, 6, 164.5, "i", fontsize=5, va="top")
     df = FL.load(DEV)
     ARCH = {"ductal": ("ductal field", S.CLONE_FAMILIES[0][1]), "free": ("without glands", S.CLONE_FAMILIES[2][1])}
     if len(df):
@@ -350,9 +340,9 @@ def panel_e(fig, ov, nums):
         ax.set_xlabel("Spatial autocorrelation")
         ax.set_ylabel("Lineage autocorrelation")
         ax.legend(fontsize=4.4, loc="upper left", frameon=False)
-        S.text_mm(fig, 68, 164.5, "(ii)", fontsize=5, va="top")
+        S.text_mm(fig, 68, 164.5, "ii", fontsize=5, va="top")
         ax = S.ax_mm(fig, 118, 168, 62, 26)
-        groups = [("R1", "ductal", None, "ductal\nsweep (R1)"), ("R3", "ductal", "selected", "ductal\nselected"),
+        groups = [("R1", "ductal", None, "ductal\nsweep"), ("R3", "ductal", "selected", "ductal\nselected"),
                   ("R3", "ductal", "neutral", "ductal\nneutral"), ("R3", "free", "selected", "no glands\nselected"),
                   ("R3", "free", "neutral", "no glands\nneutral")]
         for k, (run, arch, sel, lab) in enumerate(groups):
@@ -369,7 +359,7 @@ def panel_e(fig, ov, nums):
         ax.set_xticklabels([g[3] for g in groups], fontsize=4.5)
         ax.set_ylim(0, max(0.6, 1.1 * float(df.share.max())))
         ax.set_ylabel("Lineage share of the field")
-        S.text_mm(fig, 118, 164.5, "(iii)", fontsize=5, va="top")
+        S.text_mm(fig, 118, 164.5, "iii", fontsize=5, va="top")
         nums["e"] = FL.summary(DEV)
     else:
         nums["e"] = {}
