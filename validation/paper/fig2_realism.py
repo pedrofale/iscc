@@ -70,11 +70,11 @@ def panel_a(ax):
                label=f"iscc, full census ({cov['census']:.0%})")
     ax.scatter(sim.nd, sim.Dd, s=4, color=S.SOURCE["iscc"], alpha=0.8,
                label=f"iscc, 5% detection ({cov['5%']:.0%})")
-    ax.scatter(emp.n, emp.D, s=6, color=S.SOURCE["real"], edgecolors=S.INK, lw=0.3, label="real tumours")
+    ax.scatter(emp.n, emp.D, s=6, color=S.SOURCE["real"], edgecolors=S.INK, lw=0.3, label="real tumors")
     ax.set_yscale("log")
     ax.set_xlabel("Drivers per cell, n")
     ax.set_ylabel("Clonal diversity, D")
-    ax.legend(fontsize=4.5, loc="upper left", title="real tumours inside\nthe iscc hull",
+    ax.legend(fontsize=4.5, loc="upper left", title="real tumors inside\nthe iscc hull",
               title_fontsize=4.5)
     return dict(n_sim=len(sim), coverage=cov, D_median_detected=float(sim.Dd.median()), n_median_detected=float(sim.nd.median()),
                 D_median_census=float(sim.D0.median()), D_median_real=float(emp.D.median()))
@@ -109,7 +109,7 @@ def panel_c(ax):
     ax.text(prev.index.max(), 0.40, "PCAWG", fontsize=4.8, ha="right", va="center", color=S.GREY)
     ax.plot(prev.index, prev.values, marker="o", ms=2.5, color=S.SOURCE["iscc"], lw=0.8)
     ax.set_xlabel("WGD rate per mutating division")
-    ax.set_ylabel("Tumours with WGD")
+    ax.set_ylabel("Share of tumors with WGD")
     ax.set_ylim(0, 1)
     return dict(prevalence=prev.round(2).to_dict(), n_per_rate=int(df.groupby("rate").size().min()))
 
