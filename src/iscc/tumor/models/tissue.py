@@ -436,10 +436,11 @@ class TissueMixin:
         stro = sum(cnt for gid, cnt in deme.items() if self.genotypes[gid].type == "stromal")
         return stro / total
 
-    def _deme_comp(self, deme):
+    def _deme_comp(self, deme, cancer=None):
         """One O(#genotypes-in-deme) pass over a deme returning the per-compartment cell counts a
         death-rate evaluation needs:
-        ``(total, n_normal, n_immune, n_epithelial, n_stromal, n_host)``.
+        ``(total, n_normal, n_immune, n_epithelial, n_stromal, n_host)``. When a list ``cancer`` is
+        given, the same pass appends the deme's cancer genotypes to it, in the deme's order.
 
         Passing the result into ``_death_rate`` (via its ``comp`` argument) lets every genotype in a
         deme reuse ONE composition scan instead of each re-running the O(#genotypes) immune /
@@ -454,6 +455,8 @@ class TissueMixin:
             total += c
             tp = G[gid].type
             if tp == "cancer":
+                if cancer is not None:
+                    cancer.append(gid)
                 continue
             n_normal += c
             if tp == "immune":
