@@ -231,7 +231,7 @@ def render():
                     yy += line_h
         y += h + gap
     for k, (how, label) in enumerate(((FIT, "fitted from real data"),
-                                      (COND, "fitted when the real data carry what the fit needs"),
+                                      (COND, "fitted when the real data contain what the fit needs"),
                                       (SET, "set by the user as a prior or preset"))):
         _mark(ax, x0 + 1.2, y + 3.0 + 3.0 * k, how, S.INK)
         ax.text(x0 + 3.0, y + 3.0 + 3.0 * k, label, fontsize=5, va="center")
