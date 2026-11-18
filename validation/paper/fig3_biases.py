@@ -627,7 +627,7 @@ def _visium_left(fig, y, d):
     ax2.bar([0, 1], [d["moran_real"], d["moran_iscc"]], color=[S.SOURCE["real"], S.SOURCE["iscc"]], width=0.7)
     ax2.set_xticks([0, 1])
     ax2.set_xticklabels(["real", "iscc"], rotation=90)
-    ax2.set_ylabel("Moran's I, spot depth")
+    ax2.set_ylabel("Moran's I of spot depth")
     ax2.set_ylim(0, 1)
     return dict(moran_real=d["moran_real"], moran_iscc=d["moran_iscc"])
 
