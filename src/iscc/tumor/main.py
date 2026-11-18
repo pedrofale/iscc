@@ -79,8 +79,7 @@ def build_treatment(kind, tumor, adaptive, start, duration, max_tumor_size):
               help="With a `schedule:` block: write ONLY the compartment trajectory, skipping the "
                    "per-clone count tables. `isccgif --compartment` reads the trajectory alone, so "
                    "this is all a hero render needs -- and the tables dominate both runtime and "
-                   "disk (measured on configs/landing.yaml: 68 min / 5 GB with them, 21 min / "
-                   "317 MB without).")
+                   "disk.")
 @click.option("-o", "--output-path", default="./sim_out", help="Output directory.")
 def main(sim_config, steps, random_seed, treatment_kind, adaptive,
          treatment_start, treatment_duration, max_tumor_size, log, no_diagnose, no_tables,

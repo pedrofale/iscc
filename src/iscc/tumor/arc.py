@@ -4,8 +4,8 @@ primary + metastasis through the full clinical story and captures a compartment 
 
 The landing hero is reproducible from the ordinary CLI:
 
-    isccsim --sim-config configs/landing.yaml -o out
-    isccgif out --compartment --splash -o docs/assets/landing_hero.gif
+    isccsim --sim-config configs/landing_hero.yaml -o out --no-tables
+    isccgif out --compartment --splash --skip-confinement --scale 0.55 -o docs/assets/landing_hero.gif
 
 The schedule (under the ``schedule:`` key of a sim-config) is a list of PHASES executed in order:
 

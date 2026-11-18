@@ -17,7 +17,7 @@ import yaml
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NOTEBOOKS = sorted(glob.glob(os.path.join(REPO, "notebooks", "*.ipynb")))
 CONFIG = os.path.join(REPO, "notebooks", "example_config.yaml")
-LANDING = os.path.join(REPO, "configs", "landing.yaml")
+HERO = os.path.join(REPO, "configs", "landing_hero.yaml")
 
 
 def _cells(path, kind=None):
@@ -168,30 +168,30 @@ def test_prose_does_not_quote_a_stale_max_cells():
 # --------------------------------------------------------------------------------------------------
 @pytest.mark.parametrize("flag, why", [
     ("--skip-confinement",
-     "origin_confinement seals the founding acinus for ~84% of the run; without this the animation "
+     "origin_confinement seals the founding acinus for most of the run; without this the animation "
      "spends most of its frames on a duct where nothing moves, and the GIF palette desaturates the "
      "relapse (de3ccb7 added the flag for exactly this)"),
     ("--no-tables",
-     "isccgif --compartment reads only the trajectory; the count tables are ~47 of 68 minutes and "
-     "~4.7 of 5 GB of output it never opens"),
+     "isccgif --compartment reads only the trajectory; the count tables dominate the runtime and "
+     "the output, and it never opens them"),
 ])
 def test_landing_reproduce_command_is_the_one_that_works(flag, why):
-    """The header of configs/landing.yaml tells the reader how to regenerate the docs hero, so it
+    """The header of configs/landing_hero.yaml tells the reader how to regenerate the docs hero, so it
     must carry the flags of the command that actually produces the shipped asset."""
-    header = "\n".join(l for l in open(LANDING).read().splitlines() if l.startswith("#"))
-    assert flag in header, f"configs/landing.yaml's reproduce command is missing {flag}: {why}"
+    header = "\n".join(l for l in open(HERO).read().splitlines() if l.startswith("#"))
+    assert flag in header, f"configs/landing_hero.yaml's reproduce command is missing {flag}: {why}"
 
 
 def test_overview_and_config_document_the_same_hero_command():
     """docs/overview.md and the config header describe the same regeneration. When one gains a flag
     and the other does not, one of them is wrong and the reader cannot tell which."""
-    header = "\n".join(l for l in open(LANDING).read().splitlines() if l.startswith("#"))
+    header = "\n".join(l for l in open(HERO).read().splitlines() if l.startswith("#"))
     overview = open(os.path.join(REPO, "docs", "overview.md")).read()
     if "isccgif" not in overview:
         pytest.skip("overview.md no longer documents the hero render")
     for flag in ("--skip-confinement",):
         assert flag in overview, (
-            f"configs/landing.yaml's reproduce command uses {flag} but docs/overview.md does not")
+            f"configs/landing_hero.yaml's reproduce command uses {flag} but docs/overview.md does not")
         assert flag in header
 
 

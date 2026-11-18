@@ -3,8 +3,8 @@ that grows a primary+metastasis through grow -> surgery/resection -> chemotherap
 captures a compartment TRAJECTORY, plus the `isccgif --compartment` composite renderer.
 
 Reproduces the docs landing hero from the ordinary CLI:
-    isccsim --sim-config configs/landing.yaml -o out
-    isccgif out --compartment --splash -o docs/assets/landing_hero.gif
+    isccsim --sim-config configs/landing_hero.yaml -o out --no-tables
+    isccgif out --compartment --splash --skip-confinement --scale 0.55 -o docs/assets/landing_hero.gif
 """
 import os
 from types import SimpleNamespace

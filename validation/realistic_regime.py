@@ -84,9 +84,10 @@ SCALES = {
 # The metastasis + treatment axes, as a DIFF against the blocks above.
 #
 # ``configs/landing.yaml`` is the same tutorial tumour with a metastatic compartment and a clinical
-# arc bolted on, and it is what renders the docs hero. Deriving the extra axes by DIFFING it against
-# the base config -- rather than restating them -- means the metastasis notebook and the hero GIF can
-# never drift apart: change one number in landing.yaml and both follow.
+# arc added. Deriving the extra axes by DIFFING it against the base config -- rather than restating
+# them -- keeps the metastasis notebook in step with it: change one number in landing.yaml and the
+# notebook follows. The docs hero renders from configs/landing_hero.yaml, a copy at the paper's
+# sweep scale.
 # --------------------------------------------------------------------------------------------------
 LANDING_PATH = os.path.join(REPO, "configs", "landing.yaml")
 _LANDING = load_config(LANDING_PATH)

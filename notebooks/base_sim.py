@@ -393,7 +393,7 @@ def thin_section(t, per_deme_cap=8, seed=0):
 # ==================================================================================================
 
 # The met deposit + establishment axis and the treatment-resistance axis, taken STRAIGHT from
-# ``configs/landing.yaml`` -- the clinical arc that renders the docs hero -- via
+# ``configs/landing.yaml`` -- the clinical arc on the tutorial's tumour -- via
 # ``realistic_regime``, which derives them as a diff against the base config. The arc used to grow
 # its own small field (grid 24, a 11-deme deposit) with its own mutation load; it now runs the SAME
 # grid-170 breach-gated ductal field as every other science notebook, so the metastasis story and the
