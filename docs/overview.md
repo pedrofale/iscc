@@ -58,28 +58,31 @@ the parameter to change.
 
 ## Reproducing the landing animation
 
-The animation on the home page is one simulated tumor carried through the whole clinical arc: a
-primary ductal lesion fills the ducts (DCIS), a subclone breaches into the stroma (IDC), it seeds a
-metastasis, and a resistant clone relapses after chemotherapy. It is reproducible from the ordinary
-`iscc` CLI by using the provided config file:
+On the home page we show one simulated tumor carried through a clinical arc on a field of 96 by 96
+demes. The lesion fills the ducts (DCIS), invades the stroma after a breach of the duct wall (IDC) and
+seeds a metastasis. We then resect the primary and give chemotherapy, under which the metastasis shrinks
+to about a quarter of its size and then regrows from a resistant subclone. It is reproducible from the
+ordinary `iscc` CLI with the provided config file:
 
 ```bash
 # 1. run the whole clinical arc (grow -> resect the primary -> chemo -> relapse) and write the
 #    compartment trajectory the renderer consumes. --no-tables writes ONLY that trajectory, which
 #    is all the renderer reads; drop it if you also want to run isccsample / isccdata on the result.
-isccsim --sim-config configs/landing.yaml -o out --no-tables
+isccsim --sim-config configs/landing_hero.yaml -o out --no-tables
 
 # 2. fully-labelled version (use --splash to drop the annotations as in the home page).
 #    --skip-confinement starts the animation where the lesion first breaks out of its founding duct:
-#    the founder is sealed in one acinus for the first ~84% of the run, so without it most frames
+#    the founder is sealed in one acinus for the first ~89% of the run, so without it most frames
 #    show a duct where nothing moves.
 isccgif out --compartment --skip-confinement -o landing_full.gif
 ```
 
-`configs/landing.yaml` holds the exact parameters (genome, selection, ductal-field, metastasis and
+`configs/landing_hero.yaml` holds the exact parameters (genome, selection, ductal-field, metastasis and
 treatment settings) and the timed treatment `schedule:` (the multi-phase arc, including the surgical
-resection). Clones are coloured by their dominant selective trait and have the same colour in the grids
-and the Muller plots:
+resection). It is `configs/landing.yaml`, the tutorial tumor with a metastasis compartment and
+treatment, at the sweep scale of the paper and with a shorter and slightly weaker course of
+chemotherapy, and its header lists every changed value. Clones are coloured by their dominant
+selective trait and have the same colour in the grids and the Muller plots:
 
 | Colour | Trait |
 |---|---|

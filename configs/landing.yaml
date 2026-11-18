@@ -1,9 +1,10 @@
-# The docs landing hero: EXACTLY the tutorial (notebooks/example_config.yaml) — same biology, same
-# grid, same seed — plus the metastasis compartment + treatment that the tutorial leaves out, run
+# The tutorial's clinical arc: EXACTLY the tutorial (notebooks/example_config.yaml) — same biology,
+# same grid, same seed — plus the metastasis compartment + treatment that the tutorial leaves out, run
 # through the clinical-arc `schedule`. The primary is the tutorial's tumour; it then seeds a met and is
-# treated. Reproduce:
+# treated. This was the docs landing hero until 2026-11-18; the hero is now configs/landing_hero.yaml,
+# this arc at the paper's sweep scale. Reproduce this arc:
 #   isccsim --sim-config configs/landing.yaml -o out --no-tables
-#   isccgif out --compartment --splash --skip-confinement --scale 0.55 -o docs/assets/landing_hero.gif
+#   isccgif out --compartment --splash --skip-confinement --scale 0.55 -o landing_tutorial.gif
 # (--scale lowers the render dpi so the grid-170 arc stays a web-friendly GIF.)
 # --skip-confinement is REQUIRED here, not optional. origin_confinement below seals the founding
 # acinus for 1200 generations, and measured on this arc that is 83.6% of the run at under 200 primary
@@ -16,6 +17,9 @@
 # Measured on this config: 68 min / 5 GB with the per-clone count tables, 21 min / 317 MB without --
 # the arc itself is 21 minutes, and serialising two 1.9 GB CSVs is the other 47. Drop the flag if you
 # also want to run isccsample / isccdata on the result.
+# Those timings are of the earlier tau-leaping scheme. With today's default (binomial deaths and the
+# CGP step at epsilon 0.01) a --no-tables run on a laptop was stopped unfinished after 2 h 54 min at
+# a 14 GB memory footprint (2026-11-17), which is why the hero moved to configs/landing_hero.yaml.
 mode: genotype
 update_mode: tau
 tau: 0.5
