@@ -226,6 +226,39 @@ def test_compartment_render_produces_valid_gif(tmp_path, arc_run, splash):
     assert im.size == ((1890, 1065) if splash else (2142, 1207))
 
 
+def test_splash_gif_keeps_a_tiny_clone_in_its_stage_colour(tmp_path, arc_run):
+    """The splash GIF has one small global palette fitted to a few frames, so a clone too small to win
+    an adaptive entry (a just-seeded deposit, a few stromal-survival cells) used to be drawn in the
+    nearest bulk colour. The stage colours are reserved in the palette, so its pixels keep the exact
+    stage colour."""
+    import copy
+    import matplotlib.pyplot as plt
+    from PIL import Image
+    t, frames, marks, traj = arc_run
+    traj = copy.deepcopy(traj)
+    n_prim = traj["n_primary_demes"]
+    cancer = [g for g in traj["colors"] if g not in normal_names]
+    gid = cancer[0]
+    # every other clone gets its own hue, so the adaptive palette has more colours to fit than entries
+    hues = plt.get_cmap("hsv")(np.linspace(0, 0.9, len(cancer)))
+    for g, c in zip(cancer[1:], hues[1:]):
+        traj["colors"][g] = traj["colors_primary"][g] = tuple(float(x) for x in c)
+    traj["colors"][gid] = arc.STAGE_COL["met"]
+    # the met holds one clone in one deme, a few cells against a grid of host tissue
+    traj["frames"] = traj["frames"][-3:]
+    for f in traj["frames"]:
+        f["demes"] = [d if i < n_prim else {g: c for g, c in d.items() if g in normal_names}
+                      for i, d in enumerate(f["demes"])]
+        f["demes"][n_prim] = dict(f["demes"][n_prim], **{gid: 6})
+    out = str(tmp_path / "tiny.gif")
+    comp.render_animation(traj, out, splash=True, poster=False, scale=0.4)
+    purple = np.array([int(round(255 * v)) for v in arc.STAGE_COL["met"][:3]])
+    im = Image.open(out)
+    for k in range(im.n_frames):
+        im.seek(k)
+        assert (np.asarray(im.convert("RGB")) == purple).all(axis=-1).any(), f"frame {k} lost the purple"
+
+
 # --- CLI: isccsim schedule -> trajectory, then isccgif --compartment --------------------------
 @pytest.fixture(scope="module")
 def landing_cfg_path(tmp_path_factory):

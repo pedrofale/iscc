@@ -23,6 +23,7 @@ from matplotlib.patches import Patch
 import imageio.v2 as imageio
 
 from ..tumor import viz
+from ..tumor.arc import STAGE_COL
 
 
 # --- dark hero aesthetic ------------------------------------------------------------------------
@@ -34,6 +35,9 @@ SPLASH_TITLE, SPLASH_LABEL = "#e0e0e0", "#b3b3b3"
 # blue-shift or dim the grey titles/labels.
 _CHROME_ANCHORS = [(13, 17, 23), (224, 224, 224), (179, 179, 179), (255, 255, 255),
                    (150, 150, 150), (96, 96, 96), (48, 48, 48)]
+# The clone stage colours are reserved too, so a clone too small to win an adaptive entry (a just-seeded
+# deposit, a few stromal-survival cells) keeps its own colour instead of taking the nearest bulk colour.
+_STAGE_ANCHORS = [tuple(int(round(255 * v)) for v in c[:3]) for c in STAGE_COL.values()]
 
 
 def frame_cell_data(demes, deme_coords, n_primary_demes, gid_ord):
@@ -173,17 +177,19 @@ def draw_grid(ax, sub, gsz, colors, title, title_color=INK):
 
 def _save_gif_pillow(gif_path, imgs, per, budget_mb=5.95, candidates=(48, 32, 24, 20)):
     """Write ``imgs`` as an optimised GIF via Pillow with ONE global palette = neutral chrome anchors
-    (so grey text stays grey) + an adaptive fill from a montage of representative frames. Tries palette
-    sizes largest-first and keeps the largest whose file is <= ``budget_mb``. Returns the written MB."""
+    (so grey text stays grey) + the clone stage colours + an adaptive fill from a montage of
+    representative frames. Tries palette sizes largest-first and keeps the largest whose file is
+    <= ``budget_mb``. Returns the written MB."""
     from PIL import Image
     idxs = sorted({0, len(imgs) // 3, 2 * len(imgs) // 3, len(imgs) - 1})
     montage = np.concatenate([imgs[i] for i in idxs], axis=1)
     best = None
     for ncol in candidates:
-        n_fill = max(1, ncol - len(_CHROME_ANCHORS))
+        anchors = _CHROME_ANCHORS + _STAGE_ANCHORS
+        n_fill = max(1, ncol - len(anchors))
         base = Image.fromarray(montage).convert("P", palette=Image.ADAPTIVE, colors=n_fill)
         pal = base.getpalette()[:3 * n_fill]
-        for c in _CHROME_ANCHORS:
+        for c in anchors:
             pal += list(c)
         pal += [0] * (3 * 256 - len(pal))
         palimg = Image.new("P", (1, 1)); palimg.putpalette(pal)
