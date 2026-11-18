@@ -2,17 +2,19 @@
 #   isccsim --sim-config configs/landing_hero.yaml -o out --no-tables
 #   isccgif out --compartment --splash --skip-confinement --scale 0.55 -o docs/assets/landing_hero.gif
 # Measured on a laptop on 2026-11-18, with today's tau-leaping (binomial deaths, CGP step at epsilon
-# 0.01): isccsim 31 min at a 7.2 GB peak memory footprint, a 106 MB trajectory; isccgif 76 s, 405
-# frames of which --skip-confinement keeps 104 (the founding acinus is closed for 89% of the run),
-# 2.67 MB.
+# 0.01): isccsim 23 min at a 6.4 GB peak memory footprint, an 88 MB trajectory; isccgif 57 s, 383
+# frames of which --skip-confinement keeps 82 (the founding acinus is closed for 90% of the run),
+# 1.96 MB.
 #
-# The arc, in tumour time. The acinus opens at t ~ 602 and the lesion fills the five ducts (~15,700
-# cells) by t ~ 610. Breach clones invade the stroma from t ~ 620, the deposit reaches 50 cells at
-# t ~ 631, and growth stops at 60,000 cancer cells (t ~ 638: 57,942 in the primary, 5,638 in the
-# metastasis). After resection the deposit holds 9,904 cells, one of them resistant, at the start of
-# the course (t = 640). The drug takes it to 2,253 cells (t = 650). Resistant cells regrow it under the
-# drug to 87,404 cells at the end of the course (t = 670; 99.8% resistant, 20% of the met grid), and
-# the relapse ends at 146,504 cells (t = 675; 97.5% resistant, 31% of the met grid).
+# The arc, in tumour time. The acinus opens at t ~ 602 and the lesion fills the five ducts (~16,000
+# cells) by t ~ 610. Breach clones cross into the stroma from t ~ 622, the deposit reaches 50 cells at
+# t ~ 636, and growth stops at 60,000 cancer cells (t = 641: 17,663 in the ducts, 41,418 in the stroma,
+# 3,055 in the metastasis). The stroma then holds 40,249 breach (orange), 1,003 proliferation-only
+# (blue), 131 stromal-survival (green) and 35 resistant cells. After resection the deposit holds 6,161
+# cells, 23 of them resistant, at the start of the course (t = 643). The drug takes it to 1,342 cells
+# (t = 647.5). Resistant cells regrow it under the drug to 49,715 cells at the end of the course
+# (t = 663; 99.9% resistant, 12% of the met grid), and the relapse ends at 90,961 cells (t = 668;
+# 97.9% resistant, 20% of the met grid).
 #
 # A copy of configs/landing.yaml (the tutorial tumour with a metastasis compartment and treatment, run
 # through the clinical-arc `schedule`), with these values changed, each marked `landing_hero:` where
@@ -25,19 +27,28 @@
 #   spatial_params.met_grid_size 170 -> 96: a metastatic lattice as large as the primary field.
 #   schedule.phases[0].until {met_cancer: 60000, total_cancer: 250000} -> {total_cancer: 60000}: the
 #     paper's sweep size, primary and metastasis together.
-# Treatment, because the story needed it. With the landing's course unchanged the deposit above was
-# eradicated 47 steps into the course and nothing relapsed: its one standing resistant cell, and the
-# few that arose under the drug, were lost.
-#   chemotherapy kill_rate 1.0 -> 0.9: the sensitive cells decline more slowly and keep dividing, so
-#     resistant cells arise and establish under the drug and regrow the deposit.
-#   chemotherapy steps and duration 120 -> 60, relapse steps 90 -> 10: at kill rate 0.9 under the full
-#     course the resistant relapse covered 29% of the met grid 70 steps in and was still growing, and a
-#     shorter course (40 steps, then 20 off the drug) left sensitive survivors whose regrowth made the
-#     relapse only 40% resistant.
+# Traits (Pedro, 2026-11-18): the paper regime's (validation/paper/regime.py SELECTION and STROMA).
+# With the tutorial's values the stroma filled with blue cells: breach clones that lost the mutated
+# copy by a copy-number loss shed the breach cost (0.6 x level, large at effect 2.8) and divided
+# faster, and stromal survival at cost 0.6, effect 2.2 and hazard 0.6 never paid (the stroma held
+# 4,926 breach, 3,601 blue and 189 stromal-survival cells before resection).
+#   selection_params.prop_breach 0.02 -> 0.002, breach_effects 2.8 -> 1.01 (breach_cost stays 0.6).
+#   selection_params.prop_stromal_survival 0.02 -> 0.002, stromal_survival_effects 2.2 -> 4.0,
+#     stromal_survival_cost 0.6 -> 0.05; spatial_params.stromal_hazard 0.6 -> 0.9.
+#   The met-survival trait and the metastatic site already equal the paper's (regime.MET_SELECTION and
+#   met_spatial), so they are unchanged.
+# Treatment, because the story needed it (kill rate, effectiveness and toxicity are unchanged).
+#   chemotherapy steps and duration 120 -> 40, relapse steps 90 -> 10: the 23 standing resistant cells
+#     regrow the deposit under the drug, so a long course fills the met grid. From the chemo-start
+#     checkpoint, a 60-step course at kill rate 0.9 with the 10-step relapse ended with 47% of the grid
+#     covered, the 40-step course at kill rate 1.0 with 20%, and a 30-step course left more sensitive
+#     survivors (relapse 93% resistant against 98%).
 # Capture, which does not change the dynamics.
 #   schedule.capture.post_seed_every 3 -> 1: the tumour grows from the open acinus to the stop in about
-#     35 tumour-time units, so the old cadence left few frames of invasion and seeding, and the GIF
-#     palette (sampled at frames 0, n/3, 2n/3 and n-1) then had no purple for the deposit.
+#     40 tumour-time units, so the old cadence left few frames of invasion and seeding.
+# Rendering caveat: the GIF palette (48 colours, fitted to frames 0, n/3, 2n/3 and n-1) has no entry
+# for the purple of the small deposit or for the green of the few stromal-survival cells, so the
+# deposit renders light grey and the green cells are not distinguishable.
 # Why a copy and not an edit of configs/landing.yaml: realistic_regime.py derives the metastasis
 # notebook's axes and stop from that file (MET_SPATIAL, MET_STOP), validate_escape_modes.py uses it as
 # its base config, and tests/test_landing_arc.py checks it against the tutorial's grid 170.
@@ -64,10 +75,10 @@ selection_params:
   prop_driver: 0.04
   prop_dispersal: 0.0
   prop_immune_resistance: 0.02
-  prop_breach: 0.02
-  breach_effects: 2.8
-  prop_stromal_survival: 0.02
-  stromal_survival_effects: 2.2
+  prop_breach: 0.002                 # landing_hero: 0.02 in configs/landing.yaml
+  breach_effects: 1.01               # landing_hero: 2.8
+  prop_stromal_survival: 0.002       # landing_hero: 0.02
+  stromal_survival_effects: 4.0      # landing_hero: 2.2
   # R15 GO-OR-GROW trade-off (see example_config.yaml): invasion costs are the same as the tutorial;
   # met-survival gets a LOW cost so the deposit can still establish. Resistance gets only a SMALL cost:
   # it is near-neutral off-drug so (a) it does not hitchhike the pre-chemo met (kept rare instead by a
@@ -75,7 +86,7 @@ selection_params:
   # tolerates the drug AND regrows, giving a RED relapse. A HIGH resistance cost instead crippled the
   # relapse: cost-bearing resistant cells lost the off-drug regrowth race to any surviving sensitive cell.
   breach_cost: 0.6
-  stromal_survival_cost: 0.6
+  stromal_survival_cost: 0.05        # landing_hero: 0.6
   met_survival_cost: 0.15
   treatment_resistance_cost: 0.3
   max_mut_drivers: 12
@@ -140,7 +151,7 @@ spatial_params:
   cross_gland_lambda: 30
   breach_gated_invasion: true   # invasion requires breach (identical to example_config.yaml)
   epithelial_barrier: 0.0
-  stromal_hazard: 0.6
+  stromal_hazard: 0.9          # landing_hero: 0.6 in configs/landing.yaml
   # The founding acinus is closed at first — identical to example_config.yaml, and the reason this
   # tumour has a clonal copy-number layer at all. It applies to the FOUNDING PATCH only and only until
   # the lesion has distended it; every other duct stays free to be colonised by several clones, which
@@ -200,8 +211,8 @@ schedule:
     # Measured with the resistance parameters above UNCHANGED: sensitive 3,851 -> 14 over the course,
     # resistant 9 -> 24,466, a nadir of ~244 cells (94% below the pre-chemo deposit), and a relapse of
     # 210,295 cells at 93.7% resistant -- red, and still expanding at the last frame.
-    # landing_hero: steps 120, duration 120 and kill_rate 1.0 in configs/landing.yaml
-    - {op: chemotherapy, steps: 60, duration: 60, kill_rate: 0.9, kill_mode: proliferation,
+    # landing_hero: steps 120 and duration 120 in configs/landing.yaml
+    - {op: chemotherapy, steps: 40, duration: 40, kill_rate: 1.0, kill_mode: proliferation,
        effectiveness: 1.0, toxicity: 0.12, sites: both, phase: chemotherapy}
     # long relapse: the resistant subclone (~tens of cells post-chemo) re-expands to REFILL and grow the
     # met deposit past its pre-chemo size, so the hero ends on a large, still-expanding RED relapse.
