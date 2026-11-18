@@ -46,7 +46,7 @@ tumor after growth and tells you which knob to turn.
 On the home page we show one simulated tumor carried through a clinical arc on a field of 96 by 96
 demes. The lesion fills the ducts (DCIS), invades the stroma after a breach of the duct wall (IDC) and
 seeds a metastasis. We then resect the primary and give chemotherapy, under which the metastasis shrinks
-to about a fifth of its size and then regrows from a resistant subclone. It is reproducible from the
+to about an eighth of its size and then regrows from a resistant subclone. It is reproducible from the
 ordinary `iscc` CLI with the provided config file:
 
 ```bash
@@ -57,17 +57,17 @@ isccsim --sim-config configs/landing_hero.yaml -o out --no-tables
 
 # 2. fully-labelled version (use --splash to drop the annotations as in the home page).
 #    --skip-confinement starts the animation where the lesion first breaks out of its founding duct:
-#    the founder is sealed in one acinus for the first ~90% of the run, so without it most frames
+#    the founder is sealed in one acinus for the first ~60% of the run, so without it most frames
 #    show a duct where nothing moves.
 isccgif out --compartment --skip-confinement -o landing_full.gif
 ```
 
 `configs/landing_hero.yaml` holds the exact parameters (genome, selection, ductal-field, metastasis and
 treatment settings) and the timed treatment `schedule:` (the multi-phase arc, including the surgical
-resection). It is `configs/landing.yaml`, the tutorial tumor with a metastasis compartment and
-treatment, at the sweep scale of the paper. We use the invasion and stromal-survival settings of the
-paper's regime and a shorter course of chemotherapy, and list every changed value in the header of
-the config. Clones are coloured by their dominant selective trait and have the same colour in the
+resection). We grow the tumor under the regime of the paper at its sweep scale, add the
+treatment-resistance genes and the schedule of `configs/landing.yaml` with a shorter course of
+chemotherapy, and list every value that differs from `configs/landing.yaml` in the header of the
+config. Clones are coloured by their dominant selective trait and have the same colour in the
 grids and the Muller plots:
 
 | Colour | Trait |
