@@ -1,9 +1,9 @@
 # The docs landing hero (docs/assets/landing_hero.gif). Reproduce:
 #   isccsim --sim-config configs/landing_hero.yaml -o out --no-tables
 #   isccgif out --compartment --splash --skip-confinement --scale 0.55 -o docs/assets/landing_hero.gif
-# Measured on a laptop on 2026-11-18: isccsim 22 min at a 6.1 GB peak memory footprint, a 78 MB
-# trajectory; isccgif 3.5 min, 250 frames of which --skip-confinement keeps 149 (the founding acinus
-# is closed for about half of the run), 4.11 MB.
+# Measured on a laptop on 2026-11-18: isccsim 22 min at a 5.6 GB peak memory footprint, a 62 MB
+# trajectory; isccgif 2.7 min, 162 frames of which --skip-confinement keeps 111 (the founding acinus
+# is closed for about half of the run), 3.03 MB.
 #
 # The tumour is the paper's sweep tumour: every growth setting equals what validation/paper/regime.py's
 # config("mid", selection=realistic_regime.MET_SELECTION, spatial=met_spatial("mid")) builds (paper
@@ -69,6 +69,8 @@
 #     resistant.
 # Drawing, which does not change the dynamics.
 #   schedule.capture.post_seed_every 3 -> 1: more frames of invasion and seeding.
+#   schedule.capture.pre_seed_every 4 -> 8 (Pedro, 2026-11-18): the in-situ phase of this seed is long
+#     (t ~ 214 to 338) and took 64 of 149 frames (43%) at 4; at 8 it takes 32 of 111 (29%).
 #   schedule.min_freq 0.002 -> 0.0005 (about 30 of 60,000 cells): the fish plot folds every clone
 #     whose subtree never reaches min_freq of the grown population into its nearest shown ancestor,
 #     and at 0.002 (about 120 cells) the many blue clones of the ~60-cell closed acinus were painted
@@ -213,7 +215,7 @@ schedule:
   # that actually sticks and grows the deposit.
   seeding_establishes_at: 50
   capture:
-    pre_seed_every: 4
+    pre_seed_every: 8        # landing_hero: 4 in configs/landing.yaml
     post_seed_every: 1       # landing_hero: 3 in configs/landing.yaml
   phases:
     # grow to the tutorial's development before resecting, so the hero shows the SAME dense DCIS->IDC
