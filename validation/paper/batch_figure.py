@@ -29,8 +29,9 @@ import style as S  # noqa: E402
 # data-simulator supplement's (style.TOOL["Splatter"]).
 COL = {"real": S.SOURCE["real"], "iscc": S.SOURCE["iscc"], "splatter": S.TOOL.get("Splatter", "#A50026"),
        "splatteriscc": S.TOOL.get("Splatter", "#A50026")}
-LABEL = {"real": "real (Ding A vs B)", "iscc": "iscc", "splatter": "Splatter",
-         "splatteriscc": "Splatter, iscc's size"}
+# Labels follow the paper's style for text inside figures (no parentheticals or settings: the caption
+# names the data set and how Splatter was matched).
+LABEL = {"real": "real", "iscc": "iscc", "splatter": "Splatter", "splatteriscc": "Splatter matched to iscc"}
 
 
 def _versions(v):
@@ -51,29 +52,32 @@ def _decile_curve(st, key):
     return x / np.log(10), y                               # log10 of the mean for the axis
 
 
-def main_panel(v):
-    S.setup()
+S1_YLABEL = {"mean_log2fc": "mean log$_2$ fold change", "sd_log2fc": "s.d. of log$_2$ fold change"}
+
+
+def draw_s1(ax, v, key):
+    """S1 on ``ax``: the median over cell types of each mean-expression decile's ``key``
+    ("mean_log2fc" or "sd_log2fc"), real against every seed of iscc and Splatter. Shared by
+    :func:`main_panel` and Fig 5's panel B (``fig5_figure.py``); the summary statistics are in
+    validation.json and the text, not printed on the axes."""
     vs, groups = v["versions_stats"], _versions(v)
-    fig = S.figure("double", 52)
-    axes = [S.ax_mm(fig, 14, 7, 46, 36), S.ax_mm(fig, 74, 7, 46, 36), S.ax_mm(fig, 136, 7, 42, 36)]
-    for ax, key, ylab in ((axes[0], "mean_log2fc", "mean log$_2$ FC (B / A)"),
-                          (axes[1], "sd_log2fc", "s.d. of log$_2$ FC (B / A)")):
-        for pre in ("splatteriscc", "splatter", "iscc"):
-            for i, n in enumerate(groups.get(pre, [])):
-                x, y = _decile_curve(vs[n], key)
-                ax.plot(x, y, color=COL[pre], lw=0.6, alpha=0.75, ls=("--" if pre == "splatteriscc" else "-"),
-                        label=(LABEL[pre] if i == 0 else None))
-        x, y = _decile_curve(vs["real"], key)
-        ax.plot(x, y, color=S.INK, lw=1.2, marker="o", ms=2.2, label=LABEL["real"], zorder=5)
-        ax.set_xlabel("log$_{10}$ mean expression (decile)")
-        ax.set_ylabel(ylab)
-        if key == "mean_log2fc":
-            ax.axhline(0, color=S.GREY, lw=0.4, zorder=0)
-    axes[0].legend(loc="best")
-    s_r = v["versions_stats"]["real"]["summary"]
-    S.stat(axes[0], f"real Spearman {s_r['S1_spearman']:.2f}", "lower right")
-    S.stat(axes[1], f"real low/high ratio {s_r['S1_spread_ratio']:.2f}", "upper right")
-    ax = axes[2]
+    for pre in ("splatteriscc", "splatter", "iscc"):
+        for i, n in enumerate(groups.get(pre, [])):
+            x, y = _decile_curve(vs[n], key)
+            ax.plot(x, y, color=COL[pre], lw=0.6, alpha=0.75, ls=("--" if pre == "splatteriscc" else "-"),
+                    label=(LABEL[pre] if i == 0 else None))
+    x, y = _decile_curve(vs["real"], key)
+    ax.plot(x, y, color=S.INK, lw=1.2, marker="o", ms=2.2, label=LABEL["real"], zorder=5)
+    ax.set_xlabel("log$_{10}$ mean expression")
+    ax.set_ylabel(S1_YLABEL[key])
+    if key == "mean_log2fc":
+        ax.axhline(0, color=S.GREY, lw=0.4, zorder=0)
+
+
+def draw_s3(ax, v):
+    """S3 on ``ax``: the correlation of the log2 fold changes between pairs of cell types, every
+    pair of every seed, with the median of the seeds' medians. Shared as :func:`draw_s1`."""
+    vs, groups = v["versions_stats"], _versions(v)
     order = [g for g in ("real", "iscc", "splatter", "splatteriscc") if g in groups]
     rng = np.random.default_rng(0)
     for xi, g in enumerate(order):
@@ -84,31 +88,60 @@ def main_panel(v):
                    alpha=(0.8 if g == "real" else 0.35), linewidths=0)
         ax.hlines(np.median(meds), xi - 0.3, xi + 0.3, color=S.INK, lw=1.0, zorder=5)
     ax.set_xticks(range(len(order)))
-    ax.set_xticklabels([LABEL[g].replace(" (Ding A vs B)", "").replace(", ", ",\n") for g in order])
+    ax.set_xticklabels([LABEL[g].replace(" matched", "\nmatched") for g in order])
     ax.set_xlim(-0.6, len(order) - 0.4)
-    ax.set_ylabel("correlation of log$_2$ FC\nbetween cell-type pairs")
-    for letter, x in (("a", 2), ("b", 63), ("c", 125)):
+    ax.set_ylabel("correlation of log$_2$\nfold changes")
+
+
+def main_panel(v):
+    S.setup()
+    fig = S.figure("double", 52)
+    axes = [S.ax_mm(fig, 14, 7, 46, 36), S.ax_mm(fig, 74, 7, 46, 36), S.ax_mm(fig, 136, 7, 42, 36)]
+    draw_s1(axes[0], v, "mean_log2fc")
+    draw_s1(axes[1], v, "sd_log2fc")
+    axes[0].legend(loc="best")
+    draw_s3(axes[2], v)
+    for letter, x in (("A", 2), ("B", 63), ("C", 125)):
         S.panel_letter(fig, letter, x, 2)
     return S.save(fig, "fig5_batch_validation")
 
 
-SUPP = [("S0", "S0: s.d. of log$_2$ FC"), ("S1_spearman", "S1: Spearman(FC, mean)"),
-        ("S1_spread_ratio", "S1: spread low / high"), ("S2_slope_low", "S2: slope, low tercile"),
-        ("S2_slope_mid", "S2: slope, mid tercile"), ("S2_slope_high", "S2: slope, high tercile"),
-        ("S3_median_corr", "S3: median pair correlation"), ("silhouette_batch", "S4: silhouette, batch"),
-        ("silhouette_celltype", "S4: silhouette, cell type"), ("ilisi_batch", "S4: iLISI, batch"),
-        ("clisi_celltype", "S4: cLISI, cell type")]
+# The supplementary panels: (key, title, y label). Titles are the statistics' names, defined in the
+# Methods; the y label is the measured quantity (style guide, "Text inside figures").
+SUPP = [("S0", "S0", "s.d. of log$_2$ fold change"),
+        ("S1_spearman", "S1", "Spearman correlation of\nfold change and mean"),
+        ("S1_spread_ratio", "S1", "fold change s.d., lowest\nover highest tercile"),
+        ("S2_slope_low", "S2 in the lowest tercile", "slope of detection\nchange on fold change"),
+        ("S2_slope_mid", "S2 in the middle tercile", "slope of detection\nchange on fold change"),
+        ("S2_slope_high", "S2 in the highest tercile", "slope of detection\nchange on fold change"),
+        ("S3_median_corr", "S3", "median correlation\nof fold changes"),
+        ("silhouette_batch", "S4", "silhouette of batches"),
+        ("silhouette_celltype", "S4", "silhouette of cell types"),
+        ("ilisi_batch", "S4", "iLISI"),
+        ("clisi_celltype", "S4", "cLISI")]
+SUPP_TICK = {"real": "real", "iscc": "iscc", "splatter": "Splatter", "splatteriscc": "Splatter\nmatched"}
+TUNING = (("de_tuning", "de_facLoc", "differential expression\nfactor location", "silhouette of cell types"),
+          ("batch_tuning", "batch_facScale", "batch factor scale", "s.d. of log$_2$ fold change"))
 
 
 def supp_panel(v):
+    """S0-S4, one small axis per statistic (real: diamond; iscc's and Splatter's five seeds: dots; their
+    median: bar), and Splatter's two tuning curves (the real value: dashed; the chosen value: solid).
+    The encodings are stated in the caption, not in the figure."""
     S.setup()
     vs, groups = v["versions_stats"], _versions(v)
     order = [g for g in ("real", "iscc", "splatter", "splatteriscc") if g in groups]
-    fig = S.figure("double", 118)
-    cols, w, h, gx, gy = 5, 27, 24, 9.5, 13
-    for k, (key, title) in enumerate(SUPP):
+    fig = S.figure("double", 112)
+    cols, w, h, x0, gx, gy = 5, 25, 22, 11, 11, 14
+    letters = "ABCDEFGHIJKLMNOP"
+
+    def place(k):
         r, c = divmod(k, cols)
-        ax = S.ax_mm(fig, 10 + c * (w + gx), 6 + r * (h + gy), w, h)
+        x, y = x0 + c * (w + gx), 7 + r * (h + gy)
+        S.panel_letter(fig, letters[k], x - 9, y - 4.5)
+        return S.ax_mm(fig, x, y, w, h)
+    for k, (key, title, ylab) in enumerate(SUPP):
+        ax = place(k)
         for xi, g in enumerate(order):
             vals = []
             for n in groups[g]:
@@ -123,29 +156,27 @@ def supp_panel(v):
                            linewidths=0.5)
                 ax.hlines(np.nanmedian(vals), xi - 0.28, xi + 0.28, color=S.INK, lw=0.8)
         ax.set_xticks(range(len(order)))
-        ax.set_xticklabels([{"real": "real", "iscc": "iscc", "splatter": "Splat.", "splatteriscc": "Splat.*"}[g]
-                            for g in order])
+        ax.set_xticklabels([SUPP_TICK[g] for g in order], fontsize=5.0)
         ax.set_xlim(-0.6, len(order) - 0.4)
         ax.set_title(title)
+        ax.set_ylabel(ylab, fontsize=5.5)
     sp = v.get("splatter", {})
-    for k, (key, xlab, target_lab) in enumerate((("de_tuning", "de.facLoc", "real silhouette"),
-                                                  ("batch_tuning", "batch.facScale", "real S0"))):
+    k = len(SUPP)
+    for key, chosen_key, xlab, ylab in TUNING:
         tr = sp.get(key)
         if not tr:
             continue
-        idx = len(SUPP) + k
-        r, c = divmod(idx, cols)
-        ax = S.ax_mm(fig, 10 + c * (w + gx), 6 + r * (h + gy), w, h)
+        ax = place(k)
+        k += 1
         pts = sorted(tr["trace"], key=lambda d: d["value"])
         ax.plot([d["value"] for d in pts], [d["stat"] for d in pts], color=COL["splatter"], lw=0.7, marker="o", ms=1.8)
         ax.axhline(tr["target"], color=S.GREY, lw=0.5, ls="--")
-        chosen = sp.get("de_facLoc" if key == "de_tuning" else "batch_facScale")
+        chosen = sp.get(chosen_key)
         if chosen is not None:
             ax.axvline(chosen, color=S.INK, lw=0.5)
-        ax.set_xlabel(xlab)
-        ax.set_title(f"Splatter tuning ({target_lab})")
-    S.text_mm(fig, 10, 116, "Diamond: real; dots: five seeds; bar: median. Splat.* = Splatter at iscc's S0 "
-              "(only when iscc's S0 differs from the real one by more than 1.5x).", fontsize=5.0, color=S.GREY)
+        ax.set_xlabel(xlab, fontsize=5.5)
+        ax.set_ylabel(ylab, fontsize=5.5)
+        ax.set_title("Splatter tuning")
     return S.save(fig, "supp_batch_validation")
 
 
