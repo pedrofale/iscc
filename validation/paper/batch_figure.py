@@ -1,14 +1,15 @@
 """S13 Fig, the batch validation, from validation.json (``batch_validation.py``).
 
 ``supp_batch_validation``: the real A-B contrast of Ding et al., ``iscc``'s and Splatter's, in one
-figure (183 mm wide):
+figure, 165 mm wide (the text width) so that it is included at its true size:
 
 * A, B (S1): the mean and the spread of the per-gene log2 fold change by mean expression (the median
   over cell types of each decile), real against every seed of iscc and Splatter;
 * C (S3): the correlation of the fold changes between pairs of cell types, every pair of every seed;
-* D-G (S0-S4): one small axis per registered summary, real (diamond and dashed line) against the five
-  seeds of iscc and of Splatter (dots) and their median (bar);
-* H: Splatter's tuning curves (the target: dashed; the value chosen: solid).
+* D-G (S0, S1, S2, S4): one small axis per registered summary, real (diamond and dashed line)
+  against the five seeds of iscc and of Splatter (dots) and their median (bar).
+
+Splatter's tuning curves stay in validation.json; the caption gives the values chosen.
 
 The panels A-C were Fig 5's panel B; ``draw_s1``, ``draw_s3``, ``COL``, ``LABEL`` and ``_versions``
 are shared with ``fig5_figure.py``. Written through ``style.save`` into ``<paper>/figures/paper1/``
@@ -112,13 +113,9 @@ ROWS = [
            ("ilisi_batch", "Batches", "iLISI"),
            ("clisi_celltype", "Cell types", "cLISI")]),
 ]
-TUNING = (("de_tuning", "de_facLoc", "Cell-type separation", "differential expression\nfactor location",
-           "silhouette of cell types"),
-          ("batch_tuning", "batch_facScale", "Batch effect size", "batch factor scale",
-           "s.d. of log$_2$ fold change"),
-          ("batch_tuning_iscc_size", "batch_facScale_iscc_size", "Batch effect at iscc's size",
-           "batch factor scale", "s.d. of log$_2$ fold change"))
-W_MM, LEFT, RIGHT = 183, 27, 179
+# Drawn at the text width, so that it is included at its true size (no text below 5.5 pt) and leaves
+# room on the page for the caption.
+W_MM, LEFT, RIGHT = 165, 24, 163
 
 
 def _value(st, key):
@@ -150,62 +147,39 @@ def supp_panel(v):
     S.setup()
     groups = _versions(v)
     order = [g for g in ("real", "iscc", "splatter", "splatteriscc") if g in groups]
-    sp = v.get("splatter", {})
-    tunings = [t for t in TUNING if sp.get(t[0])]
     strip_h = 4.0 * len(order) + 1.0
-    # rows: A-C (y0 7, 34 mm); D-E; F; G; H (26 mm)
-    y_ac, h_ac = 8, 34
-    y_rows = [61]
-    for _ in ROWS[2:]:
-        y_rows.append(y_rows[-1] + strip_h + 21)
-    y_h = y_rows[-1] + strip_h + 22
-    height = y_h + 26 + 13
-    fig = S.figure(W_MM, height)
+    y_ac, h_ac = 7, 30                               # A-C, then the rows D-E, F and G
+    y_rows = [y_ac + h_ac + 20]
+    for _ in range(2):
+        y_rows.append(y_rows[-1] + strip_h + 19)
+    fig = S.figure(W_MM, y_rows[-1] + strip_h + 10)
 
     # A-C: the former Fig 5B
-    axA, axB, axC = S.ax_mm(fig, 15, y_ac, 43, h_ac), S.ax_mm(fig, 72, y_ac, 43, h_ac), S.ax_mm(fig, 130, y_ac, 49, h_ac)
+    axA, axB, axC = S.ax_mm(fig, 13, y_ac, 38, h_ac), S.ax_mm(fig, 64, y_ac, 38, h_ac), S.ax_mm(fig, 117, y_ac, 46, h_ac)
     draw_s1(axA, v, "mean_log2fc")
     draw_s1(axB, v, "sd_log2fc")
     hl = dict(zip(*axA.get_legend_handles_labels()[::-1]))
     names = [LABEL[g] for g in order if LABEL[g] in hl]
     axA.legend([hl[n] for n in names], names, loc="best")
     draw_s3(axC, v)
-    for letter, x in (("A", 2), ("B", 60), ("C", 117)):
-        S.panel_letter(fig, letter, x, y_ac - 5)
+    for letter, x in (("A", 1), ("B", 53), ("C", 104)):
+        S.panel_letter(fig, letter, x, y_ac - 4)
 
-    # D-G: the summaries; D and E share a row
-    def row(y, items, x0, w, gap, letters):
+    # D-G: the registered summaries; D and E share a row
+    def row(y, items, w, gap, letters):
         for j, ((key, title, xlab), letter) in enumerate(zip(items, letters)):
-            x = x0 + j * (w + gap)
+            x = LEFT + j * (w + gap)
             ax = S.ax_mm(fig, x, y, w, strip_h)
             _strip(ax, v, key, order, labels=(j == 0))
             ax.set_title(title)
             ax.set_xlabel(xlab)
             if letter:
-                S.panel_letter(fig, letter, (2 if j == 0 else x - 7), y - 5)
-    w3, g3 = (RIGHT - LEFT - 2 * 9) / 3, 9
-    w4, g4 = (RIGHT - LEFT - 3 * 7) / 4, 7
-    de_items = ROWS[0][1] + ROWS[1][1]
-    row(y_rows[0], de_items, LEFT, w3, g3, ["D", "E", None])
-    row(y_rows[1], ROWS[2][1], LEFT, w3, g3, ["F", None, None])
-    row(y_rows[2], ROWS[3][1], LEFT, w4, g4, ["G", None, None, None])
-
-    # H: Splatter's tuning
-    wt, gt = 38, 18
-    for j, (key, chosen_key, title, xlab, ylab) in enumerate(tunings):
-        tr = sp[key]
-        ax = S.ax_mm(fig, LEFT + j * (wt + gt), y_h, wt, 26)
-        pts = sorted(tr["trace"], key=lambda d: d["value"])
-        ax.plot([d["value"] for d in pts], [d["stat"] for d in pts], color=COL["splatter"], lw=0.7,
-                marker="o", ms=1.8)
-        ax.axhline(tr["target"], color=S.GREY, lw=0.5, ls="--")
-        if sp.get(chosen_key) is not None:
-            ax.axvline(sp[chosen_key], color=S.INK, lw=0.5)
-        ax.set_title(title)
-        ax.set_xlabel(xlab)
-        ax.set_ylabel(ylab)
-        if j == 0:
-            S.panel_letter(fig, "H", 2, y_h - 5)
+                S.panel_letter(fig, letter, (1 if j == 0 else x - 6), y - 5)
+    w3, g3 = (RIGHT - LEFT - 2 * 8) / 3, 8
+    w4, g4 = (RIGHT - LEFT - 3 * 6) / 4, 6
+    row(y_rows[0], ROWS[0][1] + ROWS[1][1], w3, g3, ["D", "E", None])
+    row(y_rows[1], ROWS[2][1], w3, g3, ["F", None, None])
+    row(y_rows[2], ROWS[3][1], w4, g4, ["G", None, None, None])
     return S.save(fig, "supp_batch_validation")
 
 
