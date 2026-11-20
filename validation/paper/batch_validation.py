@@ -193,7 +193,9 @@ def real_data(ding_dir, labels, fits):
 
 def synthetic_data(seed=0, n_genes=1500, n_a=900, n_b=600):
     """A small two-run dataset made by iscc itself, for a smoke run of the pipeline (``--synthetic``):
-    no real statistic is computed. Four types with log-normal profiles; run B shallower than A."""
+    no real statistic is computed. Four types with log-normal profiles; run B shallower than A; a
+    per-gene batch factor of sd 0.2, so the effect is above Splatter's sampling-noise floor (about 0.5
+    at this size) and within 1.5x of iscc's, so the smoke reaches LISI, scoring and the figure."""
     from iscc.data import scRNA
     rng = np.random.default_rng(seed)
     types = ["T", "B", "Mono", "NK"]
@@ -204,7 +206,7 @@ def synthetic_data(seed=0, n_genes=1500, n_a=900, n_b=600):
         ct = rng.choice(types, size=n, p=[0.45, 0.15, 0.3, 0.1])
         names = [f"{r}{i}" for i in range(n)]
         exp = pd.DataFrame(np.vstack([prof[t] for t in ct]), index=names, columns=[f"g{i}" for i in range(n_genes)])
-        a = scRNA(protocol="10x", n_cells=n, seed=7 + len(parts), mu_lib=mu, dropout_mid=0.0)
+        a = scRNA(protocol="10x", n_cells=n, seed=7 + len(parts), mu_lib=mu, dropout_mid=0.0, sigma_batch=0.2)
         a.run({"cell_exp": exp}, cell_subset=names)
         parts.append(sp.csr_matrix(a.observed_counts.to_numpy()))
         obs.append(pd.DataFrame({"run": r, "cell_type": ct}, index=names))
