@@ -18,8 +18,9 @@ its fixed driver effect set to demon's realised one (about 0.2, since demon draw
 larger effects are the ones that establish).
 Row 3, clonal territories against dispersal (neutral marks at 2e-2 per division, five seeds per
 rate): (e) the dominant clone of every deme in demon and in iscc's tau-leaping at the lowest and the
-highest dispersal (seed 1), (f) the territory score, the share of neighbouring demes with the same
-dominant clone over its expectation under random placement, and (g) the clones it is computed over.
+highest dispersal (seed 1), (f) the share of neighbouring demes with the same dominant clone beside its
+expectation under random placement (each mean and standard deviation over the seeds), and (g) the clones
+it is computed over.
 The comparison does not depend on the paper's scale tier, so the figure carries no preview stamp.
 
 Usage::
@@ -46,14 +47,14 @@ ISCC, REALISED = S.SOURCE["iscc"], "#9DB7E0"
 LS = {"gillespie": "-", "exact": (0, (2.5, 1.2)), "tau": "-"}
 # Each row's series: (model, engine, condition in the results, label, colour).
 ROWS = {
-    "neutral (s = 0)": [("demon", "gillespie", "neutral", "demon", DEMON),
-                        ("iscc", "exact", "neutral", "iscc exact", ISCC),
-                        ("iscc", "tau", "neutral", "iscc τ-leap", ISCC)],
-    "selection (s = 0.1)": [("demon", "gillespie", "selection", "demon", DEMON),
-                            ("iscc", "exact", "selection", "iscc exact", ISCC),
-                            ("iscc", "tau", "selection", "iscc τ-leap", ISCC),
-                            ("iscc", "exact", "realised", "exact, s = 0.2", REALISED),
-                            ("iscc", "tau", "realised", "τ-leap, s = 0.2", REALISED)],
+    "neutral": [("demon", "gillespie", "neutral", "demon", DEMON),
+                ("iscc", "exact", "neutral", "iscc exact", ISCC),
+                ("iscc", "tau", "neutral", "iscc τ-leap", ISCC)],
+    "selection": [("demon", "gillespie", "selection", "demon", DEMON),
+                  ("iscc", "exact", "selection", "iscc exact", ISCC),
+                  ("iscc", "tau", "selection", "iscc τ-leap", ISCC),
+                  ("iscc", "exact", "realised", "iscc exact, s = 1.2", REALISED),
+                  ("iscc", "tau", "realised", "iscc τ-leap, s = 1.2", REALISED)],
 }
 TERR = [("demon", "gillespie", "demon", DEMON), ("iscc", "exact", "iscc exact", ISCC),
         ("iscc", "tau", "iscc τ-leap", ISCC)]
@@ -103,14 +104,14 @@ def main():
                 c.plot(cs, np.arange(1, len(cs) + 1) / len(cs), color=colour, lw=0.8, ls=LS[engine],
                        label=label)
         a.set_yscale("log")
-        a.set_xlabel("generations")
-        a.set_ylabel("cancer cells")
-        b.set_xlabel("cancer cells")
-        b.set_ylabel("occupied demes")
+        a.set_xlabel("Generations")
+        a.set_ylabel("Cancer cells")
+        b.set_xlabel("Cancer cells")
+        b.set_ylabel("Occupied demes")
         c.set_xscale("log")
         c.set_yscale("log")
-        c.set_xlabel("clone size (cells)")
-        c.set_ylabel("fraction of clones\nthis large or larger")
+        c.set_xlabel("Clone size (cells)")
+        c.set_ylabel("Fraction of clones\nthis large or larger")
         c.legend(loc="lower left", handlelength=1.8)
         # (d) the indices: one dot per seed, models side by side, the median as a bar
         for k, ind in enumerate(("n", "D", "J1")):
@@ -124,17 +125,16 @@ def main():
             ax.set_xlim(-0.6, len(series) - 0.4)
             ax.set_xticks(range(len(series)))
             ax.set_xticklabels([s[3] for s in series], rotation=90)
-            ax.set_title(ind)
+            ax.set_title({"J1": "$J^1$"}.get(ind, ind))
         if row == 0:
             for letter, x in zip("abcd", (x0, x0 + w + gap, x0 + 2 * (w + gap), xi)):
                 S.panel_letter(fig, letter, x - 9, 2)
 
     # --- row 3: territories against dispersal ----------------------------------------------------
     y = 114
-    S.text_mm(fig, x0, y - 1, "clonal territories against dispersal (neutral marks at 2e-2 per "
-              "division, 20,000 cancer cells)", fontsize=6.5, va="bottom", fontweight="bold")
+    S.text_mm(fig, x0, y - 1, "clonal territories against dispersal", fontsize=6.5, va="bottom",
+              fontweight="bold")
     terr = runs[np.isclose(runs.mu, MU_TERR) & (runs.cond == "neutral")].copy()
-    terr["score"] = terr.assortment / terr.assortment_expected
     disps = sorted(terr.migration.unique())
     lo, hi = (disps[0], disps[-1]) if disps else (None, None)
     for i, (model, engine, label) in enumerate([("demon", "gillespie", "demon"), ("iscc", "tau", "iscc τ-leap")]):
@@ -152,38 +152,37 @@ def main():
     S.panel_letter(fig, "e", x0 - 9, y + 2)
     f = S.ax_mm(fig, 76, y + 6, 40, 38)
     g = S.ax_mm(fig, 134, y + 6, 40, 38)
+    # (f) the observed share of same-clone neighbours (filled) beside its expectation under random
+    # placement (open), (g) the clones above 4% of cells: mean and standard deviation over the seeds
+    from matplotlib.lines import Line2D
+    handles = []
     for model, engine, label, colour in TERR:
         sub = terr[(terr.model == model) & (terr.engine == engine)]
         if sub.empty:
             continue
-        for ax, col in ((f, "score"), (g, "n_territory_clones")):
+        mkr = "s" if engine == "exact" else "o"
+        for ax, col, kw in ((f, "assortment", {}), (f, "assortment_expected", dict(mfc="white", lw=0.6)),
+                            (g, "n_territory_clones", {})):
             st = sub.groupby("migration")[col]
             ax.errorbar(st.mean().index, st.mean().values, yerr=st.std().values, color=colour,
-                        ls=LS[engine], marker="s" if engine == "exact" else "o", ms=2.5, lw=0.8,
-                        capsize=1.5, label=label)
-    f.axhline(1, color=S.GREY, lw=0.5, ls=":")
+                        ls=LS[engine], marker=mkr, ms=2.5, capsize=1.5, **{"lw": 0.8, **kw})
+        handles.append(Line2D([], [], color=colour, ls=LS[engine], marker=mkr, ms=2.5, lw=0.8, label=label))
+    handles += [Line2D([], [], color=S.GREY, ls="none", marker="o", ms=2.5, label="observed"),
+                Line2D([], [], color=S.GREY, ls="none", marker="o", ms=2.5, mfc="white",
+                       label="random placement")]
+    f.set_ylim(0, 1.05)
     for ax in (f, g):
         ax.set_xscale("log")
-        ax.set_xlabel("dispersal per division")
+        ax.set_xlabel("Dispersal per division")
         if disps:
             ax.set_xticks(disps)
             ax.set_xticklabels([f"{d:g}" for d in disps])
         ax.minorticks_off()
-    f.set_ylabel("same-clone neighbours\nover random placement")
-    g.set_ylabel("clones above 4% of cells")
-    f.legend(loc="upper right", handlelength=1.8)
-    if len(terr):
-        S.stat(g, f"mean ± sd, {terr.groupby(['model', 'engine', 'migration']).size().min()} seeds",
-               "upper right")
+    f.set_ylabel("Share of neighboring demes\nwith the same clone")
+    g.set_ylabel("Clones above 4% of cells")
+    f.legend(handles=handles, loc="lower right", handlelength=1.8)
     S.panel_letter(fig, "f", 64, y + 2)
     S.panel_letter(fig, "g", 122, y + 2)
-    S.text_mm(fig, 3, 179, "Matched: K = 16, demon's death step above K (d1 = 100; the paper's tumours use 5), "
-              "invasion at 0.1 per division, one founding cell, no tissue.\n"
-              "Not matched: iscc mutates one daughter (the rate of new drivers per division is matched), its "
-              "24,000 driver sites are finite, its driver effect is fixed\nwhere demon's is drawn "
-              "(1 + s·Exp(1)), and its lattice is fixed (81 × 81, reflecting edges, never reached) where "
-              "demon's grows with the tumour.\nMaps: seed 1 of each sweep; clone colours by size rank within "
-              "a map, grey above every clone.", fontsize=5.5, color=S.GREY, va="bottom")
     S.save(fig, "supp_demon_match", stamp=False)
 
 

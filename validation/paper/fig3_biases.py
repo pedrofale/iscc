@@ -426,15 +426,15 @@ def render_a(fig, y):
     ax.invert_yaxis()
     ax.set_xlim(0, 1)
     ax.set_xlabel("Cell-type share")
-    ax.set_title("recovery bias at dissociation\n(no real reference staged)", fontsize=5.5)
+    ax.set_title("recovery bias at dissociation", fontsize=5.5)
     _legend(ax, loc="upper center", bbox_to_anchor=(0.5, -0.32), ncol=3, fontsize=4.3)
     ax = axs[1]
     off, on = np.log10(np.asarray(d["stress_score"]["off"]) + 1e-4), np.log10(np.asarray(d["stress_score"]["on"]) + 1e-4)
     bins = np.linspace(min(off.min(), on.min()), max(off.max(), on.max()), 30)
     ax.hist(off, bins=bins, density=True, color=SWEEP[1], alpha=0.8,
             label="stress off")
-    ax.hist(on, bins=bins, density=True, color=SWEEP[-1], alpha=0.6, label=f"stress {d['stress_strength']:g}")
-    ax.set_xlabel(f"log$_{{10}}$ UMI share in {d['n_stress_genes']} stress\ngenes (a random 5% of genes)")
+    ax.hist(on, bins=bins, density=True, color=SWEEP[-1], alpha=0.6, label="stress on")
+    ax.set_xlabel("log$_{10}$ UMI share\nin stress genes")
     ax.set_ylabel("Density")
     _legend(ax, loc="upper left")
     ax.set_title("dissociation stress", fontsize=5.5)
@@ -457,15 +457,14 @@ def render_a(fig, y):
             ax.barh(i, v, left=left, color=d["clone_colour"][k], height=0.7)
             left += v
     ax.set_yticks(range(len(rows)))
-    ax.set_yticklabels(rows)
+    ax.set_yticklabels([r.replace("tumour", "tumor") for r in rows])
     ax.invert_yaxis()
     ax.set_xlim(0, 1)
     ax.set_xlabel("Clone share of the cancer cells")
+    # the total variation distance of each sample to the whole is printed for the text, not drawn: the
+    # panel shows the clone shares it compares side by side
     tv = lambda a, b: 0.5 * float(np.abs(np.asarray(a) - np.asarray(b)).sum())   # noqa: E731
     dist = {r: tv(fr[r], fr["whole tumour"]) for r in rows[1:]}
-    blk = [dist[r] for r in rows[3:]]
-    ax.set_title(f"distance to the whole: section {dist['section']:.2f},\n"
-                 f"dissociated {dist['dissociated']:.2f}, blocks {min(blk):.2f}-{max(blk):.2f}", fontsize=5)
     return dict(composition=comp, tv_to_whole=dist,
                 stress_median_ratio=float(np.median(d["stress_score"]["on"]) / np.median(d["stress_score"]["off"])))
 
@@ -481,21 +480,23 @@ def render_b(fig, y):
     r, s = np.asarray(d["hist"]["real"]), np.asarray(d["hist"]["iscc"])
     bins = np.linspace(0, np.quantile(np.concatenate([r, s]), 0.995), 40)
     ax.hist(r, bins=bins, density=True, color=S.SOURCE["real"], alpha=0.6, label="GIAB HG002")
-    ax.hist(s, bins=bins, density=True, color=S.SOURCE["iscc"], alpha=0.6, label="iscc, fitted\n(modal copy number)")
+    ax.hist(s, bins=bins, density=True, color=S.SOURCE["iscc"], alpha=0.6, label="iscc, fitted")
     ax.set_xlabel("Per-locus coverage / mean")
     ax.set_ylabel("Density")
     _legend(ax, loc="upper right")
     txt = f"CV: real {d['cv_real']:.2f}, iscc {d['cv_iscc']:.2f}"
     if "low_frac" in d:
-        txt += (f"\nloci below {LOW_COV:g} x mean:\nreal {d['low_frac']['real']:.1%}, "
+        txt += (f"\nloci below {LOW_COV:g} × mean:\nreal {d['low_frac']['real']:.1%}, "
                 f"iscc {d['low_frac']['iscc']:.1%}")
     S.stat(ax, txt, "upper left")
     ax = axs[1]
-    ax.plot(d["kappa_x"], d["cv_sweep"], marker="o", ms=2.5, color=S.SOURCE["iscc"], lw=0.8, label="iscc")
+    # the depth concentration on its own scale (the sweep multiplies the fitted value), the fitted value marked
+    kappa = np.asarray(d["kappa_x"], float) * float(d["kappa_fit"])
+    ax.plot(kappa, d["cv_sweep"], marker="o", ms=2.5, color=S.SOURCE["iscc"], lw=0.8, label="iscc")
     ax.axhline(d["cv_real"], color=S.SOURCE["real"], lw=0.8, ls="--", label="HG002")
-    ax.axvline(1.0, color=S.BG_CELLS, lw=0.5, zorder=0)
+    ax.axvline(float(d["kappa_fit"]), color=S.BG_CELLS, lw=0.5, zorder=0)
     ax.set_xscale("log")
-    ax.set_xlabel("Depth concentration\n(x fitted)")
+    ax.set_xlabel("Depth concentration")
     ax.set_ylabel("Coverage CV")
     _legend(ax, loc="upper right")
     ax = axs[2]
@@ -503,9 +504,8 @@ def render_b(fig, y):
         cur = np.asarray(g["curves"])
         ax.plot(g["gc"], cur.mean(0), color=SWEEP[k], lw=0.9, label=f"{float(sig):g}")
     ax.set_xlabel("GC content")
-    ax.set_ylabel("Coverage per copy\n(mean 1)")
+    ax.set_ylabel("Coverage per copy")
     _legend(ax, loc="lower center", title="GC-bias strength", title_fontsize=4.5, ncol=2)
-    ax.set_title("iscc only; real GC curve pending", fontsize=5)
     return dict(cv_real=d["cv_real"], cv_iscc=d["cv_iscc"], cv_sweep=dict(zip(d["kappa_x"], d["cv_sweep"])))
 
 
@@ -526,45 +526,45 @@ def render_c(fig, y):
             ax.scatter([x], [s_], s=7, color=S.SOURCE["iscc"], zorder=3, label="iscc, fitted" if i == j == 0 else None)
             ax.plot([x, x], [o, s_], color=S.GREY, lw=0.4)
     ax.set_xticks([i * 11 + 5 for i in range(len(left))])
-    ax.set_xticklabels([f"{n}\n(copy number 1-10)" for n in left], fontsize=4.8)
+    ax.set_xticklabels(list(left), fontsize=4.8)
     ax.set_ylabel("Coverage CV")
     _legend(ax, loc="upper right")
     if "Tapestri" in ado:
         ax.set_ylim(top=max(ax.get_ylim()[1], 0.95))          # headroom so the statistic clears the points
-        S.stat(ax, f"Tapestri allelic dropout, balanced het sites:\nreal {ado['Tapestri'][0]:.2f}, "
+        S.stat(ax, f"Tapestri allelic dropout:\nreal {ado['Tapestri'][0]:.2f}, "
                    f"iscc {ado['Tapestri'][1]:.2f}", "upper left")
     ax = axs[1]
     i_fit = d["kappa_x"].index(1.0)
     for name, col in (("DLP+", SWEEP[-1]), ("Tapestri", SWEEP[1])):
         r = d[name]
         cv, ado_ = r["cv_sweep_cn2"], r["ado_sweep_kappa"]
-        ax.plot(cv, ado_, color=col, lw=0.6, marker="o", ms=1.4, zorder=2)          # the concentration sweep
-        ax.scatter([cv[i_fit]], [ado_[i_fit]], s=16, color=col, zorder=4, label=f"iscc, {name} fit")
+        # the line is the amplification-concentration sweep, the large dot the fitted concentration
+        ax.plot(cv, ado_, color=col, lw=0.6, marker="o", ms=1.4, zorder=2, label=f"iscc fitted to {name}")
+        ax.scatter([cv[i_fit]], [ado_[i_fit]], s=16, color=col, zorder=4)
     r = d["DLP+"]
     lumpy = d.get("sc_default", {})
     if lumpy.get("cv_cn2") is not None:          # undefined when too few loci at two copies are covered
         # scDNA's own single-cell defaults (kappa 5, ado_rate 0.20), which the code calls lumpy MDA/MALBAC
         ax.scatter([lumpy["cv_cn2"]], [lumpy["ado"]], s=16, facecolors="white", edgecolors=S.SOURCE["iscc"], lw=0.8,
-                   zorder=4, label="iscc, lumpy setting (scDNA\ndefaults; not a validated preset)")
+                   zorder=4, label="iscc, scDNA defaults")
     t_ = d["Tapestri"]
     ax.scatter([t_["cv_real_cn2"]], [t_["ado_real"]], s=16, color=S.SOURCE["real"], marker="D", zorder=5,
                label="Tapestri, real")
-    ax.axvline(r["cv_real_cn2"], color=S.SOURCE["real"], lw=0.7, ls="--", zorder=1, label="DLP+ real\n(no allele data)")
+    ax.axvline(r["cv_real_cn2"], color=S.SOURCE["real"], lw=0.7, ls="--", zorder=1, label="DLP+, real")
     ax.set_xscale("log")
     ax.set_xticks([0.1, 0.2, 0.5, 1, 2])
     ax.set_xticklabels(["0.1", "0.2", "0.5", "1", "2"])
     ax.xaxis.set_minor_formatter(__import__("matplotlib").ticker.NullFormatter())
-    ax.set_xlabel("Coverage CV, two copies")
-    ax.set_ylabel("Allelic dropout\n(balanced het sites)")
+    ax.set_xlabel("Coverage CV at two copies")
+    ax.set_ylabel("Allelic dropout")
     ax.set_ylim(0, 0.95)
     _legend(ax, loc="upper left", ncol=2, fontsize=3.8, columnspacing=0.6)
-    ax.set_title("lines: amplification concentration 0.1-10x fit", fontsize=5)
     ax = axs[2]
     r = d["Tapestri"]
     ax.plot(d["ado_rates"], r["ado_sweep"], marker="o", ms=2.5, color=S.SOURCE["iscc"], lw=0.8, label="iscc")
     ax.axhline(r["ado_real"], color=S.SOURCE["real"], lw=0.8, ls="--", label="Tapestri")
     ax.axvline(r["ado_fit"], color=S.BG_CELLS, lw=0.5, zorder=0)
-    ax.set_xlabel("Allelic-dropout rate setting")
+    ax.set_xlabel("Allelic dropout rate setting")
     ax.set_ylabel("Allelic dropout")
     _legend(ax, loc="upper left")
     return dict(ado=ado, DLP=d["DLP+"], Tapestri=d["Tapestri"], sc_default=d.get("sc_default"))
@@ -577,6 +577,15 @@ def render_d(fig, y):
     # the left half is Fig 2's panel, drawn from this figure's cache
     F2._cached = lambda part: (d or {}).get("left") if part == "f" else None
     left = F2.render_f(fig, 14, y + 1.5)
+    # Fig 2's panel keys its Poisson line with a text "dotted: Poisson"; here the dotted line itself is the
+    # legend entry
+    for ax_ in fig.axes:
+        for t_ in list(ax_.texts):
+            if t_.get_text() == "dotted: Poisson":
+                t_.remove()
+                dotted = [ln for ln in ax_.get_lines() if ln.get_linestyle() == ":"]
+                if dotted:
+                    ax_.legend(handles=dotted[:1], labels=["Poisson"], loc="lower right", fontsize=4.5)
     if d is None:
         for ax in axs:
             pending(ax)
@@ -618,7 +627,7 @@ def _visium_left(fig, y, d):
     ax2.bar([0, 1], [d["moran_real"], d["moran_iscc"]], color=[S.SOURCE["real"], S.SOURCE["iscc"]], width=0.7)
     ax2.set_xticks([0, 1])
     ax2.set_xticklabels(["real", "iscc"], rotation=90)
-    ax2.set_ylabel("Moran's I, spot depth")
+    ax2.set_ylabel("Moran's I of spot depth")
     ax2.set_ylim(0, 1)
     return dict(moran_real=d["moran_real"], moran_iscc=d["moran_iscc"])
 
@@ -638,15 +647,15 @@ def render_e(fig, y):
         if not st["off"]:
             continue
         ds, vs, _ = zip(*st["off"])
-        ax.plot(ds, vs, marker="s", ms=1.6, color=SWEEP[k], lw=0.8, label=f"iscc, bleed {float(r):g}")
+        ax.plot(ds, vs, marker="s", ms=1.6, color=SWEEP[k], lw=0.8, label=f"iscc, swapping rate {float(r):g}")
     ax.set_yscale("symlog", linthresh=1e-2)
     ax.set_ylim(bottom=0)
     ax.set_xlabel("Distance to the tissue (spot pitches)")
-    ax.set_ylabel("Spot total outside the tissue\n/ mean tissue spot")
+    # each spot total is divided by the mean spot inside the tissue (validate_visium_background._profiles);
+    # the cache keeps no unnormalised totals, so the counts themselves would need part e rerun
+    ax.set_ylabel("UMIs per spot outside the tissue,\nrelative to the mean tissue spot")
     _legend(ax, loc="upper left", bbox_to_anchor=(1.02, 1.05))
-    ax.set_title("spot swapping (iscc: the real tissue outline, synthetic cells)", fontsize=5)
-    S.text_mm(fig, 149, y + 19, "pending: SpotClean recovering the\ntrue counts on an iscc slide\n"
-              "(not run; no result on record)", fontsize=5, va="top", color=S.GREY)
+    ax.set_title("spot swapping", fontsize=5)
     shares = {r: st["share"] for r, st in d["sweep"].items()}
     return dict(left=left, real_share=d["real_share"], iscc_share=shares, fit=d["fit"])
 
@@ -657,13 +666,18 @@ def render():
     out = {}
     rows = [("a", "Sampling", render_a), ("b", "WGS", render_b), ("c", "scDNA", render_c),
             ("d", "scRNA", render_d), ("e", "Visium", render_e)]
-    S.text_mm(fig, 30, 2.5, "fitted to a real reference", fontsize=6.5, va="top", color=S.GREY)
-    S.text_mm(fig, 115, 2.5, "tunable: a sweep or a preset, the real value marked", fontsize=6.5, va="top",
-              color=S.GREY)
+    # sub-panels: (i) the fit to a real reference on the left, (ii) the sweep or preset on the right, in
+    # the rows whose caption and text cite them (B has no split)
+    split = {"a", "c", "d", "e"}
+    renderer = fig.canvas.get_renderer()
     for i, (L, name, fn) in enumerate(rows):
         y = 9 + i * 37
         S.panel_letter(fig, L, 2, y - 3)
-        S.text_mm(fig, 7, y - 2.6, name, fontsize=6.5, va="top", fontweight="bold")
+        t = S.text_mm(fig, 7, y - 2.6, name, fontsize=6.5, va="top", fontweight="bold")
+        if L in split:
+            x_end = t.get_window_extent(renderer=renderer).x1 / fig.dpi / S.MM      # right edge of the row name
+            S.text_mm(fig, x_end + 2.5, y - 2.6, "i", fontsize=6, va="top")
+            S.text_mm(fig, 95, y - 2.6, "ii", fontsize=6, va="top")
         out[L] = fn(fig, y)
     tum = {p: (_cached(p) or {}).get("_tumour") for p in "abcde"}
     path = S.save(fig, "fig3_biases")

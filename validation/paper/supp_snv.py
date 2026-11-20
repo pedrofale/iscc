@@ -608,7 +608,7 @@ def print_summary(rec):
 # the figure
 # ---------------------------------------------------------------------------------------------------
 LABEL = {"10x": "10x", "smartseq3": "Smart-seq3", "smartseq3_10xdepth": "Smart-seq3, 10x depth",
-         "visium": "Visium", "bulk": "Bulk WGS", "scdna_site": "scDNA (reads over the site)",
+         "visium": "Visium", "bulk": "Bulk WGS", "scdna_site": "scDNA",    # scDNA: the reads over the site
          "scdna_bin": "scDNA (bin reads, as emitted)"}
 DRAWN = ("10x", "smartseq3", "smartseq3_10xdepth", "visium", "bulk", "scdna_site")
 CELL_DRAWN = ("10x", "smartseq3", "smartseq3_10xdepth", "visium", "scdna_site")
@@ -623,8 +623,13 @@ def _colours():
 
 
 def _short(task):
-    return {"seed1": "seed 1", "seed2": "seed 2", "disp0.1_seed1": "disp 0.1", "disp0.9_seed1": "disp 0.9, s1",
-            "disp0.9_seed2": "disp 0.9, s2"}.get(task, task)
+    """A tumor in plain words on two lines, as Fig 4 names it ("dispersal 0.9" over "seed 1")."""
+    if task.startswith("disp") and "_seed" in task:
+        d, s = task[4:].split("_seed")
+        return f"dispersal {d}\nseed {s}"
+    if task.startswith("seed"):
+        return f"showcase\nseed {task[4:]}"
+    return task
 
 
 def collect(out_dir):
@@ -783,11 +788,12 @@ def draw(recs, num):
     L, W = 10.0, 3.9            # transcript drawn 0..L (5'..3'), window the last W (1,000 of ~2,500 b)
     rng = np.random.default_rng(3)
     sites_x = (8.4, 2.6)        # a site in the 3' window, and one outside it
-    for y, name, k, full in ((4.4, "10x, Visium (3′)", "10x", False), (1.4, "Smart-seq3 (full length)", "smartseq3", True)):
+    for y, name, k, full in ((4.4, "10x and Visium, 3′ end", "10x", False),
+                             (1.4, "Smart-seq3, full length", "smartseq3", True)):
         ax.text(-0.5, y + 1.25, name, ha="left", va="bottom", fontsize=6.0, color=col[k])
         if not full:
             ax.add_patch(Rectangle((L - W, y - 0.42), W, 0.84, facecolor=S.PASTEL["yellow"], edgecolor="none", zorder=0))
-            ax.text(L - W / 2, y - 0.62, "last 1,000 bases", ha="center", va="top", fontsize=5.0, color=S.GREY)
+            ax.text(L - W / 2, y - 0.62, "3′ window", ha="center", va="top", fontsize=5.0, color=S.GREY)
         ax.add_patch(FancyBboxPatch((0, y - 0.13), L, 0.26, boxstyle="round,pad=0,rounding_size=0.1",
                                     facecolor="#BDBDBD", edgecolor="none", zorder=1))
         ax.text(L + 0.12, y, "AAAA", ha="left", va="center", fontsize=4.5, color=S.GREY)
@@ -802,14 +808,8 @@ def draw(recs, num):
             ax.plot([sx], [y], marker="v", ms=4.2, color=S.INK if seen else "white", mec=S.INK, mew=0.6, zorder=3)
             ax.text(sx, y - 0.26, "read" if seen else "not read", ha="center", va="top", fontsize=4.5,
                     color=S.INK if seen else S.GREY)
-    share = num["share_genes_in_3p_window"]
-    bin_kb = num["scdna_thinning"]["median_bin_len"] / 1000
-    ax.text(-0.5, -1.95, "Transcript length log-normal (median 2,500 b), the site uniform along it:\n"
-            f"{share:.0%} of sites lie in the 3′ window. Within reach, a molecule is read at\n"
-            "the site with probability 0.1 (as germline SNPs).\n"
-            f"scDNA (reads over the site): Fig 4c's DLP+ reads per bin (median {bin_kb:.0f} kb)\n"
-            f"thinned to those over the site, assuming {DLP_READ_LEN}-bp reads and one read per bin read.", ha="left", va="bottom", fontsize=5.0, color=S.INK,
-            linespacing=1.3)
+    # The coverage model's settings (transcript lengths, the 3' window's share of sites, the per-molecule read
+    # probability, scDNA's thinning to the reads over the site) are in the caption, not in the figure.
 
     # (b) site-level detection ------------------------------------------------------------------------
     S.panel_letter(fig, "b", 94, 3)
@@ -830,19 +830,20 @@ def draw(recs, num):
     ax.set_xticks(xs)
     ax.set_xticklabels(FREQ_LABELS)
     ax.set_xlabel("Site frequency among cancer cells")
-    ax.set_ylabel(f"Somatic sites called\n(≥{MIN_ALT_SITE} alt reads, above error)")
-    ax.set_ylim(-0.02, 1.13)                       # headroom above 1 for the note
+    ax.set_ylabel("Share of somatic\nsites called")      # the call rule (alt reads, error floor) is in the caption
+    ax.set_ylim(-0.02, 1.13)                       # headroom above 1, kept from the specificity note's layout
     ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
     ax.spines["left"].set_bounds(0, 1)
+    ax.scatter([], [], s=1.2, color=S.INK, alpha=0.45, linewidths=0, label="one tumor")
     ax.legend(loc="lower left", bbox_to_anchor=(-0.02, 1.01), fontsize=5.0, ncol=3, handlelength=1.6,
               columnspacing=0.8)
-    ax.text(xs[0] - 0.25, 1.125, specificity_note(spec_num), ha="left", va="top", fontsize=5.0, color=S.INK)
+    # the calls at non-mutated sites (specificity_note) are stated in the caption, not printed in the figure
 
     # (c) cell-level detection --------------------------------------------------------------------------
     S.panel_letter(fig, "c", 2, 64)
     ks = [k for k in CELL_DRAWN if k in num["cell_level"]]
-    lab = [LABEL[k] + (" (spots)" if num["cell_level"][k]["unit"] == "spot" else "") for k in ks]
-    for j, (metric, xl, logx, x0) in enumerate((("share_detected", "Carrier cell–site pairs\nwith ≥1 alt read",
+    lab = [LABEL[k] + (" spots" if num["cell_level"][k]["unit"] == "spot" else "") for k in ks]
+    for j, (metric, xl, logx, x0) in enumerate((("share_detected", "Carrier cell–site pairs\nwith an alt read",
                                                  False, 36),
                                                 ("mean_depth", "Mean reads over the site\nper carrier pair", False, 66))):
         ax = S.ax_mm(fig, x0, 70, 22, 38)
@@ -868,6 +869,7 @@ def draw(recs, num):
         S.despine(ax, left=False)
     ax.plot([], [], marker="^", ms=2.4, color=S.INK, mfc="white", mew=0.5, ls="none", label="site in 3′ window")
     ax.plot([], [], marker="v", ms=2.4, color=S.INK, mfc="white", mew=0.5, ls="none", label="site outside")
+    ax.plot([], [], marker="|", ms=2.0, color=S.INK, alpha=0.5, mew=0.4, ls="none", label="one tumor")
     ax.legend(loc="lower right", bbox_to_anchor=(1.05, 1.0), fontsize=4.8, ncol=1, handletextpad=0.2)
 
     # (d) cardelino ------------------------------------------------------------------------------------------
@@ -891,7 +893,7 @@ def draw(recs, num):
     ax.set_xticks(np.arange(len(tasks)))
     ax.set_xticklabels([f"{_short(t)}\n{num['cardelino'][t]['n_true_clones']} clones" for t in tasks])
     ax.set_ylim(0, 1.0)
-    ax.set_ylabel("cardelino balanced accuracy")
+    ax.set_ylabel("Balanced accuracy of cardelino")
     ax.legend(loc="lower left", bbox_to_anchor=(0.0, 1.0), ncol=5, fontsize=5.0, handlelength=1.2)
     return S.save(fig, "supp_snv")
 

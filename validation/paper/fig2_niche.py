@@ -4,18 +4,19 @@ The panels of Fig 2:
   (a) one tumour's history up to metastasis (R0 seed 1, the showcase): five snapshots coloured by
       clone, and the cancer cells in gland, stroma and metastasis over generations, with clone births,
       the first invasion and the first seeding of the metastasis;
-  (b) escape from the gland across seeds (R10, barriers on against open): (i) generations from
+  (b) escape from the gland across seeds (R10, with barriers against without): (i) generations from
       founding to the first invasion, (ii) how many clones reach the stroma within a window after it;
   (c) traits are selected where they pay (R12 seeds 1-10 against R13's three controls, paired by seed):
-      the share of cancer cells carrying each trait in each compartment, and its enrichment over the
-      control without that trait's selection;
+      the share of cancer cells carrying each trait in each compartment, in the selected tumour and in
+      the control without that trait's selection, side by side (the log2 enrichment is kept in the
+      numbers file only);
   (d) confinement shapes the genome (R3): truncal copy-number fraction and clonal diversity, with the
       definitions of the old Fig 4f-g (fig4_space_lineage.py);
   (e) metastatic seeding: (i) the showcase's clone tree, branches coloured by where their cells live,
       seeding marked; (ii) across R12's 20 seeds, the lineages founding each metastasis, and the
       release, first invasion and seeding as fractions of the primary's age;
   (f) against real tumours: fig2_realism.py's panels a and c, from summaries.py's caches of R1-R5;
-  (g) speed: wall time and peak memory of one run against cancer cells (the v4 runtime logs).
+  (g) speed: wall time and peak memory (GB) of one run against cancer cells (the v4 runtime logs).
 
 Definitions used throughout:
   * compartments: gland = primary demes of a gland (lumen or wall, ``gland_id >= 0``); stroma =
@@ -29,9 +30,9 @@ Definitions used throughout:
     born in the stroma, its first ancestor born outside it); the count is of the distinct clones of
     those crossing genotypes, clones defined on the whole tumour at the end of the window ("ancestral"
     counts as one). Clones born inside the stroma after a crossing therefore do not add to it;
-  * enrichment (c): log2 of the carrier share (trait level > 0) in the selected tumour over that in
-    the control without the trait's selection at the same seed, with one pseudo-cell added to each
-    side so that a control without carriers gives a finite value (drawn hollow);
+  * carrier share (c): cancer cells with the trait's level > 0 over cancer cells, per compartment, at
+    the end of growth; the enrichment in the numbers file is log2 of the selected share over the
+    control's at the same seed, with one pseudo-cell added to each side;
   * founding lineage of the metastasis (e): for each live metastatic cancer cell, its genotype or the
     first ancestor born in the primary (the genotype that crossed; a mutant born on arrival has its
     parent as the crossing genotype); seeding time = the first seeding event of any founding lineage;
@@ -659,11 +660,16 @@ def render_a(fig, y):
         return None
     r0, r1, c0, c1 = a["crop"]
     G = a["grid"]
+    # each map is titled with the state it shows: the second is a snapshot after the acinus opened (the
+    # opening itself, a["release"], is the dotted line below), so it reads "acinus open", not "opens";
+    # the first breach is the event panels b and e call the first invasion (first_invasion), so one term
+    state = {"acinus opens": "acinus open", "first breach": "first invasion"}
     for i, (ax, m) in enumerate(zip(axes, a["maps"])):
         img = _rgb(a, m["primary"])
         ax.imshow(img[r0:r1, c0:c1] if i == 0 else img, interpolation="nearest")
         _frame(ax)
-        ax.set_title(f"{m['name']}\n{m['time']:.0f} generations", fontsize=5.5, linespacing=1.1)
+        ax.set_title(f"{state.get(m['name'], m['name'])}\n{m['time']:.0f} generations", fontsize=5.5,
+                     linespacing=1.1)
         if i == 0:                                    # the closed acinus: ring its cancer demes
             rr, cc = np.divmod(np.asarray([d for d, _, _ in m["primary"]], dtype=int), G)
             ax.scatter(cc - c0, rr - r0, s=22, facecolors="none", edgecolors=S.INK, lw=0.6)
@@ -672,16 +678,14 @@ def render_a(fig, y):
             ax.scatter(cc, rr, s=14, facecolors="none", edgecolors=LINE["stroma"], lw=0.6)
     from matplotlib.patches import Rectangle
     axes[1].add_patch(Rectangle((c0 - 0.5, r0 - 0.5), c1 - c0, r1 - r0, fill=False, lw=0.4, ec=S.INK, ls=":"))
-    S.text_mm(fig, 9, y + 34, f"founding gland ({r1 - r0} x {c1 - c0} demes,\ndotted box); ring: the cancer",
-              fontsize=4.3, color=S.GREY, va="top")
-    S.text_mm(fig, 39.5, y + 34, f"whole field ({G} x {G} demes); ring: the first cancer cells in the stroma",
+    S.text_mm(fig, 9, y + 34, "ring: the cancer", fontsize=4.3, color=S.GREY, va="top")
+    S.text_mm(fig, 39.5, y + 34, "dotted box: the founding gland; ring: the first cancer cells in the stroma",
               fontsize=4.3, color=S.GREY, va="top")
     last = a["maps"][-1]
     if a["met_grid"]:
         axm.imshow(_rgb(a, last["met"], primary=False), interpolation="nearest")
         _frame(axm, LINE["met"], 0.6)
-        axm.set_title(f"metastasis\n{a['met_grid']} x {a['met_grid']} demes", fontsize=5, color=LINE["met"],
-                      linespacing=1.1)
+        axm.set_title("metastasis", fontsize=5, color=LINE["met"], linespacing=1.1)
     else:
         axm.axis("off")
     # bottom: cancer cells in each compartment over generations
@@ -702,15 +706,15 @@ def render_a(fig, y):
     col = dict(zip(a["labels"], a["colours"]))
     for lab, bt in a["births"]:
         axh.plot(bt, ymax * 0.7, "v", ms=3, color=col[lab], mec=S.INK, mew=0.3, clip_on=False)
-    marks = [("acinus opens", a["release"], S.GREY, ":"), ("first breach", a["t_inv"], LINE["stroma"], "-"),
+    axh.plot([], [], "v", ms=3, color=S.GREY, mec=S.INK, mew=0.3, ls="none", label="clone birth")
+    marks = [("acinus opens", a["release"], S.GREY, ":"), ("first invasion", a["t_inv"], LINE["stroma"], "-"),
              ("seeding", (a["seeding"] or {}).get("t_seed"), LINE["met"], "-")]
     for name, x, c, ls in marks:
         if x is None:
             continue
         axh.axvline(x, color=c, lw=0.6, ls=ls, zorder=0)
         axh.text(x, ymax * 1.6, name, fontsize=4.5, color=c, ha="center", va="bottom", clip_on=False)
-    axh.legend(loc="lower right", fontsize=4.8, ncol=3)
-    S.stat(axh, "triangles: clone births", "upper left")
+    axh.legend(loc="upper left", fontsize=4.8, ncol=4)
     if a["source"] != SHOWCASE:
         S.text_mm(fig, 8, y - 1.3, f"stand-in: {a['source'].replace('/', ' ')} (the showcase R0 is not grown yet)",
                   fontsize=5, color="#B2182B", va="top")
@@ -732,6 +736,7 @@ def render_b(fig, x, y):
     for key, r in d.items():
         arms[key.split("/")[1].split("_")[0]].append(r)
     col = {"barriers": S.SOURCE["iscc"], "open": S.SOURCE["real"]}
+    name = {"barriers": "with barriers", "open": "without barriers"}      # the paper's terms for the arms
     out = {}
     rel = [r["release"] for rs in arms.values() for r in rs if r.get("release") is not None]
     for arm, rs in arms.items():
@@ -742,7 +747,7 @@ def render_b(fig, x, y):
         if len(ti):
             xs = np.r_[0, ti, max(r["time"] for r in rs)]
             ys = np.r_[0, np.arange(1, len(ti) + 1) / n, len(ti) / n]
-            ax1.step(xs, ys, where="post", color=col[arm], lw=1.0, label=f"{arm} ({len(ti)}/{n})")
+            ax1.step(xs, ys, where="post", color=col[arm], lw=1.0, label=name[arm])
         out[arm] = dict(n=n, invaded=len(ti), median=float(np.median(ti)) if len(ti) else None,
                         range=(float(ti.min()), float(ti.max())) if len(ti) else None,
                         median_after_release=float(np.median(ti - np.median(rel))) if len(ti) and rel else None)
@@ -754,7 +759,7 @@ def render_b(fig, x, y):
     if rel:
         ax1.set_xlim(np.median(rel) - 25, None)
     ax1.set_xlabel("Generations from founding\nto first invasion")
-    ax1.set_ylabel("Tumours invaded")
+    ax1.set_ylabel("Share of tumors invaded")
     ax1.legend(loc="lower right", fontsize=4.5)
     # (ii) clones reaching the stroma within WINDOW generations of the first invasion
     cats = ["1", "2", "3+"]
@@ -768,7 +773,6 @@ def render_b(fig, x, y):
         for f, c in zip(fr, shades):
             ax2.bar(j, f, bottom=bottom, color=c, width=0.7, lw=0)
             bottom += f
-        ax2.text(j, 1.02, f"n={len(ns)}", fontsize=4.3, ha="center", va="bottom", color=S.GREY)
         out[arm]["clones_reaching"] = dict(zip(cats, [round(float(f), 2) for f in fr]))
         out[arm]["clones_reaching_n"] = ns
         out[arm]["clones_reaching_final_def"] = [sum(1 for c in r["cross_final"].values() if c > 0)
@@ -777,13 +781,10 @@ def render_b(fig, x, y):
                                                  for r in rs if r.get("cross_then_end")]
         out[arm]["crossing_genotypes"] = [r["n_crossing_genotypes"] for r in rs if "n_crossing_genotypes" in r]
     ax2.set_xticks([0, 1])
-    ax2.set_xticklabels(["barriers", "open"], fontsize=4.8)
+    ax2.set_xticklabels(["with\nbarriers", "without\nbarriers"], fontsize=4.8)
     ax2.set_ylim(0, 1)
-    ax2.set_ylabel(f"Tumours, by clones crossing into\nthe stroma {WINDOW:.0f} generations after invasion",
-                   fontsize=5.5)
+    ax2.set_ylabel("Share of tumors, by clones\ncrossing into the stroma", fontsize=5.5)
     _key(ax2, shades, cats, "clones")
-    ax2.text(-0.1, -0.14, "DCIS-to-invasive comparison:\nreference to verify", transform=ax2.transAxes,
-             fontsize=4, color=S.GREY, va="top", ha="left")
     return out
 
 
@@ -807,6 +808,13 @@ def _enrichment(sel, ctl, comp, trait):
 
 
 def render_c(fig, x, y):
+    """The share of cancer cells carrying each trait in each compartment, in the selected tumour and in
+    the control without that trait's selection at the same seed, side by side (one dot per seed, a thin
+    line joining the two tumours of a seed, ticks at the medians). The shares run from 0 to 1 with
+    several near 0, so the axis is linear below 0.1% and logarithmic above (0 is drawn at 0). The log2
+    enrichment of the earlier version is kept only in the numbers file."""
+    from matplotlib.lines import Line2D
+    from matplotlib.ticker import NullLocator
     d = cached("c")
     axes = [S.ax_mm(fig, x + i * 26, y, 22, 28) for i in range(3)]
     if not d:
@@ -814,10 +822,10 @@ def render_c(fig, x, y):
             pending(ax)
         return None
     out = {}
-    names = {"breach": "breach", "stromal_survival": "stromal\nsurvival", "met_survival": "met.\nsurvival"}
+    names = {"breach": "breach", "stromal_survival": "stromal\nsurvival", "met_survival": "metastatic\nsurvival"}
     tcol = {"breach": S.CLONE_FAMILIES[0][1], "stromal_survival": S.CLONE_FAMILIES[2][1],
             "met_survival": S.CLONE_FAMILIES[3][1]}
-    xlim = 1
+    off = 0.17                                    # selected (filled) above the trait's row, control (hollow) below
     for j, (ax, comp) in enumerate(zip(axes, COMPS)):
         for i, tr in enumerate(TRAITS):
             vals, shares_s, shares_c, zero = [], [], [], []
@@ -834,33 +842,38 @@ def render_c(fig, x, y):
                 shares_c.append(ctl["comp"][comp][tr] / ctl["comp"][comp]["n"])
             if not vals:
                 continue
-            yy = 2 - i + np.random.default_rng(10 * i + j).uniform(-0.18, 0.18, len(vals))
+            row = 2 - i
+            jit = np.random.default_rng(10 * i + j).uniform(-0.05, 0.05, len(vals))
+            ps, pc = 100 * np.asarray(shares_s), 100 * np.asarray(shares_c)
+            for a_, b_, k in zip(ps, pc, jit):
+                ax.plot([a_, b_], [row + off + k, row - off + k], color=S.BG_CELLS, lw=0.3, zorder=1)
+            ax.scatter(ps, row + off + jit, s=5, color=tcol[tr], lw=0, zorder=2)
+            ax.scatter(pc, row - off + jit, s=5, facecolors="none", edgecolors=tcol[tr], lw=0.5, zorder=2)
+            for med, yc in ((np.median(ps), row + off), (np.median(pc), row - off)):
+                ax.plot([med] * 2, [yc - 0.11, yc + 0.11], color=S.INK, lw=0.8, zorder=3)
             v = np.asarray(vals)
             z = np.asarray(zero)
-            ax.scatter(v[~z], yy[~z], s=5, color=tcol[tr], lw=0)
-            ax.scatter(v[z], yy[z], s=5, facecolors="none", edgecolors=tcol[tr], lw=0.5)
-            ax.plot([np.median(v)] * 2, [2 - i - 0.3, 2 - i + 0.3], color=S.INK, lw=0.8)
-            ax.text(0.98, (2 - i + 0.97) / 3.0, f"{_pct(np.median(shares_s))} vs {_pct(np.median(shares_c))}",
-                    transform=ax.transAxes, fontsize=4.2, color=S.GREY, ha="right", va="top")
-            xlim = max(xlim, float(np.abs(v).max()))
             out[f"{tr}/{comp}"] = dict(n=len(v), median_log2=round(float(np.median(v)), 2),
                                        min=round(float(v.min()), 2), max=round(float(v.max()), 2),
                                        median_share_sel=round(float(np.median(shares_s)), 4),
                                        median_share_ctl=round(float(np.median(shares_c)), 4),
                                        ctl_zero=int(z.sum()))
-        ax.axvline(0, color=S.GREY, lw=0.5, ls=":")
+        ax.set_xscale("symlog", linthresh=0.1, linscale=0.4)
+        ax.set_xlim(-0.03, 160)
+        ax.set_xticks([0, 1, 10, 100])
+        ax.set_xticklabels(["0", "1", "10", "100"])
+        ax.xaxis.set_minor_locator(NullLocator())
         ax.set_ylim(-0.5, 2.5)
         ax.set_yticks([2, 1, 0])
         ax.set_yticklabels([names[tr] for tr in TRAITS] if j == 0 else [], fontsize=5)
         ax.set_title({"gland": "gland", "stroma": "stroma", "met": "metastasis"}[comp], fontsize=5.5)
         if j == 1:
-            ax.set_xlabel("Enrichment over the control without that selection (log$_2$)")
-    for ax in axes:
-        ax.set_xlim(-1.1 * xlim, 1.1 * xlim)
-    S.text_mm(fig, x - 12, y + 37, "dot: one seed, selected (R12) against the control without that selection "
-              "(R13) at the same seed;\nhollow: no carrier in the control (one pseudo-cell added to each side); "
-              "grey: median share of cancer\ncells carrying the trait, selected vs control",
-              fontsize=4.2, color=S.GREY, va="top")
+            ax.set_xlabel("Cancer cells carrying the trait (%)")
+            ax.legend(handles=[Line2D([], [], marker="o", ms=2.2, ls="none", color=S.INK, mew=0,
+                                      label="selected"),
+                               Line2D([], [], marker="o", ms=2.2, ls="none", mfc="none", mec=S.INK, mew=0.5,
+                                      label="control without that selection")],
+                      loc="upper center", bbox_to_anchor=(0.5, -0.33), ncol=2, fontsize=4.8)
     return out
 
 
@@ -873,7 +886,7 @@ def render_d(fig, x, y):
         return None
     out = {}
     groups = [("confined", "neutral"), ("confined", "selected"), ("free", "neutral"), ("free", "selected")]
-    for ax, (col, ylab) in zip(axes, (("trunk_fraction", "Truncal CN fraction"), ("D", "Clonal diversity, D"))):
+    for ax, (col, ylab) in zip(axes, (("trunk_fraction", "Truncal copy number fraction"), ("D", "Clonal diversity, D"))):
         for j, (arch, sel) in enumerate(groups):
             v = np.asarray([r[col] for k, r in d.items() if k.split("/")[1].startswith(f"{arch}_{sel}_")],
                            dtype=float)
@@ -885,7 +898,9 @@ def render_d(fig, x, y):
             ax.plot([j - 0.25, j + 0.25], [v.mean()] * 2, color=S.INK, lw=0.8)
             out[f"{col}/{arch}/{sel}"] = dict(n=len(v), mean=round(float(v.mean()), 3))
         ax.set_xticks(range(4))
-        ax.set_xticklabels(["conf.\nneutral", "conf.\nsel.", "free\nneutral", "free\nsel."], fontsize=4.3)
+        # four groups on an 18 mm axis: the full words fit only rotated
+        ax.set_xticklabels(["confined, neutral", "confined, selected", "free, neutral", "free, selected"],
+                           rotation=90, fontsize=4.8)
         ax.set_ylabel(ylab)
     return out
 
@@ -951,12 +966,12 @@ def render_e(fig, x, y):
         ax1.set_ylim(end * 1.02, 0)
         ax1.set_xticks([])
         ax1.spines["bottom"].set_visible(False)
-        ax1.set_xlabel("clone", fontsize=5, labelpad=6)
+        ax1.set_xlabel("Clone", fontsize=5, labelpad=6)
         ax1.set_ylabel("Generations")
         handles = [ax1.plot([], [], color=WHERE[k], lw=1.5, label=lab)[0]
                    for k, lab in (("primary", "primary only"), ("met", "metastasis only"), ("both", "both"))]
         handles.append(ax1.scatter([], [], marker="*", s=14, color=WHERE["met"], edgecolors=S.INK, lw=0.3,
-                                   label="seeding (>= 1% of the met.)"))
+                                   label="seeding"))
         ax1.legend(handles=handles, loc="lower left", fontsize=4.3, bbox_to_anchor=(0, -0.42), ncol=2)
         out["tree"] = dict(n_nodes=len(nodes), n_leaves=sum(1 for g in nodes if not kids[g]),
                            where=Counter(_where(n) for g, n in nodes.items() if not kids[g]),
@@ -993,9 +1008,7 @@ def render_e(fig, x, y):
     ax2.set_xticklabels(["genotypes", "clones"], rotation=90, fontsize=4.8)
     ax2.set_xlim(-0.6, 1.6)
     ax2.set_ylim(0, max(2.0, 1.1 * float(max(eff_g.max(), eff_c.max()))) if len(eff_g) else 2)
-    ax2.set_ylabel("Founding lineages per metastasis\n(effective number)", fontsize=5.5)
-    ax2.text(0.5, 1.02, f"n={len(seeded)} of {len(rows)}", transform=ax2.transAxes, fontsize=4.3, ha="center",
-             va="bottom", color=S.GREY)
+    ax2.set_ylabel("Effective number of founding\nlineages per metastasis", fontsize=5.5)
     # the release, the first invasion and the seeding as fractions of the primary's age
     keys = [("release", "acinus\nopens", S.GREY), ("t_inv", "first\ninvasion", LINE["stroma"]),
             ("t_seed", "first\nseeding", LINE["met"])]
@@ -1011,9 +1024,7 @@ def render_e(fig, x, y):
     ax3.set_xticks(range(3))
     ax3.set_xticklabels([k[1] for k in keys], fontsize=4.5)
     ax3.set_ylim(0, 1)
-    ax3.set_ylabel("Fraction of the primary's age")
-    ax3.text(-0.2, -0.24, "comparison with published\nbreast-metastasis phylogenies:\nreferences to verify",
-             transform=ax3.transAxes, fontsize=4, color=S.GREY, va="top")
+    ax3.set_ylabel("Fraction of the age of the primary")
     out.update(n_tumours=len(rows), n_seeded=len(seeded), founders=nf.tolist(),
                effective_genotypes=eff_g.round(2).tolist(), effective_clones=eff_c.round(2).tolist(),
                median_effective_genotypes=float(np.median(eff_g)) if len(eff_g) else None,
@@ -1032,7 +1043,7 @@ def render_f(fig, x, y):
     ax2.set_xticks(REG.R5_WGD)
     ax2.set_xticklabels([f"{r:g}" for r in REG.R5_WGD], rotation=90, fontsize=4.8)
     ax2.axvline(w, color=S.INK, lw=0.5, ls=":")
-    ax2.text(w, 0.95, " paper", fontsize=4.5, color=S.INK, va="top", ha="left")
+    ax2.text(w, 0.95, " this paper", fontsize=4.5, color=S.INK, va="top", ha="left")
     return out
 
 
@@ -1047,24 +1058,26 @@ def render_g(fig, x, y):
     df = pd.DataFrame(d["rows"])
     df = df[df.ok]
     out = {}
-    for ax, col, ylab in zip(axes, ("wall_s", "peak_mb"), ("Wall time (s)", "Peak memory (MB)")):
+    # memory is drawn in GB (MB / 1000, as the paper states it); the numbers file keeps MB
+    for ax, col, ylab, scale in zip(axes, ("wall_s", "peak_mb"), ("Wall time (s)", "Peak memory (GB)"), (1, 1e-3)):
         g = df.groupby("n_cancer")[col]
         xs = np.array(sorted(g.groups))
         med, lo, hi = g.median().loc[xs], g.min().loc[xs], g.max().loc[xs]
-        ax.plot(xs, med, color=S.SOURCE["iscc"], marker="o", ms=2.5, lw=0.9)
-        ax.vlines(xs, lo, hi, color=S.SOURCE["iscc"], lw=0.8)
+        ax.plot(xs, med * scale, color=S.SOURCE["iscc"], marker="o", ms=2.5, lw=0.9)
+        ax.vlines(xs, lo * scale, hi * scale, color=S.SOURCE["iscc"], lw=0.8)
         ax.set_xscale("log")
         ax.set_yscale("log")
         ax.set_xticks(xs)
         ax.set_xticklabels([f"{v / 1000:g}k" for v in xs], fontsize=4.8)
         ax.minorticks_off()
+        if col == "peak_mb":                     # 0.74 to 8 GB: plain ticks rather than a lone 10^0
+            ax.set_yticks([1, 2, 5])
+            ax.set_yticklabels(["1", "2", "5"])
         ax.set_xlabel("Cancer cells")
         ax.set_ylabel(ylab)
         out[col] = {int(k): round(float(v), 1) for k, v in med.items()}
     out["n_runs"] = int(len(df))
     out["seeds_per_size"] = {int(k): int(v) for k, v in df.groupby("n_cancer").size().items()}
-    S.text_mm(fig, x, y + 37, "one core; grow, section and Visium; median and range of the seeds",
-              fontsize=4.2, color=S.GREY, va="top")
     return out
 
 

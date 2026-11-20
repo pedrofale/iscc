@@ -765,16 +765,12 @@ def render_a(fig, T, Z, D, Dz, V, Vz, nums):
     fr, fc = divmod(T["founding_deme"], G)
     ax.scatter([fc], [fr], s=9, facecolors="none", edgecolors="#B2182B", lw=0.6)
     _frame(ax)
-    S.text_mm(fig, x0, MAP_Y + 24.3, f"{T['n_glands']} glands in stroma,\n{G} x {G} demes (1 cm);\n"
-              "ring: the founding deme", fontsize=4.6, color=S.GREY, va="top", linespacing=1.15)
     if MG:
         axm = S.ax_mm(fig, x0, MAP_Y + 33.5, 9, 9)
         axm.imshow(np.tile(_hexrgb(S.COMPARTMENT["met"]), (MG, MG, 1)), interpolation="nearest")
         vr, vc = T["met_vessel"]
         axm.scatter([vc], [vr], s=6, color="#B2182B", lw=0)
         _frame(axm, NORMAL_COLOUR["host"], 0.5)
-        S.text_mm(fig, x0 + 10.2, MAP_Y + 34, f"metastatic site:\nhost tissue,\n{MG} x {MG} demes;\ndot: the vessel",
-                  fontsize=4.6, color=S.GREY, va="top", linespacing=1.15)
     _arrow(fig, x0 + 23.6, MAP_Y + 11.5, STAGE_X["growth"] - 0.6, MAP_Y + 11.5)
 
     # 2. the grown tumour, coloured by clone, with the metastasis as an inset
@@ -799,11 +795,7 @@ def render_a(fig, T, Z, D, Dz, V, Vz, nums):
         axi.scatter([vc - c0], [vr - r0], s=4, facecolors="none", edgecolors="#B2182B", lw=0.4)
         _frame(axi, "#3E7CB1", 0.6)
         S.text_mm(fig, x1 + 29.2, MAP_Y + 11.4, "metastasis", fontsize=4.8, color="#3E7CB1", va="bottom")
-        S.text_mm(fig, x1 + 29.2, MAP_Y + 24.6, f"{side} x {side}-\ndeme crop", fontsize=4.2, color=S.GREY,
-                  va="top", linespacing=1.1)
         nums["a"]["met_crop"] = side
-    S.text_mm(fig, x1, MAP_Y + 29.3, f"{T['cancer']:,} cancer cells after {T['time']:.0f} generations;\n"
-              f"metastasis: {n_met:,} of them", fontsize=4.6, color=S.GREY, va="top", linespacing=1.15)
     S.text_mm(fig, x1, MAP_Y + 36, "clone", fontsize=4.6, color=S.GREY, va="center")
     for i, lab in enumerate(labels):
         xx, yy = x1 + 7 + (i % 4) * 8.2, MAP_Y + 36 + (i // 4) * 2.7
@@ -827,8 +819,6 @@ def render_a(fig, T, Z, D, Dz, V, Vz, nums):
     _frame(ax, "none")
     S.text_mm(fig, x2 + 7, MAP_Y - 0.4, "section", fontsize=4.8, color=c_sec, ha="center", va="bottom")
     S.text_mm(fig, x2 + 21, MAP_Y - 0.4, "dissociated", fontsize=4.8, color=c_dis, ha="center", va="bottom")
-    S.text_mm(fig, x2, MAP_Y + 29.3, "the resected primary, cut in half;\nfour blocks (1-4) for multi-region\n"
-              "sequencing; the metastasis is\nnot resected", fontsize=4.6, color=S.GREY, va="top", linespacing=1.15)
     # the blocks' clone fractions (truth, from the counts)
     for b in range(len(T["block_centres"])):
         cnt = T["counts"].get(f"block {b + 1}", {})
@@ -844,7 +834,7 @@ def render_a(fig, T, Z, D, Dz, V, Vz, nums):
         _frame(axb, "none")
         axb.text(0, -0.06, str(b + 1), transform=axb.get_xaxis_transform(), fontsize=4.4, ha="center", va="top")
         nums["a"].setdefault("blocks", {})[str(b + 1)] = {lab: round(cnt.get(lab, 0) / tot, 3) for lab in labels}
-    S.text_mm(fig, x2 + 22, MAP_Y + 40, "clone shares\nof the blocks\n(truth)", fontsize=4.4, color=S.GREY,
+    S.text_mm(fig, x2 + 22, MAP_Y + 40, "True clone\nshares", fontsize=4.4, color=S.GREY,
               va="top", linespacing=1.1)
     _arrow(fig, x2 + 28.6, MAP_Y + 11.5, STAGE_X["assays"] - 0.6, MAP_Y + 11.5)
 
@@ -887,9 +877,6 @@ def render_a(fig, T, Z, D, Dz, V, Vz, nums):
     else:
         _visium(axv, Vz, T, mode="clone")
         _frame(axv, "none")
-    S.text_mm(fig, x3, MAP_Y + 38.5, "Each output carries the answer key: per cell its clone, lineage, genotype,\n"
-              "copy number, niche and program activity; per clone where and when it arose.",
-              fontsize=4.6, color=S.INK, va="top", linespacing=1.2)
     nums["a"].update(cancer=T["cancer"], generations=round(T["time"], 1), met_cells=n_met, glands=T["n_glands"],
                      grid=G, met_grid=MG, clone_sizes=T["sizes"])
 
@@ -981,15 +968,12 @@ def render_biases(fig, y0, nums):
         ax.text((a + b) / 2, yb + 0.6, st, fontsize=5.2, ha="center", va="top", fontweight="bold")
     # legend and the steps with no bias
     lx, ly = 5.0, y0 + 14.0
-    for k_, (how, txt) in enumerate(((SB.FIT, "fitted from real data (estimate_dna, _rna, _visium)"),
-                                     (SB.COND, "fitted when the real data carry what the fit needs"),
-                                     (SB.SET, "set by the user (a prior or preset)"))):
+    for k_, (how, txt) in enumerate(((SB.FIT, "fitted from real data"),
+                                     (SB.COND, "fitted when the real data contain what the fit needs"),
+                                     (SB.SET, "set by the user as a prior or preset"))):
         ax.plot([lx], [ly + 2.6 * k_], marker="o", ms=2.6, fillstyle=fill[how], color=S.INK, mec=S.INK,
                 mew=0.5, markerfacecoloralt="white", ls="none")
         ax.text(lx + 1.8, ly + 2.6 * k_, txt, fontsize=4.8, va="center")
-    ax.text(lx - 1, ly + 9.3, "Each bias at the step where it enters, per technology (rows).\n"
-            "Tissue and growth add none: the answer key is exact.\nSource: supp_biases.BIASES, traced to the code.",
-            fontsize=4.6, color=S.GREY, va="top", linespacing=1.25)
     counts = Counter(b.how for b in SB.BIASES)
     nums["d"] = dict(entries=len(SB.BIASES), by_status=dict(counts),
                      names={st: names[st] for st in SB.STEPS})
@@ -1004,7 +988,7 @@ def _cell(ax, x, y, r, fc, ec=None, lw=0.3, z=2):
 def render_b(fig, y0, T, nums):
     from matplotlib.patches import Circle, Ellipse, FancyArrowPatch, FancyBboxPatch, Rectangle
     S.panel_letter(fig, "b", 1, y0)
-    S.text_mm(fig, 5, y0 + 1.6, "Selection depends on the niche", fontsize=6.5, fontweight="bold", va="center")
+    S.text_mm(fig, 5, y0 + 1.6, "Selection in each niche", fontsize=6.5, fontweight="bold", va="center")
     P, car = T["params"], T["carriers"]
     col = dict(zip(T["labels"], T["colours"]))
     can = [col["clone 1"], col["clone 3"], col["clone 2"]]
@@ -1032,12 +1016,12 @@ def render_b(fig, y0, T, nums):
                                  lw=0.5, zorder=5))
     ax.text(0, -12.6, "basement membrane", fontsize=4.2, ha="center", va="center", color=S.INK)
     texts.append(("Gland", [
-        "A closed acinus: the founding deme is held shut",
-        f"for {P['origin_generations']:.0f} generations once half full; leaving a",
-        "gland needs the breach trait, and a crossing",
-        "succeeds with probability equal to its level.",
-        f"Breach carriers here: {100 * car['gland']['breach']:.0f}% of gland cells,",
-        f"{100 * car['stroma']['breach']:.0f}% of stroma cells."]))
+        "Founding acinus closed at first",
+        "Breach trait needed to leave the gland",
+        "Crossing probability equal to the trait level",
+        "",
+        "Carriers of the breach trait:",
+        f"{100 * car['gland']['breach']:.0f}% of gland cells, {100 * car['stroma']['breach']:.0f}% of stroma cells"]))
 
     # the stroma: residents add a hazard that stromal survival offsets
     ax = S.ax_mm(fig, 3, ys[1], 27, h * 0.82)
@@ -1056,13 +1040,13 @@ def render_b(fig, y0, T, nums):
     _cell(ax, 7.0, -6.0, 1.05, "#BDBDBD", ec="white", z=3)
     ax.text(7.0, -6.0, "x", fontsize=5, ha="center", va="center", color=S.INK, zorder=4)
     texts.append(("Stroma", [
-        "Resident stromal cells add a death hazard",
-        r"$\sigma\,\phi_s\,(1-\beta_{ss})$, $\sigma$ = " + f"{P['stromal_hazard']:g}"
-        + r", with $\phi_s$ the stromal",
-        r"share of the deme and $\beta_{ss}$ the clone's",
-        "stromal survival, which offsets it.",
-        f"Carriers here: {100 * car['stroma']['stromal_survival']:.1f}% of stroma cells,",
-        f"{100 * car['gland']['stromal_survival']:.1f}% of gland cells (the trait stays rare)."]))
+        "Death hazard from resident stromal cells,",
+        "rising with their share of the deme",
+        "Hazard offset by stromal survival",
+        "",
+        "Carriers of stromal survival:",
+        f"{100 * car['stroma']['stromal_survival']:.1f}% of stroma cells, "
+        f"{100 * car['gland']['stromal_survival']:.1f}% of gland cells"]))
 
     # the metastasis: vessel entry with transit survival, a host hazard offset by met survival
     ax = S.ax_mm(fig, 3, ys[2], 27, h * 0.82)
@@ -1087,32 +1071,41 @@ def render_b(fig, y0, T, nums):
         _cell(ax, 4.5 + rr * np.cos(a), 1.5 + rr * np.sin(a), 1.0, col["clone 1"], ec="white", z=3)
     ax.text(-13.2, 9.6, "vessel", fontsize=4.4, color="#B2182B", va="bottom")
     texts.append(("Metastasis", [
-        "Entry only through the vessel deme, surviving",
-        r"transit with probability $f + (1-f)\,m$, $f$ = " + f"{P['transit_floor']:g};",
-        r"the host adds a hazard $h\,\phi_h\,(1-m)$, $h$ = " + f"{P['met_hazard']:g},",
-        r"offset by the clone's metastatic survival $m$.",
-        f"Carriers here: {100 * car['met']['met_survival']:.0f}% of metastatic cells,",
-        f"{100 * car['stroma']['met_survival']:.0f}% of stroma cells."]))
+        "Entry only through the vessel",
+        "Transit survival rising with metastatic survival",
+        "Host hazard offset by metastatic survival",
+        "",
+        "Carriers of metastatic survival:",
+        f"{100 * car['met']['met_survival']:.0f}% of metastatic cells, "
+        f"{100 * car['stroma']['met_survival']:.0f}% of stroma cells"]))
 
     for (name, lines), y in zip(texts, ys):
         S.text_mm(fig, 31.5, y + 1.0, name, fontsize=6, fontweight="bold", va="top")
         S.text_mm(fig, 31.5, y + 4.6, "\n".join(lines), fontsize=4.8, va="top", linespacing=1.35)
     yd = ys[2] + h + 0.5
     _box(fig, 3, yd, 64, 10.5, S.PASTEL["grey"], r=0.8)
-    S.text_mm(fig, 5, yd + 1.4, "Everywhere: driver dosage sets the division rate", fontsize=5.4,
-              fontweight="bold", va="top")
-    S.text_mm(fig, 5, yd + 4.6, r"$b=\min(b_{max},\,b_0\,s^{d})\,\prod_j(1-c_j\beta_j)$, $d$ the driver dosage (CINner), "
-              f"$s$ = {P['driver_effect']:g};\n"
-              f"each trait costs division wherever it is carried ($c$ = {P['breach_cost']:g}, "
-              f"{P['stromal_survival_cost']:g}, {P['met_survival_cost']:g}).",
+    S.text_mm(fig, 5, yd + 1.4, "In every niche", fontsize=5.4, fontweight="bold", va="top")
+    S.text_mm(fig, 5, yd + 4.6, "Division rate increasing with driver dosage, up to a maximum"
+              "\nA cost to division for each trait, wherever it is carried",
               fontsize=4.8, va="top", linespacing=1.35)
     nums["b"] = dict(params=P, carriers=car)
     return yd + 10.5
 
 
 # --- c: one clone in every modality -----------------------------------------------------------------
+def _key(ax, entries, **kw):
+    """A one-row legend in place of a written key; ``entries`` are (handle, label) pairs. By default it sits
+    just above the axes, at its left edge."""
+    opts = dict(loc="lower left", bbox_to_anchor=(0.0, 1.02), ncol=len(entries), fontsize=4.4, frameon=False,
+                handlelength=1.4, handleheight=0.7, handletextpad=0.4, columnspacing=1.0, borderaxespad=0.0,
+                borderpad=0.0)
+    opts.update(kw)
+    return ax.legend([h for h, _ in entries], [lab for _, lab in entries], **opts)
+
+
 def render_clone(fig, y0, T, D, Dz, V, Vz, nums):
-    from matplotlib.patches import Rectangle
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch, Rectangle
     k = T["choice"]
     labels, colours = T["labels"], T["colours"]
     col = dict(zip(labels, colours))
@@ -1121,14 +1114,11 @@ def render_clone(fig, y0, T, D, Dz, V, Vz, nums):
     X0, W0 = 84.0, 58.0                 # the genome-aligned column
     XR = 150.0                          # the right column
     S.panel_letter(fig, "c", 72, y0)
-    S.text_mm(fig, 76, y0 + 1.6, f"One clone in every modality: {k}", fontsize=6.5, fontweight="bold",
+    S.text_mm(fig, 76, y0 + 1.6, f"{k[:1].upper()}{k[1:]} in every modality", fontsize=6.5, fontweight="bold",
               va="center", color=ck)
     cons, modal = np.asarray(T["consensus"][k]), np.asarray(T["modal"])
     altered = np.nonzero(cons != modal)[0]
     edges = np.concatenate([[0], np.cumsum(T["segment_sizes"])])
-    S.text_mm(fig, 76, y0 + 4.6, f"{T['sizes'][k]:,} cancer cells ({100 * T['sizes'][k] / T['cancer']:.1f}%), "
-              f"born at generation {_node_time(T, k):.0f}; {len(altered)} of {len(cons)} segments differ "
-              f"from the tumour's modal profile", fontsize=4.8, color=S.GREY, va="center")
     nd = dict(clone=k, cells=T["sizes"][k], altered_segments=(altered + 1).tolist(), consensus=cons.tolist(),
               modal=modal.tolist(), consensus_share=T["consensus_share"][k])
 
@@ -1148,10 +1138,12 @@ def render_clone(fig, y0, T, D, Dz, V, Vz, nums):
     ax.set_ylim(0, 6.3)
     ax.set_yticks([0, 2, 4, 6])
     ax.tick_params(axis="y", labelsize=4.6)
-    ylab(ax, "truth\ncopies")
+    ylab(ax, "True copy\nnumber")
     S.despine(ax, True, False)
-    S.text_mm(fig, X0, y0 + 7.3, f"Truth: its consensus profile (solid), the tumour's modal profile (dashed)",
-              fontsize=4.4, va="center")
+    Wf, Hf = fig.get_size_inches() / S.MM
+    _key(ax, [(Line2D([], [], color=ck, lw=1.6), f"consensus profile of {k}"),
+              (Line2D([], [], color=S.GREY, lw=0.8, ls=(0, (2, 1))), "modal profile of the tumor")],
+         loc="center left", bbox_to_anchor=(X0 / Wf, 1 - (y0 + 7.3) / Hf), bbox_transform=fig.transFigure)
 
     if Dz is None:
         for yy, hh in ((24, 12), (40, 33), (77, 13)):
@@ -1191,11 +1183,12 @@ def render_clone(fig, y0, T, D, Dz, V, Vz, nums):
         ax.scatter(centre, v * scale, s=0.9, color=S.INK, lw=0, alpha=0.7, rasterized=True, zorder=4)
         ax.set_ylim(0, max((normal + oth + kk).max(), np.percentile(v * scale, 99)) * 1.08)
         ax.tick_params(axis="y", labelsize=4.6)
-        ylab(ax, "WGS\ncopies", S.MODALITY["DNA"])
+        ylab(ax, "WGS copy\nnumber", S.MODALITY["DNA"])
         S.despine(ax, True, False)
         fb = wb["n_choice"] / wb["n_pooled"]
-        ax.text(0.0, 1.04, f"WGS of block {wb['block']}: depth (dots) on the cells' copies, {k} ({100 * fb:.0f}% of "
-                "cells) on top", transform=ax.transAxes, fontsize=4.4, va="bottom")
+        _key(ax, [(Line2D([], [], ls="none", marker="o", ms=1.3, color=S.INK, mew=0), "depth"),
+                  (Patch(fc=ck, lw=0), k), (Patch(fc="#C4C4C4", lw=0), "other cancer cells"),
+                  (Patch(fc="#E3E3E3", lw=0), "normal cells")], bbox_to_anchor=(0.0, 1.04))
         wh = D["wgs"]
         hn, ho, hk = parts(wh)
         h_obs, h_scale = observed(wh, Dz["wgs_rel"].astype(float))
@@ -1248,15 +1241,16 @@ def render_clone(fig, y0, T, D, Dz, V, Vz, nums):
         err = 1 - ok.mean(1)
         axe.imshow(err[order][:, None], aspect="auto", cmap="Greys", vmin=0, vmax=0.5, interpolation="nearest")
         _frame(axe, "none")
-        axe.text(2.4, 1.0, "error; arrow: doublet", transform=axe.transAxes, fontsize=4.0, ha="center", va="top",
+        axe.text(2.4, 1.0, "Error", transform=axe.transAxes, fontsize=4.0, ha="center", va="top",
                  rotation=90, color=S.GREY)
         for i in np.nonzero(dbl[order])[0]:
             axe.plot([1.6], [i], marker="<", ms=1.6, color=S.INK, mew=0, clip_on=False)
         ylab(ax, "scDNA\ncells", S.MODALITY["DNA"])
         ax.yaxis.labelpad = 4.5
         n_ok, n_sing = int(ok[sing].sum()), int(ok[sing].size)
-        ax.text(0.0, 1.015, f"scDNA: integer calls of {len(order)} cells, its {nk} boxed; {n_ok:,} of {n_sing:,} "
-                "singlet bins equal the truth", transform=ax.transAxes, fontsize=4.4, va="bottom")
+        _key(ax, [(Patch(fill=False, ec=ck, lw=1.1), k),
+                  (Line2D([], [], ls="none", marker="<", ms=1.6, color=S.INK, mew=0), "doublet")],
+             bbox_to_anchor=(0.0, 1.015))
         nd["scdna"] = dict(cells=int(len(order)), choice_cells=nk, bins=int(nb), doublets=int(dbl.sum()),
                            accuracy_singlets=round(acc_all, 6), accuracy_choice=round(acc_k, 6),
                            singlet_bins_correct=n_ok, singlet_bins=n_sing,
@@ -1286,12 +1280,14 @@ def render_clone(fig, y0, T, D, Dz, V, Vz, nums):
         ax.axhline(0, color="#BDBDBD", lw=0.4, zorder=0)
         ax.set_ylim(min(-1.4, np.nanmin(lfc_o) - 0.1), max(0.8, np.nanmax(lfc_o) + 0.1))
         ax.tick_params(axis="y", labelsize=4.6)
-        ax.set_xlabel("segment", fontsize=5, labelpad=1)
-        ylab(ax, "scRNA\nlog$_2$ FC", S.MODALITY["RNA"])
+        ax.set_xlabel("Segment", fontsize=5, labelpad=1)
+        ylab(ax, "scRNA log$_2$\nfold change", S.MODALITY["RNA"])
         S.despine(ax, True, False)
         r = float(np.corrcoef(lfc_o, lfc_e)[0, 1])
-        ax.text(0.0, 1.04, f"scRNA: its expression shift (dots, {BIN} genes); line: dosage law on its true copies",
-                transform=ax.transAxes, fontsize=4.4, va="bottom")
+        _key(ax, [(Line2D([], [], ls="none", marker="o", ms=1.3, color=S.MODALITY["RNA"], mew=0), "observed"),
+                  (Line2D([], [], color=S.INK, lw=0.7), "dosage law"),
+                  (Line2D([], [], color=S.GREY, lw=0.7, ls=(0, (2, 1))), "copy number ratio")],
+             bbox_to_anchor=(0.0, 1.04))
         S.stat(ax, f"r = {r:.2f}", "lower left")
         alt_obs = {str(s + 1): round(float(np.median(lfc_o[bin_seg == s])), 3) for s in altered}
         nd["scrna"] = dict(cells=D["scrna"]["n_cells"], choice_cells=D["scrna"]["n_choice"], r_obs_expected=round(r, 3),
@@ -1305,7 +1301,7 @@ def render_clone(fig, y0, T, D, Dz, V, Vz, nums):
         ax.scatter(xy[~m, 0], xy[~m, 1], s=0.2, color="#D5D5D5", lw=0, rasterized=True)
         ax.scatter(xy[m, 0], xy[m, 1], s=0.4, color=ck, lw=0, rasterized=True)
         _frame(ax, "none")
-        ax.set_title(f"scRNA: {int(m.sum())} of {len(m):,} cells", fontsize=5.2, color=S.MODALITY["RNA"], pad=1.5)
+        ax.set_title(f"scRNA: {k}", fontsize=5.2, color=S.MODALITY["RNA"], pad=1.5)
         nd["umap"] = dict(cells=int(len(m)), choice_cells=int(m.sum()))
 
     # (vi) Visium: its true fraction per spot
@@ -1321,13 +1317,13 @@ def render_clone(fig, y0, T, D, Dz, V, Vz, nums):
         ax.set_ylim(xy[on, 0].max() + 2, xy[on, 0].min() - 2)
         ax.set_aspect("equal", adjustable="box")
         _frame(ax, "none")
-        ax.set_title(f"Visium: true share of {k}\nper spot (sectioned half)", fontsize=5.2,
-                     color=S.MODALITY["spatial"], pad=1.5, linespacing=1.1)
+        ax.set_title(f"Visium: {k}", fontsize=5.2, color=S.MODALITY["spatial"], pad=1.5)
         cax = S.ax_mm(fig, XR + 3, y0 + 92, 12, 1.2)
         cb = fig.colorbar(sc, cax=cax, orientation="horizontal")
         cb.set_ticks([0, 0.5, 1])
         cb.ax.tick_params(labelsize=4.4, length=1.2, pad=0.8)
         cb.outline.set_linewidth(0.3)
+        cb.set_label("True share per spot", fontsize=4.6, labelpad=1)
         frac = Vz["n_choice"][on] / n[on]
         nd["visium"] = dict(tissue_spots=int(on.sum()), spots_with_choice=int((Vz["n_choice"][on] > 0).sum()),
                             spots_choice_majority=int((frac > 0.5).sum()),
@@ -1336,7 +1332,7 @@ def render_clone(fig, y0, T, D, Dz, V, Vz, nums):
     # (vii) its place in the genealogy
     ax = S.ax_mm(fig, X0, y0 + 103, 96, 28)
     nd["genealogy"] = _genealogy(ax, T, k, ck)
-    ylab(ax, "genealogy")
+    ylab(ax, "Genealogy")
     nums["c"] = nd
 
 
@@ -1407,7 +1403,6 @@ def _genealogy(ax, T, k, ck):
                 yy = ypos[n["id"]]
         if kind == "WGD":
             ax.scatter([tt], [yy], marker="*", s=22, color=S.INK, lw=0, zorder=6)
-            ax.text(tt, yy - 0.45, "genome doubling", fontsize=4.4, ha="left", va="bottom", color=S.INK)
             continue
         up = kind == "gain"
         ax.scatter([tt], [yy], marker="^" if up else "v", s=9, color="#A81B20" if up else "#2F479E", lw=0, zorder=6)
@@ -1421,12 +1416,19 @@ def _genealogy(ax, T, k, ck):
     ax.set_yticks([])
     ax.set_xticks([0, 100, 200, 300])
     ax.tick_params(axis="x", labelsize=4.6)
-    ax.set_xlabel("generations", fontsize=5, labelpad=1)
+    ax.set_xlabel("Generations", fontsize=5, labelpad=1)
     S.despine(ax, False, True)
     ax.text(end + 48, -0.9, "in the\nmetastasis", fontsize=4.2, color="#3E7CB1", ha="center", va="bottom",
             linespacing=1.0)
-    ax.text(0.0, 1.02, "triangles: a copy gained or lost on the path to " + k + " (segment number)",
-            transform=ax.transAxes, fontsize=4.4, va="bottom")
+    from matplotlib.lines import Line2D
+    kinds = {e[1] for e in ev}
+    entries = [(Line2D([], [], ls="none", marker=m_, ms=ms_, color=c_, mew=0), lab_)
+               for kind_, m_, ms_, c_, lab_ in (("gain", "^", 3.0, "#A81B20", "copy number gain"),
+                                                ("loss", "v", 3.0, "#2F479E", "copy number loss"),
+                                                ("WGD", "*", 4.4, S.INK, "whole-genome duplication"))
+               if kind_ in kinds]
+    if entries:
+        _key(ax, entries)
     return dict(nodes=len(nodes), leaves=nxt[0], events=[[round(e[0], 1), e[1], e[2] + 1, e[3], e[4]] for e in ev],
                 met_cells_by_clone={n["label"]: n["sub_met"] for n in nodes.values() if n["label"]})
 

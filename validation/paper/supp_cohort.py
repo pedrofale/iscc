@@ -71,20 +71,36 @@ def render():
         ax.imshow(np.load(os.path.join(CACHE, f"{r['task']}_map.npy")), interpolation="nearest")
         S.despine(ax, False, False)
         ax.set_title(f"patient {i + 1}", fontsize=5.5)
+    # the outlined diamonds are the gland walls (common.tissue_map darkens gland demes next to stroma)
+    from matplotlib.lines import Line2D
+    W, H = fig.get_size_inches() / S.MM
+    fig.legend(handles=[Line2D([], [], marker="D", ms=3.0, mfc="none", mec=S.INK, mew=0.6, ls="none",
+                               label="gland")], loc="upper left", bbox_to_anchor=(6 / W, 1 - 33.5 / H),
+               fontsize=5, handletextpad=0.3, borderaxespad=0)
     # (b) clone copy-number profiles, grouped by patient
     S.panel_letter(fig, "b", 2, 39)
     ax = S.ax_mm(fig, 14, 43, 60, 48)
-    rows, ylab, bounds = [], [], []
+    rows, ylab, groups = [], [], []
     for i, r in enumerate(recs):
+        start = len(rows)
         for lab, p in r["profiles"].items():
             rows.append(p)
-            ylab.append(f"P{i + 1} {lab.replace('clone ', 'c')}")
-        bounds.append(len(rows))
-    ax.imshow(np.array(rows), cmap=S.DIVERGING, norm=S.cn_norm(6), aspect="auto", interpolation="nearest")
+            ylab.append(lab.replace("clone ", ""))          # the clone number; its patient is the group label
+        groups.append((i, start, len(rows)))
+    bounds = [g[2] for g in groups]
+    im = ax.imshow(np.array(rows), cmap=S.DIVERGING, norm=S.cn_norm(6), aspect="auto", interpolation="nearest")
     for b in bounds[:-1]:
         ax.axhline(b - 0.5, color=S.INK, lw=0.6)
     ax.set_yticks(range(len(rows)))
     ax.set_yticklabels(ylab, fontsize=3.6)
+    for i, a, b in groups:                                  # "patient 1" beside its clones, numbered within it
+        ax.text(-0.06, (a + b - 1) / 2, f"patient {i + 1}", transform=ax.get_yaxis_transform(), ha="right",
+                va="center", fontsize=4.8)
+    cax = S.ax_mm(fig, 76.5, 55, 1.8, 26)
+    cb = fig.colorbar(im, cax=cax, extend="max")
+    cb.set_ticks([0, 2, 4, 6])
+    cb.ax.tick_params(labelsize=4.8, length=1.5)
+    cb.set_label("Copy number", fontsize=5.5)
     ax.set_xlabel("Segment")
     ax.set_title("Copy number of each clone", fontsize=6)
     # (c) driver genes hit, by patient, sorted by recurrence
@@ -102,7 +118,7 @@ def render():
     ax.set_yticks(range(len(recs)))
     ax.set_yticklabels([f"patient {i + 1}" for i in range(len(recs))], fontsize=4.8)
     ax.set_xticks([])
-    ax.set_xlabel(f"Driver genes carried by at least {HIT:.0%} of a patient's cancer cells")
+    ax.set_xlabel("Driver genes carried by each patient")
     path = S.save(fig, "supp_s4_cohort")
     out = dict(n_patients=len(recs), genes_hit=len(genes), recurrent=rec_n,
                clones=[r["n_clones"] for r in recs], drivers_in_layout=recs[0]["n_drivers"] if recs else None,
