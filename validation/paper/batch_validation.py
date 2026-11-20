@@ -6,10 +6,17 @@ beforehand by ``batch_fits.py`` and is read from fits.json (its SHA-256 is recor
 fitted to a statistic except Splatter's two tuned parameters, as registered. It refuses to run while a
 run's ambient fraction needs the registered range and fits.json does not carry it.
 
-    PYTHONPATH=src python validation/paper/batch_validation.py run --fits $D/batchval/fits.json \\
-        --ding-dir $D/realdata/GSE132044 --pbmcsca-meta $D/realdata/pbmcsca/pbmcsca_meta.tsv.gz \\
-        --out $D/batchval/validation.json --work $SNIC_TMP/bv --tools-dir $R/tools
-    PYTHONPATH=src python validation/paper/batch_validation.py figure --validation $D/batchval/validation.json
+    IN="--fits $D/batchval/fits.json --ding-dir $D/realdata/GSE132044 \\
+        --pbmcsca-meta $D/realdata/pbmcsca/pbmcsca_meta.tsv.gz --tools-dir $R/tools --work $SNIC_TMP/bv"
+    python validation/paper/batch_validation.py stage tune --parts $D/batchval/parts $IN
+    python validation/paper/batch_validation.py stage iscc --seed 1 --parts $D/batchval/parts $IN   # seeds 1-5
+    python validation/paper/batch_validation.py stage splatter --parts $D/batchval/parts $IN        # after tune
+    python validation/paper/batch_validation.py stage size --parts $D/batchval/parts $IN            # after all
+    python validation/paper/batch_validation.py collect --parts $D/batchval/parts --out $D/batchval/validation.json
+    python validation/paper/batch_validation.py figure --validation $D/batchval/validation.json
+
+Each stage is a short job writing one part; ``run --out ... $IN`` runs them all and the collector in
+one process (the synthetic smoke: ``run --synthetic``). The stages compute what one run computes.
 
 **The contrast.** Ding et al. 2020's PBMC1 in two 10x Chromium v2 runs, A and B, every cell: the same
 blood sample, so their differences are technical. Cell types as fits.json gives them (the authors'
@@ -167,6 +174,13 @@ def embedding(X, seed=0):
     """S4's 50 PCs: counts normalised to the median library size, log1p (``batch_fits.lognorm_pca``)."""
     import batch_fits as BF
     return BF.lognorm_pca(X, N_PCS, seed)[0]
+
+
+def save_embedding(path, pca, batch, ctype):
+    """S4's embedding for the LISI step, which loads it in the integration image without pickle: the
+    labels are stored as fixed-width strings (a pandas column's object array needs pickle to load)."""
+    np.savez(path, pca=np.asarray(pca, dtype=np.float64), batch=np.asarray(batch).astype(str),
+             ctype=np.asarray(ctype).astype(str))
 
 
 def silhouettes(pca, batch, ctype):
@@ -328,10 +342,12 @@ class Splatter:
         return subprocess.run(["apptainer", "exec", self.img, "cat", "/opt/versions.txt"],
                               capture_output=True, text=True).stdout.strip()
 
-    def estimate(self, X):
+    def estimate(self, X, params_path=None):
+        """``splatEstimate`` on the pooled real counts; the parameters are kept at ``params_path``
+        (default: the work directory), where later stages read them."""
         inp = os.path.join(self.work, "real.bin")
         write_bin(X, inp)
-        self.params = os.path.join(self.work, "splat_params.rds")
+        self.params = params_path or os.path.join(self.work, "splat_params.rds")
         info = os.path.join(self.work, "splat_info.json")
         self._r("estimate", inp, self.params, info)
         with open(info) as f:
@@ -394,12 +410,33 @@ def tune(splat, name, grid, target, stat, fixed):
     return (x2 if x2 is not None else x), dict(target=target, trace=trace, matched=True, bracket=br2 or br)
 
 
-# ------------------------------------------------------------------ run
-def run(a):
+# ------------------------------------------------------------------ run, in stages
+# The validation runs as four stages and a collector, so that each is a short job; ``run`` calls the
+# same stages one after the other. Each stage writes one part (JSON) into a parts directory and the
+# collector assembles validation.json from them. Every stage computes what the single run computes:
+# the same data, seeds, tuning grids and functions; LISI is computed per embedding, so per stage.
+#
+#   tune      the real contrast (S0-S4), splatEstimate (kept as splat_params.rds beside the parts),
+#             Splatter's cell-type silhouette tuning and its batch-factor tuning to the real S0
+#   iscc      one iscc seed (S0-S4)
+#   splatter  Splatter's five evaluation seeds at the tuned values, simulated in one call (S0-S4)
+#   size      iscc's S0 against the real one; when they differ by more than SIZE_FACTOR, Splatter's
+#             batch factor tuned to iscc's S0 and its five seeds (S0-S4)
+STAGES = ("tune", "iscc", "splatter", "size")
+
+
+def _settings():
+    return dict(min_mean=MIN_MEAN, gene_filter="pooled mean over both batches within the type",
+                pseudocount=PSEUDOCOUNT, pseudocount_units="normalised counts per cell, added to "
+                "each batch's mean in log2((mB + c) / (mA + c))", normalisation="median library size",
+                min_type_cells=MIN_TYPE_CELLS, k=K, n_pcs=N_PCS, seeds=SEEDS, tune_seed=TUNE_SEED,
+                ambient_seed=AMBIENT_SEED, sigma_batch=SIGMA_BATCH, size_factor=SIZE_FACTOR,
+                de_grid=DE_GRID, batch_grid=BATCH_GRID, n_refine=N_REFINE, summaries=SUMMARIES)
+
+
+def _context(a):
+    """fits.json, the A-B data and the scored types: the same in every stage."""
     import batch_fits as BF
-    t0 = time.time()
-    if os.path.exists(a.out):
-        sys.exit(f"{a.out} exists; remove it deliberately to rerun")
     if a.synthetic:
         fits, fits_sha = synthetic_fits(), None
     else:
@@ -407,113 +444,249 @@ def run(a):
         with open(a.fits) as f:
             fits = json.load(f)
     BF.require_ambient_range(fits)                   # the order is hard: the range before any statistic
-    os.makedirs(a.work, exist_ok=True)
-    work = a.work
+    if a.synthetic:
+        X, genes, obs = synthetic_data()
+    else:
+        X, genes, obs = real_data(a.ding_dir, a.pbmcsca_meta, fits)
+    types, counts = type_set(obs)
+    print(f"[bv] data: {X.shape[0]} cells x {X.shape[1]} genes; types scored {types}", flush=True)
+    return dict(fits=fits, fits_sha=fits_sha, X=X, obs=obs, types=types, counts=counts,
+                fits_meta=dict(path=None if a.synthetic else os.path.abspath(a.fits), sha256=fits_sha,
+                               created=fits.get("created"), ambient_range=fits.get("ambient_range")),
+                data=dict(n_cells={r: int((obs["run"] == r).sum()) for r in ("A", "B")}, n_genes=int(X.shape[1]),
+                          cells_by_type_and_run=counts, types_scored=types))
+
+
+def _record(ctx, name, Xv, batch, ctype, work, extra=None):
+    """S0-S3 and S4's silhouettes of one version; its embedding is kept in ``work`` for LISI."""
+    st = contrast_stats(Xv, batch, ctype, ctx["types"])
+    pca = embedding(Xv)
+    st["S4"] = silhouettes(pca, batch, ctype)
+    path = os.path.join(work, f"emb_{name}.npz")
+    save_embedding(path, pca, batch, ctype)
+    if extra:
+        st.update(extra)
+    s = st["summary"]
+    print(f"[bv] {name}: S0 {s['S0']:.4f} S1 {s['S1_spearman']:.3f}/{s['S1_spread_ratio']:.3f} "
+          f"S2 {s['S2_slope_low']:.3f}/{s['S2_slope_mid']:.3f}/{s['S2_slope_high']:.3f} "
+          f"S3 {s['S3_median_corr']:.3f} sil {st['S4']}", flush=True)
+    return st, path
+
+
+def _add_lisi(versions, embeds, a, work):
+    """S4's iLISI and cLISI in the integration image (scib-metrics, as Fig 5), per embedding."""
+    for name, v in run_lisi(embeds, a.tools_dir, work).items():
+        versions[name]["S4"].update(v)
+    return versions
+
+
+def _splatter(ctx, a, work):
+    ctype = ctx["obs"]["cell_type"].astype(str).to_numpy()
+    all_types = sorted(set(ctype))
+    prob = [float((ctype == t).mean()) for t in all_types]
+    nA, nB = int((ctx["obs"]["run"] == "A").sum()), int((ctx["obs"]["run"] == "B").sum())
+    splat = Splatter(a.tools_dir, work, all_types, prob, [nA, nB])
+    return splat, dict(group_prob=dict(zip(all_types, prob)), batch_cells=[nA, nB])
+
+
+def _sil_type(Xv, batch, ct):
+    return silhouettes(embedding(Xv), batch, ct)["silhouette_celltype"]
+
+
+def _s0(types):
+    def s0(Xv, batch, ct):
+        return contrast_stats(Xv, batch, ct, types, curves=False)["summary"]["S0"]
+    return s0
+
+
+def _part_path(parts, name):
+    return os.path.join(parts, f"{name}.json")
+
+
+def _write_part(parts, name, part):
+    os.makedirs(parts, exist_ok=True)
+    path = _part_path(parts, name)
+    with open(path + ".tmp", "w") as f:
+        json.dump(part, f, indent=1, default=_jsonable)
+    os.replace(path + ".tmp", path)
+    print(f"[bv] part {name} -> {path}", flush=True)
+
+
+def _read_part(parts, name):
+    path = _part_path(parts, name)
+    if not os.path.exists(path):
+        raise RuntimeError(f"part {name} is missing ({path}): its stage has not run")
+    with open(path) as f:
+        return json.load(f)
+
+
+def _part_meta(ctx, stage, t0):
+    return dict(stage=stage, commit=_commit(), host=platform.node(), job=os.environ.get("SLURM_JOB_ID"),
+                settings=_settings(), fits=ctx["fits_meta"], synthetic=bool(ctx.get("synthetic")),
+                wall_s=round(time.time() - t0, 1))
+
+
+def stage_tune(ctx, a, work, parts):
+    """The real contrast; splatEstimate; Splatter's two tunings (as registered)."""
+    t0 = time.time()
+    X, obs = ctx["X"], ctx["obs"]
+    real, emb = _record(ctx, "real", X, obs["run"].to_numpy(), obs["cell_type"].astype(str).to_numpy(), work)
+    versions = _add_lisi({"real": real}, {"real": emb}, a, work)
+    splat, info = _splatter(ctx, a, work)
+    image = splat.version()
+    est = splat.estimate(X, params_path=os.path.join(parts, "splat_params.rds"))
+    de, de_trace = tune(splat, "de_facLoc", DE_GRID, real["S4"]["silhouette_celltype"], _sil_type,
+                        dict(batch_facScale=0.0))
+    bf, bf_trace = tune(splat, "batch_facScale", BATCH_GRID, real["summary"]["S0"], _s0(ctx["types"]),
+                        dict(de_facLoc=de))
+    part = dict(meta=_part_meta(ctx, "tune", t0), data=ctx["data"], versions=versions, splatter_image=image,
+                splatter=dict(estimate=est, **info, de_tuning=de_trace, de_facLoc=de, batch_tuning=bf_trace,
+                              batch_facScale=bf, params=splat.params, runner_log=splat.log))
+    _write_part(parts, "tune", part)
+    return part
+
+
+def stage_iscc(ctx, a, work, parts, seed):
+    """One iscc seed of the contrast, from fits.json's per-run vectors (not tuned)."""
+    t0 = time.time()
+    Xi, bi, ti, settings = iscc_version(ctx["X"], ctx["obs"], ctx["fits"], seed)
+    name = f"iscc_s{seed}"
+    st, emb = _record(ctx, name, Xi, bi, ti, work, dict(settings=settings))
+    del Xi
+    part = dict(meta=_part_meta(ctx, f"iscc seed {seed}", t0), versions=_add_lisi({name: st}, {name: emb}, a, work))
+    _write_part(parts, name, part)
+    return part
+
+
+def _splatter_seeds(ctx, a, work, splat, de, bf, prefix, matched_to):
+    out = splat.simulate([dict(name=f"{prefix}_s{s}", seed=s, de_facLoc=de, batch_facScale=bf) for s in SEEDS],
+                         "eval" if prefix == "splatter" else "evaliscc")
+    versions, embeds = {}, {}
+    for name in sorted(out):
+        Xs, bs, ts = out[name]
+        versions[name], embeds[name] = _record(ctx, name, Xs, bs, ts, work,
+                                               dict(splatter=dict(de_facLoc=de, batch_facScale=bf,
+                                                                  matched_to=matched_to)))
+    del out
+    return _add_lisi(versions, embeds, a, work)
+
+
+def stage_splatter(ctx, a, work, parts):
+    """Splatter's five seeds at the values tuned to the real contrast."""
+    t0 = time.time()
+    tuned = _read_part(parts, "tune")["splatter"]
+    splat, _ = _splatter(ctx, a, work)
+    splat.params = tuned["params"]
+    versions = _splatter_seeds(ctx, a, work, splat, tuned["de_facLoc"], tuned["batch_facScale"], "splatter", "real S0")
+    part = dict(meta=_part_meta(ctx, "splatter", t0), versions=versions, runner_log=splat.log)
+    _write_part(parts, "splatter", part)
+    return part
+
+
+def stage_size(ctx, a, work, parts):
+    """iscc's S0 against the real one; Splatter matched to iscc's S0 when they differ by more than
+    SIZE_FACTOR (registered: the run stops if that version cannot be tuned)."""
+    t0 = time.time()
+    tp = _read_part(parts, "tune")
+    real_s0 = tp["versions"]["real"]["summary"]["S0"]
+    iscc_s0 = float(np.median([_read_part(parts, f"iscc_s{s}")["versions"][f"iscc_s{s}"]["summary"]["S0"]
+                               for s in SEEDS]))
+    ratio = iscc_s0 / real_s0
+    differs = bool(max(ratio, 1 / ratio) > SIZE_FACTOR)
+    part = dict(S0=dict(real=real_s0, iscc_median=iscc_s0, ratio=ratio, differs_by_more_than_factor=differs),
+                versions={}, splatter={}, runner_log=[])
+    print(f"[bv] S0 real {real_s0:.4f}, iscc median {iscc_s0:.4f}, ratio {ratio:.3f}; matched version "
+          f"{'needed' if differs else 'not needed'}", flush=True)
+    if differs:
+        tuned = tp["splatter"]
+        splat, _ = _splatter(ctx, a, work)
+        splat.params = tuned["params"]
+        bf2, bf2_trace = tune(splat, "batch_facScale", BATCH_GRID, iscc_s0, _s0(ctx["types"]),
+                              dict(de_facLoc=tuned["de_facLoc"]))
+        part["splatter"] = dict(batch_tuning_iscc_size=bf2_trace, batch_facScale_iscc_size=bf2)
+        part["versions"] = _splatter_seeds(ctx, a, work, splat, tuned["de_facLoc"], bf2, "splatteriscc", "iscc S0")
+        part["runner_log"] = splat.log
+    part["meta"] = _part_meta(ctx, "size", t0)
+    _write_part(parts, "size", part)
+    return part
+
+
+def collect(parts, out):
+    """validation.json from the parts: the versions, Splatter's tuning, S0 and the registered score."""
+    if os.path.exists(out):
+        sys.exit(f"{out} exists; remove it deliberately to rerun")
+    names = ["tune"] + [f"iscc_s{s}" for s in SEEDS] + ["splatter", "size"]
+    ps = {n: _read_part(parts, n) for n in names}
+    for n, p in ps.items():                          # every part computed with the same inputs and settings
+        for key in ("settings", "fits"):
+            if p["meta"][key] != ps["tune"]["meta"][key]:
+                raise RuntimeError(f"part {n} has other {key} than part tune: they are not one validation")
+    versions = {}
+    for n in names:
+        versions.update(ps[n]["versions"])
+    tp, size = ps["tune"], ps["size"]
+    splatter = {k: v for k, v in tp["splatter"].items() if k not in ("params", "runner_log")}
+    splatter.update(size["splatter"])
+    splatter["runner_log"] = tp["splatter"]["runner_log"] + ps["splatter"]["runner_log"] + size["runner_log"]
+    differs = size["S0"]["differs_by_more_than_factor"]
+    s0 = dict(size["S0"], splatter_median=float(np.median([versions[f"splatter_s{s}"]["summary"]["S0"] for s in SEEDS])))
+    if differs:
+        s0["splatter_iscc_size_median"] = float(np.median([versions[f"splatteriscc_s{s}"]["summary"]["S0"]
+                                                           for s in SEEDS]))
+    import iscc
     res = dict(registered="exp-paper1-fig5-cohort, Amendment 2026-11-16 night (the new panel), with the "
                           "Clarifications before any run (2026-11-17)",
-               fits=dict(path=None if a.synthetic else os.path.abspath(a.fits), sha256=fits_sha,
-                         created=fits.get("created"), ambient_range=fits.get("ambient_range")),
-               settings=dict(min_mean=MIN_MEAN, gene_filter="pooled mean over both batches within the type",
-                             pseudocount=PSEUDOCOUNT, pseudocount_units="normalised counts per cell, added to "
-                             "each batch's mean in log2((mB + c) / (mA + c))", normalisation="median library size",
-                             min_type_cells=MIN_TYPE_CELLS, k=K, n_pcs=N_PCS, seeds=SEEDS, tune_seed=TUNE_SEED,
-                             ambient_seed=AMBIENT_SEED, sigma_batch=SIGMA_BATCH, size_factor=SIZE_FACTOR,
-                             de_grid=DE_GRID, batch_grid=BATCH_GRID, n_refine=N_REFINE, summaries=SUMMARIES),
-               host=platform.node(), commit=_commit(), versions={})
-    import iscc
-    res["versions"].update(python=platform.python_version(), numpy=np.__version__, pandas=pd.__version__,
-                           iscc=getattr(iscc, "__version__", None))
-    try:
-        if a.synthetic:
-            X, genes, obs = synthetic_data()
-        else:
-            X, genes, obs = real_data(a.ding_dir, a.pbmcsca_meta, fits)
-        res["synthetic"] = bool(a.synthetic)
-        types, counts = type_set(obs)
-        res["data"] = dict(n_cells={r: int((obs["run"] == r).sum()) for r in ("A", "B")}, n_genes=int(X.shape[1]),
-                           cells_by_type_and_run=counts, types_scored=types)
-        print(f"[bv] data: {X.shape[0]} cells x {X.shape[1]} genes; types scored {types}", flush=True)
-        versions, embeds = {}, {}
-
-        def record(name, Xv, batch, ctype, extra=None):
-            st = contrast_stats(Xv, batch, ctype, types)
-            pca = embedding(Xv)
-            st["S4"] = silhouettes(pca, batch, ctype)
-            path = os.path.join(work, f"emb_{name}.npz")
-            np.savez(path, pca=pca, batch=np.asarray(batch), ctype=np.asarray(ctype))
-            embeds[name] = path
-            if extra:
-                st.update(extra)
-            versions[name] = st
-            s = st["summary"]
-            print(f"[bv] {name}: S0 {s['S0']:.4f} S1 {s['S1_spearman']:.3f}/{s['S1_spread_ratio']:.3f} "
-                  f"S2 {s['S2_slope_low']:.3f}/{s['S2_slope_mid']:.3f}/{s['S2_slope_high']:.3f} "
-                  f"S3 {s['S3_median_corr']:.3f} sil {st['S4']}", flush=True)
-            return st
-
-        real = record("real", X, obs["run"].to_numpy(), obs["cell_type"].astype(str).to_numpy())
-        for s in SEEDS:
-            Xi, bi, ti, settings = iscc_version(X, obs, fits, s)
-            record(f"iscc_s{s}", Xi, bi, ti, dict(settings=settings))
-            del Xi
-
-        # Splatter: estimate, tune DE to the cell-type silhouette, tune the batch factor to S0
-        ctype = obs["cell_type"].astype(str).to_numpy()
-        all_types = sorted(set(ctype))
-        prob = [float((ctype == t).mean()) for t in all_types]
-        nA, nB = int((obs["run"] == "A").sum()), int((obs["run"] == "B").sum())
-        splat = Splatter(a.tools_dir, work, all_types, prob, [nA, nB])
-        res["versions"]["splatter_image"] = splat.version()
-        est = splat.estimate(X)
-
-        def sil_type(Xv, batch, ct):
-            return silhouettes(embedding(Xv), batch, ct)["silhouette_celltype"]
-
-        def s0(Xv, batch, ct):
-            return contrast_stats(Xv, batch, ct, types, curves=False)["summary"]["S0"]
-
-        res["splatter"] = dict(estimate=est, group_prob=dict(zip(all_types, prob)), batch_cells=[nA, nB])
-        de, de_trace = tune(splat, "de_facLoc", DE_GRID, real["S4"]["silhouette_celltype"], sil_type,
-                            dict(batch_facScale=0.0))
-        res["splatter"].update(de_tuning=de_trace, de_facLoc=de)
-        bf, bf_trace = tune(splat, "batch_facScale", BATCH_GRID, real["summary"]["S0"], s0, dict(de_facLoc=de))
-        res["splatter"].update(batch_tuning=bf_trace, batch_facScale=bf)
-        out = splat.simulate([dict(name=f"splatter_s{s}", seed=s, de_facLoc=de, batch_facScale=bf) for s in SEEDS], "eval")
-        for name, (Xs, bs, ts) in out.items():
-            record(name, Xs, bs, ts, dict(splatter=dict(de_facLoc=de, batch_facScale=bf, matched_to="real S0")))
-        del out
-
-        iscc_s0 = float(np.median([versions[f"iscc_s{s}"]["summary"]["S0"] for s in SEEDS]))
-        ratio = iscc_s0 / real["summary"]["S0"]
-        differs = bool(max(ratio, 1 / ratio) > SIZE_FACTOR)
-        res["S0"] = dict(real=real["summary"]["S0"], iscc_median=iscc_s0, ratio=ratio, differs_by_more_than_factor=differs,
-                         splatter_median=float(np.median([versions[f"splatter_s{s}"]["summary"]["S0"] for s in SEEDS])))
-        if differs:
-            bf2, bf2_trace = tune(splat, "batch_facScale", BATCH_GRID, iscc_s0, s0, dict(de_facLoc=de))
-            res["splatter"].update(batch_tuning_iscc_size=bf2_trace, batch_facScale_iscc_size=bf2)
-            out = splat.simulate([dict(name=f"splatteriscc_s{s}", seed=s, de_facLoc=de, batch_facScale=bf2)
-                                  for s in SEEDS], "evaliscc")
-            for name, (Xs, bs, ts) in out.items():
-                record(name, Xs, bs, ts, dict(splatter=dict(de_facLoc=de, batch_facScale=bf2, matched_to="iscc S0")))
-            del out
-            res["S0"]["splatter_iscc_size_median"] = float(np.median(
-                [versions[f"splatteriscc_s{s}"]["summary"]["S0"] for s in SEEDS]))
-        res["splatter"]["runner_log"] = splat.log
-
-        # S4's LISI in the integration image (scib-metrics, as Fig 5)
-        lisi = run_lisi(embeds, a.tools_dir, work)
-        for name, v in lisi.items():
-            versions[name]["S4"].update(v)
-        res["versions_stats"] = versions
-        res["score"] = score(versions, differs)
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
-    res["wall_s"] = round(time.time() - t0, 1)
-    os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
-    with open(a.out + ".part", "w") as f:
+               fits=tp["meta"]["fits"], settings=tp["meta"]["settings"], synthetic=tp["meta"]["synthetic"],
+               data=tp["data"], host=platform.node(), commit=_commit(),
+               versions=dict(python=platform.python_version(), numpy=np.__version__, pandas=pd.__version__,
+                             iscc=getattr(iscc, "__version__", None), splatter_image=tp["splatter_image"]),
+               stages={n: p["meta"] for n, p in ps.items()},
+               versions_stats=versions, splatter=splatter, S0=s0, score=score(versions, differs))
+    res["wall_s"] = round(sum(p["meta"]["wall_s"] for p in ps.values()), 1)
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    with open(out + ".part", "w") as f:
         json.dump(res, f, indent=1, default=_jsonable)
-    os.replace(a.out + ".part", a.out)
-    print(f"[bv] wrote {a.out} in {res['wall_s']} s", flush=True)
+    os.replace(out + ".part", out)
+    print(f"[bv] wrote {out}; primary {res['score']['primary']}; reproduced "
+          f"{ {k: v['reproduced'] for k, v in res['score'][res['score']['primary']].items()} }", flush=True)
+    return res
+
+
+def stage(a):
+    """One stage as its own job; its scratch is ``--work`` (removed at the end)."""
+    os.makedirs(a.work, exist_ok=True)
+    try:
+        ctx = _context(a)
+        ctx["synthetic"] = bool(a.synthetic)
+        if a.stage == "tune":
+            stage_tune(ctx, a, a.work, a.parts)
+        elif a.stage == "iscc":
+            stage_iscc(ctx, a, a.work, a.parts, a.seed)
+        elif a.stage == "splatter":
+            stage_splatter(ctx, a, a.work, a.parts)
+        else:
+            stage_size(ctx, a, a.work, a.parts)
+    finally:
+        shutil.rmtree(a.work, ignore_errors=True)
+
+
+def run(a):
+    """The whole validation in one process: every stage in turn, then the collector (the smoke)."""
+    if os.path.exists(a.out):
+        sys.exit(f"{a.out} exists; remove it deliberately to rerun")
+    os.makedirs(a.work, exist_ok=True)
+    parts = os.path.join(a.work, "parts")
+    try:
+        ctx = _context(a)
+        ctx["synthetic"] = bool(a.synthetic)
+        stage_tune(ctx, a, a.work, parts)
+        for s in SEEDS:
+            stage_iscc(ctx, a, a.work, parts, s)
+        stage_splatter(ctx, a, a.work, parts)
+        stage_size(ctx, a, a.work, parts)
+        collect(parts, a.out)
+    finally:
+        shutil.rmtree(a.work, ignore_errors=True)
 
 
 def run_lisi(embeds, tools_dir, work):
@@ -598,39 +771,60 @@ def _jsonable(o):
 
 
 def _commit():
+    """The code's commit: git's, or a snapshot's COMMIT file (snapshots carry no .git)."""
     try:
         return subprocess.run(["git", "-C", REPO, "rev-parse", "--short", "HEAD"], capture_output=True,
                               text=True, check=True).stdout.strip()
     except Exception:
-        return None
+        try:
+            with open(os.path.join(REPO, "COMMIT")) as f:
+                return f.read().strip() or None
+        except OSError:
+            return None
 
 
 def _check_run_args(a):
     if not a.synthetic and not (a.fits and a.ding_dir and a.pbmcsca_meta):
-        sys.exit("run needs --fits, --ding-dir and --pbmcsca-meta (or --synthetic)")
+        sys.exit(f"{a.cmd} needs --fits, --ding-dir and --pbmcsca-meta (or --synthetic)")
+    if a.cmd == "stage" and a.stage == "iscc" and a.seed not in SEEDS:
+        sys.exit(f"stage iscc needs --seed, one of {SEEDS}")
+
+
+def _data_args(r):
+    r.add_argument("--fits")
+    r.add_argument("--ding-dir")
+    r.add_argument("--pbmcsca-meta")
+    r.add_argument("--work", required=True, help="node-local scratch directory (removed at the end)")
+    r.add_argument("--tools-dir", required=True)
+    r.add_argument("--synthetic", action="store_true",
+                   help="smoke run on a small dataset made by iscc (no real statistic is computed)")
 
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
-    r = sub.add_parser("run")
-    r.add_argument("--fits")
-    r.add_argument("--ding-dir")
-    r.add_argument("--pbmcsca-meta")
+    r = sub.add_parser("run", help="every stage and the collector in one process")
+    _data_args(r)
     r.add_argument("--out", required=True)
-    r.add_argument("--work", required=True)
-    r.add_argument("--tools-dir", required=True)
-    r.add_argument("--synthetic", action="store_true",
-                   help="smoke run on a small dataset made by iscc (no real statistic is computed)")
+    st = sub.add_parser("stage", help="one stage as its own job, writing its part into --parts")
+    st.add_argument("stage", choices=STAGES)
+    st.add_argument("--seed", type=int, help="the iscc seed (stage iscc)")
+    st.add_argument("--parts", required=True)
+    _data_args(st)
+    co = sub.add_parser("collect", help="validation.json from the parts")
+    co.add_argument("--parts", required=True)
+    co.add_argument("--out", required=True)
     li = sub.add_parser("lisi")
     li.add_argument("listing")
     li.add_argument("out")
     fg = sub.add_parser("figure")
     fg.add_argument("--validation", required=True)
     a = p.parse_args(argv)
-    if a.cmd == "run":
+    if a.cmd in ("run", "stage"):
         _check_run_args(a)
-        run(a)
+        (run if a.cmd == "run" else stage)(a)
+    elif a.cmd == "collect":
+        collect(a.parts, a.out)
     elif a.cmd == "lisi":
         lisi_cmd(a.listing, a.out)
     else:

@@ -7,6 +7,7 @@
 - the registered scoring compares medians over seeds to the real value; the tuning interpolation
   and the runner's binary format.
 """
+import json
 import os
 import sys
 
@@ -227,3 +228,70 @@ def test_statistics_refuse_without_the_registered_range():
     rng = np.random.default_rng(0)
     a, rho = BF.draw_ambient(dict(rho_low=0.03, rho_high=0.11), rng)
     assert 0.03 <= rho <= 0.11 and a == pytest.approx(rho / (1 - rho))
+
+
+def test_embedding_labels_load_without_pickle(tmp_path):
+    # the LISI step loads the embeddings with allow_pickle=False; labels from a pandas column are an
+    # object array, which needs pickle (the smoke of 2026-11-20 failed there)
+    obs = pd.DataFrame({"run": ["A", "B", "A"], "cell_type": ["T", "B cell", "T"]})
+    assert obs["run"].to_numpy().dtype == object
+    path = str(tmp_path / "emb.npz")
+    BV.save_embedding(path, np.zeros((3, 2)), obs["run"].to_numpy(), obs["cell_type"].to_numpy())
+    z = np.load(path, allow_pickle=False)
+    assert list(z["batch"]) == ["A", "B", "A"] and list(z["ctype"]) == ["T", "B cell", "T"]
+    assert z["pca"].shape == (3, 2)
+
+
+def _summary(s0, rho):
+    return {"summary": dict(S0=s0, S1_spearman=rho, S1_spread_ratio=1.0, S2_slope_low=0.0, S2_slope_mid=0.0,
+                            S2_slope_high=0.0, S3_median_corr=0.5), "S4": {}}
+
+
+def _write_parts(parts, differs=False, settings=None):
+    meta = dict(settings=settings or json.loads(json.dumps(BV._settings())), fits={"sha256": "f"},
+                synthetic=True, wall_s=1.0, commit="c", host="h", job=None, stage="s")
+    BV._write_part(parts, "tune", dict(meta=meta, data={"n_cells": {"A": 1, "B": 1}}, splatter_image="img",
+                                       versions={"real": _summary(0.4, 0.3)},
+                                       splatter=dict(params="p.rds", runner_log=[{"args": ["estimate"]}],
+                                                     de_facLoc=1.0, batch_facScale=0.1)))
+    for s in BV.SEEDS:
+        BV._write_part(parts, f"iscc_s{s}", dict(meta=meta, versions={f"iscc_s{s}": _summary(0.41, 0.28)}))
+    BV._write_part(parts, "splatter", dict(meta=meta, runner_log=[{"args": ["simulate"]}],
+                                           versions={f"splatter_s{s}": _summary(0.4, 0.0) for s in BV.SEEDS}))
+    size = dict(meta=meta, S0=dict(real=0.4, iscc_median=0.41, ratio=1.025, differs_by_more_than_factor=differs),
+                versions={}, splatter={}, runner_log=[])
+    if differs:
+        size["versions"] = {f"splatteriscc_s{s}": _summary(0.41, 0.0) for s in BV.SEEDS}
+        size["splatter"] = dict(batch_facScale_iscc_size=0.12)
+    BV._write_part(parts, "size", size)
+
+
+def test_collect_assembles_the_stages(tmp_path):
+    import json as _json
+    parts = str(tmp_path / "parts")
+    _write_parts(parts)
+    res = BV.collect(parts, str(tmp_path / "validation.json"))
+    assert set(res["versions_stats"]) == {"real", *(f"{p}_s{s}" for p in ("iscc", "splatter") for s in BV.SEEDS)}
+    assert res["score"]["primary"] == "against_splatter"
+    assert res["score"]["against_splatter"]["S1"]["summaries"]["S1_spearman"]["iscc_closer"]
+    assert res["S0"]["splatter_median"] == pytest.approx(0.4)
+    assert [d["args"][0] for d in res["splatter"]["runner_log"]] == ["estimate", "simulate"]
+    assert "params" not in res["splatter"]
+    with open(tmp_path / "validation.json") as f:
+        assert _json.load(f)["stages"]["tune"]["commit"] == "c"
+    with pytest.raises(SystemExit):                    # never overwritten
+        BV.collect(parts, str(tmp_path / "validation.json"))
+
+
+def test_collect_scores_against_the_size_matched_splatter_and_refuses_mixed_settings(tmp_path):
+    parts = str(tmp_path / "parts")
+    _write_parts(parts, differs=True)
+    res = BV.collect(parts, str(tmp_path / "v.json"))
+    assert res["score"]["primary"] == "against_splatteriscc"
+    assert res["S0"]["splatter_iscc_size_median"] == pytest.approx(0.41)
+    other = json.loads(json.dumps(BV._settings()))
+    other["min_mean"] = 0.1
+    BV._write_part(parts, "iscc_s3", dict(meta=dict(settings=other, fits={"sha256": "f"}, synthetic=True, wall_s=1.0),
+                                          versions={"iscc_s3": _summary(0.41, 0.28)}))
+    with pytest.raises(RuntimeError, match="other settings"):
+        BV.collect(parts, str(tmp_path / "v2.json"))
