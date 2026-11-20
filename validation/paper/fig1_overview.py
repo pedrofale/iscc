@@ -89,7 +89,7 @@ NORMAL_COLOUR = {"stromal": "#CDBFA8", "epithelial": S.COMPARTMENT["epithelium"]
 N_BLOCKS, BLOCK_HALF = 4, 8              # as in Fig 3a: 17 x 17 demes, about 1 mm at the cm scale
 FS = 5.5                                 # the smallest text in the paper's figures, in points
 FIG1_SIZE = (165, 84)                    # mm: the text width, and at most half the text height (114 mm)
-S9_SIZE = (165, 148)                     # mm: S9 Fig at the text width, so that its text keeps its size
+S9_SIZE = (165, 135)                     # mm: S9 Fig at the text width, so that its text keeps its size
 MET_BLUE, VESSEL_RED = "#3E7CB1", "#B2182B"
 
 
@@ -1035,6 +1035,9 @@ def render_b(fig, y0, T, nums):
 # --- S9 Fig: one clone in every modality -------------------------------------------------------------
 S9_X0, S9_W0 = 17.0, 92.0                 # the genome-aligned column (A to D)
 S9_XR = 121.0                             # the right column (E, F)
+# (top, height) in mm of the axes of each panel of S9 Fig; letters and keys sit above them
+S9_ROW = dict(a=(9.0, 10.0), b=(25.5, 11.5), c=(45.0, 30.0), d=(82.5, 12.5), g=(109.0, 19.0),
+              e=(7.5, 35.0), f=(52.5, 37.5))
 
 
 def _key(ax, entries, **kw):
@@ -1071,6 +1074,10 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
     def ylab(ax, s, colour=S.INK):
         ax.set_ylabel(s, fontsize=FS, color=colour, linespacing=1.0, labelpad=1.5)
 
+    def _row(p, width=W0):
+        """(top, width, height) of panel ``p``'s axes, for ``S.ax_mm`` after its left edge."""
+        return S9_ROW[p][0], width, S9_ROW[p][1]
+
     def row_key(ax, entries, y):
         """A key at ``y`` mm, from the left edge of the genome column."""
         return _key(ax, entries, loc="center left", bbox_to_anchor=(X0 / Wf, 1 - y / Hf),
@@ -1078,7 +1085,7 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
 
     # (A) the true copy-number profile
     S.panel_letter(fig, "a", 1, 1)
-    ax = S.ax_mm(fig, X0, 9.0, W0, 10.0)
+    ax = S.ax_mm(fig, X0, *_row("a"))
     _genome_axis(ax, T, labels=True, top=True)
     shade(ax)
     ax.hlines(modal, edges[:-1], edges[1:], color=S.GREY, lw=0.8, linestyles=(0, (2, 1)))
@@ -1092,9 +1099,9 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
                  (Line2D([], [], color=S.GREY, lw=0.8, ls=(0, (2, 1))), "modal profile of the tumor")], 3.0)
 
     if Dz is None:
-        for yy, hh in ((25.5, 11.5), (45, 38), (90.5, 13.5)):
-            _pending(S.ax_mm(fig, X0, yy, W0, hh), "pending: --part dissociated")
-        _pending(S.ax_mm(fig, XR, 7.5, 42, 35), "pending")
+        for p in "bcd":
+            _pending(S.ax_mm(fig, X0, *_row(p)), "pending: --part dissociated")
+        _pending(S.ax_mm(fig, XR, *_row("e", S9_SIZE[0] - 2.0 - XR)), "pending")
     else:
         # (B) WGS: the depth is the pooled copy number, the sum of every cell's copies, so the clone's
         # segments enter it in proportion to its share of the cells. Shown on the multi-region block where
@@ -1115,11 +1122,11 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
             scale = np.average(w["seg_true"], weights=sizes)            # the pool's mean copy number
             return np.array([rel[lseg == s_].mean() for s_ in range(len(sizes))]) * scale, scale
 
-        S.panel_letter(fig, "b", 1, 21.5)
+        S.panel_letter(fig, "b", 1, S9_ROW["b"][0] - 4.0)
         wb = D["wgs_block"]
         normal, oth, kk = parts(wb)
         obs, scale = observed(wb, Dz["wgs_block_rel"].astype(float))
-        ax = S.ax_mm(fig, X0, 25.5, W0, 11.5)
+        ax = S.ax_mm(fig, X0, *_row("b"))
         _genome_axis(ax, T, labels=False)
         for s_ in range(len(sizes)):
             x_ = [edges[s_], edges[s_ + 1]]
@@ -1156,8 +1163,8 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
             reference=wb["reference"], mu_depth=wb["mu_depth"], kappa=wb["kappa"])
 
         # (C) scDNA: integer calls, its cells boxed, scored against the truth
-        S.panel_letter(fig, "c", 1, 38.5)
-        yc, hc = 45.0, 38.0
+        yc, hc = S9_ROW["c"]
+        S.panel_letter(fig, "c", 1, yc - 6.5)
         calls, ploidy = call_cn(Dz["sc_rel"].astype(float))
         truth = np.rint(Dz["sc_true"])
         dbl = Dz["sc_doublet"].astype(bool)
@@ -1197,13 +1204,13 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
         ylab(ax, "scDNA\ncells", S.MODALITY["DNA"])
         ax.yaxis.labelpad = 4.5
         row_key(ax, [(Patch(fill=False, ec=ck, lw=1.1), k),
-                     (Line2D([], [], ls="none", marker="<", ms=2.0, color=S.INK, mew=0), "doublet")], 40.3)
-        cax = S.ax_mm(fig, X0 + W0 - 22.0, 39.7, 22.0, 1.1)
+                     (Line2D([], [], ls="none", marker="<", ms=2.0, color=S.INK, mew=0), "doublet")], yc - 4.7)
+        cax = S.ax_mm(fig, X0 + W0 - 22.0, yc - 5.3, 22.0, 1.1)
         cb = fig.colorbar(ScalarMappable(norm=norm, cmap=S.DIVERGING), cax=cax, orientation="horizontal")
         cb.set_ticks([0, 2, 4, 6])
         cb.ax.tick_params(labelsize=FS, length=1.2, pad=0.8)
         cb.outline.set_linewidth(0.3)
-        S.text_mm(fig, X0 + W0 - 23.5, 40.25, "Copy number", fontsize=FS, ha="right", va="center")
+        S.text_mm(fig, X0 + W0 - 23.5, yc - 4.75, "Copy number", fontsize=FS, ha="right", va="center")
         n_ok, n_sing = int(ok[sing].sum()), int(ok[sing].size)
         nd["scdna"] = dict(cells=int(len(order)), choice_cells=nk, bins=int(nb), doublets=int(dbl.sum()),
                            accuracy_singlets=round(acc_all, 6), accuracy_choice=round(acc_k, 6),
@@ -1213,8 +1220,8 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
                            reference=D["scdna"]["reference"], mu_depth=D["scdna"]["mu_depth"])
 
         # (D) scRNA: the expression shift on its altered segments
-        S.panel_letter(fig, "d", 1, 86.0)
-        ax = S.ax_mm(fig, X0, 90.5, W0, 13.5)
+        S.panel_letter(fig, "d", 1, S9_ROW["d"][0] - 4.5)
+        ax = S.ax_mm(fig, X0, *_row("d"))
         _genome_axis(ax, T, labels=True)
         shade(ax)
         seg = np.repeat(np.arange(len(sizes)), np.asarray(T["segment_sizes"]))
@@ -1250,7 +1257,7 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
 
         # (E) the scRNA embedding with its cells highlighted
         S.panel_letter(fig, "e", XR - 4.0, 1)
-        ax = S.ax_mm(fig, XR, 7.5, S9_SIZE[0] - 2.0 - XR, 35.0)
+        ax = S.ax_mm(fig, XR, *_row("e", S9_SIZE[0] - 2.0 - XR))
         xy, rc = Dz["umap"], Dz["rna_code"].astype(int)
         m = rc == li[k]
         ax.scatter(xy[~m, 0], xy[~m, 1], s=0.25, color="#D5D5D5", lw=0, rasterized=True)
@@ -1260,11 +1267,12 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
         nd["umap"] = dict(cells=int(len(m)), choice_cells=int(m.sum()))
 
     # (F) Visium: its true fraction per spot
-    S.panel_letter(fig, "f", XR - 4.0, 47.0)
+    yf, hf = S9_ROW["f"]
+    S.panel_letter(fig, "f", XR - 4.0, yf - 5.5)
     if Vz is None:
-        _pending(S.ax_mm(fig, XR + 6.0, 52.5, 30.0, 45.0), "pending: --part section")
+        _pending(S.ax_mm(fig, XR + 6.0, yf, 30.0, hf), "pending: --part section")
     else:
-        ax = S.ax_mm(fig, XR + 6.0, 52.5, 30.0, 45.0)
+        ax = S.ax_mm(fig, XR + 6.0, yf, 30.0, hf)
         sc = _visium(ax, Vz, T, mode="fraction", colour=ck)
         n = Vz["n_cells"]
         on = n > 0
@@ -1274,7 +1282,7 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
         ax.set_aspect("equal", adjustable="box")
         _frame(ax, "none")
         ax.set_title(f"Visium: {k}", fontsize=6.0, color=S.MODALITY["spatial"], pad=1.5)
-        cax = S.ax_mm(fig, XR + 12.0, 100.5, 18.0, 1.1)
+        cax = S.ax_mm(fig, XR + 12.0, yf + hf + 3.0, 18.0, 1.1)
         cb = fig.colorbar(sc, cax=cax, orientation="horizontal")
         cb.set_ticks([0, 0.5, 1])
         cb.ax.tick_params(labelsize=FS, length=1.2, pad=0.8)
@@ -1286,8 +1294,8 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
                             median_cells_per_spot=float(np.median(n[on])), section_cells=V["n_section_cells"])
 
     # (G) its place in the genealogy
-    S.panel_letter(fig, "g", 1, 112.5)
-    ax = S.ax_mm(fig, X0, 118.0, 133.0, 22.0)
+    S.panel_letter(fig, "g", 1, S9_ROW["g"][0] - 5.0)
+    ax = S.ax_mm(fig, X0, *_row("g", 133.0))
     nd["genealogy"] = _genealogy(ax, T, k, ck)
     nums["s9"] = nd
 
