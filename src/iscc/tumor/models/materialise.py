@@ -49,6 +49,23 @@ ASSAY_LAYERS = {
 
 # Gene-wide rows are built per chunk of cells of about this many float64 bytes (and at least this
 # many cells), so the transient working set of materialisation stays small whatever the number of cells.
+class SectionCapWarning(UserWarning):
+    """A physical section (a region or a depth cut) was thinned by ``max_cells``, so the cap, not
+    the section, sets its cell density."""
+
+
+def _outside_iscc_stacklevel():
+    """The ``stacklevel`` of the first frame outside the package, so that a warning points at the
+    user's call rather than at a line of ``iscc``."""
+    import os
+    import sys
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    level, frame = 1, sys._getframe(1)
+    while frame is not None and os.path.abspath(frame.f_code.co_filename).startswith(root):
+        frame, level = frame.f_back, level + 1
+    return level
+
+
 _MATERIALISE_CHUNK_BYTES = 64 << 20
 
 _MATERIALISE_MIN_ROWS = 256
@@ -814,7 +831,7 @@ class MaterialiseMixin:
                 f"region/depth_frac but only ~{max_cells:,} are materialised ({max_cells / want:.1%}). "
                 f"The cap, not depth_frac, is setting the cell density. Pass a larger max_cells "
                 f"(~{int(want * 1.2):,}) to let the physical section govern.",
-                stacklevel=2)
+                SectionCapWarning, stacklevel=_outside_iscc_stacklevel())
         layers = _resolve_layers(layers)
         gene_names = self.selection.get_gene_names()
         onc_idx, tsg_idx = self.selection.get_oncogenes(), self.selection.get_tsgs()
