@@ -114,30 +114,14 @@ nav:
   - Overview: overview.md
   - Installation: installation.md
   - Tutorials:
-      - iscc overview: tutorials/01_pipeline_walkthrough.ipynb
-      - Tumor evolution:
-          - Exploring the tumor: tutorials/02_tumor_growth.ipynb
-          - The shared tumour: tutorials/base_simulation.ipynb
-          - Compartment selection — DCIS to IDC: tutorials/compartment_selection_confound.ipynb
-          - Treatment and the four escape modes: tutorials/treatment_escape_modes.ipynb
-          - Metastasis: tutorials/metastasis.ipynb
-      - Data generation:
-          - Bulk & single-cell DNA: tutorials/assay_dna.ipynb
-          - Single-cell RNA: tutorials/assay_scrna.ipynb
-          - Spatial (Visium): tutorials/assay_spatial.ipynb
-          - Sequencing reads: tutorials/reads.ipynb
-      - Data analysis examples:
-          - The analysis dataset and its ground truth: tutorials/analysis_ground_truth.ipynb
-          - Calling copy number from single-cell DNA with HMMcopy: tutorials/tool_hmmcopy_R.ipynb
-          - Tree reconstruction from single-cell DNA with SCITE: tutorials/tool_scite_trees.ipynb
-          - Clone inference from bulk DNA with PyClone-VI: tutorials/tool_pyclonevi.ipynb
-          - Integrating scDNA and scRNA with clonealign: tutorials/tool_clonealign_R.ipynb
-          - Calling copy number from scRNA with Numbat: tutorials/tool_numbat_R.ipynb
-          - Deconvolving Visium spots with RCTD: tutorials/tool_rctd_R.ipynb
-          - Recovering progression constraints with TreeMHN: tutorials/tool_treemhn_R.ipynb
-          - Progression constraints from cross-sectional data with MHN: tutorials/tool_mhn_bulk.ipynb
-          - Integrating a patient cohort with scDEF: tutorials/tool_scdef_cohort.ipynb
-          - Cell–cell communication with CellChat: tutorials/tool_cellchat_R.ipynb
+      - Quickstart: tutorials/01_quickstart.ipynb
+      - Shape the tumor: tutorials/02_shape_the_tumor.ipynb
+      - Shape the data: tutorials/03_shape_the_data.ipynb
+      - A cohort: tutorials/04_cohort.ipynb
+      - Analysis tools:
+          - Copy number and malignancy from scRNA with inferCNV: tutorials/tool_scrna_cnv.ipynb
+          - Cell-type deconvolution of Visium spots with RCTD: tutorials/tool_rctd.ipynb
+          - Batch integration of a cohort with Harmony and scVI: tutorials/tool_integration.ipynb
   - API Reference:
       - reference/index.md
       - Tumor:
