@@ -157,6 +157,26 @@ class TestRunsOnRealisticData:
         forced = estimate_rna(adata, protocol="10x", fit_dropout=True)
         assert np.isfinite(forced.hypers.dropout_mid) and forced.hypers.dropout_mid >= 0
 
+    def test_dropout_fit_sees_no_dropout_in_negative_binomial_counts(self):
+        """Counts drawn without dropout hold no zeros beyond the negative binomial's, so the fit adds
+        none; fitting the curve to every zero gave a midpoint of about 0.9 on such data."""
+        adata = self._realistic_adata("10x", dropout_mid=0.0)
+        est = estimate_rna(adata, protocol="10x", fit_dropout=True, cell_types=None)
+        assert est.hypers.dropout_mid < 0.2
+
+    def test_dropout_fit_brings_a_refit_closer_to_the_zeros_of_data_with_dropout(self):
+        """On counts drawn with dropout the moment fit of the dispersion absorbs part of the dropout,
+        so the midpoint is not recovered; the fitted dropout still brings the refit's zeros closer
+        to the data's than the negative binomial alone (measured 0.25 and 0.12 against 0.32)."""
+        adata = self._realistic_adata("10x", dropout_mid=1.5)
+        real = float(np.mean(np.asarray(adata.X.todense() if hasattr(adata.X, "todense") else adata.X) == 0))
+        zeros = {}
+        for fit in (False, True):
+            est = estimate_rna(adata, protocol="10x", fit_dropout=fit, cell_types=None)
+            sim = scRNA(n_cells=500, seed=9, **est.scrna_kwargs()).run(_cell_data(n_cells=500, n_genes=400, seed=2))
+            zeros[fit] = float(np.mean(sim.observed_counts.values == 0))
+        assert abs(zeros[True] - real) < 0.1 < abs(zeros[False] - real)
+
     def test_refit_reproduces_library_size(self):
         """Fit -> re-simulate keeps the library sizes: dropout is not applied a second time on top
         of a library fitted to post-dropout totals. The data pin the old 10x midpoint of 1.5, since

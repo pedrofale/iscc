@@ -438,7 +438,8 @@ def fit_rna(X):
     X = sp.csc_matrix(X)
     nz = np.flatnonzero(np.diff(X.indptr) > 0)
     dense = X[:, nz].toarray().astype(float)
-    est = estimate_rna(dense, protocol="10x", fit_dropout=True)
+    # The registered design fits the T cells as one population: pooled, not split into automatic types.
+    est = estimate_rna(dense, protocol="10x", fit_dropout=True, cell_types=None)
     h = est.hypers
     return dict(mu_lib=float(h.mu_lib), sigma_lib=float(h.sigma_lib), dispersion=float(h.dispersion),
                 dropout_mid=float(h.dropout_mid), dropout_shape=float(h.dropout_shape),
