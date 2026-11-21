@@ -94,7 +94,7 @@ def _figure(t, path):
     import matplotlib.pyplot as plt
     fig, axes = plt.subplots(1, 2, figsize=(12, 5), gridspec_kw={"width_ratios": [1, 1.6]})
     t.plot_tissue(color="clone", ax=axes[0])
-    t.plot_muller(ax=axes[1], min_freq=0.02)
+    t.plot_muller(ax=axes[1], by_drivers=True, min_freq=0.02)
     fig.tight_layout()
     fig.savefig(path, dpi=110)
     plt.close(fig)
