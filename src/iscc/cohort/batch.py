@@ -61,10 +61,7 @@ def pool_cell_data(patient_results, n_cells_per_patient=None, base_seed=0):
     per_key = {k: [] for k in _POOL_KEYS}
     meta_rows = []
     for pr in patient_results:
-        cd = pr.tumor.cell_data
-        if cd is None:
-            pr.tumor.make_cell_data()
-            cd = pr.tumor.cell_data
+        cd = pr.cell_data
         idx = np.asarray(cd["cell_exp"].index)
         if n_cells_per_patient is not None and len(idx) > n_cells_per_patient:
             idx = rng.choice(idx, size=int(n_cells_per_patient), replace=False)

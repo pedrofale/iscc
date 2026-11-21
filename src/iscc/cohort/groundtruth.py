@@ -17,7 +17,7 @@ import pandas as pd
 
 def _cancer_snv(pr):
     """(cancer-cell SNV matrix, gene_names) for one patient."""
-    cd = pr.tumor.cell_data
+    cd = pr.cell_data
     snv = cd["cell_snv"]
     genos = pr.tumor.genotypes
     gid = cd["cell_type"].iloc[:, 0].astype(str).values
