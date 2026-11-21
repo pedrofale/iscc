@@ -4,11 +4,12 @@
 Every tumour is the paper's regime (``validation/paper/regime.py``) on the arm-level human genome, as
 the registry's run R11 grows it, at the cm scale (grid 170) to 200,000 cancer cells. ``ductal`` is
 that tumour; ``neutral``, ``sweeps`` and ``cin`` are declared variants of it, and ``cohort`` is six
-patients of ``ductal``'s configuration. Each object is saved with its per-cell tables built, as
+patients of ``ductal``'s configuration at the mid scale (grid 96) to 60,000 cancer cells each. Each object is saved with its per-cell tables built, as
 ``grow`` leaves a tumour, so that a loaded tumour is in the same state.
 
 Usage:
     python scripts/build_pregrown.py grow <out_dir> [name ...] [--scale mid --target 60000]
+                                     [--cohort-scale small --cohort-target 8000]
     python scripts/build_pregrown.py manifest <out_dir> [--base-url URL]
 
 ``grow`` writes ``<name>.iscc``, a summary ``<name>.json`` and a figure ``<name>.png`` (the tissue
@@ -35,6 +36,9 @@ from iscc.data.human import arm_genome  # noqa: E402
 from iscc.data.human.reference import _sha256  # noqa: E402
 
 SCALE, TARGET = "cm", 200_000
+# Cohort keeps every patient in memory, and the regime's cm-scale tumour peaks at 7.4 GB (R11 on
+# Arrhenius), so the cohort grows at the mid scale (grid 96), the scale of the paper's seeding runs.
+COHORT_SCALE, COHORT_TARGET = "mid", 60_000
 MANIFEST = os.path.join(REPO, "src", "iscc", "pregrown", "manifest.json")
 
 
@@ -111,13 +115,14 @@ def _check_loads(path, kind):
         raise RuntimeError(f"{path} does not load in a fresh process:\n{out.stderr[-2000:]}")
 
 
-def grow(out_dir, names, scale, target):
+def grow(out_dir, names, scale, target, cohort_scale=COHORT_SCALE, cohort_target=COHORT_TARGET):
     os.makedirs(out_dir, exist_ok=True)
     for name in names:
         t0 = time.time()
         if name == "cohort":
             seed, kw = TUMOURS["ductal"]
-            obj = Cohort(functools.partial(_grow, kw=kw, scale=scale, target=target),
+            at_scale, at_target = cohort_scale, cohort_target
+            obj = Cohort(functools.partial(_grow, kw=kw, scale=at_scale, target=at_target),
                          patient_seeds=COHORT_SEEDS).run()
             # The growth function lives in validation/, which an installed iscc does not have.
             obj.grow = pregrown._grown_elsewhere
@@ -125,6 +130,7 @@ def grow(out_dir, names, scale, target):
                                                   for p in obj.patients]}
         else:
             seed, kw = TUMOURS[name]
+            at_scale, at_target = scale, target
             obj = _grow(seed, kw, scale, target)
             summary = _summary(obj, name, time.time() - t0)
             _figure(obj, os.path.join(out_dir, f"{name}.png"))
@@ -132,7 +138,7 @@ def grow(out_dir, names, scale, target):
         obj.save(path)
         kind = type(obj).__name__
         _check_loads(path, kind)
-        summary.update(scale=scale, target=target, kind=kind, bytes=os.path.getsize(path),
+        summary.update(scale=at_scale, target=at_target, kind=kind, bytes=os.path.getsize(path),
                        total_s=round(time.time() - t0))
         with open(os.path.join(out_dir, f"{name}.json"), "w") as f:
             json.dump(summary, f, indent=1)
@@ -162,9 +168,12 @@ if __name__ == "__main__":
     ap.add_argument("names", nargs="*")
     ap.add_argument("--scale", default=SCALE)
     ap.add_argument("--target", type=int, default=TARGET)
+    ap.add_argument("--cohort-scale", default=COHORT_SCALE)
+    ap.add_argument("--cohort-target", type=int, default=COHORT_TARGET)
     ap.add_argument("--base-url", default=None)
     a = ap.parse_args()
     if a.action == "grow":
-        grow(a.out_dir, a.names or [*TUMOURS, "cohort"], a.scale, a.target)
+        grow(a.out_dir, a.names or [*TUMOURS, "cohort"], a.scale, a.target, a.cohort_scale,
+             a.cohort_target)
     else:
         manifest(a.out_dir, a.base_url)
