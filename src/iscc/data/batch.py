@@ -878,11 +878,14 @@ class VisiumBatchHyperParams:
     protocol : str
         Protocol preset the magnitudes come from (e.g. "visium").
     spot_pitch : float
-        Spot centre-to-centre spacing (sets spot density / spots-per-tissue).
+        Spot centre-to-centre spacing (sets spot density / spots-per-tissue). The default of 2.0 demes
+        is the 100 um pitch of Visium v1, with a deme of ~50 um.
     spot_radius : float
-        Spot capture radius (sets spot->cell aggregation, ~1-10 cells/spot).
+        Spot capture radius (sets spot->cell aggregation). The default of 0.55 demes is the 55 um
+        spot of Visium v1, so a spot pools about one deme's share of the section.
     mu_counts : float
-        Mean per-spot library size (total UMIs / spot).
+        Mean library size of a tissue spot (total UMIs / spot) before spot swapping; without
+        swapping it is the mean depth of the tissue spots.
     sigma_counts : float
         Per-spot library-size LogNormal sd.
     field_lengthscale : float
@@ -913,19 +916,27 @@ class VisiumBatchHyperParams:
     count_model : str
         Count emission {"dm" (default, compositional capture), "nb"}.
     kappa : float
-        Dirichlet-Multinomial concentration (only for count_model="dm").
+        Dirichlet-Multinomial concentration (only for count_model="dm"). A gene's variance is
+        ``(N + kappa) / (1 + kappa)`` times its multinomial variance at a spot depth ``N``, whatever
+        the number of genes, so a value fitted on one gene set applies to any other.
     nb_dispersion : float
         NB overdispersion phi (var = mu + phi*mu^2; only for count_model="nb").
     """
     # Defaults CALIBRATED to a real 10x Visium breast-cancer section (estimate_visium on
     # `scanpy.datasets.visium_sge('V1_Breast_Cancer_Block_A_Section_1')`), so out-of-the-box Visium
-    # is realistic with no user data. Only the SCALE-FREE / unit-reconciled fits are transferred;
-    # `kappa` is NOT (the real fit's ~89k is a full-transcriptome sparsity artifact — averaged over
-    # 36k mostly-zero genes — and does not transfer to iscc's small dense gene model; the
-    # comparable-gene fit gives ~50–90, so the iscc-scale default is kept).
+    # is realistic with no user data. The spot geometry is Visium v1 at ~50 um per deme.
+    # `kappa` transfers between gene sets: the Dirichlet-multinomial inflates every gene's variance by
+    # (N + kappa) / (1 + kappa), which depends on the spot depth N and not on the number of genes or
+    # their composition, so unlike the DNA concentration (kappa_loci) it is not rescaled by the number
+    # of genes. The direct fit (89,197 over the section's 3,798 in-tissue spots) reads the tissue's
+    # heterogeneity as count noise, so it bounds the technical kappa from below; a simulated section
+    # reproduces the real estimate from an input of 300,000 up (HUMAN_VISIUM_KAPPA, by indirect
+    # inference). The old default of 50 inflated each gene's variance about 390-fold at 20,000 UMIs
+    # per spot: over 6,000 growth genes a spot detected 281 genes instead of ~4,700 and put 77% of
+    # its counts in 50 of them.
     protocol: str = "visium"
     spot_pitch: float = 2.0
-    spot_radius: float = 1.0
+    spot_radius: float = 0.55        # 55 um spot at the 100 um pitch of Visium v1
     mu_counts: float = 20000.0       # real ~21,815 UMIs/spot (deep Visium)
     sigma_counts: float = 0.45       # real 0.455
     field_lengthscale: float = 18.0  # real ~9 spots x spot_pitch 2.0 (coord units)
@@ -939,7 +950,7 @@ class VisiumBatchHyperParams:
     sigma_batch: float = 0.10
     ambient_frac: float = 0.05
     count_model: str = "dm"
-    kappa: float = 50.0              # iscc-scale (NOT the sparse-transcriptome 89k — see note above)
+    kappa: float = 300_000.0         # technical noise near multinomial; see the note above
     nb_dispersion: float = 0.30
 
     def to_dict(self):
@@ -969,7 +980,8 @@ class VisiumBatch(Batch):
 
         `base_profile` (pooled spot expression) sets the ambient soup; the per-gene batch factor
         and the spatial capture field are the technical signature (reproducible from the seed).
-        `in_tissue` (a per-spot boolean) is read only with ``edge_reference="tissue"``.
+        `in_tissue` (a per-spot boolean) marks the spots the capture field is normalised over, and
+        is the edge of ``edge_reference="tissue"``; without it every spot counts as tissue.
         """
         n = len(genes)
         self.genes = list(genes)
@@ -995,8 +1007,12 @@ class VisiumBatch(Batch):
         / (2*ell^2))`` (ell = `field_lengthscale`) is sampled on the spot grid and pushed through a
         LogNormal link (strength `field_sigma`) so the field is positive. Larger `field_lengthscale`
         -> smoother field -> stronger positive spatial autocorrelation (higher Moran's I). The field
-        is then multiplied by a tissue-boundary falloff (`edge_sigma`) and normalized to mean 1, so
-        it RESHAPES capture (a spatial bias) without moving the absolute depth scale `mu_counts` sets.
+        is then multiplied by a tissue-boundary falloff (`edge_sigma`) and normalized to mean 1 over
+        the tissue spots (`in_tissue`; every spot when it is None), so it RESHAPES capture (a spatial
+        bias) without moving the mean depth of a tissue spot, which `mu_counts` sets.
+        Normalising over the whole slide instead scales a section that covers part of it by the field's
+        mean over the tissue: 0.55 to 1.49 over five seeds for a section on 28% of the v1 slide, since
+        the field is correlated over ~9 pitches.
         """
         coords = np.asarray(coords, dtype=float)
         n = coords.shape[0]
@@ -1012,7 +1028,8 @@ class VisiumBatch(Batch):
         # LogNormal link -> positive field with mean ~1 (before edge / renormalization)
         field = np.exp(self.h.field_sigma * g - 0.5 * self.h.field_sigma ** 2)
         field = field * self._edge_falloff(coords, in_tissue=in_tissue)
-        m = field.mean()
+        tis = None if in_tissue is None else np.asarray(in_tissue, dtype=bool)
+        m = field[tis].mean() if tis is not None and tis.any() else field.mean()
         return field / m if m > 0 else np.ones(n)
 
     def _edge_falloff(self, coords, in_tissue=None):

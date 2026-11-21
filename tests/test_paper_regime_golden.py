@@ -63,6 +63,10 @@ RECORD = os.environ.get("ISCC_GOLDEN_RECORD") == "1"
 # outputs (cell_exp, cell_exp_m, cell_exp_p, cell_rna_baf, scRNA, Visium); the regime moves the rest.
 # Re-pinned when stromal survival was made to pay in the stroma (vault: decision-stromal-survival-selected):
 # stromal_survival_cost 0.05, stromal_survival_effects 4.0 and stromal_hazard 0.9.
+# The six Visium entries were re-pinned when the Visium assay took Visium v1's spot (radius 0.55 at
+# pitch 2), the capture field became normalised over the tissue spots, ambient RNA became a share of
+# the library, and the default kappa became 300,000 (visium-depth). Nothing else moved. The old Visium
+# digests had matched on an ARM laptop, so these do not depend on the platform.
 GOLDEN = {('tau', 'paper'): {'counts@1': '1282a482de6262c3',
                     'counts@3': 'a2915b6abce15bac',
                     'counts@end': '610958b604b3a50b',
@@ -90,7 +94,7 @@ GOLDEN = {('tau', 'paper'): {'counts@1': '1282a482de6262c3',
                     'wgs': 'b226273b138dbbc0',
                     'scdna': '9779fd308a16736c',
                     'scrna': '73ab527dac3f1500',
-                    'visium': 'f219f708a7ec7d64'},
+                    'visium': '41d0ed37eebf3f36'},
  ('tau', 'open'): {'counts@1': '1282a482de6262c3',
                    'counts@3': '3a729f2474df9eb0',
                    'counts@end': '4e896dad458f6e54',
@@ -118,7 +122,7 @@ GOLDEN = {('tau', 'paper'): {'counts@1': '1282a482de6262c3',
                    'wgs': 'dd8e5c27893ef544',
                    'scdna': 'c3e5a7e66c3baa16',
                    'scrna': '8949761bd3d44365',
-                   'visium': 'dc9c64cc9031999c'},
+                   'visium': '685d043095f592f1'},
  ('tau', 'exact_passengers'): {'counts@1': '5ac672396e0e5a7e',
                                'counts@3': 'd91099b939dae93a',
                                'counts@end': 'd91099b939dae93a',
@@ -144,7 +148,7 @@ GOLDEN = {('tau', 'paper'): {'counts@1': '1282a482de6262c3',
                                'wgs': '544539387b74e2df',
                                'scdna': '0c7bc3d8102356be',
                                'scrna': '76fb7104d5841718',
-                               'visium': '2ef18fc1c2517409'},
+                               'visium': 'de7a6d2dcd53641a'},
  ('exact', 'paper'): {'counts@1': 'a734ca650357cc43',
                       'counts@3': '2211d64997ffb1e5',
                       'counts@end': '2211d64997ffb1e5',
@@ -172,7 +176,7 @@ GOLDEN = {('tau', 'paper'): {'counts@1': '1282a482de6262c3',
                       'wgs': '4843095454b4ff4b',
                       'scdna': '184b146f0010b9c7',
                       'scrna': '3fe0da074bbc6b25',
-                      'visium': '26dbf6cd79acc7c4'},
+                      'visium': '754231fa5952e2d5'},
  ('exact', 'open'): {'counts@1': '576f6d4a5c787cf2',
                      'counts@3': '65b6ce2b22e93df1',
                      'counts@end': '65b6ce2b22e93df1',
@@ -200,7 +204,7 @@ GOLDEN = {('tau', 'paper'): {'counts@1': '1282a482de6262c3',
                      'wgs': '04a0d42e470377f1',
                      'scdna': '868b0616f1fc1662',
                      'scrna': '1bef9e8d97fb5f69',
-                     'visium': '86a48ea4e2223ad6'},
+                     'visium': 'fe04be46b72f9711'},
  ('exact', 'exact_passengers'): {'counts@1': '361212c7ec5b6fe6',
                                  'counts@end': '6fcdcd1a577507af',
                                  'births': '1eef27600e1a8174',
@@ -225,7 +229,7 @@ GOLDEN = {('tau', 'paper'): {'counts@1': '1282a482de6262c3',
                                  'wgs': '2a88fa337a87234b',
                                  'scdna': '18fe58c3a31bb6a9',
                                  'scrna': '5c6c489567b1af7e',
-                                 'visium': 'f19b0cfd635abeb7'}}
+                                 'visium': '26e6da1640a7e1eb'}}
 
 
 

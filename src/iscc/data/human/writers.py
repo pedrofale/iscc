@@ -23,9 +23,10 @@ GENOME = "GRCh38"
 # The same estimator on a simulated section returns 55,416 at an input of 82,165, 81,464 at
 # 300,000 and 81,592 with no count noise at all (fit_human_visium_kappa_indirect.py): iscc's simulated
 # tissue already accounts for the real dispersion, so the technical concentration is only bounded from
-# below, and 300,000 is the smallest tested value that reproduces the real estimate within 1%. The
-# default `VisiumBatchHyperParams.kappa` (50) is calibrated for the small growth-gene axis; spread over
-# the human genes it piles each spot's counts onto a few dozen genes.
+# below, and 300,000 is the smallest tested value that reproduces the real estimate within 1%. It is
+# also the default `VisiumBatchHyperParams.kappa`: the Dirichlet-multinomial inflates every gene's
+# variance by (N + kappa) / (1 + kappa) whatever the gene set, so the value holds for the growth genes
+# too. A small kappa (the old default was 50) piles each spot's counts onto a few genes at any gene count.
 HUMAN_VISIUM_KAPPA = 300_000.0
 
 
@@ -158,7 +159,8 @@ def write_visium(out_dir, assay, layer, allele=None, tumor=None, seed=0):
     ----------
     out_dir : str
     assay : Visium
-        Run with ``gene_lift=layer.lift`` and ``kappa=HUMAN_VISIUM_KAPPA`` (warns otherwise).
+        Run with ``gene_lift=layer.lift`` and the default ``kappa`` (``HUMAN_VISIUM_KAPPA``); a
+        kappa below 1,000 warns.
     layer : HumanGenomeLayer
     allele : AlleleCounts, optional
         From [`HumanGenomeLayer.visium_allele_counts`][iscc.data.human.HumanGenomeLayer.visium_allele_counts]; without it no ``snp_dir`` is written.
@@ -168,8 +170,8 @@ def write_visium(out_dir, assay, layer, allele=None, tumor=None, seed=0):
         Seed of the spot barcodes.
     """
     if assay.count_model == "dm" and float(assay.hypers.kappa) < 1000:
-        warnings.warn(f"Visium kappa {assay.hypers.kappa:g} is the growth-gene scale; over human genes "
-                      f"use Visium(kappa=HUMAN_VISIUM_KAPPA) or counts concentrate on a few genes",
+        warnings.warn(f"Visium kappa {assay.hypers.kappa:g} concentrates each spot's counts on a few genes; "
+                      f"use the default (HUMAN_VISIUM_KAPPA, fitted to a real section)",
                       stacklevel=2)
     outs = os.path.join(out_dir, "outs")
     os.makedirs(os.path.join(outs, "spatial"), exist_ok=True)

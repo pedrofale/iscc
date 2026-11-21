@@ -68,10 +68,10 @@ BIASES = [
          (f"{_R}:41",), (f"{_ER}:60",)),                               # estimate_rna _PRIOR_ONLY
     Bias("library", ("scRNA",), "doublets", "doublet_rate", "0.05", SET, None,
          (f"{_R}:41",), (f"{_ER}:60",)),
-    Bias("library", ("Visium",), "count overdispersion", "kappa", "50", FIT, None,
-         (f"{_B}:932",), (f"{_EV}:631",)),
+    Bias("library", ("Visium",), "count overdispersion", "kappa", "300,000", FIT, None,
+         (f"{_B}:943",), (f"{_EV}:675",)),
     Bias("library", ("Visium",), "ambient RNA", "ambient_frac", "0.05", SET, None,
-         (f"{_B}:930",), (f"{_EV}:64",)),                              # estimate_visium _PRIOR_ONLY
+         (f"{_B}:941",), (f"{_EV}:68",)),                              # estimate_visium _PRIOR_ONLY
     # --- sequencing: depth and its dispersion -----------------------------------------------------------
     Bias("sequencing", ("WGS", "scDNA"), "depth", "mu_depth", "30 (x0.3 single cell)", FIT, None,
          (f"{_D}:41", f"{_D}:270"), (f"{_ED}:440",)),
@@ -82,16 +82,16 @@ BIASES = [
     Bias("sequencing", ("scRNA",), "library size", "mu_lib, sigma_lib", "4000, 0.35", FIT, None,
          (f"{_R}:40",), (f"{_ER}:324",)),
     Bias("sequencing", ("Visium",), "spot depth", "mu_counts, sigma_counts", "20000, 0.45", FIT, None,
-         (f"{_B}:919", f"{_B}:920"), (f"{_EV}:614",)),
+         (f"{_B}:930", f"{_B}:931"), (f"{_EV}:658",)),
     # --- spatial: Visium only (the dissociated assays lose cell positions) ----------------------------
     Bias("spatial", ("Visium",), "capture field", "field_sigma, field_lengthscale", "0.70, 18", FIT, None,
-         (f"{_B}:921", f"{_B}:922"), (f"{_EV}:616", f"{_EV}:619")),
+         (f"{_B}:932", f"{_B}:933"), (f"{_EV}:660", f"{_EV}:663")),
     Bias("spatial", ("Visium",), "edge falloff", "edge_sigma", "0.30", COND, "needs off-tissue spots",
-         (f"{_B}:923",), (f"{_EV}:586",)),
+         (f"{_B}:934",), (f"{_EV}:622",)),
     Bias("spatial", ("Visium",), "spot swapping", "bleed_rate", "0 (off)", COND, "needs off-tissue spots",
-         (f"{_B}:926",), (f"{_EV}:579",)),
+         (f"{_B}:937",), (f"{_EV}:615",)),
     Bias("spatial", ("Visium",), "lateral diffusion", "diffusion_sigma", "0", SET, None,
-         (f"{_B}:925",), (f"{_EV}:64",)),
+         (f"{_B}:936",), (f"{_EV}:68",)),
     # --- batch: what differs between two runs of the same assay ---------------------------------------
     Bias("batch", ("WGS", "scDNA"), "depth shift", "depth_batch_sigma", "0.05", COND, ">=2 batches",
          (f"{_B}:707",), (f"{_ED}:511",)),
@@ -102,7 +102,7 @@ BIASES = [
     Bias("batch", ("scRNA",), "plate depth", "plate_sigma, well_sigma", "0, 0.15 (Smart-seq3)", SET, None,
          (f"{_R}:53",), (f"{_ER}:61",)),
     Bias("batch", ("Visium",), "per-gene factor", "sigma_batch", "0.10", COND, ">=2 sections",
-         (f"{_B}:929",), (f"{_EV}:641",)),
+         (f"{_B}:940",), (f"{_EV}:685",)),
 ]
 
 
@@ -124,7 +124,7 @@ PLAIN = {
     ("dropout", "dropout_mid", "1.5 (Smart-seq3 0)"): "midpoint 1.5, Smart-seq3 0",
     ("ambient RNA", "ambient_frac", "0.05"): "share 0.05",
     ("doublets", "doublet_rate", "0.05"): "rate 0.05",
-    ("count overdispersion", "kappa", "50"): "concentration 50",
+    ("count overdispersion", "kappa", "300,000"): "concentration 300,000",
     ("depth", "mu_depth", "30 (x0.3 single cell)"): "mean 30x, single cells 9x",
     ("depth dispersion", "kappa", "2000"): "concentration 2000",
     ("base errors", "error_rate", "0.001"): "rate 0.001",

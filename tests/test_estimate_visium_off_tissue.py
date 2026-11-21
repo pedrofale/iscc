@@ -56,8 +56,11 @@ def test_estimate_visium_reads_the_tissue_flag():
     assert est.hypers.ambient_frac == 0.0 and est.hypers.diffusion_sigma == 0.0
     assert est.n_spots == len(in_t)
     assert est.spots_per_tissue == int(in_t.sum())
-    # the library fit sees the tissue spots only
-    assert est.hypers.mu_counts == pytest.approx(counts[in_t].sum(axis=1).mean(), rel=0.1)
+    # the library fit sees the tissue spots only, and returns their depth before the fitted swap
+    observed = counts[in_t].sum(axis=1).mean()
+    assert bl["mu_counts_observed"] == pytest.approx(observed)
+    assert 0.0 < bl["tissue_retained"] <= 1.0
+    assert est.hypers.mu_counts == pytest.approx(observed / bl["tissue_retained"])
 
 
 def test_without_spots_outside_the_tissue_nothing_changes():
