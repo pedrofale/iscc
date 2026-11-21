@@ -226,7 +226,7 @@ the same way** — see the warning below before comparing runs across engines.
 ### Genome — `genome_params`
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|
-| `n_segments` × `segment_size` | 12 × 50 (= 600 genes) | ≳ 100 genes | too few → trivial genome; assays degenerate, too few drivers |
+| `n_segments` × `segment_size` | `n_segments` required, `segment_size` 1000; the shipped configs use 12 × 500 (`notebooks/example_config.yaml`, the paper regime) and 10 × 1000 (the CLI's `genotype.yaml`), and `arm_genome` gives 39 arms over 6,000 genes | ≳ 100 genes | too few → trivial genome; assays degenerate, too few drivers |
 | `segment_sizes` | unset (all `segment_size`) | one positive size per segment | sets unequal segments, e.g. arms of different lengths |
 | `arms` | unset | one arm name per segment (`1p` … `22q`, the 39 modelled arms) | names the human arm each segment stands for; only the human genome layer reads it, growth never does |
 
