@@ -269,7 +269,8 @@ def _cancer_only(traces, genotypes_parents):
     return genotype_counts, genotype_parents
 
 
-def _muller_stackplot(ax, pop_df, anc_df, color_by, colormap, normalize, smoothing_std, baseline="zero"):
+def _muller_stackplot(ax, pop_df, anc_df, color_by, colormap, normalize, smoothing_std, baseline="zero",
+                      times=None):
     """Muller stackplot with pymuller's nested layout + colour mapping. ``baseline=0`` grows upward
     from zero; ``baseline="sym"`` grows symmetrically from a central midline (the Noble et al. 2021
     "fish"/stream layout). When ``normalize`` is set the bands are a proper 0-1 frequency at every
@@ -280,7 +281,7 @@ def _muller_stackplot(ax, pop_df, anc_df, color_by, colormap, normalize, smoothi
     if normalize:
         pop["Population"] = pop.groupby("Generation")["Population"].transform(
             lambda v: v / v.sum() if v.sum() else v)
-    x = pop["Generation"].unique()
+    x = pop["Generation"].unique() if times is None else np.asarray(times, dtype=float)
     _old = _sys.getrecursionlimit()
     try:
         _sys.setrecursionlimit(max(_old, 20000))
@@ -297,7 +298,8 @@ def _muller_stackplot(ax, pop_df, anc_df, color_by, colormap, normalize, smoothi
 
 
 def plot_muller(traces, genotypes_parents, ax=None, colormap="gnuplot", normalize=True,
-                smoothing_std=0.1, show_axes=True, min_freq=None, driver_map=None, centered=False):
+                smoothing_std=0.1, show_axes=True, min_freq=None, driver_map=None, centered=False,
+                times=None):
     """Muller plot of clonal dynamics.
 
     ``driver_map`` ({genotype_id -> hashable driver signature}, supplied by the engine) colours by
@@ -310,7 +312,10 @@ def plot_muller(traces, genotypes_parents, ax=None, colormap="gnuplot", normaliz
 
     ``centered`` (default False) stacks the clone bands SYMMETRICALLY around a central horizontal axis
     (the Noble "fish"/stream layout, ``baseline="sym"``) instead of upward from zero; the default is the
-    zero-based pymuller layout."""
+    zero-based pymuller layout.
+
+    ``times`` (one per trace, in generations) puts the x axis in generations; without it the x axis
+    counts the records."""
     genotype_counts, genotype_parents = _cancer_only(traces, genotypes_parents)
     # FULL parent map used to reconnect ancestry; replaced by the driver-tree edges after a collapse.
     merge_parents = genotypes_parents
@@ -338,11 +343,11 @@ def plot_muller(traces, genotypes_parents, ax=None, colormap="gnuplot", normaliz
         _sys.setrecursionlimit(max(_old_limit, 20000))
         baseline = "sym" if centered else "zero"
         _muller_stackplot(ax, pop_df, anc_df, color_by, colormap, normalize, smoothing_std,
-                          baseline=baseline)
+                          baseline=baseline, times=times)
     finally:
         _sys.setrecursionlimit(_old_limit)
     if show_axes:
-        ax.set_xlabel("Step")
+        ax.set_xlabel("Step" if times is None else "Generation")
         ax.set_ylabel("Frequency" if normalize else "Cells")
     else:
         ax.axis("off")

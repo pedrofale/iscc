@@ -13,9 +13,12 @@ class PlottingMixin:
         ``by_drivers=True`` colours by distinct DRIVER-mutation combinations (Noble's demon
         convention) instead of by genotype, collapsing passenger-only diversity; combine with
         ``min_freq`` for a size threshold. Additional keywords (``ax``, ``colormap``,
-        ``normalize``) select the target axes and control the styling."""
+        ``normalize``) select the target axes and control the styling. The x axis is in generations
+        when every record has its time (tau-leaping), and counts the records otherwise."""
         from .. import viz
         driver_map = self._driver_signatures() if by_drivers else None
+        if len(self.trace_times) == len(self.traces):
+            kwargs.setdefault("times", self.trace_times)
         return viz.plot_muller(self.traces, self.genotypes_parents, ax=ax,
                                driver_map=driver_map, **kwargs)
 
