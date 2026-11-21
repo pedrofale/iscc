@@ -239,16 +239,20 @@ def compute_h():
     tot = np.asarray(real.X.sum(1)).ravel()
     occ = tot > 0
     mi_o = float(morans_i(tot[occ], coords[occ]))
-    est = estimate_visium(real, count_model="dm", coords=coords)
     toto = np.log10(tot[occ]).tolist()
     del real
+    # Fit the raw all-spot matrix with its tissue mask, as fig3_biases.compute_e does, so the fit returns
+    # the depth before spot swapping; the paper's spot swapping and tissue edge (regime.VISIUM, fitted on
+    # this section's off-tissue spots) then go on top. Fitting the in-tissue matrix alone took the depth
+    # after swapping and swapped again, so the simulated tissue came out 4-6% shallow. load_raw gives
+    # coordinates in iscc's units (pitch 2), so the fitted field length scale is already in demes.
+    import validate_visium_background as VB
+    raw_dir = os.environ.get("ISCC_VISIUM_RAW_DIR") or os.path.join(REPO, "data", "visium_breast_A1")
+    X, in_tissue, raw_coords = VB.load_raw(raw_dir)
+    est = estimate_visium(X, count_model="dm", coords=raw_coords, in_tissue=in_tissue, bleed_min_dist=1.5)
     t = REG.load("R0", "seed1")
     sec = RR.resect(t).slice(depth_frac=0.5, max_cells=6000)
-    # The fit reads the section's in-tissue spots only, so it cannot see spot swapping; the paper's spot
-    # swapping and tissue edge (regime.VISIUM, fitted on this section's off-tissue spots) go on top.
     kw = {**est.visium_kwargs(), **getattr(RG, "VISIUM", {}), "spot_pitch": 2.0, "spot_radius": 1.0}
-    if kw.get("field_lengthscale") is not None:
-        kw["field_lengthscale"] = 2.0 * kw["field_lengthscale"]      # spot units -> demes (pitch 2)
     sim = Visium(seed=11, count_model="dm", **kw).run(sec, grid_side=t.grid_size)
     zs, cs, tots = VV._log_library_residual(sim)
     return dict(toto=toto, tots=np.log10(tots).tolist(), moran_real=mi_o, moran_iscc=float(morans_i(tots, cs)))
