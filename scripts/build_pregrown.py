@@ -46,17 +46,25 @@ def _arm(driver_scale=0.4):
     return dict(genome=ag["genome_params"], selection=dict(ag["selection_params"]), cancer=dict(rates))
 
 
-def _variant(selection=None, cancer=None, driver_scale=0.4):
+def _variant(selection=None, cancer=None, spatial=None, driver_scale=0.4):
     kw = _arm(driver_scale)
     kw["selection"].update(selection or {})
     kw["cancer"].update(cancer or {})
+    if spatial:
+        kw["spatial"] = dict(spatial)
     return kw
 
 
 # name -> (seed, regime overrides). Seed 1 of R11 is swept by a genome doubling, so ductal is seed 2.
+# neutral has no selection at all: drivers without effect, no niche traits, and the duct wall and the
+# stroma open to every cell (R10's "open" arm). With the barriers on, a tumour without drivers never
+# selects breach against its cost and stays in its glands (a smoke run held 6,359 cells after 1,500
+# generations).
 TUMOURS = {
     "ductal": (2, _variant()),
-    "neutral": (2, _variant(selection={"driver_effects": 1.0})),
+    "neutral": (2, _variant(selection={"driver_effects": 1.0, "prop_breach": 0.0,
+                                       "prop_stromal_survival": 0.0, "prop_immune_resistance": 0.0},
+                            spatial={"breach_gated_invasion": False, "stromal_hazard": 0.0})),
     "sweeps": (2, _variant(selection={"driver_effects": 1.15}, driver_scale=0.1)),
     "cin": (2, _variant(cancer={"cnv_prob": 4 * _arm()["cancer"]["cnv_prob"],
                                 "wgd_rate": 5 * _arm()["cancer"]["wgd_rate"]})),
@@ -86,7 +94,7 @@ def _figure(t, path):
     import matplotlib.pyplot as plt
     fig, axes = plt.subplots(1, 2, figsize=(12, 5), gridspec_kw={"width_ratios": [1, 1.6]})
     t.plot_tissue(color="clone", ax=axes[0])
-    t.plot_muller(ax=axes[1], min_freq=0.005)
+    t.plot_muller(ax=axes[1], min_freq=0.02)
     fig.tight_layout()
     fig.savefig(path, dpi=110)
     plt.close(fig)
