@@ -297,8 +297,7 @@ def compute_c():
             # panel c's headline (left["_ado"], computed by fig2_realism over every het site) at balanced sites
             left.setdefault("_ado", {})["Tapestri"] = [rec["ado_real"], _sc_stats(VD, fit_run)[1]]
         out[name] = rec
-    # The package's own single-cell defaults (scDNA.mode_defaults: kappa 5, ado_rate 0.20, no kappa_loci),
-    # recorded for the report; at whole-genome breadth kappa 5 spreads very few reads over thousands of loci.
+    # The package's own single-cell defaults (scDNA.mode_defaults), recorded for the report.
     try:
         cv, a = _sc_stats(VD, scDNA(n_cells=len(cancer), breadth="wgs", seed=21).run(diss, cell_subset=cancer))
         out["sc_default"] = dict(cv_cn2=cv, ado=a)
@@ -544,7 +543,7 @@ def render_c(fig, y):
     r = d["DLP+"]
     lumpy = d.get("sc_default", {})
     if lumpy.get("cv_cn2") is not None:          # undefined when too few loci at two copies are covered
-        # scDNA's own single-cell defaults (kappa 5, ado_rate 0.20), which the code calls lumpy MDA/MALBAC
+        # scDNA's own single-cell defaults (scDNA.mode_defaults)
         ax.scatter([lumpy["cv_cn2"]], [lumpy["ado"]], s=16, facecolors="white", edgecolors=S.SOURCE["iscc"], lw=0.8,
                    zorder=4, label="iscc, scDNA defaults")
     t_ = d["Tapestri"]

@@ -52,8 +52,9 @@ def load_cell_data(path):
     help="scRNA protocol preset: 10x or smartseq3.",
 )
 @click.option(
-    "--breadth", default="wgs", type=click.Choice(["wgs", "wes", "panel"]),
-    help="DNA capture breadth (bdna / scdna): wgs, wes, or panel.",
+    "--breadth", default=None, type=click.Choice(["wgs", "wes", "panel"]),
+    help="DNA capture breadth (bdna / scdna): wgs, wes, or panel. Default: the config's, else the "
+         "scDNA platform's, else wgs.",
 )
 @click.option(
     "--depth-model", default="dm", type=click.Choice(["dm", "nb"]),
@@ -113,7 +114,8 @@ def main(sample_path, assay, assay_config, grid_side, protocol, breadth, depth_m
     # DNA multi-batch path: one labelled output per batch (same biology, different run).
     if assay in ("bdna", "scdna") and batches > 1:
         from .dna import run_dna_batches
-        config.setdefault("breadth", breadth)
+        if breadth is not None:
+            config.setdefault("breadth", breadth)
         config.setdefault("depth_model", depth_model)
         mode = "bulk" if assay == "bdna" else "sc"
         assays = run_dna_batches(
@@ -124,7 +126,7 @@ def main(sample_path, assay, assay_config, grid_side, protocol, breadth, depth_m
         for a in assays:
             a.write(os.path.join(output_path, a.batch.label))
         logging.info("Saved %d %s batches to %s", batches, ASSAY_NAMES[assay], output_path)
-        print(f"{ASSAY_NAMES[assay]} ({batches} batches, {breadth}) finished -> {output_path}")
+        print(f"{ASSAY_NAMES[assay]} ({batches} batches, {assays[0].breadth}) finished -> {output_path}")
         return
 
     if assay == "scrna":
@@ -132,7 +134,8 @@ def main(sample_path, assay, assay_config, grid_side, protocol, breadth, depth_m
         config.setdefault("count_model", count_model)
         config.setdefault("seed", batch_seed)
     if assay in ("bdna", "scdna"):
-        config.setdefault("breadth", breadth)
+        if breadth is not None:
+            config.setdefault("breadth", breadth)
         config.setdefault("depth_model", depth_model)
         config.setdefault("seed", batch_seed)
     if assay == "visium":

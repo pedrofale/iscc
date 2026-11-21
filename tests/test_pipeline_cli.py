@@ -85,3 +85,20 @@ def test_isccdata_runs_each_assay(tmp_path, sample_dir, assay, cfg, expected):
     )
     assert r.exit_code == 0
     assert expected <= set(os.listdir(out))
+
+
+def test_isccdata_takes_the_breadth_of_a_platform_in_the_config(tmp_path, sample_dir):
+    """A config naming a platform runs at the platform's breadth unless --breadth is given."""
+    import pandas as pd
+    cfg = tmp_path / "tapestri.yaml"
+    yaml.safe_dump({"platform": "tapestri", "n_cells": 5}, open(cfg, "w"))
+    n_loci = {}
+    for name, extra in [("wgs", []), ("platform", []), ("explicit", ["--breadth", "wgs"])]:
+        out = str(tmp_path / f"scdna_{name}")
+        args = [sample_dir, "-a", "scdna", "-o", out, *extra]
+        if name != "wgs":
+            args += ["--assay-config", str(cfg)]
+        r = CliRunner().invoke(data_main, args, catch_exceptions=False)
+        assert r.exit_code == 0
+        n_loci[name] = pd.read_csv(os.path.join(out, "coverage.csv"), index_col=0).shape[1]
+    assert n_loci["platform"] < n_loci["wgs"] == n_loci["explicit"]

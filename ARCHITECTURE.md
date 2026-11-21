@@ -198,7 +198,7 @@ Every assay subclasses `data/assay.py` and draws its technical noise from a seed
 - **Bulk and single-cell DNA** (`data/dna.py`, `bulkDNA`, `scDNA`).
   Coverage is proportional to copy number times a per-locus efficiency, drawn compositionally (Dirichlet-multinomial) or per locus (negative binomial).
   The biases are GC and capture efficiency per breadth (WGS, WES, panel), a per-batch depth shift, sequencing error and FFPE damage.
-  Single-cell DNA adds lumpy amplification, allelic dropout and doublets.
+  Single-cell DNA adds a per-cell amplification draw, allelic dropout and doublets, with fitted platform presets (DLP+, Tapestri).
   Bulk DNA reports the pool's true purity.
 - **Single-cell RNA** (`data/rna.py`, `scRNA`).
   Per-gene batch factors, per-cell library sizes, negative-binomial (or Dirichlet-multinomial) counts, ambient soup, doublets and optional dropout, by protocol.

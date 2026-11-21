@@ -300,7 +300,9 @@ def _run(engine, variant):
     cells = list(diss["cell_exp"].index)
     gid = diss["cell_type"]["cell_id"].astype(str).values
     cancer = [c for c, g in zip(cells, gid) if g in t.genotypes and t._is_cancer(g)]
-    wgs = bulkDNA(breadth="wgs", seed=11).run(diss)
+    # kappa 2000 as given: the bulk default when the digests were recorded (now the HG002 fit), pinned
+    # so the digest keeps checking the dissociated sample rather than the assay default
+    wgs = bulkDNA(breadth="wgs", seed=11, kappa=2000.0).run(diss)
     out["wgs"] = _digest(wgs.observed_data)
     sc = scDNA(n_cells=min(40, len(cancer)), breadth="wgs", kappa=500.0, mu_depth=60.0,
                seed=21).run(diss, cell_subset=cancer[:40])

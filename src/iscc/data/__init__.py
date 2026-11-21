@@ -1,5 +1,6 @@
 from .dna import (
     DNA, bulkDNA, scDNA, run_dna_batches, genome_features, genome_bases, DNA_BREADTH_PRESETS,
+    SCDNA_PLATFORM_PRESETS,
 )
 from .rna import scRNA, run_scrna_batches, concat_batches
 from .visium import Visium, morans_i

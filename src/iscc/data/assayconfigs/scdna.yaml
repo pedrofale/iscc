@@ -1,6 +1,3 @@
 n_cells: 200
-n_reads: 1000
 target_genes: 'all'
 data_mode: 'counts'
-fpr: 0.1
-fnr: 0.1

@@ -2,15 +2,20 @@
 
 ## Technology presets
 
-Single-cell DNA platforms differ mainly in the whole-genome-amplification (WGA) chemistry and depth.
-Set `breadth` for the locus set / depth regime, and override the amplification knobs — `kappa`
-(lower = lumpier amplification), `ado_rate` (allelic dropout), and `mu_depth` (coverage) — via the
-constructor. These are starting points; [`estimate_dna`](estimate_dna.md) fits them from real data.
+Single-cell DNA platforms differ mainly in the amplification chemistry and the depth.
+The amplification concentration `kappa` sets the coverage spread: the excess squared coefficient of
+variation of a locus is about `kappa_loci / kappa`, whatever the number of loci, so each `kappa` is
+given with the number of loci it was fitted on.
+We fitted every value below with [`estimate_dna`](estimate_dna.md) on a public reference of the
+platform, and `platform=` selects the fit.
+Any keyword argument overrides the preset.
 
-| Platform | `breadth` | `kappa` | `ado_rate` | Depth | Notes |
-|---|---|---|---|---|---|
-| MALBAC (default) | `"wgs"` | ~5 | ~0.20 | shallow (~9×) | Quasi-linear WGA, moderate bias — the built-in single-cell defaults. |
-| MDA | `"wgs"` | ~2–3 | ~0.30 | shallow | Stronger lumpiness and higher dropout than MALBAC. |
-| DLP / DLP+ | `"wgs"` | ~500 (near-uniform) | ~0.05 | very shallow (low `mu_depth`; DLP+ is ~0.01–0.1× the genome) | Direct single-cell library, no WGA bias: near-uniform coverage, low dropout. |
-| Mission Bio Tapestri | `"panel"` | ~5–10 | ~0.15 | very deep | Targeted single-cell SNV amplicon panel. |
-| 10x CNV (Chromium) | `"wgs"` | ~50 | ~0.05 | very shallow | Droplet shallow WGS for copy number. |
+| Platform | `platform` | `breadth` | Depth per locus | `kappa` (`kappa_loci`) | `ado_rate` | Notes |
+|---|---|---|---|---|---|---|
+| Default | `None` | `"wgs"` | 9 (0.3 × the WGS depth) | 202,799 (5,787) | 0.20 (prior) | The DLP+ dispersion at the breadth depth: on a 6,000-locus genome, a median coverage CV of 0.40 at two copies and under 0.1% of loci without reads. |
+| DLP+ | `"dlp"` | `"wgs"` | 830 | 202,799 (5,787) | 0.20 (prior) | Fitted on 40 cells of OV2295 (Laks et al. 2019) in 500 kb bins. A locus counts the reads of a whole bin, not the reads over its variant site. Coverage CV 0.22 at two copies, against 0.23 in the reference. The reference has no allele counts, so the allele layer keeps the priors. |
+| Mission Bio Tapestri | `"tapestri"` | `"panel"` | 42.7 | 4,679 (584) | 0.325 | Fitted on 800 cells of the KaryoTap panel (Mays et al. 2024), with `capture_sigma` 0.389 and `beta_binom_conc` 4.5. The fit overestimates the coverage spread: CV 0.55 at two copies, against 0.37 in the reference. |
+
+We ship no fit for MALBAC, MDA or 10x Chromium single-cell CNV.
+For these platforms, fit `estimate_dna` on data from the platform and pass the result as
+`scDNA(breadth=est.breadth, depth_model=est.depth_model, **est.dna_kwargs())`.

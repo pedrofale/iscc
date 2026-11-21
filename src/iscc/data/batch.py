@@ -586,8 +586,10 @@ class Batch:
 # budget partitioned across loci, proportions driven by COPY NUMBER) rather than NB, and
 # the *allele* layer is a separate binomial/beta-binomial draw with explicit ADO for
 # single-cell. The unifying knob across bulk vs single-cell is **kappa = the amplification
-# regime**: large kappa  ≈ multinomial/Poisson (un-amplified BULK), small kappa = lumpy
-# (whole-cell-amplified SINGLE-CELL).
+# regime**: the Dirichlet concentration over all loci, so the excess per-locus coverage
+# variance is about n_loci / kappa (large -> multinomial/Poisson, small -> lumpy). Because
+# that depends on the number of loci, a kappa travels with the locus count it was fitted
+# on (`kappa_loci`) and is rescaled to the genome it is drawn on.
 #
 # All hyper-parameter names here are `estimate_dna()` targets: `kappa`
 # (amplification regime), `capture_sigma` (per-target/amplicon efficiency), `ado_rate`,
@@ -604,8 +606,11 @@ def _dna_depth_dm(rng, weights, N, h):
 
         p_seg ~ Dirichlet(kappa * p_bar),  p_bar ∝ weights;   y ~ Multinomial(N, p)
 
-    Large `kappa` → p≈p_bar → multinomial/Poisson (BULK); small `kappa` → lumpy
-    over-Poisson coverage (SINGLE-CELL amplification). Because the budget is fixed, an
+    The coverage CV^2 at a locus is about 1/mean + n_loci/kappa: large `kappa` → p≈p_bar →
+    multinomial/Poisson; small `kappa` → lumpy over-Poisson coverage (whole-genome
+    amplification). With `kappa_loci` set, `kappa` is first rescaled to
+    ``kappa * n_loci / kappa_loci``, which keeps the excess at ``kappa_loci / kappa`` on any
+    number of loci. Because the budget is fixed, an
     amplified (high-CN) segment compositionally *steals* reads from the rest — exactly the
     coupling independent-per-bin models miss, and the reason depth is RELATIVE not absolute.
     """
@@ -666,15 +671,20 @@ class DNABatchHyperParams:
     mu_depth : float
         Mean per-locus coverage (the depth regime; breadth sets it).
     kappa : float
-        DM concentration = amplification regime (large = bulk, small = single-cell).
+        DM concentration = amplification regime: the excess per-locus coverage CV^2 is about
+        ``n_loci / kappa`` (large = near-Poisson, small = lumpy). The default 121,241 is the
+        GIAB HG002 WGS fit, as in [`bulkDNA`][iscc.data.bulkDNA].
     kappa_loci : int, optional
         Number of loci ``kappa`` was fitted on. The DM's excess per-locus coverage variance is
         about ``n_loci / kappa``, so a ``kappa`` fitted on one locus count gives a different
         coverage spread on another. When set, the depth draw rescales ``kappa`` to its own locus
-        count (``kappa * n_loci / kappa_loci``), so a fit transfers. ``None`` (the default) uses
-        ``kappa`` as given. [`estimate_dna`][iscc.data.estimate_dna.estimate_dna] sets it.
+        count (``kappa * n_loci / kappa_loci``), so a fit transfers. ``None`` uses ``kappa`` as
+        given. The default 20,000 is the number of HG002 sites the default ``kappa`` was fitted
+        on, so set the two together. [`estimate_dna`][iscc.data.estimate_dna.estimate_dna] sets
+        both, and the assays drop the default ``kappa_loci`` when given a ``kappa`` alone.
     nb_dispersion : float
-        NB per-bin overdispersion phi (only for depth_model="nb").
+        NB per-bin overdispersion phi (only for depth_model="nb"). The default 0.165 is the
+        GIAB HG002 WGS fit.
     gc_curve_sigma : float
         Per-batch GC->coverage curve strength (the GC bias a panel-of-normals fits).
     mappability_sigma : float
@@ -697,9 +707,9 @@ class DNABatchHyperParams:
     breadth: str = "wgs"
     depth_model: str = "dm"
     mu_depth: float = 30.0
-    kappa: float = 2000.0
-    kappa_loci: Optional[int] = None
-    nb_dispersion: float = 0.1
+    kappa: float = 121_241.0             # GIAB HG002 WGS (estimate_dna), on the loci below
+    kappa_loci: Optional[int] = 20_000
+    nb_dispersion: float = 0.165         # GIAB HG002 WGS (estimate_dna, depth_model="nb")
     gc_curve_sigma: float = 0.20
     mappability_sigma: float = 0.10
     capture_sigma: float = 0.0
