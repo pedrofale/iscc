@@ -19,6 +19,9 @@ silently redefines what ``to_anndata(tumor)`` / ``tumor.write_h5ad(...)`` export
 tumour-level helpers that read ``tumor.cell_data`` (``clones_from_clades``, ``to_anndata(tumor)``)
 then see.
 """
+import warnings
+
+from ...tumor.models.materialise import SectionCapWarning
 
 
 class _CellDataGuard:
@@ -154,12 +157,18 @@ class Resection:
                     (part if key < s else remainder).append(base + r * G + c)
         return part, remainder
 
-    def _materialise(self, install, **kwargs):
-        """``make_cell_data`` for a sample: return its tables, leave the tumour's own alone."""
-        if install:
-            return self.tumor.make_cell_data(**kwargs)
-        with _CellDataGuard(self.tumor):
-            return self.tumor.make_cell_data(**kwargs)
+    def _materialise(self, install, section=True, **kwargs):
+        """``make_cell_data`` for a sample: return its tables, leave the tumour's own alone.
+
+        A dissociation (``section=False``) takes ``max_cells`` cells by design, so the warning that
+        the cap thins a physical section does not apply to it."""
+        with warnings.catch_warnings():
+            if not section:
+                warnings.simplefilter("ignore", SectionCapWarning)
+            if install:
+                return self.tumor.make_cell_data(**kwargs)
+            with _CellDataGuard(self.tumor):
+                return self.tumor.make_cell_data(**kwargs)
 
     def dissociate(self, region=None, max_cells=None, install=False, layers=None,
                    recovery_probs=None, stress_strength=0.0, n_stress_genes=None,
@@ -224,11 +233,13 @@ class Resection:
             region = self._all_demes()
         self.dissociation_meta = None
         if recovery_probs is None and float(stress_strength) == 0.0:
-            return self._materialise(install, region=region, max_cells=max_cells, layers=layers)
+            return self._materialise(install, section=False, region=region, max_cells=max_cells,
+                                     layers=layers)
         import numpy as np
         from ..dissociation import Dissociation, DEFAULT_RECOVERY
 
-        cd = self._materialise(install, region=region, max_cells=max_cells, layers=layers)
+        cd = self._materialise(install, section=False, region=region, max_cells=max_cells,
+                               layers=layers)
         if float(stress_strength) != 0.0 and cd.get("cell_exp") is None:
             raise ValueError("a stress signature needs the expression table; pass layers that "
                              "build cell_exp (e.g. 'scrna')")

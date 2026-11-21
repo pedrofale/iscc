@@ -5,7 +5,8 @@ YAML config holds). :func:`resolve_parameters` turns them into two typed groups:
 (:class:`RunSettings`) and the model's parameter blocks (:class:`ModelBlocks`), applying a config file,
 the real-genome wiring and a breast-subtype preset, so the construction steps read one resolved source.
 """
-from dataclasses import dataclass
+import copy
+from dataclasses import dataclass, fields
 from typing import Optional
 
 import yaml
@@ -74,42 +75,53 @@ class ModelBlocks:
     subtype: Optional[str] = None
 
 
-def resolve_parameters(config, genome_mode, genome_spec, r, p):
+def _merge(base, override):
+    """``base`` with ``override`` merged in key by key; a nested dict merges the same way."""
+    out = dict(base or {})
+    for k, v in (override or {}).items():
+        out[k] = _merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
+def _merge_layer(base, override):
+    """As :func:`_merge`, for an optional readout layer: None when neither side sets it."""
+    return None if base is None and override is None else _merge(base, override)
+
+
+def resolve_parameters(config, genome_mode, genome_spec, run, p):
     """Resolve the constructor's arguments into ``(RunSettings, ModelBlocks)``.
 
-    A ``config`` file overrides the keyword blocks; ``genome_mode="real"`` wires the genome and its
-    selection from ``genome_spec`` (``selection_params`` such as ``s_arm`` still win); a ``subtype``
-    key in the cancer block fills in that preset's instability numbers (explicit values win)."""
+    ``run`` holds the run settings passed to the constructor, None where one was not passed. A
+    ``config`` (a YAML path or the dict it holds) sets the blocks and run settings; a keyword block
+    given beside it is merged into the config's block key by key, and a run setting passed
+    explicitly replaces the config's. ``genome_mode="real"`` wires the genome and its selection from
+    ``genome_spec`` (``selection_params`` such as ``s_arm`` still win); a ``subtype`` key in the
+    cancer block fills in that preset's instability numbers (explicit values win)."""
     if genome_mode == "real":
         if genome_spec is None:
             raise ValueError("genome_mode='real' requires genome_spec")
         p.genome, p.selection = genome_spec.engine_params(p.selection)
+    settings = {}
     if config is not None:
-        with open(config) as f:
-            cfg = yaml.safe_load(f)
-        p.genome = cfg["genome_params"]
-        p.selection = cfg["selection_params"]
-        p.deme = cfg["deme_params"]
-        p.spatial = cfg["spatial_params"]
+        if isinstance(config, dict):
+            cfg = copy.deepcopy(config)
+        else:
+            with open(config) as f:
+                cfg = yaml.safe_load(f)
+        p.genome = _merge(cfg["genome_params"], p.genome)
+        p.selection = _merge(cfg["selection_params"], p.selection)
+        p.deme = _merge(cfg["deme_params"], p.deme)
+        p.spatial = _merge(cfg["spatial_params"], p.spatial)
         cp = cfg["cell_params"]
-        p.cancer = cp["cancer"]
-        p.epithelial = cp.get("epithelial", {})
-        p.stromal = cp.get("stromal", {})
-        p.immune = cp.get("immune", {})
-        p.host = cp.get("host", {})
-        r.update_mode = cfg.get("update_mode", r.update_mode)
-        r.tau = cfg.get("tau", r.tau)
-        r.snapshot_every = cfg.get("snapshot_every", r.snapshot_every)
-        r.spatial_snapshot_every = cfg.get("spatial_snapshot_every", r.spatial_snapshot_every)
-        r.spatial_snapshot_budget = cfg.get("spatial_snapshot_budget", r.spatial_snapshot_budget)
-        r.coarsen_passengers = cfg.get("coarsen_passengers", r.coarsen_passengers)
-        r.max_cells = cfg.get("max_cells", r.max_cells)
-        r.germline_params = cfg.get("germline_params", r.germline_params)
-        r.founder_mutations = cfg.get("founder_mutations", r.founder_mutations)
-        p.microenv = cfg.get("microenv_params", p.microenv)
-        p.expression = cfg.get("expression_params", p.expression)
-        if cfg.get("layout_seed") is not None:
-            r.layout_seed = cfg["layout_seed"]
+        p.cancer = _merge(cp["cancer"], p.cancer)
+        p.epithelial = _merge(cp.get("epithelial", {}), p.epithelial)
+        p.stromal = _merge(cp.get("stromal", {}), p.stromal)
+        p.immune = _merge(cp.get("immune", {}), p.immune)
+        p.host = _merge(cp.get("host", {}), p.host)
+        p.microenv = _merge_layer(cfg.get("microenv_params"), p.microenv)
+        p.expression = _merge_layer(cfg.get("expression_params"), p.expression)
+        settings = {f.name: cfg[f.name] for f in fields(RunSettings) if cfg.get(f.name) is not None}
+    r = RunSettings(**{**settings, **{k: v for k, v in run.items() if v is not None}})
     if r.layout_seed is None:
         r.layout_seed = DEFAULT_LAYOUT_SEED
     # Subtype preset (see BREAST_SUBTYPES). ``subtype`` is a cancer-cell config key that stands in for
