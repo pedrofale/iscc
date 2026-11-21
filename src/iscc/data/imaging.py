@@ -134,8 +134,8 @@ class scSpatial(Assay):
 
         lib = self.batch.library_factors(self.n_cells)
         comp = self.batch.composition(probs)
-        counts = self.batch.emit(comp, lib, count_model=self.count_model)
-        counts = self.batch.add_ambient(counts, lib)
+        counts = self.batch.emit(comp, self.batch.own_library(lib), count_model=self.count_model)
+        counts = self.batch.add_ambient(counts, lib)                # the soup is a share of lib
         counts, self.p_drop = self.batch.apply_dropout(counts, comp, lib)
         counts = counts.astype(int)
 

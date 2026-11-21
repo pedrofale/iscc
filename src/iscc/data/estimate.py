@@ -28,6 +28,15 @@ so the raw mean-variance slope ``S = (Var-mean)/mean^2`` measures ``phi*(1+c2)+c
 true ``phi``; on real data (which also has biological cell-cell variation) it is an effective
 dispersion, reported as such.
 
+The dispersion is fitted within cell types.  Pooled over a sample of several cell types, the slope
+``S`` also holds the variance between types, and a simulated tumour draws the variance between its
+own cell types on top of the fitted dispersion, so a pooled fit counts that variance twice and gives
+too many zeros at every mean above about 0.1 UMIs. On PBMC3k the pooled fit is 0.61 and the fit
+within its 8 annotated types is 0.36. ``cell_types`` takes the types, or finds them by k-means
+(``"auto"``, the default, 0.345 on PBMC3k); ``RNAEstimate.dispersion_pooled`` keeps the pooled value.
+Within the annotated types, a negative binomial at 0.35 gives the zero fraction of PBMC3k at every
+mean (median excess of the real zeros 0.0007 above 0.1 UMIs), so no zeros are left for a dropout.
+
 Dropout is not fit by default. The logistic curve is fit to the total zero fraction, which already
 includes the zeros the negative binomial draws, and the generator applies the dropout on top of
 those draws and after the library size is set; fitting it therefore counts zeros twice and shrinks
@@ -86,6 +95,8 @@ class RNAEstimate:
     fitted: list                           # hyper-param names actually fit from this data
     per_batch: dict = field(default_factory=dict)   # label -> {mu_lib, dispersion, n_cells}
     carried: list = field(default_factory=list)     # names taken from the protocol preset
+    dispersion_pooled: float = float("nan")         # dispersion over all cells, types pooled
+    n_types: int = 1                                # cell groups the dispersion was fitted within
 
     def scrna_kwargs(self):
         """Kwargs to splat into ``scRNA(...)`` or ``run_scrna_batches(...)``."""
@@ -98,7 +109,8 @@ class RNAEstimate:
         return (f"RNAEstimate(protocol={self.protocol!r}, n_cells={self.n_cells}, "
                 f"n_genes={self.n_genes}, n_batches={self.n_batches}, "
                 f"mu_lib={h.mu_lib:.0f}, sigma_lib={h.sigma_lib:.3f}, "
-                f"dispersion={h.dispersion:.3f}, sigma_batch={h.sigma_batch:.3f}, "
+                f"dispersion={h.dispersion:.3f} (pooled {self.dispersion_pooled:.3f}, "
+                f"{self.n_types} types), sigma_batch={h.sigma_batch:.3f}, "
                 f"depth_batch_sigma={h.depth_batch_sigma:.3f}, "
                 f"dropout_mid={h.dropout_mid:.2f}, n_wells={h.n_wells}, "
                 f"fitted={self.fitted}, carried={self.carried})")
@@ -116,6 +128,18 @@ def _dense_counts(x):
     if hasattr(x, "values"):
         x = x.values
     return np.asarray(x, dtype=float)
+
+
+def _cell_type_labels(adata, cell_types, n_cells):
+    """``cell_types`` as ``_cell_typings`` takes it: "auto", None, or one label per cell (an
+    ``adata.obs`` column name is looked up)."""
+    if cell_types is None or (isinstance(cell_types, str) and cell_types == "auto"):
+        return cell_types
+    if isinstance(cell_types, str):
+        if not (hasattr(adata, "obs") and cell_types in adata.obs):
+            raise ValueError(f"cell_types={cell_types!r} is neither 'auto' nor a column of adata.obs")
+        return np.asarray(adata.obs[cell_types].values).astype(str)
+    return np.asarray(cell_types).astype(str)
 
 
 def _batch_labels(adata, batch_key, n_cells):
@@ -166,6 +190,113 @@ def _fit_dispersion(counts, cv_lib):
     S = float(np.median(s))
     phi = (S - c2) / (1.0 + c2)
     return max(phi, 0.0)
+
+
+# Smallest group the dispersion is fitted in; smaller groups are left out of the average.
+_MIN_TYPE_CELLS = 30
+# Cells per k-means group the automatic typing aims for at least, so small data get fewer groups.
+_CELLS_PER_TYPE = 50
+
+
+def _type_labels(counts, genes, n_types, seed=0):
+    """Cell groups by k-means on the leading principal components of log-normalised counts.
+
+    Uses only the columns ``genes``: the 2,000 most variable of them after ``log1p(1e4 * count /
+    library)``, with the library over every gene, centred, then up to 20 principal components.
+    """
+    from sklearn.cluster import KMeans
+    from sklearn.decomposition import PCA
+
+    lib = counts.sum(axis=1)
+    scale = np.divide(1e4, lib, out=np.zeros_like(lib, dtype=float), where=lib > 0)
+    y = counts[:, genes] * scale[:, None]
+    np.log1p(y, out=y)
+    top = np.argsort(y.var(axis=0))[::-1][:2000]
+    y = y[:, top]
+    y -= y.mean(axis=0)
+    n_pc = int(min(20, y.shape[0] - 1, y.shape[1]))
+    pcs = PCA(n_components=n_pc, random_state=seed).fit_transform(y)
+    return KMeans(n_clusters=n_types, n_init=4, random_state=seed).fit_predict(pcs)
+
+
+def _cell_typings(counts, cell_types, n_types, seed=0):
+    """How to group the cells for the dispersion fit: a list of ``(labels, genes)`` pairs, or None.
+
+    The dispersion is fitted within each group of ``labels`` on the columns ``genes`` (None: every
+    gene), and the pairs are averaged. None (returned for ``cell_types`` None, and for ``"auto"`` on
+    fewer than ``2 * _CELLS_PER_TYPE`` cells) pools every cell; per-cell labels are used as given.
+    ``"auto"`` finds ``n_types`` groups by k-means, cross-fitted: the genes are split at random into
+    two halves, the cells are grouped on one half and the dispersion fitted on the other, and both
+    ways round. A clustering partly follows the noise of the genes it is built on, so the
+    within-group variance of those same genes would understate the dispersion; the other half does
+    not share that noise.
+    """
+    n = counts.shape[0]
+    if cell_types is None:
+        return None
+    if not isinstance(cell_types, str):
+        labels = np.asarray(cell_types).astype(str)
+        if labels.shape != (n,):
+            raise ValueError(f"cell_types has {labels.size} labels for {n} cells")
+        return [(labels, None)]
+    k = int(min(int(n_types), n // _CELLS_PER_TYPE))
+    expressed = np.flatnonzero(counts.sum(axis=0) > 0)
+    if k < 2 or expressed.size < 20:
+        return None
+    perm = np.random.default_rng(seed).permutation(expressed)
+    halves = (np.sort(perm[: perm.size // 2]), np.sort(perm[perm.size // 2:]))
+    return [(_type_labels(counts, halves[a], k, seed=seed), halves[1 - a]) for a in (0, 1)]
+
+
+def _fit_dispersion_within(counts, typings):
+    """NB dispersion within cell groups, from the within-group moments pooled over the groups.
+
+    Within group ``k`` (``n_k`` cells, library squared CV ``c2_k`` over every gene), gene ``g`` has
+    ``Var - mean = mean^2 * (phi*(1+c2_k) + c2_k)`` (see the module notes). Summing ``n_k*(Var - mean)``
+    and ``n_k*mean^2`` over the groups gives one slope per gene, ``S_g = phi*(1+c2_g) + c2_g`` with
+    ``c2_g`` the ``n_k*mean^2``-weighted ``c2_k``, so ``phi_g = (S_g - c2_g)/(1 + c2_g)``; the estimate
+    is the median ``phi_g`` over the genes whose overall mean reaches ``_fit_dispersion``'s threshold.
+    The variance is unbiased (ddof 1) and ``mean^2`` is corrected by ``Var/n_k``, and the genes are
+    chosen on the overall mean, so groups of about a hundred cells add no small-sample bias that a
+    median of per-group fits would. With several typings (the two halves of a cross-fit), their
+    estimates are averaged. ``typings`` None, or no group of at least ``_MIN_TYPE_CELLS`` cells,
+    pools every cell with ``_fit_dispersion``.
+    """
+    lib_all = counts.sum(axis=1)
+    m_all = counts.mean(axis=0)
+    vals = []
+    for labels, genes in (typings or []):
+        cols = np.arange(counts.shape[1]) if genes is None else np.asarray(genes)
+        m = m_all[cols]
+        if not np.any(m > 0):
+            continue
+        thr = max(1.0, float(np.median(m[m > 0])))
+        keep = m >= thr
+        if keep.sum() < 5:
+            keep = m > 0
+        cols = cols[keep]
+        num, den, c2w = np.zeros(cols.size), np.zeros(cols.size), np.zeros(cols.size)
+        for g in np.unique(labels):
+            rows = np.flatnonzero(labels == g)
+            n_k = rows.size
+            if n_k < _MIN_TYPE_CELLS:
+                continue
+            sub = counts[np.ix_(rows, cols)]
+            mk = sub.mean(axis=0)
+            vk = sub.var(axis=0, ddof=1)
+            lib = lib_all[rows]
+            c2 = float(np.var(lib, ddof=1) / (np.mean(lib) ** 2 + 1e-12))
+            m2 = np.maximum(mk ** 2 - vk / n_k, 0.0)
+            num += n_k * (vk - mk)
+            den += n_k * m2
+            c2w += n_k * m2 * c2
+        ok = den > 0
+        if ok.any():
+            c2g = c2w[ok] / den[ok]
+            vals.append(float(np.median((num[ok] / den[ok] - c2g) / (1.0 + c2g))))
+    if not vals:
+        return _fit_dispersion(counts, float(np.std(lib_all) / (np.mean(lib_all) + 1e-12)))
+    return max(float(np.mean(vals)), 0.0)
 
 
 def _fit_mean_expression(counts):
@@ -222,10 +353,11 @@ def _fit_dropout(counts):
         return 0.0, 1.0
 
 
-def _fit_batch_params(counts, labels):
+def _fit_batch_params(counts, labels, typings=None):
     """Cross-batch hyper-parameters (needs >=2 batches).
 
-    Returns ``(sigma_batch, depth_batch_sigma, per_batch)``.
+    Returns ``(sigma_batch, depth_batch_sigma, per_batch)``. The dispersion of each batch is fitted
+    within the cell groups of ``typings`` (see ``_cell_typings``; None pools the cells of the batch).
 
     * ``depth_batch_sigma`` = sd over batches of ``log(mean library size)``: how much per-batch
       sequencing depth wobbles (the model draws ``mu_lib,b = mu_lib * LogNormal(0, this^2)``).
@@ -255,12 +387,14 @@ def _fit_batch_params(counts, labels):
         expressed = pooled >= max(0.5, np.median(pooled[pooled > 0]) if np.any(pooled > 0) else 0.5)
 
     for b in uniq:
-        cb = counts[labs == b]
+        in_b = labs == b
+        cb = counts[in_b]
         lib = cb.sum(axis=1)
         lib = lib[lib > 0]
         mu_b = float(lib.mean()) if lib.size else 0.0
         per_batch[b] = dict(mu_lib=mu_b,
-                            dispersion=_fit_dispersion(cb, np.std(cb.sum(1)) / (cb.sum(1).mean() + 1e-12)),
+                            dispersion=_fit_dispersion_within(
+                                cb, None if typings is None else [(t[in_b], g) for t, g in typings]),
                             n_cells=int(cb.shape[0]))
         if mu_b > 0:
             log_depths.append(np.log(mu_b))
@@ -284,7 +418,8 @@ def _fit_batch_params(counts, labels):
 # --------------------------------------------------------------------------------------
 # Public entry point
 # --------------------------------------------------------------------------------------
-def estimate_rna(adata, protocol="10x", batch_key=None, count_model="nb", fit_dropout=False):
+def estimate_rna(adata, protocol="10x", batch_key=None, count_model="nb", fit_dropout=False,
+                 cell_types="auto", n_types=8):
     """Fit ``RNABatchHyperParams`` from a real scRNA count matrix (Splatter-style).
 
     Parameters
@@ -304,6 +439,18 @@ def estimate_rna(adata, protocol="10x", batch_key=None, count_model="nb", fit_dr
         zeros and shrinks the simulated library sizes (see the module notes).
     count_model : str
         Not used by the fit; the fitted dispersion is the negative-binomial one.
+    cell_types : "auto" | str | array-like | None
+        The cell types the dispersion is fitted within. A simulated tumour draws the variation
+        between its own cell types, so a dispersion that also holds the variation between the cell
+        types of the reference counts it twice and gives too many zeros: on PBMC3k, pooling every
+        cell gives 0.61 and the 8 annotated types give 0.36. ``"auto"`` (default) groups the cells
+        by k-means into ``n_types`` groups (fewer for small data, about 50 cells per group at least),
+        cross-fitted over two halves of the genes (see ``_cell_typings``); this gives 0.345 on
+        PBMC3k. An ``adata.obs`` column name or one label per cell uses those types. None pools every
+        cell. Each batch is fitted within its own cells.
+    n_types : int
+        Number of k-means groups for ``cell_types="auto"`` (default 8, the number of annotated cell
+        types in PBMC3k).
 
     Returns
     -------
@@ -319,7 +466,9 @@ def estimate_rna(adata, protocol="10x", batch_key=None, count_model="nb", fit_dr
 
     # always-fit core params
     mu_lib, sigma_lib, cv_lib = _fit_library_size(counts)
-    dispersion = _fit_dispersion(counts, cv_lib)
+    dispersion_pooled = _fit_dispersion(counts, cv_lib)
+    typings = _cell_typings(counts, _cell_type_labels(adata, cell_types, n_cells), n_types)
+    dispersion = _fit_dispersion_within(counts, typings)
     gene_means, gshape, gscale = _fit_mean_expression(counts)
     fitted += ["mu_lib", "sigma_lib", "dispersion"]
 
@@ -339,7 +488,7 @@ def estimate_rna(adata, protocol="10x", batch_key=None, count_model="nb", fit_dr
     n_batches = 1
     if labels is not None and len(set(labels.tolist())) >= 2:
         n_batches = len(set(labels.tolist()))
-        sigma_batch, depth_batch_sigma, per_batch = _fit_batch_params(counts, labels)
+        sigma_batch, depth_batch_sigma, per_batch = _fit_batch_params(counts, labels, typings)
         fitted += ["sigma_batch", "depth_batch_sigma"]
         # Dispersion is a within-batch quantity: estimating it on the pooled matrix lets
         # cross-batch depth and beta differences leak in and inflate phi. Average the per-batch
@@ -378,4 +527,6 @@ def estimate_rna(adata, protocol="10x", batch_key=None, count_model="nb", fit_dr
         hypers=hypers, protocol=proto, n_cells=n_cells, n_genes=n_genes, n_batches=n_batches,
         cv_lib=cv_lib, gene_means=gene_means, gamma_shape=gshape, gamma_scale=gscale,
         fitted=fitted, per_batch=per_batch, carried=carried,
+        dispersion_pooled=dispersion_pooled,
+        n_types=1 if typings is None else int(max(len(np.unique(t)) for t, _ in typings)),
     )

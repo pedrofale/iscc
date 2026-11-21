@@ -92,8 +92,7 @@ def median_vector(vectors, ambient_range=None):
             if vals:
                 out[p] = float(np.median(vals))
             else:
-                rho = 0.5 * (ambient_range["rho_low"] + ambient_range["rho_high"])
-                out[p] = rho / (1 - rho)
+                out[p] = 0.5 * (ambient_range["rho_low"] + ambient_range["rho_high"])   # the soup share
         else:
             out[p] = float(np.median([vectors[t][p] for t in ts]))
     return out

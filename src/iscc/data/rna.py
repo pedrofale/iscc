@@ -7,7 +7,7 @@ the tumour's ground-truth expression `lambda_cg` (= `cell_data['cell_exp']`):
     ell_c   ~ LogNormal(mu_lib,b, sigma_lib^2)   per-cell library size (depth)
     comp_cg = normalize_g( beta_gb * lambda_cg ) per-cell composition (batch reshapes it)
     y_cg    ~ NB(ell_c * comp_cg, phi_b)         counts  (pluggable; see batch.COUNT_MODELS)
-    + ambient soup counts, + doublets, + optional dropout
+    + ambient soup counts, + doublets, + optional dropout (off in both presets)
 
 Everything above (biology -> library -> batch) is shared; only the final count draw is
 swapped via `count_model` (default "nb"; "dm" Dirichlet-Multinomial is the implemented
@@ -15,10 +15,13 @@ compositional alternative, the Visium assay's default — see `batch.COUNT_MODEL
 
 Protocol presets set which technical components dominate:
   * 10x        — droplet / UMI / 3': prominent ambient RNA + doublets, moderate depth.
-  * Smart-seq3 — plate / 5' UMI + full-length: higher sensitivity / lower dropout than 10x,
+  * Smart-seq3 — plate / 5' UMI + full-length: higher sensitivity (deeper) than 10x,
                  low amplification noise (low dispersion), and real plate structure — cells
                  are index-sorted one per well onto `n_wells`-well plates, and depth is
                  plate-nested (a per-plate offset x a per-well term).
+Neither preset adds dropout: UMI counts are not zero-inflated beyond the negative binomial
+(Svensson 2020, Nat Biotechnol 38:147), and within cell types the negative binomial alone
+reproduces the zero fraction of PBMC3k at every mean.
 
 Two `scRNA` instances with the same hyper-parameters and different seeds are two batches:
 same biology, different technical signature. `run_scrna_batches` builds a labelled
@@ -36,22 +39,36 @@ import pandas as pd
 # Protocol-typical hyper-parameter presets.
 PROTOCOL_PRESETS = {
     # Droplet protocol: no plates, so n_wells = 0 switches the whole plate layer off.
+    # dispersion: `estimate_rna` on 10x PBMC3k, within cell types (0.345; 0.36 over its 8 annotated
+    # types, 0.61 pooled, which also holds the variance between types that a tumour draws itself).
+    # No dropout: within types the NB alone gives the PBMC3k zero fraction at every mean (median
+    # excess 0.0007 above 0.1 UMIs), so there are no zeros left for a dropout curve. A midpoint in
+    # counts per gene also deletes far more of the genes of a cell when its library is spread over
+    # 35,061 human genes than over a few thousand growth genes.
+    # kappa (count_model="dm" only): the Dirichlet-multinomial concentration fitted by moments within
+    # the 8 annotated PBMC3k types, on the genes the dispersion is fitted on (1,463; the variance is
+    # 2.9 times multinomial there). The DM inflates the variance of every gene by (N + kappa)/(1 + kappa)
+    # whatever its mean, so it cannot follow the NB, whose excess grows with the mean: the same fit
+    # gives 34,000 on genes below 0.1 UMIs and 1,200 above 10. The old 50 inflated the variance of
+    # every gene about 80-fold at 4,000 UMIs and put three quarters of the counts of a cell in 50 genes.
     "10x": dict(
-        sigma_batch=0.10, mu_lib=4000.0, sigma_lib=0.35, dispersion=0.30,
-        ambient_frac=0.05, doublet_rate=0.05, dropout_mid=1.5, dropout_shape=1.0,
+        sigma_batch=0.10, mu_lib=4000.0, sigma_lib=0.35, dispersion=0.35,
+        ambient_frac=0.05, doublet_rate=0.05, dropout_mid=0.0, dropout_shape=1.0,
         well_sigma=0.0, n_wells=0, n_plates=0, plate_sigma=0.0,
-        depth_batch_sigma=0.05, kappa=50.0,
+        depth_batch_sigma=0.05, kappa=1500.0,
     ),
     # 5' UMIs suppress amplification noise (low dispersion); plate prep -> low ambient /
-    # few doublets, higher sensitivity (deeper) / lower dropout. Cells are index-sorted one
+    # few doublets, higher sensitivity (deeper). Cells are index-sorted one
     # per well onto 384-well plates (n_plates=0 -> as many plates as the cells need).
     # plate_sigma defaults to 0 (plates are bookkeeping only); set it to ~0.1-0.2 to switch
-    # on the shared per-plate depth offset.
+    # on the shared per-plate depth offset. dispersion 0.15 is set by hand (no Smart-seq3 reference
+    # is fitted), and kappa follows it: the 10x kappa scaled by 0.35 / 0.15, so the DM excess
+    # variance stands to the NB one as at 10x. It is derived, not fitted.
     "smartseq3": dict(
         sigma_batch=0.10, mu_lib=8000.0, sigma_lib=0.45, dispersion=0.15,
         ambient_frac=0.005, doublet_rate=0.01, dropout_mid=0.0, dropout_shape=1.0,
         well_sigma=0.15, n_wells=384, n_plates=0, plate_sigma=0.0,
-        depth_batch_sigma=0.05, kappa=50.0,
+        depth_batch_sigma=0.05, kappa=3500.0,
     ),
 }
 # Hyper-parameters that count things (plates / wells) rather than measuring a magnitude.
@@ -85,7 +102,7 @@ class scRNA(Assay):
     protocol : str, default "10x"
         Hyper-parameter preset selecting which technical components dominate: ``"10x"``
         (droplet / UMI / 3': prominent ambient RNA + doublets, moderate depth) or
-        ``"smartseq3"`` (plate / 5' UMI + full-length: higher sensitivity, lower dropout and
+        ``"smartseq3"`` (plate / 5' UMI + full-length: higher sensitivity, lower
         amplification noise, and real plate/well structure). Common spellings are accepted
         (``"10X"``, ``"tenx"``, ``"droplet"``; ``"smart-seq3"``, ``"ss3"``, ``"plate"``).
         Sets the defaults of every hyper-parameter below.
@@ -104,8 +121,9 @@ class scRNA(Assay):
         Alias for ``sigma_lib`` (per-cell library-size LogNormal sd).
     dispersion : float, optional
         Negative-binomial overdispersion phi (``var = mu + phi*mu^2``); used only when
-        ``count_model="nb"`` (phi <= 0 collapses to Poisson). Default None -> preset
-        (10x: 0.30, smartseq3: 0.15).
+        ``count_model="nb"`` (phi <= 0 collapses to Poisson). It is the dispersion within a cell
+        type: the tumour supplies the variation between its cell types. Default None -> preset
+        (10x: 0.35, ``estimate_rna`` on PBMC3k within cell types; smartseq3: 0.15).
     sigma_batch : float, optional
         Per-gene batch-factor LogNormal sd; ``beta_gb ~ LogNormal(0, sigma_batch^2)`` is
         shared across cells and reshapes the per-gene composition (Splatter ``batch.facScale``).
@@ -118,16 +136,19 @@ class scRNA(Assay):
         Per-cell library-size LogNormal sd (cell-to-cell depth variation). Default None ->
         preset (10x: 0.35, smartseq3: 0.45).
     ambient_frac : float, optional
-        Fraction of each cell's library drawn as ambient "soup" — Poisson counts from the
-        pooled expression profile added to every cell. Default None -> preset
-        (10x: 0.05, smartseq3: 0.005).
+        Share of each library drawn as ambient "soup": Poisson counts from the pooled expression
+        profile, with the counts of the cell itself drawn on the rest of the library, so the soup does
+        not add depth. Default None -> preset (10x: 0.05, smartseq3: 0.005).
     doublet_rate : float, optional
         Fraction of barcodes merged with a random partner cell (two cells combined into one).
         Default None -> preset (10x: 0.05, smartseq3: 0.01).
     dropout_mid : float, optional
         Logistic dropout midpoint in expected-count space (Splatter-style zero-inflation keyed
-        to mean count); 0 disables dropout. Default None -> preset (10x: 1.5, smartseq3: 0.0,
-        i.e. disabled).
+        to the expected count of a gene in the droplet, ambient molecules included); 0 disables
+        dropout. UMI counts carry no zeros beyond the negative binomial, so both presets leave it
+        off. The midpoint is in counts per gene, so its effect grows with the number of genes the
+        library is spread over: on the 35,061 human genes a midpoint of 1.5 deletes most of the
+        genes of a cell. Default None -> preset (0.0, disabled).
     dropout_shape : float, optional
         Logistic dropout steepness (active only when ``dropout_mid > 0``). Default None ->
         preset (1.0).
@@ -157,7 +178,9 @@ class scRNA(Assay):
     kappa : float, optional
         Dirichlet concentration for the ``"dm"`` count model only: large kappa -> proportions
         ~ composition (multinomial/Poisson-like), small kappa -> lumpy, over-dispersed
-        proportions. Default None -> preset (50.0).
+        proportions. It inflates the variance of every gene by ``(N + kappa) / (1 + kappa)`` at a
+        library of ``N``, whatever the mean of the gene. Default None -> preset (10x: 1,500, fitted
+        by moments within the cell types of PBMC3k; smartseq3: 3,500, derived from its dispersion).
     seed : int, default 42
         RNG seed. Fixes both the technical signature of the batch (per-gene factor, depth,
         ambient soup) and the sampled-cell selection; two instances with the same
@@ -299,7 +322,8 @@ class scRNA(Assay):
         # biology -> library -> batch (shared), then the pluggable count draw
         lib = self.batch.library_factors(self.n_cells, plates=self.plates)
         comp = self.batch.composition(probs)
-        counts = self.batch.emit(comp, lib, count_model=self.count_model)
+        # the ambient soup is a share of the library: the counts of the cell itself take the rest
+        counts = self.batch.emit(comp, self.batch.own_library(lib), count_model=self.count_model)
         counts = self.batch.add_ambient(counts, lib)
         counts, self.p_drop = self.batch.apply_dropout(counts, comp, lib)
         counts, is_doublet = self.batch.apply_doublets(counts)
@@ -343,7 +367,7 @@ class scRNA(Assay):
             probs = np.divide(act, tot, out=np.zeros_like(act), where=tot > 0)
             comp = self.batch.composition(probs)
             l = lib[lo:lo + expr.chunk]
-            c = self.batch.emit(comp, l, count_model=self.count_model)
+            c = self.batch.emit(comp, self.batch.own_library(l), count_model=self.count_model)
             c = self.batch.add_ambient(c, l)
             c, _ = self.batch.apply_dropout(c, comp, l)
             blocks.append(sp.csr_matrix(c.astype(np.int32)))

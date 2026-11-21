@@ -174,7 +174,7 @@ AMBIENT = dict(
     agreement=2.0,                   # identifiable: >= 2 sets, largest / smallest estimate <= 2
     min_sets=2,
 )
-AMBIENT_DRAW = "uniform on the soup share rho in [low, high], converted to iscc's ambient_frac rho / (1 - rho)"
+AMBIENT_DRAW = "uniform on the soup share rho in [low, high], which is iscc's ambient_frac (a share of the library)"
 RECOVERY_SD = 0.5
 RECOVERY_SEED = 20261116
 N_PATIENTS = 50
@@ -427,9 +427,8 @@ def ambient_estimate(X, ctype, target_mask, sets):
              and max(rhos) / min(rhos) <= AMBIENT["agreement"])
     rho = float(np.median(rhos)) if rhos else None
     return dict(per_set=per, n_sets=len(rhos), identifiable=bool(ident), rho=rho,
-                # iscc adds ambient_frac x library soup counts on top of the cell's own library, so the
-                # soup share of a cell is a / (1 + a): a = rho / (1 - rho)
-                ambient_frac=(rho / (1 - rho) if (ident and rho is not None and rho < 1) else None))
+                # iscc draws the soup as ambient_frac of the library, so the soup share rho is ambient_frac
+                ambient_frac=(rho if (ident and rho is not None and rho < 1) else None))
 
 
 # ------------------------------------------------------------------ fits
@@ -621,7 +620,7 @@ def require_ambient_range(fits):
 def draw_ambient(rng_range, rng):
     """One ambient_frac drawn from the registered range (:data:`AMBIENT_DRAW`)."""
     rho = float(rng.uniform(rng_range["rho_low"], rng_range["rho_high"]))
-    return rho / (1 - rho), rho
+    return rho, rho
 
 
 def set_ambient_range(path, low, high, source, registered):
@@ -632,7 +631,7 @@ def set_ambient_range(path, low, high, source, registered):
     if not 0 <= low < high < 1:
         sys.exit("the range is of the soup share rho: 0 <= low < high < 1")
     fits["ambient_range"] = dict(rho_low=float(low), rho_high=float(high),
-                                 ambient_frac_low=float(low / (1 - low)), ambient_frac_high=float(high / (1 - high)),
+                                 ambient_frac_low=float(low), ambient_frac_high=float(high),
                                  draw=AMBIENT_DRAW, source=source, registered=registered,
                                  set=time.strftime("%Y-%m-%dT%H:%M:%S"), needs=ambient_needs(fits))
     with open(path + ".part", "w") as f:

@@ -149,6 +149,21 @@ def test_assays_run_on_human_expression(grown):
     assert av.total[tissue].sum() > 0
 
 
+def test_default_10x_keeps_a_realistic_number_of_genes_per_cell(grown):
+    """The default 10x preset over the 35,061 human genes keeps the library and the genes of a cell.
+
+    A dropout midpoint in counts per gene (the old 1.5 of the preset) deletes most genes when a library is
+    spread this thin: the old preset gave 334 genes at 2,276 UMIs per cell here, a genes-to-UMIs ratio
+    of 0.15, against 0.37 in PBMC3k. The default now gives about 1,210 genes at 3,380 UMIs (0.36)."""
+    t, layer, expr = grown
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")                  # no dropout warning on the default
+        sc = scRNA(n_cells=200, seed=1).run(t.cell_data, gene_lift=expr)
+    umis, genes = sc.obs["n_counts"].median(), sc.obs["n_genes"].median()
+    assert umis > 0.8 * sc.hypers.mu_lib                # nothing deletes the counts
+    assert genes / umis > 0.3
+
+
 def test_permuted_programmes_move_only_the_programme_factor(grown):
     t, layer, expr = grown
     perm = layer.expression(t, chunk=64, permute_programmes=11)
