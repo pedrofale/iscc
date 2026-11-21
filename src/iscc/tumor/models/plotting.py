@@ -198,6 +198,12 @@ class PlottingMixin:
                 img[di] = (3 if induct else 4) if ncan > 0 else (2 if (induct and d) else (1 if d else 0))
             cm = cmap or ListedColormap(["white", "#f3d3d3", "#2e8b57", "#4b0082", "#d62728"])
             ax.imshow(img.reshape(G, G), cmap=cm, vmin=0, vmax=4, interpolation="nearest")
+            from matplotlib.patches import Patch
+            names = [None, "stroma", "duct", "cancer in duct", "cancer in stroma"]
+            present = sorted(set(np.unique(img)) - {0})
+            if present:
+                ax.legend(handles=[Patch(color=cm(i / 4), label=names[i]) for i in present],
+                          loc="upper right", fontsize=8, framealpha=0.9)
         ax.set_xticks([]); ax.set_yticks([])
         return ax
 

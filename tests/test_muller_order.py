@@ -58,3 +58,17 @@ def test_muller_of_a_tau_tumour_is_drawn_in_generations():
     ax = t.plot_muller()
     assert ax.get_xlabel() == "Generation"
     assert max(ax.collections[0].get_paths()[0].vertices[:, 0]) == pytest.approx(t.trace_times[-1])
+
+
+def test_state_map_has_a_legend_of_the_states_present():
+    import matplotlib
+    matplotlib.use("Agg")
+    from conftest import GENOME_PARAMS, SELECTION_PARAMS, CANCER_CELL_PARAMS, DEME_PARAMS
+    from iscc.tumor import GenotypeTumor
+    t = GenotypeTumor(seed=3, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
+                      cancer_cell_params=CANCER_CELL_PARAMS, deme_params=DEME_PARAMS,
+                      spatial_params={"grid_size": 14, "structure_radius": 3, "n_glands": 2,
+                                      "gland_radius": 3, "min_gland_sep": 7})
+    t.grow(n_steps=30, seed=3)
+    labels = [x.get_text() for x in t.plot_tissue().get_legend().get_texts()]
+    assert "stroma" in labels and "cancer in duct" in labels
