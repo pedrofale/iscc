@@ -15,6 +15,34 @@ import pymuller
 from ..constants import normal_names, normal_cmap_rgba
 
 
+def _strains_ordering(adjacency_df):
+    """The nested band order of a Muller plot: each clone, its descendants, then the clone again.
+
+    Replaces ``pymuller.logic._get_strains_ordering``, which starts a subtree at every identity not yet
+    placed, in sorted string order. Genotype ids are numbers and the founder of a tumour is ``"2"``,
+    so every clone whose id sorts before it (``"10"``, ``"11717"``) was laid out twice, once on its
+    own and once under the founder, and its cells counted twice. Here the subtrees start from the
+    roots only, and the traversal is iterative, so a deep tree needs no recursion limit."""
+    children = adjacency_df.groupby("Parent")["Identity"].apply(sorted).to_dict()
+    roots = sorted(set(adjacency_df["Parent"]) - set(adjacency_df["Identity"]))
+    order, seen = [], set()
+    stack = [(r, False) for r in reversed(roots)]
+    while stack:
+        strain, closing = stack.pop()
+        if not closing:
+            if strain in seen:
+                continue
+            seen.add(strain)
+            stack.append((strain, True))
+            stack.extend((c, False) for c in reversed(children.get(strain, [])))
+        order.append(strain)
+    return np.array(order)
+
+
+# pymuller's _get_y_values looks the ordering up in its module, so the fix applies to every caller.
+pymuller.logic._get_strains_ordering = _strains_ordering
+
+
 #: Copy-number colormap convention: blue (loss) — white (diploid, CN=2) — red (gain).
 CNV_CMAP = "bwr"
 
@@ -245,9 +273,8 @@ def _muller_stackplot(ax, pop_df, anc_df, color_by, colormap, normalize, smoothi
     """Muller stackplot with pymuller's nested layout + colour mapping. ``baseline=0`` grows upward
     from zero; ``baseline="sym"`` grows symmetrically from a central midline (the Noble et al. 2021
     "fish"/stream layout). When ``normalize`` is set the bands are a proper 0-1 frequency at every
-    step: pymuller's ``_get_y_values`` draws each clone as two nested half-bands, so the raw stack
-    sums to a tree-dependent factor (1 for one clone, up to ~2 for a deep tree), which we divide out
-    per generation so the frequency axis stays in [0, 1]."""
+    step: the smoothing can move the stack slightly off 1, which we divide out per generation so the
+    frequency axis stays in [0, 1]."""
     import sys as _sys
     pop = pop_df.copy()
     if normalize:
@@ -734,7 +761,7 @@ def _get_y_values_hardcut(populations_df, adjacency_df, smoothing_std, cutoff_ge
     centerline afterward). Ordering + leaf-doubling mirror ``_get_y_values`` so the band colours line
     up exactly with the ordinarily-smoothed (non-cut) panels."""
     import scipy.ndimage as _ndi
-    ordering = pymuller.logic._get_strains_ordering(adjacency_df)
+    ordering = _strains_ordering(adjacency_df)
     population_size_max = populations_df.groupby("Generation")["Population"].sum().max()
     pivot = populations_df.pivot(index="Generation", columns="Identity",
                                  values="Population").sort_index()
