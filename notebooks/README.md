@@ -16,6 +16,9 @@ Every notebook is committed with its outputs; re-execute one with `jupyter nbcon
 One notebook per main use case, each running one standard tool as its documentation shows and scoring it against the answer key.
 Each tool runs in its own conda environment (`iscc-<tool>`), never in the environment of `iscc`.
 
+- **`tool_ascat_pyclonevi.ipynb`**: purity, ploidy and allele-specific copy number from bulk WGS with ASCAT, then clones with PyClone-VI.
+- **`tool_hmmcopy.ipynb`**: copy number from single-cell DNA with HMMcopy at the settings of the DLP+ pipeline.
+- **`tool_clonealign.ipynb`**: matching scRNA cells to the clones of the scDNA with clonealign.
 - **`tool_scrna_cnv.ipynb`**: copy number and malignancy from scRNA with inferCNV (infercnvpy).
 - **`tool_rctd.ipynb`**: cell-type deconvolution of Visium spots with RCTD.
 - **`tool_integration.ipynb`**: batch integration of a cohort with Harmony and scVI.

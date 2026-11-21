@@ -119,6 +119,9 @@ nav:
       - Shape the data: tutorials/03_shape_the_data.ipynb
       - A cohort: tutorials/04_cohort.ipynb
       - Analysis tools:
+          - Purity, copy number and clones from bulk WGS with ASCAT and PyClone-VI: tutorials/tool_ascat_pyclonevi.ipynb
+          - Copy number from single-cell DNA with HMMcopy: tutorials/tool_hmmcopy.ipynb
+          - Matching scRNA cells to scDNA clones with clonealign: tutorials/tool_clonealign.ipynb
           - Copy number and malignancy from scRNA with inferCNV: tutorials/tool_scrna_cnv.ipynb
           - Cell-type deconvolution of Visium spots with RCTD: tutorials/tool_rctd.ipynb
           - Batch integration of a cohort with Harmony and scVI: tutorials/tool_integration.ipynb
