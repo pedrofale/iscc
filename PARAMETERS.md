@@ -267,6 +267,20 @@ gene's expression. Germline SNPs are the 1000 Genomes phase-3 common SNPs (allel
 inside those genes, drawn heterozygous at 2·AF·(1 − AF) and phased exactly onto the homologs;
 `fetch_snps()` downloads them (92 MB) and `ISCC_HUMAN_REF` points at the result.
 
+### DNA assays — `bulkDNA`, `scDNA`
+
+The coverage spread of a Dirichlet-multinomial depth draw is set by `kappa` and by the number of loci:
+the excess squared coefficient of variation of a locus is about `n_loci / kappa`. Each default `kappa`
+is therefore an `estimate_dna` fit stored with the number of loci it was fitted on (`kappa_loci`), and
+the draw rescales it to the genome it runs on. A `kappa` passed on its own is used as given.
+
+| Knob | Default | Valid range | Outside the range |
+|---|---|---|---|
+| `bulkDNA(kappa=, kappa_loci=)` | 121,241 on 20,000 loci (GIAB HG002 WGS) | `kappa_loci / kappa` ≲ 0.2 (the fits: 0.03 to 0.17) | coverage CV at two copies 0.48 at 30× on any genome size (HG002: 0.41). The old default, 2,000 used as given, gave 1.7 on 6,000 loci and left 39% of them below a tenth of the mean |
+| `scDNA(kappa=, kappa_loci=)` | 202,799 on 5,787 loci (DLP+ OV2295) | `kappa_loci / kappa` ≲ 0.2 (the fits: 0.03 to 0.17) | at 9 reads per locus, a median within-cell CV of 0.40 and under 0.1% of loci without reads on 6,000 loci. The old default, 5 used as given, left 99% of loci without reads, so segment copy number could not be called |
+| `nb_dispersion` (`depth_model="nb"`) | 0.165 bulk (HG002), 0.032 single-cell (DLP+) | ≲ 0.2 | the negative-binomial alternative, fitted on the same references |
+| `scDNA(platform=)` | `None` | `"dlp"`, `"tapestri"` | the full fit on the reference of the platform, including its own depth per locus (DLP+ 830 reads per 500 kb bin, Tapestri 42.7 per amplicon); an unknown name raises |
+
 ### Copy-number — `cell_params.cancer`
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|

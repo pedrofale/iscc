@@ -38,8 +38,9 @@ What is fit (and from what), per modality:
 The ``_PRIOR_ONLY`` escape that ``estimate_rna()`` uses (ambient/doublet) carries the
 unidentifiable fields from the preset instead of fitting them. ``ado_rate`` /
 ``beta_binom_conc`` are the per-cell amplification/dropout layer — fittable only from single-cell
-data; they are flagged not-fit (and carried from the preset) on bulk data, and ``kappa`` means
-different things per modality (large from pooled bulk, small from lumpy MDA/MALBAC single-cell).
+data; they are flagged not-fit (and carried from the preset) on bulk data. ``kappa`` is stored with the
+number of loci it was fitted on (``kappa_loci``), so the fitted coverage spread transfers to a
+genome of any size.
 
 numpy / scipy only (no JAX / R); stateless and config-driven.
 """
@@ -48,18 +49,14 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .batch import DNABatchHyperParams
-from .dna import DNA_BREADTH_PRESETS
+from .dna import DNA_BREADTH_PRESETS, DNA_MODE_DEFAULTS, scDNA
 
-# Single-cell depth_scale (scDNA.depth_scale): single-cell coverage is shallower than bulk.
-_SC_DEPTH_SCALE = 0.3
+# Single-cell depth_scale: single-cell coverage is shallower than bulk.
+_SC_DEPTH_SCALE = scDNA.depth_scale
 
-# Amplification-regime / per-cell-layer defaults, mirroring bulkDNA/scDNA.mode_defaults().
-_MODE_DEFAULTS = {
-    "bulk": dict(kappa=2000.0, nb_dispersion=0.1, ado_rate=0.0,
-                 beta_binom_conc=200.0, doublet_rate=0.0),
-    "sc":   dict(kappa=5.0, nb_dispersion=0.5, ado_rate=0.20,
-                 beta_binom_conc=30.0, doublet_rate=0.02),
-}
+# Amplification-regime / per-cell-layer defaults: the same dicts bulkDNA/scDNA.mode_defaults()
+# return, so a field this data cannot inform is carried from exactly what the generator uses.
+_MODE_DEFAULTS = DNA_MODE_DEFAULTS
 
 # Fields a counts-only estimate cannot identify even with CN (need demultiplexing); carried from
 # the preset, never claimed as "fit" — the DNA analogue of estimate_rna()'s ambient/doublet escape.
@@ -184,7 +181,7 @@ def _fit_depth_dispersion(coverage, cn, gc_fit, mappability, depth_model):
 
       * DM: the index of dispersion ``D = <(X-mu)^2/mu>`` estimates ``(1-1/n)*(N+kappa)/(kappa+1)``
         (Dirichlet-Multinomial), inverted for ``kappa = (N - R)/(R - 1)`` with ``R = D/(1-1/n)``.
-        Large kappa (pooled bulk) ~ multinomial/Poisson; small kappa (lumpy single-cell MDA/MALBAC).
+        Large kappa ~ multinomial/Poisson; small kappa ~ lumpy (whole-genome amplification).
       * NB: ``phi = median_l ((X-mu)^2 - mu)/mu^2`` (the standard NB method-of-moments residual).
 
     This is the DNA analogue of the scRNA estimator's library-size de-biasing of the NB
@@ -398,7 +395,7 @@ def estimate_dna(coverage, alt_counts, called_cn, *, modality="bulk", breadth="w
     modality : {"bulk", "sc"}
         Bulk vs single-cell. ``ado_rate`` / ``beta_binom_conc`` are fit only for ``"sc"``; on bulk
         they are flagged not-fit and carried from the preset (and vice-versa is moot — they don't
-        exist for bulk). ``kappa`` means different regimes per modality.
+        exist for bulk). Unfitted fields carry the modality defaults of ``bulkDNA`` / ``scDNA``.
     breadth : {"wgs", "wes", "panel"}
         Capture breadth (chosen, not estimated). ``capture_sigma`` is fit only for WES/panel.
     depth_model : {"dm", "nb"}

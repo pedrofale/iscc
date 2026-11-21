@@ -62,7 +62,7 @@ Generate single-cell and bulk molecular data from the sampled cells.
 | [`iscc.data.DNA`](DNA.md) | Shared base of the DNA assays — breadth + coverage core. |
 
 Each assay page also lists **technology presets** — the parameter settings that approximate named
-platforms (MALBAC / DLP / Tapestri for scDNA, WGS / WES / panel for bulk DNA, and 10x / Smart-seq3
+platforms (DLP+ / Tapestri for scDNA, WGS / WES / panel for bulk DNA, and 10x / Smart-seq3
 for scRNA). The assays' technical defaults live in these hyper-parameter containers (the targets of the
 [Calibration](#calibration) estimators, overridable per assay):
 
