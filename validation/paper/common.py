@@ -178,8 +178,9 @@ def assays(run, task, seed=0, n_dna=400, force=False):
     cancer_cells = [c for c, k in zip(cells, is_cancer) if k]
     rng = np.random.default_rng(seed)
     dna_cells = list(rng.choice(cancer_cells, size=min(n_dna, len(cancer_cells)), replace=False))
-    dna = scDNA(n_cells=len(dna_cells), breadth="wgs", kappa=500.0, mu_depth=60.0,
-                seed=200 + seed).run(diss, cell_subset=dna_cells)
+    # The DLP+ fit (OV2295). The hand values used before (kappa 500, mu_depth 60, no kappa_loci) left
+    # 58% of the 6,000 loci of a cell without reads and miscalled 35% of its diploid segments.
+    dna = scDNA(n_cells=len(dna_cells), platform="dlp", seed=200 + seed).run(diss, cell_subset=dna_cells)
     rna = scRNA(n_cells=len(cells), seed=100 + seed).run(diss, cell_subset=cells)
     # The section feeds only Visium (and its coordinates and genotypes), so only expression is built.
     sec = spec.slice(depth_frac=0.5, max_cells=RG.T["max_cells"], layers="visium")
