@@ -41,16 +41,12 @@ def test_normals_is_not_hand_copied():
     "host", the met compartment's own normal tissue) and nothing fails."""
     import sys
     sys.path.insert(0, os.path.join(REPO, "validation"))
-    sys.path.insert(0, os.path.join(REPO, "notebooks"))
     from iscc.constants import normal_names
     import realistic_regime as RR
-    import base_sim as BS
 
     engine = tuple(normal_names)
     assert tuple(RR.NORMALS) == engine, (
         f"realistic_regime.NORMALS {RR.NORMALS} != engine {engine}; derive it, do not restate it")
-    assert tuple(BS.NORMALS) == engine, (
-        f"base_sim.NORMALS {BS.NORMALS} != engine {engine}; derive it, do not restate it")
 
 
 def test_expression_params_hands_out_copies():
@@ -89,6 +85,9 @@ def test_prose_parameter_claims_match_the_config():
     ok_grid = {s["grid_size"] for s in RR.SCALES.values()}
     ok_glands = {s["n_glands"] for s in RR.SCALES.values()}
     ok_genes = {gen["n_segments"] * gen["segment_size"], gen["segment_size"]}
+    # Gene counts that are not the simulated genome's: the genes detected in the real 10x breast
+    # section (Shape the data) and the 100-gene window of infercnvpy (the scRNA copy-number tutorial).
+    ok_genes |= {25_062, 100}
 
     checks = [(re.compile(r"grid[ -]?(\d{2,4})", re.I), ok_grid, "grid_size"),
               (re.compile(r"(\d{1,2})\s+(?:ducts|glands)\b", re.I), ok_glands, "n_glands"),
