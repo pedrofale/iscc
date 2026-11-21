@@ -50,8 +50,15 @@ def _arm(driver_scale=0.4):
     return dict(genome=ag["genome_params"], selection=dict(ag["selection_params"]), cancer=dict(rates))
 
 
+# The density of germline sites of a genotyping array (about 30% heterozygous), so that the DNA
+# assays carry the B-allele signal allele-specific callers read; the regime's 0.5% leaves about 30
+# sites on the growth genome. The germline changes no growth statistic (Cell._available_sites).
+GERMLINE = {"het_frac": 0.3, "hom_frac": 0.33}
+
+
 def _variant(selection=None, cancer=None, spatial=None, driver_scale=0.4):
     kw = _arm(driver_scale)
+    kw["germline"] = dict(GERMLINE)
     kw["selection"].update(selection or {})
     kw["cancer"].update(cancer or {})
     if spatial:

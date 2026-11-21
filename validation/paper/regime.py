@@ -161,20 +161,22 @@ def expression():
 
 
 def config(scale, selection=None, cancer=None, deme=None, spatial=None, genome=None,
-           update_mode="tau", tau=RR.TAU, coarsen=RR.COARSEN):
+           update_mode="tau", tau=RR.TAU, coarsen=RR.COARSEN, germline=None):
     """Every :class:`GenotypeTumor` keyword of the paper regime at ``scale`` except the seed and the
     readout layers, with a variant's overrides on top.
 
     This is the regime's one source: :func:`grow` builds from it, and so must any script that grows a
     paper-regime tumour another way (``supp_tau.py`` runs the exact engine through ``update_mode``).
-    ``coarsen`` sets ``coarsen_passengers`` (R2 runs it off)."""
+    ``coarsen`` sets ``coarsen_passengers`` (R2 runs it off). ``germline`` replaces the germline
+    parameters of the example config (heterozygous at 0.5% of the neutral genes); it changes no growth
+    statistic, only the density of the germline sites the DNA assays read."""
     sp = {"origin_confinement": dict(ORIGIN_CONFINEMENT), **STROMA, **(spatial or {})}
     blocks = RR.config_for(scale, genome=genome, selection={**SELECTION, **(selection or {})},
                            cancer={**CANCER, **(cancer or {})}, deme={**DEME, **(deme or {})},
                            spatial=sp)
     return dict(blocks, update_mode=update_mode, tau=tau, coarsen_passengers=coarsen,
                 founder_mutations=RR.FOUNDER_MUTATIONS,
-                germline_params=RR.GERMLINE)
+                germline_params=RR.GERMLINE if germline is None else germline)
 
 
 def grow(seed, scale, target_cancer, spatial_snapshot_every=0, max_steps=3_000, chunk=20,
