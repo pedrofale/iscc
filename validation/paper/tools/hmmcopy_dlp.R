@@ -8,8 +8,10 @@
 # cell's ploidy is unknown, runs the HMM at multipliers 1..6 of the GC-corrected ratio, re-centres each
 # run on its own states (the "tweak"), and keeps the multiplier whose copy values sit closest to integers
 # (the lowest scaled "halfiness"; a run with more than 70% of bins at one copy is refused). This script
-# follows that, with two differences stated here: the GC correction is HMMcopy's correctReadcount (loess)
-# rather than the pipeline's modal regression, and the halfiness is measured on each bin's segment median.
+# follows that, including the halfiness measured on each bin's segment median as the pipeline does
+# (hmmcopy_single_cell.R: test.df$median), with two differences stated here: the GC correction is
+# HMMcopy's correctReadcount (loess) rather than the pipeline's modal regression, and the segments of
+# the median are the runs of the HMM's states rather than those of the modal regression.
 #
 # Usage: Rscript hmmcopy_dlp.R <reads.csv> <bins.csv> <out_prefix> [mappability]
 #   reads.csv  loci x cells read counts; bins.csv  locus, chr, start, end, gc, map
