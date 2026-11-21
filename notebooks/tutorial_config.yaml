@@ -79,3 +79,55 @@ spatial_params:
   met_seed_kappa: 0.03
   met_hazard: 3.5
   met_transit_floor: 0.001
+
+# The expression and microenvironment layers of the paper's regime (validation/paper/regime.py:
+# expression() and MICROENV): gene programs coupled to the niche, the total dosage law fitted to
+# TCGA breast tumours with allele-specific expression, the epithelium as the cell of origin, and the
+# hypoxia field. Readout only: they change no growth, only the expression the assays read.
+expression_params:
+  program_params:
+    n_programs: 6
+    n_genes_per_program: 25
+    program_overlap: 0.1
+    loading_strength:
+      mean: 1.0
+      sd: 0.3
+    loading_sparsity: 1.0
+    program_genomic_scatter: 1.0
+    max_log_fold: 5.0
+  activity_params:
+    n_active_programs_per_cell: 3
+    activity_dist: lognormal
+    activity_mean: 1.0
+    activity_sd: 0.5
+    activity_noise: 0.2
+  coupling_params:
+    phenotype_program_strength:
+      breach: 1.0
+      __default__: 0.5
+    niche_program_map:
+      epithelial: emt
+      hypoxia: hypoxia
+    niche_program_strength: 3.0
+  dosage_params:
+    dosage_sensitivity_mean: 0.86
+    dosage_sensitivity_sd: 0.61
+    dosage_saturation: 8
+    allele_specific: true
+    dosage_law: total
+  snv_effect_params:
+    p_lof: 0.1
+    p_missense: 0.3
+    p_splice: 0.05
+    p_silent: 0.55
+    nmd_strength: 0.2
+    snv_expression_effect: 0.5
+  cell_of_origin: epithelial
+microenv_params:
+  hypoxia:
+    strength: 0.9
+    n_genes: 40
+    o2_consumption: 1.0
+    o2_supply: 10.0
+    o2_source: perfused
+    o2_diffusion: 4.0
