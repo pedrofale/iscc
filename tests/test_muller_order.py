@@ -9,6 +9,7 @@ from collections import Counter
 import numpy as np
 import pandas as pd
 import pymuller
+import pytest
 
 from iscc.tumor import viz
 
@@ -43,3 +44,17 @@ def test_deep_tree_needs_no_recursion():
     parents = {str(i + 1): str(i) for i in range(2, 5000)}
     order = viz._strains_ordering(_adjacency(parents))
     assert len(order) == 2 * 4999 and order[0] == "2"
+
+
+def test_muller_of_a_tau_tumour_is_drawn_in_generations():
+    import matplotlib
+    matplotlib.use("Agg")
+    from conftest import GENOME_PARAMS, SELECTION_PARAMS, CANCER_CELL_PARAMS, DEME_PARAMS
+    from iscc.tumor import GenotypeTumor
+    t = GenotypeTumor(seed=3, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
+                      cancer_cell_params=CANCER_CELL_PARAMS, deme_params=DEME_PARAMS,
+                      spatial_params={"grid_size": 10}, update_mode="tau", tau=0.5)
+    t.grow(n_steps=40, seed=3)
+    ax = t.plot_muller()
+    assert ax.get_xlabel() == "Generation"
+    assert max(ax.collections[0].get_paths()[0].vertices[:, 0]) == pytest.approx(t.trace_times[-1])
