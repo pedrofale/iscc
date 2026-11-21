@@ -13,8 +13,11 @@ callers read, and the private background genetic demultiplexing uses to assign c
 Two calls, made once per patient and applied BEFORE growth so every descendant inherits them:
 
 * :func:`draw_germline_sites` picks the loci. They are drawn from NEUTRAL positions only — genes
-  with no role in any selection axis — so the germline is a pure observational layer and can never
-  perturb fitness or the growth trajectory.
+  with no role in any selection axis — so the germline never changes the fitness of a clone. Its
+  positions stay in the pool later point mutations are drawn from (a draw there is dropped), so it
+  does not change the chance that a mutation hits a driver either: a seed grows the same tumour with
+  or without it until a mutation is first drawn at a germline site, and a different but equally
+  likely one after.
 * :func:`apply_germline` writes the bits into every genotype registered on the tumour: the cancer
   founder and each normal (epithelial / stromal / immune / host) genotype.
 
@@ -203,6 +206,11 @@ def apply_germline(tumor, sites, zygosity, homologs):
     mask[:] = 0
     if len(sites):
         mask[sites] = np.where(zygosity == "hom", 2, 1)
+    # Per parental homolog, the genes whose germline variant that homolog carries: the mutation pool
+    # keeps these positions on that homolog's copies (see Cell._available_sites).
+    selection.germline_on = {hap: np.zeros(selection.n_genes, dtype=bool) for hap in ("p", "m")}
+    for hap in ("p", "m"):
+        selection.germline_on[hap][sites[(homologs == hap) | (homologs == "both")]] = True
 
     # Planting a variant on a driver can move the founder's rates, so any already-computed per-deme
     # event rate has to be rebuilt. Skipped when the tumour has not reached that point yet (the

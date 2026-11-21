@@ -372,13 +372,22 @@ class Cell(object):
         ARBITRARY tie-break, so never score ordering off this; use ``event_groups``."""
         return tuple(e for group in self.event_groups for e in group)
 
-    def _available_sites(self, selection, seg, allele, gate_bits):
+    def _available_sites(self, selection, seg, allele, gate_bits, hap=None):
         """Positions on this allele copy that may still take a new SNV: unmutated (infinite sites
         per allele) and, under ACCESSIBILITY gating, not inside an event module whose dependency-DAG
         parents are still absent. Accessibility is judged on ``gate_bits`` — the event set as it
         stood at the START of the division — so an event acquired earlier in the same division does
         not unblock its children until the next one."""
-        available = np.where(~allele)[0]
+        free = ~allele
+        # A germline variant is not a somatic event, so its position stays in the pool of the homolog
+        # that carries it, and a draw there is dropped in `mutate`. Leaving it out would shrink the
+        # pool by the germline sites and so change every later draw, and raise the chance that a new
+        # SNV hits a driver, making growth depend on the germline density.
+        germ_on = getattr(selection, "germline_on", None)
+        if germ_on is not None and hap in germ_on:
+            lo, hi = selection._seg_offsets[seg], selection._seg_offsets[seg + 1]
+            free = free | germ_on[hap][lo:hi]
+        available = np.where(free)[0]
         if selection.epistasis is not None and len(available):
             blocked = selection.epistasis.blocked_mask(seg, gate_bits)
             if blocked is not None:
@@ -751,11 +760,15 @@ class CancerCell(Cell):
                         k = rng.poisson(n_snvs_per_allele)
                         if k == 0:
                             continue
-                        available = self._available_sites(selection, seg, allele, gate_bits)
+                        available = self._available_sites(selection, seg, allele, gate_bits, hap)
                         if len(available) == 0:
                             continue
                         n_mutations = min(k, len(available))
                         muts = rng.choice(available, size=n_mutations, replace=False)
+                        muts = muts[~allele[muts]]    # a germline site this copy carries takes no SNV
+                        n_mutations = len(muts)
+                        if n_mutations == 0:
+                            continue
                         # copy-on-write: privatise the segment, then write to a copy of THIS allele so
                         # the parent's shared bitset is never mutated in place.
                         self._cow_privatize(seg)

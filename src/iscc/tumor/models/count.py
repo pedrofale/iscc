@@ -572,8 +572,10 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
 
         # Germline layer. Applied HERE — after every normal genotype has been registered, so the
         # inherited variants reach the whole tissue and not just the tumour, and before the per-deme
-        # event rates below, so nothing has to be recomputed. It draws from its own seeded rng and
-        # never touches the growth stream, so growth is the same with the layer on or off.
+        # event rates below, so nothing has to be recomputed. It draws from its own seeded rng, sits at
+        # neutral genes and stays in the mutation pool (Cell._available_sites), so growth is the same
+        # with the layer on or off until a mutation is first drawn at a germline site, and equally
+        # likely after.
         self.germline_sites = np.array([], dtype=int)
         self.germline_zygosity = np.array([], dtype="<U4")
         self.germline_homolog = np.array([], dtype="<U4")
