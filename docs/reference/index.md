@@ -25,6 +25,19 @@ expression and programs and differ in their evolution.
 | [`iscc.cohort.Cohort`](Cohort.md) | A cohort of patient tumours grown over one shared gene layout. |
 | [`iscc.cohort.grow_tumor`](grow_tumor.md) | Grow one patient tumour for a fixed number of steps. |
 
+## Pregrown tumors
+
+Tumors and a cohort grown once with the paper's regime, to generate data from without growing; each
+is downloaded on first use, checked and cached.
+
+| | |
+|---|---|
+| [`iscc.pregrown.ductal`](pregrown_ductal.md) | The tumor of the paper's regime: growth in the glands, breach and invasion of the stroma. |
+| [`iscc.pregrown.neutral`](pregrown_neutral.md) | A tumor grown without selection, whose clones branch without sweeps. |
+| [`iscc.pregrown.sweeps`](pregrown_sweeps.md) | A tumor with few, strong drivers, whose clones sweep in turn. |
+| [`iscc.pregrown.cin`](pregrown_cin.md) | A tumor with frequent copy-number events and genome doubling. |
+| [`iscc.pregrown.cohort`](pregrown_cohort.md) | Six patients grown over one configuration of the paper's regime. |
+
 ## Treatment
 
 Therapies applied to the tumor during growth.

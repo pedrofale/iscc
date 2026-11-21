@@ -1826,3 +1826,49 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         adata = to_anndata(self, **kwargs)
         adata.write_h5ad(str(path), compression=compression)
         return path
+
+    def save(self, path):
+        """Save the tumour to one file, which [`load`][iscc.tumor.GenotypeTumor.load] reads back.
+
+        Unlike [`write`][iscc.tumor.GenotypeTumor.write] and
+        [`write_h5ad`][iscc.tumor.GenotypeTumor.write_h5ad], which export the data of the tumour,
+        the file keeps the whole state, so the loaded tumour can be grown further, sampled and
+        measured exactly as this one. It leaves out the per-cell tables (``cell_data``), which
+        [`load`][iscc.tumor.GenotypeTumor.load] rebuilds from their seeded streams. A
+        25,000-cell tumour of the tutorial configuration takes about 5 MB.
+
+        Parameters
+        ----------
+        path : str or path-like
+            The file to write.
+
+        Returns
+        -------
+        path
+        """
+        from ..io import save
+        return save(self, path)
+
+    @classmethod
+    def load(cls, path):
+        """Load a tumour saved with [`save`][iscc.tumor.GenotypeTumor.save].
+
+        The file is a pickle, which can run code when it is read: load only files you trust, such
+        as your own or the [pregrown tumours](index.md#pregrown-tumors), whose checksums ``iscc``
+        verifies. A file saved with another version of ``iscc`` loads with a warning, or fails
+        with an error naming the version that saved it.
+
+        Parameters
+        ----------
+        path : str or path-like
+            A file written by [`save`][iscc.tumor.GenotypeTumor.save].
+
+        Returns
+        -------
+        GenotypeTumor
+        """
+        from ..io import load, read_header
+        tumor = load(path, cls)
+        if read_header(path).get("cell_data"):
+            tumor.make_cell_data()
+        return tumor

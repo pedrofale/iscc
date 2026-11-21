@@ -98,7 +98,10 @@ class PatientResult:
 
     @property
     def cell_data(self):
-        return self.tumor.cell_data
+        """The per-cell tables of the tumour, rebuilt first if they are missing or stale (as in a
+        loaded cohort)."""
+        t = self.tumor
+        return t.ensure_cell_data() if hasattr(t, "ensure_cell_data") else t.cell_data
 
     def cancer_size(self):
         return int(self.tumor.get_cancer_size())
@@ -200,6 +203,47 @@ class Cohort:
                 patient_id=i, seed=self.patient_seeds[i], subgroup=self.subgroups[i].name,
                 tumor=t, kwargs=self.patient_kwargs[i]))
         return self
+
+    def save(self, path):
+        """Save the cohort with its grown patients to one file, which
+        [`load`][iscc.cohort.Cohort.load] reads back.
+
+        The file keeps the whole state of every patient tumour, as
+        [`GenotypeTumor.save`][iscc.tumor.GenotypeTumor.save] does for one tumour; the per-cell
+        tables of a patient are rebuilt when they are first read. The ``grow``
+        function is saved by reference, so it has to be importable (a module-level function or a
+        ``functools.partial`` of one, not a lambda).
+
+        Parameters
+        ----------
+        path : str or path-like
+            The file to write.
+
+        Returns
+        -------
+        path
+        """
+        from ..tumor.io import save
+        return save(self, path)
+
+    @classmethod
+    def load(cls, path):
+        """Load a cohort saved with [`save`][iscc.cohort.Cohort.save].
+
+        As for [`GenotypeTumor.load`][iscc.tumor.GenotypeTumor.load], the file is a pickle: load
+        only files you trust.
+
+        Parameters
+        ----------
+        path : str or path-like
+            A file written by [`save`][iscc.cohort.Cohort.save].
+
+        Returns
+        -------
+        Cohort
+        """
+        from ..tumor.io import load
+        return load(path, cls)
 
     @property
     def selection(self):
