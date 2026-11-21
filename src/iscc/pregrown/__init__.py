@@ -10,9 +10,12 @@ package and keeps it in a cache folder: ``ISCC_PREGROWN_DIR`` if it is set, othe
 ``iscc/pregrown`` in the user cache folder (``$XDG_CACHE_HOME``, by default ``~/.cache``). Later
 calls load the cached file.
 
-The four tumours grow in the same ductal field of the paper, on the arm-level human genome of
-[`arm_genome`][iscc.data.human.arm_genome] with the epithelium as the cell of origin, and differ in
-their evolution. ``scripts/build_pregrown.py`` grows them from ``configs/pregrown/``.
+The four tumours grow in the ductal field of the paper, at its regime on the arm-level human genome of
+[`arm_genome`][iscc.data.human.arm_genome] (the paper's run R11) with the epithelium as the cell of
+origin, and differ in their evolution. They carry germline variants at the density of a genotyping
+array (30% of the neutral genes heterozygous), so that the DNA assays carry the B-allele signal of
+allele-specific callers, and no segment at zero copies. ``scripts/build_pregrown.py`` in the
+repository grows them.
 """
 import json
 import os
@@ -82,6 +85,10 @@ def ductal():
     """The tumour of the paper's regime: growth inside the glands, breach of the duct wall and
     invasion of the stroma, with selection by niche.
 
+    200,284 cancer cells on the 1 cm field (grid 170, eight glands) after 299 generations; driver
+    clones sweep in situ for about 200 generations before two invasive lesions grow, and some glands
+    still hold small in-situ tumours. 7% of the cancer cells have a doubled genome. About 40 MB.
+
     Returns
     -------
     GenotypeTumor
@@ -90,8 +97,12 @@ def ductal():
 
 
 def neutral():
-    """A tumour whose drivers have no effect on fitness, so its clones branch without sweeps. It
-    keeps the niche traits of the paper's regime, which it needs to leave the glands.
+    """A tumour grown without selection: drivers without effect, no niche traits, and the duct wall
+    and the stroma open to every cell.
+
+    200,030 cancer cells on the 1 cm field after 246 generations, in six lesions that are each a
+    mosaic of clones drifting without sweeps. A negative control for methods that look for selection
+    or subclonal structure. About 15 MB.
 
     Returns
     -------
@@ -104,6 +115,9 @@ def sweeps():
     """A tumour with fewer and stronger drivers than the paper's regime, so that new drivers sweep
     and a few large, nested clones dominate.
 
+    200,005 cancer cells on the 1 cm field after 242 generations, in three large lesions each
+    dominated by one clone. 33% of the cancer cells have a doubled genome. About 38 MB.
+
     Returns
     -------
     GenotypeTumor
@@ -112,8 +126,12 @@ def sweeps():
 
 
 def cin():
-    """A tumour with a high rate of copy-number events and of genome doubling under per-arm
-    copy-number selection, so that its clones differ mostly in copy number.
+    """A chromosomally unstable tumour: four times the copy-number events and five times the genome
+    doubling of the paper's regime, so that its clones differ mostly in copy number.
+
+    200,156 cancer cells on the 1 cm field after 228 generations; every cancer cell has a doubled
+    genome (mean ploidy 3.7), and many copy-number clones spread over lesions from several glands.
+    About 40 MB.
 
     Returns
     -------
@@ -125,6 +143,9 @@ def cin():
 def cohort():
     """Six patients grown over one configuration of the paper's regime, for analyses across
     patients such as batch integration.
+
+    Each patient grows from its own seed to 60,000 cancer cells on the 96 by 96 field, the scale of
+    the paper's seeding runs. About 71 MB.
 
     Returns
     -------

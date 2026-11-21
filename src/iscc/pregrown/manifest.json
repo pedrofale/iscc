@@ -1,4 +1,35 @@
 {
   "base_url": null,
-  "files": {}
+  "files": {
+    "ductal": {
+      "file": "ductal.iscc",
+      "sha256": "ca38d2c617f2aeea85011ce544d041182bed236e0db43d100f8e0c6334bae031",
+      "bytes": 40230469,
+      "kind": "GenotypeTumor"
+    },
+    "neutral": {
+      "file": "neutral.iscc",
+      "sha256": "2f83c2d0267f8f09f003cdd4c67535ef99996dc1a8b96d036fcdb2b5722f6a41",
+      "bytes": 15018265,
+      "kind": "GenotypeTumor"
+    },
+    "sweeps": {
+      "file": "sweeps.iscc",
+      "sha256": "766b28b0a5a80132fa9f91326f55f9396723226aa05478014d7af878f75b328f",
+      "bytes": 38248669,
+      "kind": "GenotypeTumor"
+    },
+    "cin": {
+      "file": "cin.iscc",
+      "sha256": "0d5d45ee53cacabec188d25ca4bca2c56c72212bb2050bf41f92fa0064b24b87",
+      "bytes": 39646477,
+      "kind": "GenotypeTumor"
+    },
+    "cohort": {
+      "file": "cohort.iscc",
+      "sha256": "45e0b41a8b8c04eb31398709b619f9b9f32e4d623ebad3e968967904490cda2f",
+      "bytes": 71153010,
+      "kind": "Cohort"
+    }
+  }
 }
