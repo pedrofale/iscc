@@ -38,7 +38,10 @@ MET_SEL = {**SELECTION_PARAMS, "prop_breach": 0.2, "prop_stromal_survival": 0.2,
 def _build(seed=3, mode="tau", spatial=SPATIAL, deme=DEME, selection=SELECTION_PARAMS, **kw):
     # Genotype ids come from a process-wide counter and the digests include them.
     Cell._genotype_counter = 2_000_000
-    return GenotypeTumor(seed=seed, genome_params=GENOME_PARAMS, selection_params=selection,
+    # The pinned digests were recorded with two nullisomic segments allowed (max_nullisomy 2, the
+    # default until 2026-11-21); these tests check resection, not the viability rule.
+    return GenotypeTumor(seed=seed, genome_params=GENOME_PARAMS,
+                         selection_params={"max_nullisomy": 2, **selection},
                          cancer_cell_params=CANCER_CELL_PARAMS, deme_params=deme,
                          spatial_params=spatial, update_mode=mode, **kw)
 

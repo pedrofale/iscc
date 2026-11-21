@@ -46,7 +46,11 @@ def _build(seed=3, mode="tau", selection=SELECTION, cancer=CANCER, spatial=SPATI
     # Genotype ids come from a process-wide counter and the digests include them, so every build
     # starts it at the same value.
     Cell._genotype_counter = 1_000_000
-    return GenotypeTumor(seed=seed, genome_params=GENOME, selection_params=selection,
+    # The pinned digests and the grown scenarios were recorded with two nullisomic segments allowed
+    # (max_nullisomy 2, the default until 2026-11-21); these tests check the treatment code, not the
+    # viability rule, so they keep it.
+    return GenotypeTumor(seed=seed, genome_params=GENOME,
+                         selection_params={"max_nullisomy": 2, **selection},
                          cancer_cell_params=cancer, deme_params=DEME, spatial_params=spatial,
                          immune_cell_params={"prob_kill": 0.2}, update_mode=mode, **kw)
 

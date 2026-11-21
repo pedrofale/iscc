@@ -186,7 +186,8 @@ def clone_correlation(cell_data, pairs, clone_key="cell_type", exp_key="cell_exp
         gmean = np.divide(gsum, counts, out=np.zeros_like(gsum), where=counts > 0)
         ss_between = float((counts * (gmean - grand) ** 2).sum())
         ss_total = float(((x - grand) ** 2).sum())
-        return float(np.sqrt(ss_between / ss_total)) if ss_total > 0 else 0.0
+        # min(): rounding can put ss_between a hair above ss_total when the clone determines x
+        return float(min(1.0, np.sqrt(ss_between / ss_total))) if ss_total > 0 else 0.0
 
     pairs = np.asarray(pairs, dtype=int)
     gene_names = list(exp.columns)

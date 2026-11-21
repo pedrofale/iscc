@@ -20,10 +20,14 @@ GENOME = {"n_segments": 6, "segment_size": 100}
 DEME = {"carrying_capacity": 5, "initial_cancer_cells": 5}
 CANCER = {"division_rate": 0.4, "death_rate": 0.02, "max_birth_rate": 0.8,
           "mutation_rate": 0.5, "dispersal_rate": 0.2}
-# resistance can evolve so therapy selects for it; no dispersal/immune unless asked
+# resistance can evolve so therapy selects for it; no dispersal/immune unless asked. At an effect of
+# 1.2 a resistance hit was too weak to outlast 95% chemotherapy, and the test passed only because
+# cells that had lost whole segments (nullisomy, allowed until 2026-11-21) raised the relative dosage
+# of their resistance copies; at 1.5 chemotherapy selects resistance from mutations alone (+0.38 to
+# +0.63 over the four seeds).
 SEL_TR = {"prop_driver": 0.1, "prop_dispersal": 0.0, "prop_immune_resistance": 0.0,
           "prop_treatment_resistance": 0.05, "driver_effects": 1.1, "dispersal_effects": 1.0,
-          "treatment_resistant_effects": 1.2, "immune_resistant_effects": 1.0}
+          "treatment_resistant_effects": 1.5, "immune_resistant_effects": 1.0}
 SEL_IR = {"prop_driver": 0.1, "prop_dispersal": 0.0, "prop_immune_resistance": 0.3,
           "prop_treatment_resistance": 0.0, "driver_effects": 1.1, "dispersal_effects": 1.0,
           "treatment_resistant_effects": 1.0, "immune_resistant_effects": 1.4}

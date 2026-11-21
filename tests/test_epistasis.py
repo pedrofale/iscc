@@ -797,7 +797,8 @@ def test_per_event_module_sizes_are_validated(size, match):
 def test_per_event_module_sizes_in_a_grown_tumour():
     """Tumours grown with per-event sizes acquire each event through its own module: over three
     seeds a module of 12 genes is carried by more cells than a module of one, and every lineage
-    carrying the one-gene event carries that gene's SNV."""
+    carrying the one-gene event acquired it with that gene's SNV. Events are monotone, so a lineage
+    keeps the event after a deletion removes the copy that carried the SNV."""
     ep = {"n_events": 3, "event_size": [1, 4, 12], "planted": {"effects": 0.1}}
     frac = np.zeros(3)
     for seed in (1, 2, 3):
@@ -807,9 +808,12 @@ def test_per_event_module_sizes_in_a_grown_tumour():
         assert t.epistasis_ground_truth()["event_sizes"] == [1, 4, 12]
         frac += event_cell_fractions(t)
         g0 = int(net.event_genes[0][0])
-        for rep in t.genotypes.values():
+        for gid, rep in t.genotypes.items():
             if rep.type == "cancer" and rep.event_bits & 1:
-                assert rep.get_snvs()[g0] > 0
+                while t.genotypes_parents.get(gid) in t.genotypes and \
+                        t.genotypes[t.genotypes_parents[gid]].event_bits & 1:
+                    gid = t.genotypes_parents[gid]          # the genotype that acquired the event
+                assert t.genotypes[gid].get_snvs()[g0] > 0
     assert frac[2] > frac[0]
 
 

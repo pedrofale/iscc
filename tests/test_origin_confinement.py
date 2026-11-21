@@ -266,7 +266,9 @@ def test_release_generations_is_counted_from_the_fill():
 #: One fixed seed for the growth fixture. The mechanism is stochastic — the founding acinus resolves
 #: to a single dominant altered state in most runs but not all — so the module pins a seed rather than
 #: asserting a rate. The distribution across seeds is a calibration measurement, not a unit test.
-SEED = 17
+# Since no segment may reach zero copies (2026-11-21), a truncal copy-number alteration emerged in 6
+# of 8 seeds (5 of 8 before); seed 17 is one of the two without one (0.85), so the tests use seed 13.
+SEED = 13
 
 
 @pytest.fixture(scope="module")
