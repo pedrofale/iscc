@@ -226,4 +226,4 @@ def test_statistics_refuse_without_the_registered_range():
     assert BF.require_ambient_range({"wu": {"ambient": {"needs_range": []}}, "ding": {"needs_range": []}}) is None
     rng = np.random.default_rng(0)
     a, rho = BF.draw_ambient(dict(rho_low=0.03, rho_high=0.11), rng)
-    assert 0.03 <= rho <= 0.11 and a == pytest.approx(rho / (1 - rho))
+    assert 0.03 <= rho <= 0.11 and a == pytest.approx(rho)          # the soup is a share of the library

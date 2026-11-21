@@ -142,10 +142,13 @@ class TestScRNAAssay:
         assert (a.obs["clone"].values == src.reindex(a.obs.index).astype(str).values).all()
 
     def test_smartseq3_deeper_and_sparser_than_10x(self, labelled_cell_data):
-        """Smart-seq3 preset: higher sensitivity (deeper) and lower dropout (fewer zeros)."""
+        """Smart-seq3 preset: higher sensitivity (deeper) and lower dropout (fewer zeros).
+
+        The 10x preset no longer draws dropout; the 10x run pins its old midpoint of 1.5, so the
+        comparison stays the one this test was written for."""
         from iscc.data.rna import scRNA
         sub = labelled_cell_data["cell_exp"].index
-        tenx = scRNA(protocol="10x", seed=1).run(labelled_cell_data, cell_subset=sub)
+        tenx = scRNA(protocol="10x", seed=1, dropout_mid=1.5).run(labelled_cell_data, cell_subset=sub)
         ss3 = scRNA(protocol="smartseq3", seed=1).run(labelled_cell_data, cell_subset=sub)
         assert ss3.observed_counts.values.sum() > tenx.observed_counts.values.sum()
         ss3_zero = (ss3.observed_counts.values == 0).mean()
@@ -315,10 +318,13 @@ class TestPlateNestedDepth:
         cd = _plain_cell_data(600)
         ss3 = scRNA(protocol="smartseq3", n_cells=600, seed=1).run(cd).observed_counts.values
         tenx = scRNA(protocol="10x", n_cells=600, seed=1).run(cd).observed_counts.values
+        # Re-pinned when the ambient soup became a share of the library instead of counts on top
+        # of it, and the 10x preset took the PBMC3k fit (dispersion 0.30 -> 0.35) and dropped its
+        # hand-set dropout (midpoint 1.5 -> 0).
         assert (_counts_hash(ss3), int(ss3.sum())) == (
-            "655f81aa1744a65441f209212283a2c7b1b5fc4cca6dc7e81731aa1fd8899e15", 4455795)
+            "5640d61df1b41e078a9616648ef5581ca46738c205257764b5c194195c56d39b", 4446386)
         assert (_counts_hash(tenx), int(tenx.sum())) == (
-            "ca7778be26c8af4aed58c6d2333304e836c7faa3311613b70e80efa48dab202c", 2415897)
+            "a5b0b61683ed5e0bb6164937da4bced9ab39b2cc3c8a00f728a4810d75217852", 2289045)
 
 
 class TestCallerPlateLayout:
@@ -532,3 +538,79 @@ class TestMultiBatch:
         from iscc.data.rna import run_scrna_batches
         with pytest.raises(ValueError):
             run_scrna_batches(labelled_cell_data, design="bogus")
+
+
+# --------------------------------------------------------------------------------------
+# Dropout and ambient RNA
+# --------------------------------------------------------------------------------------
+def _two_population_cell_data(n_per=300, n_genes=200, n_markers=20, seed=0):
+    """Population A expresses every gene; population B expresses none of the first `n_markers`
+    genes (exact zeros), like stromal cells and cancer markers. Returns (cell_data, is_b)."""
+    rng = np.random.default_rng(seed)
+    base = rng.lognormal(0.0, 1.0, size=n_genes)
+    a = np.tile(base, (n_per, 1))
+    b = np.tile(base, (n_per, 1))
+    b[:, :n_markers] = 0.0
+    exp = pd.DataFrame(np.vstack([a, b]), index=[f"C{i}" for i in range(2 * n_per)],
+                       columns=[f"g{i}" for i in range(n_genes)])
+    return {"cell_exp": exp}, np.r_[np.zeros(n_per, bool), np.ones(n_per, bool)]
+
+
+class TestDropoutAndAmbient:
+    def test_ambient_is_a_share_of_the_library(self):
+        """The soup takes ambient_frac of each library and the counts of the cell itself the rest, so the
+        mean depth does not grow with ambient_frac (it grew by 1 + ambient_frac)."""
+        from iscc.data.rna import scRNA
+        cd = _plain_cell_data(600)
+        tot = {a: scRNA(protocol="10x", n_cells=600, seed=4, ambient_frac=a, doublet_rate=0.0,
+                        depth_batch_sigma=0.0).run(cd).observed_counts.values.sum(axis=1).mean()
+               for a in (0.0, 0.2)}
+        assert tot[0.2] == pytest.approx(tot[0.0], rel=0.02)
+
+    def test_dm_concentration_is_the_fitted_one(self):
+        """count_model="dm" at the 10x preset spreads the counts of a cell like the NB does; the old
+        concentration of 50 put about three quarters of them in 50 genes."""
+        from iscc.data.rna import PROTOCOL_PRESETS, scRNA
+        assert PROTOCOL_PRESETS["10x"]["kappa"] == 1500.0
+        cd = _plain_cell_data(300, n_genes=2000, seed=2)
+        share = {}
+        for model in ("nb", "dm"):
+            X = scRNA(protocol="10x", n_cells=300, seed=6, count_model=model).run(cd).observed_counts.values
+            share[model] = np.median(np.sort(X, axis=1)[:, -50:].sum(1) / X.sum(1))
+        assert share["dm"] < share["nb"] + 0.05
+
+    def test_presets_add_no_dropout(self):
+        """UMI counts carry no zeros beyond the negative binomial, so no preset draws a dropout
+        (the 10x preset used to set dropout_mid=1.5 by hand)."""
+        from iscc.data.batch import RNABatchHyperParams
+        from iscc.data.rna import PROTOCOL_PRESETS, scRNA
+        assert all(p["dropout_mid"] == 0.0 for p in PROTOCOL_PRESETS.values())
+        assert RNABatchHyperParams().dropout_mid == 0.0
+        assert scRNA(protocol="10x").hypers.dropout_mid == 0.0
+
+    def test_dropout_is_keyed_to_everything_in_the_droplet(self):
+        """A gene the cell does not express still holds ambient molecules; dropout treats them as
+        it treats the molecules of the cell at the same expected count, instead of deleting them all."""
+        from iscc.data.batch import Batch, RNABatchHyperParams
+        h = RNABatchHyperParams(ambient_frac=0.2, dropout_mid=1.5, dropout_shape=1.0)
+        b = Batch(h, seed=1).realize(["g0", "g1"], np.array([1.0, 1.0]))
+        comp = np.array([[0.0, 1.0]])                    # the cell does not express g0
+        lib = np.array([20.0])
+        _, p_drop = b.apply_dropout(np.ones((1, 2), dtype=int), comp, lib)
+        mu = np.array([0.2 * 20 * 0.5, 0.8 * 20 + 0.2 * 20 * 0.5])   # cell + ambient expected counts
+        assert np.allclose(p_drop[0], 1.0 / (1.0 + mu / 1.5))
+        assert p_drop[0, 0] < 0.5                        # 2 ambient UMIs expected: mostly kept
+
+    @pytest.mark.parametrize("dropout_mid", [0.0, 1.5])
+    def test_ambient_counts_reach_cells_that_do_not_express_the_gene(self, dropout_mid):
+        """The marker share of population B follows the ambient fraction, with or without dropout.
+        With dropout keyed to the expression of the cell alone it stayed at 0 at every ambient fraction."""
+        from iscc.data.rna import scRNA
+        cd, is_b = _two_population_cell_data()
+        share = {}
+        for amb in (0.02, 0.2):
+            X = scRNA(protocol="10x", n_cells=600, seed=3, ambient_frac=amb, doublet_rate=0.0,
+                      dropout_mid=dropout_mid).run(cd, cell_subset=cd["cell_exp"].index).observed_counts.values
+            share[amb] = X[is_b, :20].sum() / X[is_b].sum()
+        assert share[0.2] > 0.002                        # B's marker UMIs are ambient, and survive
+        assert share[0.2] > 4 * share[0.02]              # and they scale with the ambient fraction

@@ -255,10 +255,12 @@ xenobiotic metabolism as a proxy), the rest on random human genes, with the grow
 distribution and the same `max_log_fold` bound. What the genotype and the niche do to a gene is read
 off the growth genes. Pass it as `gene_lift` to `scRNA.run` (chunked, sparse counts) and `Visium.run`
 (per-type pooling).
-On human genes pass `scRNA(dropout_mid=0)`: at the 10x preset's midpoint of 1.5 UMIs the logistic
-dropout deletes most of a cell's 35,061 genes (355 genes per cell at 2,300 UMIs, against 1,313 at 3,650
-without it), and UMI counts are not zero-inflated beyond the negative binomial (Svensson 2020); the run
-warns otherwise.
+The scRNA presets add no dropout, which suits the human genes: a logistic dropout midpoint is in
+counts per gene, so a midpoint of 1.5 UMIs deletes most of the 35,061 genes of a cell (410 genes per
+cell at 1,913 UMIs, against 1,523 at 3,494 without it, on 3,019 cells of an arm-genome tumour at the
+10x preset), and UMI counts are not zero-inflated beyond the negative binomial (Svensson 2020). A run
+on human genes with `dropout_mid > 0` warns. Over the human genes the 10x preset gives the zero
+fraction of PBMC3k within 0.02 at every mean.
 
 The layer emits the 35,061 GRCh38-2020-A genes that lie on the 39 modelled arms (chrX, chrY, chrM, the
 acrocentric short arms and scaffolds are not modelled). Each takes the copy number per homolog of the

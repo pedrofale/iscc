@@ -399,11 +399,13 @@ class RNABatchHyperParams:
         NB overdispersion phi (var = mu + phi*mu^2); used only by the "nb" count model
         (phi <= 0 collapses to Poisson).
     ambient_frac : float
-        Fraction of the library that is ambient ("soup") contamination.
+        Fraction of the library that is ambient ("soup") contamination. The soup is a share of
+        the library, not counts on top of it, so the mean library stays ``mu_lib``.
     doublet_rate : float
         Fraction of barcodes that are doublets (two cells merged).
     dropout_mid : float
-        Logistic dropout midpoint in expected-count space (0 disables dropout).
+        Logistic dropout midpoint in expected-count space: the expected count of a gene in the
+        droplet, ambient molecules included (0, the default, disables dropout).
     dropout_shape : float
         Logistic dropout steepness (active only when dropout_mid > 0).
     well_sigma : float
@@ -425,15 +427,17 @@ class RNABatchHyperParams:
         Dirichlet concentration for the "dm" count model only (large kappa ->
         multinomial/Poisson-like, small kappa -> lumpy over-dispersed proportions).
     """
-    # mu_lib / sigma_lib CALIBRATED to real 10x PBMC3k (`estimate(sc.datasets.pbmc3k())`) — the
-    # scale-free library-size magnitudes transfer. `dispersion` and the dropout curve are NOT taken
-    # from PBMC3k: they are gene-set / cell-type-heterogeneity dependent (PBMC's fit ~0.6 is inflated
-    # by cross-cell-type variance unreachable by a clonal tumour), so iscc-scale values are used.
+    # mu_lib / sigma_lib CALIBRATED to real 10x PBMC3k (`estimate_rna(sc.datasets.pbmc3k())`) — the
+    # scale-free library-size magnitudes transfer. `dispersion` is the NB dispersion WITHIN cell types
+    # of PBMC3k (0.345 by `estimate_rna`; pooling all cells gives 0.61, which also holds the variance
+    # between types, and a tumour draws its own cell types on top). Dropout is off: within types the
+    # NB alone reproduces the PBMC3k zero fraction at every mean, so UMI counts leave no zeros for a
+    # dropout curve to explain (Svensson 2020). `kappa` is the PBMC3k fit of the 10x preset (see rna.py).
     protocol: str = "10x"
     sigma_batch: float = 0.10
     mu_lib: float = 2400.0      # real PBMC3k ~2,367 UMIs/cell
     sigma_lib: float = 0.43     # real PBMC3k 0.431
-    dispersion: float = 0.30
+    dispersion: float = 0.35
     ambient_frac: float = 0.05
     doublet_rate: float = 0.05
     dropout_mid: float = 0.0
@@ -443,7 +447,7 @@ class RNABatchHyperParams:
     n_plates: int = 0           # 0 = as many plates as the cells need
     plate_sigma: float = 0.0    # 0 = no shared plate depth offset (default: off)
     depth_batch_sigma: float = 0.05
-    kappa: float = 50.0
+    kappa: float = 1500.0
 
     def to_dict(self):
         return asdict(self)
@@ -536,21 +540,47 @@ class Batch:
             )
         return COUNT_MODELS[count_model](self.rng, comp, lib, self)
 
+    def _soup_share(self):
+        return min(max(float(self.h.ambient_frac), 0.0), 1.0)
+
+    def own_library(self, lib):
+        """The part of each library that is the molecules of the cell itself: ``(1 - ambient_frac) * lib``.
+
+        The ambient soup is a share of the library (``add_ambient`` draws the rest), so the expected
+        total of a cell stays ``lib`` whatever ``ambient_frac`` is, as in a real droplet, whose
+        observed library holds both.
+        """
+        return np.asarray(lib, dtype=float) * (1.0 - self._soup_share())
+
+    def _ambient_mu(self, lib):
+        """Expected ambient counts per cell and gene: ``ambient_frac * lib_c`` spread over the soup."""
+        return (self._soup_share() * np.asarray(lib, dtype=float))[:, None] * self.ambient_profile[None, :]
+
     def add_ambient(self, counts, lib):
-        """Add ambient contamination: Poisson counts from the batch soup profile."""
+        """Add ambient contamination: Poisson counts from the batch soup profile, ``ambient_frac`` of
+        each library ``lib`` (the counts of the cell itself are drawn on ``own_library(lib)``)."""
         if self.h.ambient_frac <= 0:
             return counts
-        amb_mu = (self.h.ambient_frac * lib)[:, None] * self.ambient_profile[None, :]
-        return counts + self.rng.poisson(amb_mu)
+        return counts + self.rng.poisson(self._ambient_mu(lib))
 
     def apply_dropout(self, counts, comp, lib):
         """Optional Splatter-style logistic dropout (zero-inflation), keyed to mean count.
+
+        The count of a gene in a droplet is zeroed with probability
+        ``1 / (1 + (mu / dropout_mid) ** dropout_shape)``, where ``mu`` is the expected count of the
+        gene in the droplet: the molecules of the cell plus the ambient ones. Dropout acts on every
+        molecule in the droplet, so ambient counts survive it as often as the counts of the cell at
+        the same expected count. Keying it to the expression of the cell alone would delete the
+        ambient counts of every gene the cell does not express.
 
         Returns (counts, p_drop). `p_drop` is None when dropout is disabled.
         """
         if self.h.dropout_mid <= 0:
             return counts, None
-        mu = np.maximum(lib[:, None] * comp, 1e-12)
+        mu = self.own_library(lib)[:, None] * comp
+        if self.h.ambient_frac > 0:
+            mu = mu + self._ambient_mu(lib)
+        mu = np.maximum(mu, 1e-12)
         p_drop = 1.0 / (1.0 + np.exp(self.h.dropout_shape * (np.log(mu) - np.log(self.h.dropout_mid))))
         keep = self.rng.random(counts.shape) >= p_drop
         return counts * keep, p_drop

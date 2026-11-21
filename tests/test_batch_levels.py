@@ -37,8 +37,8 @@ def _fits(n_tumours=7, ambient=True, n_patients=12):
 
 def _with_range(f, lo=0.03, hi=0.11):
     f = dict(f)
-    f["ambient_range"] = dict(rho_low=lo, rho_high=hi, ambient_frac_low=lo / (1 - lo),
-                              ambient_frac_high=hi / (1 - hi), source="test")
+    f["ambient_range"] = dict(rho_low=lo, rho_high=hi, ambient_frac_low=lo,
+                              ambient_frac_high=hi, source="test")
     return f
 
 
@@ -160,7 +160,7 @@ def test_unfitted_ambient_needs_the_registered_range_in_the_fits():
     with pytest.raises(RuntimeError, match="registered range"):
         BL.level_settings(f, PATIENTS, "balanced", "fitted")
     s = BL.level_settings(_with_range(f), PATIENTS, "balanced", "fitted")
-    assert all(0.03 / 0.97 <= kw["ambient_frac"] <= 0.11 / 0.89 for kw in s["batches"])
+    assert all(0.03 <= kw["ambient_frac"] <= 0.11 for kw in s["batches"])   # the soup share itself
     assert all(src.startswith("drawn") for src in s["batch_ambient_source"])
     # one draw per batch, the same at every level that varies the ambient fraction
     arm = BL.level_settings(_with_range(f), PATIENTS, "balanced", "ambient")
@@ -168,7 +168,7 @@ def test_unfitted_ambient_needs_the_registered_range_in_the_fits():
     assert len({kw["ambient_frac"] for kw in s["batches"]}) == len(s["batches"])
     # with nothing fitted, the shared level sits at the middle of the range
     sh = BL.level_settings(_with_range(f), PATIENTS, "balanced", "shared")
-    assert sh["batches"][0]["ambient_frac"] == pytest.approx(0.07 / 0.93)
+    assert sh["batches"][0]["ambient_frac"] == pytest.approx(0.07)
 
 
 def test_partly_fitted_ambient_mixes_fits_and_draws():
