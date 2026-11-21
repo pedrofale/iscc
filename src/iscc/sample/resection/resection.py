@@ -29,10 +29,10 @@ class _CellDataGuard:
     (``make_cell_data`` rebinds ``cell_data`` to a fresh dict rather than mutating the old one), and
     the tumour keeps whatever it had before the cut. That includes the stale flag
     ``grow(materialize=False)`` sets: ``make_cell_data`` clears it, and the restored tables are as
-    stale as they were.
+    stale as they were. The flag that tells a whole-tumour table from a section's is restored too.
     """
 
-    __slots__ = ("tumor", "_had", "_saved", "_stale")
+    __slots__ = ("tumor", "_had", "_saved", "_stale", "_whole")
 
     def __init__(self, tumor):
         self.tumor = tumor
@@ -41,11 +41,14 @@ class _CellDataGuard:
         self._had = hasattr(self.tumor, "cell_data")
         self._saved = getattr(self.tumor, "cell_data", None)
         self._stale = getattr(self.tumor, "_cell_data_stale", None)
+        self._whole = getattr(self.tumor, "_cell_data_whole", None)
         return self
 
     def __exit__(self, exc_type, exc, tb):
         if self._stale is not None:
             self.tumor._cell_data_stale = self._stale
+        if self._whole is not None:
+            self.tumor._cell_data_whole = self._whole
         if self._had:
             self.tumor.cell_data = self._saved
         else:                                    # nothing was installed before: leave it that way

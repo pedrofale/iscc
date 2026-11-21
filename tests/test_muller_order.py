@@ -72,3 +72,24 @@ def test_state_map_has_a_legend_of_the_states_present():
     t.grow(n_steps=30, seed=3)
     labels = [x.get_text() for x in t.plot_tissue().get_legend().get_texts()]
     assert "stroma" in labels and "cancer in duct" in labels
+
+
+def test_grid_plot_rebuilds_cell_data_only_when_it_is_not_the_whole_tumour(monkeypatch):
+    import matplotlib
+    matplotlib.use("Agg")
+    from conftest import GENOME_PARAMS, SELECTION_PARAMS, CANCER_CELL_PARAMS, DEME_PARAMS
+    from iscc.sample import Resection
+    from iscc.tumor import GenotypeTumor
+    t = GenotypeTumor(seed=3, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
+                      cancer_cell_params=CANCER_CELL_PARAMS, deme_params=DEME_PARAMS,
+                      spatial_params={"grid_size": 12}, max_cells=8)
+    t.grow(n_steps=40, seed=3)
+    assert t.cell_data["cell_type"].shape[0] < t.get_tumor_size()     # a thinned whole tumour
+    calls = []
+    make = t.make_cell_data
+    monkeypatch.setattr(t, "make_cell_data", lambda **kw: calls.append(kw) or make(**kw))
+    t.plot_grid()
+    assert calls == []
+    Resection(t).slice(depth_frac=0.5, install=True)
+    t.plot_grid()
+    assert len(calls) == 2 and calls[-1] == {}

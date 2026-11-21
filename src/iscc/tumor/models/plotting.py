@@ -351,7 +351,8 @@ class PlottingMixin:
     def plot_grid(self, color=None, ax=None, **kwargs):
         """Plot the spatial deme grid, colouring each deme by a per-cell attribute.
 
-        Rebuilds the per-cell data if stale, then draws the grid coloured by ``color``
+        Rebuilds the per-cell data if it is missing, stale or a section's, then draws the grid
+        coloured by ``color``
         (default the dominant clone / cell type). When the metastatic compartment is enabled
         and no explicit ``ax`` is passed, both the primary and met grids are drawn side by
         side with a shared clone colormap.
@@ -371,7 +372,7 @@ class PlottingMixin:
         """
         from .. import viz
         if (self.cell_data is None or getattr(self, "_cell_data_stale", False)
-                or self.cell_data["cell_type"].shape[0] != self.get_tumor_size()):
+                or not getattr(self, "_cell_data_whole", True)):
             self.make_cell_data()
         # With the metastatic deposit enabled, `plot_grid()` shows BOTH grids (primary + met) side by
         # side with a shared clone colormap, so the same clone is the same colour across compartments.
@@ -387,7 +388,7 @@ class PlottingMixin:
         by the stage-dominant driver; pass ``min_freq`` to also merge below-threshold clones."""
         from .. import viz
         if (self.cell_data is None or getattr(self, "_cell_data_stale", False)
-                or self.cell_data["cell_type"].shape[0] != self.get_tumor_size()):
+                or not getattr(self, "_cell_data_whole", True)):
             self.make_cell_data()
         if by_stage:
             colors, present = self._stage_colors()

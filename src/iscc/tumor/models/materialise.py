@@ -1206,6 +1206,8 @@ class MaterialiseMixin:
                     Z, index=idx, columns=list(P.dictionary.program_names))
             self.program_truth = P.truth()
         self._cell_data_stale = False
+        # Whether the tables stand for the whole tumour (possibly thinned to max_cells) or a section.
+        self._cell_data_whole = region is None and depth_frac is None
         return self.cell_data
 
     def ensure_cell_data(self, **kwargs):
