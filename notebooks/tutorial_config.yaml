@@ -18,6 +18,7 @@ selection_params:
   prop_driver: 0.04
   prop_dispersal: 0.0
   prop_immune_resistance: 0.02
+  prop_treatment_resistance: 0.0     # as the paper regime; the package default (0.1) pre-seeds resistance
   prop_breach: 0.002
   breach_effects: 1.01
   prop_stromal_survival: 0.002
