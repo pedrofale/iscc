@@ -18,7 +18,7 @@ class Selection(object):
                  resistance_state_cost=0.0, resistance_state_induction=0.0,
                  resistance_state_relax=0.0,
                  selection_mode="gene", s_arm=None,
-                 max_ploidy=6, max_cn=12, max_nullisomy=2, max_mut_drivers=1000, rng=None,
+                 max_ploidy=6, max_cn=12, max_nullisomy=0, max_mut_drivers=1000, rng=None,
                  epistasis_params=None, dependency_params=None, layout_seed=None,
                  segment_drivers=None, ):
         # Seeded generator so the driver/resistance layout is reproducible. This ``rng`` is used
@@ -179,6 +179,10 @@ class Selection(object):
         # Fixed about viability
         self.max_ploidy = max_ploidy
         self.max_cn = max_cn
+        # A segment is a chromosome arm or more, so a cell with no copy of one has lost essential
+        # genes: by default no segment may reach zero copies, as CINner's bound_homozygosity (default
+        # 0) allows no bin at zero copies. Allowing two let dosage selection sweep the loss of both
+        # copies of a suppressor-rich arm through whole tumours (97% of cancer cells, 15q or 16).
         self.max_nullisomy = max_nullisomy
         self.max_mut_drivers = max_mut_drivers
 

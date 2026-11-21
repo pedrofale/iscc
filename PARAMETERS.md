@@ -157,14 +157,14 @@ knob defaults to its inert value; `Selection.resistance_state_on` is then `False
 CINner-style hard limits on what genome is compatible with life. A daughter breaching **any** of
 them is not born: the division is consumed but yields no cell (`Selection.update_viability`;
 enforced at birth in **both** engines — `GenotypeTumor._is_viable` and `Deme.apply_event`). The defaults
-are deliberately loose — the exact engine never reaches them at the shipped defaults, so they only
-matter once you tighten them or push amplification/deletion hard.
+are loose, except `max_nullisomy`: the exact engine never reaches the other three at the shipped
+defaults, so they only matter once you tighten them or push amplification/deletion hard.
 
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|
 | `max_ploidy` | 6 | 3–8 | tight (≲ 3) → caps CIN; near-diploid tumour, WGD impossible |
 | `max_cn` | 12 | 6–20 | tight → caps focal amplification; interacts with `amp_prob` |
-| `max_nullisomy` | 2 | 0–`n_segments` | `0` → **any** fully deleted segment is fatal; loose → whole-genome loss survives |
+| `max_nullisomy` | 0 | 0–`n_segments` | the number of segments a viable cell may hold at zero copies. `0` (default, as CINner's `bound_homozygosity`): a segment is a chromosome arm or more, and a cell without any copy of one has lost essential genes. Above 0, dosage selection sweeps the loss of both copies of suppressor-rich segments (97% of the cancer cells of a paper-regime tumour at 2) |
 | `max_mut_drivers` | 1000 | 1–(`prop_driver` × `n_genes`) + 4 | tight → caps the driver LOAD; `0` → any driver is fatal. **Config-set** (default 1000 = off) so it does not disturb e.g. hypermutation studies or the R14 MHN benchmarks; the cascade configs set it ~12 |
 
 !!! note "`max_mut_drivers` = distinct driver *genes* PLUS activated dissemination programs (R15)"
@@ -185,11 +185,11 @@ matter once you tighten them or push amplification/deletion hard.
     `0 > 1000` forever. Now covered by `test_max_mut_drivers_limit_binds` and
     `test_n_mutated_drivers_counts_distinct_genes_not_mutated_copies`.
 
-!!! note "`max_nullisomy` binds at the defaults under tau-leaping"
-    With the default 5-segment genome, tau-leaping reaches sizes where a daughter has deleted >2
-    segments outright, so the limit fires and default-config **tau** trajectories are slightly
-    tighter than before viability was enforced. Default-config **exact** trajectories are
-    unchanged (the gate never fires there).
+!!! note "`max_nullisomy` binds at the defaults"
+    At the default 0, every daughter that loses the last copy of a segment is not born, under both
+    engines. Real homozygous deletions are focal; `iscc` has no focal copy-number events, so a
+    segment at zero copies would remove a whole chromosome arm from the DNA and the expression of
+    the cell.
 
 ### Therapy — `Treatment` ops (`chemotherapy`, `targeted_therapy`, `immunotherapy`)
 

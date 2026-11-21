@@ -296,14 +296,10 @@ def test_reproducer_tight_ploidy_actually_binds():
     assert all(t.selection.update_viability(gs) == 1 for gs in living)
 
 
-def test_default_limits_are_a_noop_for_the_exact_engine():
-    """At the shipped defaults the limits (ploidy 6 / cn 12 / nullisomy 2 / drivers 1000) are far
-    out of reach for the exact engine, so the gate never fires and no existing baseline can move.
-
-    This does NOT hold for tau-leaping, which reaches ~3x the size in the same number of steps and
-    does occasionally delete >2 of the 5 default segments outright -- see
-    test_default_nullisomy_can_bind_under_tau.
-    """
+def test_default_limits_reject_only_daughters_without_a_copy_of_a_segment():
+    """At the shipped defaults the ploidy, copy-number and driver limits (6 / 12 / 1000) are out of
+    reach for the exact engine, so the only daughters the gate rejects are those that lost the last
+    copy of a segment (max_nullisomy 0, as CINner's bound_homozygosity)."""
     rejected = []
     real = GenotypeTumor._is_viable
 
@@ -324,4 +320,5 @@ def test_default_limits_are_a_noop_for_the_exact_engine():
             assert t.get_cancer_size() > 0
     finally:
         GenotypeTumor._is_viable = real
-    assert rejected == [], f"viability gate fired at shipped defaults: {rejected}"
+    assert all(gs["nullisomy_count"] > 0 for gs in rejected), (
+        f"a limit other than nullisomy fired at shipped defaults: {rejected}")
