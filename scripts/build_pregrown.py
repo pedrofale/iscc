@@ -83,12 +83,30 @@ def _grow(seed, kw, scale, target, layout_seed=None):
     return t
 
 
+def _cancer_shares(t):
+    """Over the cancer cells: the share with a doubled genome, the share with a segment at copy number
+    0, and the mean ploidy (segments weighted by their genes)."""
+    import numpy as np
+    sizes = np.asarray(t.selection.segment_sizes, dtype=float)
+    n = wgd = null = ploidy = 0.0
+    for g, c in t.genotypes_counts.items():
+        if c <= 0 or not t._is_cancer(g):
+            continue
+        rep = t.genotypes[g]
+        cns = np.asarray(rep.genome_summary["seg_cns"], dtype=float)
+        n += c
+        wgd += c * bool(rep.is_wgd)
+        null += c * bool((cns == 0).any())
+        ploidy += c * float((cns * sizes).sum() / sizes.sum())
+    return {"wgd_share": round(wgd / n, 3), "nullisomic_share": round(null / n, 3),
+            "mean_ploidy": round(ploidy / n, 2)}
+
+
 def _summary(t, name, seconds):
     d = t.diagnose(verbose=False)
-    wgd = t.cell_data.get("cell_wgd")
     return {"name": name, "cancer_cells": int(t.get_cancer_size()), "generations": round(t.time, 1),
             "reached_target": bool(t.reached_target), "genotypes": len(t.genotypes),
-            "grow_s": round(seconds), "wgd_share": None if wgd is None else round(float(wgd["is_wgd"].mean()), 3),
+            "grow_s": round(seconds), **_cancer_shares(t),
             "flags": [f for f, v in getattr(d, "flags", {}).items() if v]}
 
 
