@@ -1851,7 +1851,7 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         """Load a tumour saved with [`save`][iscc.tumor.GenotypeTumor.save].
 
         The file is a pickle, which can run code when it is read: load only files you trust, such
-        as your own or the [`pregrown`](../pregrown/index.md) tumours, whose checksums ``iscc``
+        as your own or the [pregrown tumours](index.md#pregrown-tumors), whose checksums ``iscc``
         verifies. A file saved with another version of ``iscc`` loads with a warning, or fails
         with an error naming the version that saved it.
 

@@ -145,6 +145,12 @@ nav:
       - Cohort:
           - Cohort: reference/Cohort.md
           - grow_tumor: reference/grow_tumor.md
+      - Pregrown:
+          - ductal: reference/pregrown_ductal.md
+          - neutral: reference/pregrown_neutral.md
+          - sweeps: reference/pregrown_sweeps.md
+          - cin: reference/pregrown_cin.md
+          - cohort: reference/pregrown_cohort.md
       - Treatment:
           - Chemotherapy: reference/Chemotherapy.md
           - TargetedTherapy: reference/TargetedTherapy.md
