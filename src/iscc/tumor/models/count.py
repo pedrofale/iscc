@@ -63,11 +63,14 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
 
     Parameters
     ----------
-    config : str or pathlib.Path, optional
-        Path to a YAML config that defines all of the parameter blocks below (keys
+    config : str, pathlib.Path or dict, optional
+        A YAML config, or the dict it holds, that defines the parameter blocks below (keys
         ``genome_params``, ``selection_params``, ``deme_params``, ``spatial_params``,
-        ``cell_params`` and any optional layers). When given it **overrides** the
-        individual arguments. This is the recommended entry point.
+        ``cell_params``, any optional layers and the run settings). This is the recommended entry
+        point. A block passed beside it is merged into the config's block key by key (nested
+        dicts merge the same way), so ``selection_params={"driver_effects": 1.1}`` changes one
+        value of the config; a run setting passed explicitly (``update_mode``, ``tau``, ...)
+        replaces the config's.
     seed : int, optional
         EVOLUTION seed (default 42): drives the per-run stochastic dynamics and the
         spatial seeding. Two runs differing only in ``seed`` are two patients with the
@@ -220,18 +223,18 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
                  epithelial_cell_params=None, stromal_cell_params=None, immune_cell_params=None,
                  host_cell_params=None,
                  genome_mode="abstract", genome_spec=None,
-                 update_mode="exact", tau=1.0, snapshot_every=1, microenv_params=None,
-                 layout_seed=None, expression_params=None, coarsen_passengers=False,
+                 update_mode=None, tau=None, snapshot_every=None, microenv_params=None,
+                 layout_seed=None, expression_params=None, coarsen_passengers=None,
                  max_cells=None, germline_params=None, founder_mutations=None,
-                 spatial_snapshot_every=0, spatial_snapshot_budget=5_000_000):
+                 spatial_snapshot_every=None, spatial_snapshot_budget=None):
         r, p = resolve_parameters(
             config, genome_mode, genome_spec,
-            RunSettings(update_mode=update_mode, tau=tau, snapshot_every=snapshot_every,
-                        spatial_snapshot_every=spatial_snapshot_every,
-                        spatial_snapshot_budget=spatial_snapshot_budget,
-                        coarsen_passengers=coarsen_passengers, max_cells=max_cells,
-                        germline_params=germline_params, founder_mutations=founder_mutations,
-                        layout_seed=layout_seed),
+            dict(update_mode=update_mode, tau=tau, snapshot_every=snapshot_every,
+                 spatial_snapshot_every=spatial_snapshot_every,
+                 spatial_snapshot_budget=spatial_snapshot_budget,
+                 coarsen_passengers=coarsen_passengers, max_cells=max_cells,
+                 germline_params=germline_params, founder_mutations=founder_mutations,
+                 layout_seed=layout_seed),
             ModelBlocks(genome=genome_params, selection=selection_params, cancer=cancer_cell_params,
                         deme=deme_params, spatial=spatial_params,
                         epithelial=epithelial_cell_params, stromal=stromal_cell_params,
