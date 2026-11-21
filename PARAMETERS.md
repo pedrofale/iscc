@@ -245,7 +245,7 @@ resolution traded between the detail of the dynamics and their cost; the layer w
 | `snp_window` | 1000 bp | 300–3000 | the 3' stretch of a gene a 3' library covers; only heterozygous SNPs there get allele counts |
 | `snp_coverage` | 0.1 | 0.01–0.5 | probability a UMI of a gene covers a given SNP in its window (about read length / window). A preset, not fitted |
 | `snp_concentration` | unset (binomial) | ≳ 10 | beta-binomial concentration of the haplotype split at a SNP (allelic-expression noise) |
-| `Visium(kappa=)` on human genes | `HUMAN_VISIUM_KAPPA` = 300,000 | ≥ 300,000 | by indirect inference: `estimate_visium` gives 82,165 on the in-tissue spots of 10x's V1_Breast_Cancer_Block_A_Section_1 (over the layer's genes), and a simulated paper-regime section reproduces that estimate within 1% from an input of 300,000 up (the direct value, used as input, over-disperses the section to 55,416, because the simulated tissue already carries the heterogeneity). The default 50 is the growth-gene scale and piles each spot's counts onto a few dozen genes, so `write_visium` warns |
+| `Visium(kappa=)` on human genes | `HUMAN_VISIUM_KAPPA` = 300,000, the assay's default | ≥ 300,000 | by indirect inference: `estimate_visium` gives 82,165 on the in-tissue spots of 10x's V1_Breast_Cancer_Block_A_Section_1 (over the layer's genes), and a simulated paper-regime section reproduces that estimate within 1% from an input of 300,000 up (the direct value, used as input, over-disperses the section to 55,416, because the simulated tissue already carries the heterogeneity). Below 1,000 each spot's counts pile onto a few genes, so `write_visium` warns |
 
 `layer.expression(tumor)` (`HumanExpression`) is the realistic path: each cell type takes its Human
 Breast Cell Atlas baseline (epithelial = luminal epithelium, stromal = fibroblasts, immune = T/NK cells,
@@ -523,6 +523,16 @@ A further saving is chosen by the caller.
 | Knob | Default | Valid range | Outside the range |
 |---|---|---|---|
 | `make_cell_data(layers=...)`, also on `Resection.slice` / `dissociate` | `None` (every table) | table names (`"cell_exp"`, `"cell_snv"`, `"cell_cnv"`, `"cell_rna_vaf"`, `"cell_snv_p"`, `"cell_snv_m"`, `"cell_exp_p"`, `"cell_exp_m"`, `"cell_rna_baf"`) and/or assay names standing for the tables that assay reads (`"visium"` and `"imaging"`: expression; `"scrna"`: expression, SNVs and RNA VAF; `"scdna"`: SNVs and copy number). The small per-cell tables are always built. Values are byte-identical to a full build | an unknown name raises |
+
+### Visium spots and depth — `iscc.data.Visium`
+A deme is ~50 µm, so the default spot is Visium v1's: 55 µm across at a 100 µm pitch.
+The capture field is normalised over the tissue spots, so a tissue spot holds `mu_counts` UMIs on average whatever share of the slide the section covers.
+
+| Knob | Default | Valid range | Outside the range |
+|---|---|---|---|
+| `spot_pitch` / `spot_radius` | 2.0 / 0.55 demes | radius below half the pitch (spots apart, as on a slide) | a radius of 1 (the old default) made a spot as wide as the pitch: it pooled three times the cells of a 55 µm spot (~40 at 12 cells per deme) and tiled 91% of the tissue instead of 27% |
+| `mu_counts` | 20,000 UMIs per tissue spot | ~10³–10⁵ | with spot swapping on it is the depth before swapping, and the tissue keeps a share of it: 0.96 on 10x's breast section (76% of the slide) at the fitted swap, 0.90 for a section on a quarter of the slide, whose distal bleed lands mostly off the tissue. `estimate_visium` given a raw matrix with all spots returns this depth |
+| `kappa` (`count_model="dm"`) | 300,000 | ≳ 10⁵ | it inflates every gene's variance by (N + κ)/(1 + κ) at a spot depth N, whatever the gene set, so unlike the DNA concentration it is not rescaled by the number of genes; 50 (the old default) inflated it ~390-fold at 20,000 UMIs, and over 6,000 growth genes a spot detected 281 genes instead of ~4,700 and put 77% of its counts in 50 of them |
 
 ---
 

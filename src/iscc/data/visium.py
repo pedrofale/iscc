@@ -7,15 +7,17 @@ Built like the scRNA and DNA modalities: an `Assay` + a `VisiumBatch` realizatio
 Generative model for spot *s*, gene *g*:
 
   1. **Spot layout** — Visium-like hexagonal spots over the 2D section (`spot_pitch` spacing,
-     `spot_radius` capture radius, ~1-10 cells/spot). iscc is 2D (single section, no z).
+     `spot_radius` capture radius; the defaults are Visium v1's 55 um spots at a 100 um pitch, with a
+     deme of ~50 um). iscc is 2D (single section, no z).
   2. **Spot->cell aggregation** — pool the `cell_exp` of cells whose `cell_crd` falls in the spot;
      record per-spot ground truth (n_cells, member cell ids, dominant clone + clone fractions).
   3. **Lateral mRNA diffusion** — a Gaussian kernel (`diffusion_sigma`) bleeds expression to
      neighbouring spots (the spatial-mixing artifact spatial-deconvolution methods fight).
   4. **Spatially-correlated capture-efficiency field** — the HEADLINE piece: a smooth positive
      random field over the spot coords (squared-exponential GP, `field_lengthscale` / `field_sigma`)
-     times an `edge_sigma` tissue-boundary falloff, scaling the per-spot library so the realized
-     depth has positive spatial autocorrelation (Moran's I > 0). Lives in `VisiumBatch`.
+     times an `edge_sigma` tissue-boundary falloff, normalised to mean 1 over the tissue spots and
+     scaling the per-spot library, so the realized depth has positive spatial autocorrelation
+     (Moran's I > 0) and a tissue spot holds `mu_counts` UMIs on average. Lives in `VisiumBatch`.
   5. **Layer shared with scRNA** — per-gene batch factor (`sigma_batch`), per-spot library
      (LogNormal `mu_counts`/`sigma_counts`), the pluggable NB/DM count draw (`COUNT_MODELS`),
      and ambient soup (`ambient_frac`).
@@ -74,8 +76,9 @@ class Visium(Assay):
 
     Any hyper-parameter below can be overridden explicitly, and ``None`` keeps the default. The
     defaults of the spot depth and the capture field (``mu_counts``, ``sigma_counts``,
-    ``field_lengthscale``, ``field_sigma``) were fitted to a 10x Visium breast-cancer section, and
-    the others are set by hand. Spot swapping (``bleed_rate``) is off by default, and ambient RNA
+    ``field_lengthscale``, ``field_sigma``, ``kappa``) were fitted to a 10x Visium breast-cancer
+    section, the spot geometry is Visium v1's, and the others are set by hand. Spot swapping
+    (``bleed_rate``) is off by default, and ambient RNA
     within each spot (``ambient_frac``, 0.05) is on. Aliases are accepted: ``n_reads`` maps
     onto ``mu_counts``, and a spot grid requested via ``n_spots_x`` / ``n_spots_y`` derives
     ``spot_pitch`` from ``grid_side`` at run time. The number of spots (and cells per spot)
@@ -94,12 +97,15 @@ class Visium(Assay):
     spot_pitch : float, default 2.0
         Spot centre-to-centre spacing (coordinate units); sets spot density / number of spots.
         Overridden at run time if ``n_spots_x`` / ``n_spots_y`` are given.
-    spot_radius : float, default 1.0
-        Spot capture radius: cells within this distance of a spot centre are pooled into it
-        (~1-10 cells / spot).
+    spot_radius : float, default 0.55
+        Spot capture radius: cells within this distance of a spot centre are pooled into it. With a
+        deme of ~50 um, 0.55 at the default pitch of 2.0 is the 55 um spot of Visium v1 at its
+        100 um pitch, and a spot pools about one deme's share of the section.
     mu_counts : float, default 20000.0
-        Mean per-spot library size (total UMIs / spot); ``ell_s ~ LogNormal(log mu_counts,
-        sigma_counts^2) × capture_field``.
+        Mean library size of a tissue spot (total UMIs / spot); ``ell_s ~ LogNormal(log mu_counts,
+        sigma_counts^2) × capture_field``, with the capture field at mean 1 over the tissue spots.
+        Ambient RNA is part of this library. With spot swapping on, it is the depth before swapping:
+        the tissue spots then keep less, since some of their counts land outside the tissue.
     sigma_counts : float, default 0.45
         Per-spot library-size LogNormal sd (spot-to-spot depth variation).
     field_lengthscale : float, default 18.0
@@ -130,9 +136,13 @@ class Visium(Assay):
         Per-gene batch-factor LogNormal sd, shared across spots (Splatter ``batch.facScale``).
     ambient_frac : float, default 0.05
         Fraction of each spot's library drawn as ambient "soup" contamination.
-    kappa : float, default 50.0
+    kappa : float, default 300000.0
         Dirichlet-multinomial concentration (only for ``count_model="dm"``); large -> ~
-        multinomial, small -> lumpy proportions.
+        multinomial, small -> lumpy proportions. It inflates every gene's variance by
+        ``(N + kappa) / (1 + kappa)`` at a spot depth ``N``, whatever the gene set, so a fitted value
+        applies to growth genes and human genes alike. The default is the human layer's
+        ``HUMAN_VISIUM_KAPPA``: the real section bounds the technical concentration from below
+        only.
     nb_dispersion : float, default 0.30
         Negative-binomial overdispersion phi (``var = mu + phi*mu^2``; only for
         ``count_model="nb"``).
@@ -256,7 +266,8 @@ class Visium(Assay):
         """The fixed 10x Visium v1 capture array: 78 x 64 hexagonally-packed spots (**4,992**).
 
         A real slide is a fixed grid of spots regardless of the tissue placed on it; ``spot_pitch``
-        sets the physical spacing (100 um in v1 = one coordinate unit at the default pitch)."""
+        sets the physical spacing (100 um in v1 = two coordinate units, i.e. demes of ~50 um, at the
+        default pitch)."""
         pitch = float(self.hypers.spot_pitch)
         n_cols, n_rows = V1_SPOT_COLS, V1_SPOT_ROWS
         row_dy = pitch * np.sqrt(3.0) / 2.0
@@ -471,7 +482,10 @@ class Visium(Assay):
             from .visium_background import bleed
             lib, comp, bled_in = bleed(lib, comp, spot_coords, self.hypers.bleed_rate,
                                        self.hypers.bleed_distal, self.hypers.bleed_sigma)
-        counts = self.batch.emit(comp, lib, count_model=self.count_model)
+        # the soup is a share of the library, not counts on top of it, so a tissue spot's mean depth
+        # stays mu_counts whatever ambient_frac is
+        soup = min(max(float(self.hypers.ambient_frac), 0.0), 1.0)
+        counts = self.batch.emit(comp, lib * (1.0 - soup), count_model=self.count_model)
         counts = self.batch.add_ambient(counts, lib).astype(int)
 
         # -- store outputs (DataFrames + ground truth) ---------------------------------

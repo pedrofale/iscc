@@ -11,14 +11,16 @@ estimation is closed-form / 1-D curve-fit — fast and simulation-free (ABC stay
 
 What is fit (and from what):
 
-    mu_counts          mean per-spot library size (total UMIs / spot)            (always)
+    mu_counts          mean depth of a tissue spot (total UMIs / spot); before   (always)
+                       spot swapping when a raw matrix fits the swap
     sigma_counts       NON-spatial (nugget) part of the per-spot log-library sd  (always)
     field_sigma        SPATIAL (autocorrelated) part of the per-spot log-library (always)
                        sd — the capture-field strength
     field_lengthscale  capture-field autocorrelation scale: squared-exponential   (always)
                        length-scale fit of the per-spot library-size residual
                        autocorrelation (Moran's-I correlogram / variogram range)
-    kappa (dm)         per-spot count overdispersion (DM concentration)           (always)
+    kappa (dm)         per-spot count overdispersion (DM concentration); a lower  (always)
+                       bound on the technical value, valid for any gene set
     nb_dispersion (nb) per-spot count overdispersion phi (NB)                     (count_model=nb)
     sigma_batch        per-gene cross-section log-fold-change scale               (needs >=2 sections)
 
@@ -49,7 +51,9 @@ are left out of that fit, because a spot just outside the tissue flag can still 
 diagnostics. The same raw matrix then fits ``edge_sigma`` (with ``edge_reference="tissue"``) from the
 tissue's outermost ring only, as the drop there beyond what the bleed predicts (``_fit_edge``):
 farther in, real depth keeps changing with the tissue itself, which one section cannot separate
-from biology.
+from biology. The swap carries part of the tissue's counts off it, so ``mu_counts``, the depth the
+assay draws before swapping, is then the observed tissue depth divided by the share the fitted swap
+leaves on this slide's tissue (``_tissue_retained``).
 
 numpy / scipy only (no JAX / R); stateless and config-driven.
 """
@@ -218,7 +222,11 @@ def _fit_count_overdispersion(counts, count_model):
       * NB: ``phi = <((y-mu)^2 - mu)/mu^2>`` (NB method-of-moments), median over spots.
 
     The section-mean composition stands in for the per-spot expectation; biological heterogeneity
-    inflates it, so this is an *effective* overdispersion, reported as such.
+    inflates it, so this is an *effective* overdispersion, reported as such: the fitted ``kappa``
+    bounds the technical concentration from below. It still applies to another gene set, since the
+    DM's ``R = (N + kappa) / (1 + kappa)`` holds for every gene whatever the number of genes. How
+    much heterogeneity it absorbs does depend on the genes: a few highly expressed genes carry more
+    of it than a whole transcriptome of mostly sparse genes, so a fit on a small gene set is lower.
     """
     total = counts.sum(axis=1)
     occ = total > 0
@@ -513,6 +521,29 @@ def _fit_edge(counts, coords, in_tissue, bleed_rate, bleed_distal, sigma_pitch):
     return dict(edge_sigma=e, observed_ring=obs, bleed_predicted_ring=pred0, n_ring=int(ring.sum()))
 
 
+def _tissue_retained(coords, in_tissue, bleed_rate, bleed_distal, sigma_pitch, edge_sigma=0.0):
+    """The mean depth of the tissue spots after spot swapping, as a share of their mean depth before.
+
+    The assay's model on this slide: a tissue at mean depth 1 (the capture field is normalised over the
+    tissue spots), with the falloff of ``edge_reference="tissue"`` on its outer spots, then the bleed of
+    [`bleed`][iscc.data.visium_background.bleed]. What the bleed carries off the tissue is the rest, so
+    the share is one minus the model's share of the slide's counts outside the tissue. Dividing the
+    observed tissue depth by it gives ``mu_counts``, the depth before swapping that the assay draws.
+    """
+    from scipy.spatial import cKDTree
+    from .visium_background import bleed_kernel
+    in_tissue = np.asarray(in_tissue, dtype=bool)
+    xy = coords / _pitch(coords)
+    src = in_tissue.astype(float)
+    if edge_sigma > 0 and in_tissue.any() and not in_tissue.all():
+        d_in = cKDTree(xy[~in_tissue]).query(xy[in_tissue])[0]
+        src[in_tissue] = 1.0 - edge_sigma * np.exp(-3.0 * (d_in - d_in.min()))
+        src[in_tissue] /= src[in_tissue].mean()
+    out = ((1.0 - bleed_rate) * src + bleed_rate * (1.0 - bleed_distal) * (bleed_kernel(xy, sigma_pitch) @ src)
+           + bleed_rate * bleed_distal * src.mean())
+    return float(out[in_tissue].mean())
+
+
 def estimate_visium(adata, *, count_model="dm", coords=None, section_labels=None,
                     occupied_fraction=None, in_tissue=None, bleed_min_dist=1.5):
     """Fit ``VisiumBatchHyperParams`` from a real Visium AnnData (MoM / curve-fit).
@@ -537,8 +568,13 @@ def estimate_visium(adata, *, count_model="dm", coords=None, section_labels=None
         overdispersion fits use the tissue spots only, and the spots outside the tissue fit
         SpotClean's spot-swapping model (``_fit_bleed``): ``bleed_rate``, ``bleed_distal`` and
         ``bleed_sigma`` become fitted (``ambient_frac`` and ``diffusion_sigma`` are set to 0), and
-        the fit is reported in ``diagnostics["bleed"]`` beside ``diagnostics["off_tissue"]``. Without
-        it, every spot informs the fits and no bleed is fit.
+        the fit is reported in ``diagnostics["bleed"]`` beside ``diagnostics["off_tissue"]``.
+        ``mu_counts`` is then the depth of a tissue spot before swapping: the observed mean depth of
+        the tissue spots divided by the share of it the fitted swap leaves on this slide's tissue
+        (``diagnostics["bleed"]["tissue_retained"]``), which is what the assay draws before it
+        swaps. Without the flag, every spot informs the fits, no bleed is fit, and ``mu_counts`` is
+        the observed mean depth; adding spot swapping to such a fit lowers the simulated tissue
+        depth below it.
     bleed_min_dist : float, default 1.5
         Spots outside the tissue nearer to it than this (in spot pitches) are left out of the bleed
         fit. On 10x's breast section the first ring alone pushes the bleeding rate to its bound
@@ -585,6 +621,14 @@ def estimate_visium(adata, *, count_model="dm", coords=None, section_labels=None
                     h["edge_reference"] = "tissue"
                     est.fitted += ["edge_sigma"]
                     est.diagnostics["edge"] = edge
+                # The tissue spots were counted after swapping, which carried part of their counts off
+                # the tissue; the assay draws the depth before it, so divide by the share they keep.
+                kept = _tissue_retained(coords_all, in_tissue, bl["bleed_rate"], bl["bleed_distal"],
+                                        bl["sigma_pitch"],
+                                        edge["edge_sigma"] if edge is not None else 0.0)
+                bl["tissue_retained"] = kept
+                bl["mu_counts_observed"] = float(h["mu_counts"])
+                h["mu_counts"] = float(h["mu_counts"]) / kept
                 est.hypers = VisiumBatchHyperParams(**h)
             return est
     if count_model not in ("dm", "nb"):

@@ -45,8 +45,11 @@ def _digest(vz):
     return hashlib.sha256(np.ascontiguousarray(vz.spot_counts.to_numpy(np.int64)).tobytes()).hexdigest()[:16]
 
 
-# digest of the default assay on this section: with bleed and the tissue edge off it must not move
-DEFAULT_DIGEST = "cdf7ab731f44d5f7"
+# digest of the default assay on this section: with bleed and the tissue edge off it must not move.
+# Re-pinned (was cdf7ab731f44d5f7) when the capture field became normalised over the tissue spots,
+# the ambient soup became a share of the library rather than counts on top of it, and the default
+# kappa became 300,000 (visium-depth).
+DEFAULT_DIGEST = "9572b2c7e5dcecab"
 
 
 def test_kernel_columns_sum_to_one():
