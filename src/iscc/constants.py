@@ -32,8 +32,17 @@ LAYOUT_OFFSET_F8_PROGRAMS = 102    # microenvironment programs: the
 LAYOUT_OFFSET_EPISTASIS = 201      # the epistasis E matrix / dependency DAG
 LAYOUT_OFFSET_MET = 301            # metastasis module: the host-parenchyma baseline expression
                                    # profile for the metastatic deposit (celltype_exps["host"])
+LAYOUT_OFFSET_IMMUNE_SUBTYPES = 401  # the baseline expression of the myeloid and B/plasma immune
+                                   # subtypes (celltype_exps["myeloid"], ["bplasma"])
+RUN_OFFSET_IMMUNE_SPLIT = 6101     # per run: the split of each deme's immune cells into subtypes
 
-normal_cmap = {'epithelial': 'green', 'immune': 'yellow', 'stromal': 'pink', 'host': 'lightgray'}
+# Immune cells come in three subtypes, each a static normal genotype whose type is "immune": T and NK
+# cells (genotype "immune", the only ones that kill cancer cells), myeloid cells (macrophages,
+# monocytes, dendritic and mast cells) and B and plasma cells. Genotype id -> the subtype's label.
+IMMUNE_SUBTYPES = {"immune": "T_NK", "myeloid": "myeloid", "bplasma": "B_plasma"}
+
+normal_cmap = {'epithelial': 'green', 'immune': 'yellow', 'stromal': 'pink', 'host': 'lightgray',
+               'myeloid': 'orange', 'bplasma': 'khaki'}
 normal_names = list(normal_cmap.keys())
 normal_colors = list(normal_cmap.values())
 normal_colors_rgba = np.array([np.array(mcolors.to_rgba(color)) for color in normal_colors])

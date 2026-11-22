@@ -57,6 +57,7 @@ STAGE_LABEL = {"prolif": "proliferation", "breach": "duct escape", "stromal": "s
 # the splash background (no filled-square seam).
 NORMAL_MUTED = {"epithelial": (0.15, 0.29, 0.23, 1.0), "stromal": (0.18, 0.15, 0.18, 1.0),
                 "host": (0.13, 0.16, 0.21, 1.0), "immune": (0.24, 0.22, 0.11, 1.0)}
+NORMAL_MUTED.update(myeloid=NORMAL_MUTED["immune"], bplasma=NORMAL_MUTED["immune"])   # one immune tone
 
 # per-phase caption for the fully-labelled (non-splash) variant
 PHASE_CAPTION = {

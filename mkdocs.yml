@@ -192,6 +192,7 @@ nav:
           - clone_summary: reference/clone_summary.md
           - to_anndata: reference/to_anndata.md
           - biological_types: reference/biological_types.md
+          - cell_subtypes: reference/cell_subtypes.md
       - Inference:
           - ABC: reference/ABC.md
           - Prior: reference/Prior.md

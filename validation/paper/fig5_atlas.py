@@ -165,7 +165,7 @@ def pilot_targets(n, lo_hi=None):
 
 def grow_one(seeds, targets, i, scale, spatial, ep):
     """Grow patient ``i`` through the thin Cohort, each patient with its own target size. Every
-    patient grows the regime's immune variant (T and NK cells in the stroma and the duct wall,
+    patient grows the regime's immune variant (T and NK cells in the stroma,
     ``RG.IMMUNE_SPATIAL``, ``RG.IMMUNE_SELECTION``, ``RG.IMMUNE``), so that the dissociated cells hold
     immune cells, the shared state of integration across patients."""
     from iscc.cohort import Cohort

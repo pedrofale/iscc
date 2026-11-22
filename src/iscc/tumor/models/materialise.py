@@ -857,6 +857,10 @@ class MaterialiseMixin:
         # genotypes; the gene-wide rows are built per chunk of cells and written straight into the
         # requested frames. Every per-genotype function here is deterministic, so a genotype seen
         # again in a later chunk gives the same row, and the frames equal stacking every row at once.
+        def _exp_key(rep):
+            # a normal genotype's id names its baseline (its type, or its immune subtype)
+            return "cancer" if rep.type == "cancer" else rep.genotype_id
+
         def genotype_exp(gid):
             """(exp, exp_p, exp_m) of genotype ``gid``; the allele split is None without programs."""
             rep = self.genotypes[gid]
@@ -865,8 +869,8 @@ class MaterialiseMixin:
                 if rep.type == "cancer":
                     rep.baseline_exp = self.celltype_exps["cancer"]
                     return rep.get_exp(self.selection.mut_effects), None, None
-                return self.celltype_exps[rep.type], None, None
-            rep.baseline_exp = self.celltype_exps[rep.type]
+                return self.celltype_exps[_exp_key(rep)], None, None
+            rep.baseline_exp = self.celltype_exps[_exp_key(rep)]
             if rep.type == "cancer":
                 ep, em = rep.get_exp_alleles(dosage_sensitivity=P.dosage_sensitivity,
                                              snv_exp_effect=P.snv_exp_effect,
@@ -874,7 +878,7 @@ class MaterialiseMixin:
                                              dosage_law=getattr(P, "dosage_law", "haplotype"))
             else:
                 # Normal cells are diploid and unmutated: a flat allele split.
-                half = self.celltype_exps[rep.type] / 2.0
+                half = self.celltype_exps[_exp_key(rep)] / 2.0
                 ep, em = half.copy(), half.copy()
             return ep + em, ep, em
 
@@ -886,7 +890,7 @@ class MaterialiseMixin:
                 if rep.type == "cancer":
                     rep.baseline_exp = self.celltype_exps["cancer"]
             else:
-                rep.baseline_exp = self.celltype_exps[rep.type]
+                rep.baseline_exp = self.celltype_exps[_exp_key(rep)]
                 # The clone drive reads the EVOLVED per-clone phenotype, so whatever moved fitness —
                 # CINner drivers, and the epistasis multiplier — propagates into the programs by
                 # construction; it also reads the clone's SNV VAFs. Normal cells carry no drive.

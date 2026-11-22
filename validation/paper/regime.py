@@ -104,13 +104,15 @@ DEME = {"crowding_overfill": CROWDING_OVERFILL, "crowding_d1": CROWDING_D1,
 MET_SELECTION = {"prop_met_survival": 0.015, "met_survival_effects": 3.0, "met_survival_cost": 0.15}
 
 
-# Immune cells (a declared variant; the canonical regime has none). Static T and NK cells, the cells
-# that kill in iscc's immune model, seeded in the stroma at 0.2 of K_stroma (6 per stroma deme, beside
-# its 9 fibroblasts: twice the T/NK-to-fibroblast ratio of the normal-breast atlas, 0.37, for the
-# infiltrate of a carcinoma; not fitted) and in the duct wall at 0.02 of K_duct (one per wall deme, the
-# intraepithelial lymphocytes). A variant passes IMMUNE_SPATIAL as `spatial`, IMMUNE_SELECTION as
+# Immune cells (a declared variant; the canonical regime has none), seeded in the stroma only (Pedro,
+# 2026-11-22), at 0.2 of K_stroma (6 per stroma deme, beside its 9 fibroblasts; not fitted) and none in
+# the ducts. Each deme's immune cells split into T and NK cells (the only ones that kill), myeloid cells
+# and B and plasma cells with the shares of the tumours of Wu et al. 2021 (T-cells 35,214, Myeloid
+# 9,675, B-cells and Plasmablasts 6,730 of 51,619 immune cells) corrected by the default recovery (T and
+# NK, B and plasma cells 10 and myeloid cells 5 times malignant cells): 0.575, 0.315 and 0.11. A variant passes IMMUNE_SPATIAL as `spatial`, IMMUNE_SELECTION as
 # `selection` and IMMUNE as `immune`.
-IMMUNE_SPATIAL = {"immune_density": 0.2, "immune_duct_density": 0.02}
+IMMUNE_SPATIAL = {"immune_density": 0.2, "immune_duct_density": 0.0,
+                  "immune_composition": {"immune": 0.575, "myeloid": 0.315, "bplasma": 0.11}}
 # Immune resistance at 0.2% of genes, the target breach and stromal survival were cut to (14 genes
 # instead of the example config's 116). At 2% point mutations hit the trait so often that it spreads
 # without any immune cells (traits follow trait_source "mutation", so only mutated copies count): in an
@@ -120,14 +122,16 @@ IMMUNE_SPATIAL = {"immune_density": 0.2, "immune_duct_density": 0.02}
 # resistance until it was strong enough to double the growth time. Escape events in tumours (HLA or
 # B2M loss) protect substantially with one event. Neither change moves another gene's role.
 IMMUNE_SELECTION = {"prop_immune_resistance": 0.002, "immune_resistant_effects": 4.0}
-# The kill rate: a cancer cell dies at prob_kill x (the immune share of its deme) x (1 - its immune
-# resistance). Picked on preview tumours (stage immune_grid3 of tune_regime_v2, five seeds per rate)
-# as the largest of 0.5-16 at which the regime still met its criteria and immune resistance was
-# selected: at 8, growth to 15,000 cancer cells takes 1.3 times as long as without immune cells and
-# the mean immune resistance of cancer cells is 13 times as high; at 16 the cost is 5 times
+# The kill rate: a cancer cell dies at prob_kill x (the share of T and NK cells in its deme) x (1 - its
+# immune resistance). Picked on preview tumours (stage immune_grid3 of tune_regime_v2, five seeds per
+# rate) as the largest of 0.5-16 at which the regime still met its criteria and immune resistance was
+# selected, 8, with every immune cell a T or NK cell and some in the duct wall. In the stroma only, 8
+# missed the cost bound (3.6 times the immune-free wall time, against 3), so the variant takes the next
+# passing rate, 4 (growth 1.2 times as long, mean immune resistance 9.6 times the immune-free level);
+# with the subtypes it is 4 / 0.575 = 7, which keeps the expected killing of each deme
 # (exp-immune-variant). A wild-type cancer cell entering a stroma deme then dies of immune killing at
-# about 3 per generation, so invading the stroma takes immune resistance as well as breach.
-IMMUNE = {"prob_kill": 8.0}
+# about 1.5 per generation against a division rate of about 1.75.
+IMMUNE = {"prob_kill": 7.0}
 # The interferon response of cancer cells near T and NK cells (readout only): the immune density of
 # each deme, smoothed over one deme (the IFN-gamma they release reaches the cells around them), drives
 # an `interferon_response` program, which the human genome layer loads on the Hallmark IFN-gamma

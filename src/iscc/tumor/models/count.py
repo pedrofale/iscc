@@ -29,7 +29,8 @@ from ..components.epistasis import bits_to_events
 from ..components.cell import CancerCell, EpithelialCell, StromalCell, ImmuneCell, HostCell
 from ..germline import draw_germline_sites, apply_germline, seed_founder_mutations
 from ..programs import ProgramModel
-from ...constants import normal_names
+from ...constants import (IMMUNE_SUBTYPES, LAYOUT_OFFSET_IMMUNE_SUBTYPES, RUN_OFFSET_IMMUNE_SPLIT,
+                          normal_names)
 from .tissue import TissueMixin
 from .metastasis import MetastasisMixin
 from .therapy import TherapyMixin
@@ -106,8 +107,10 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         - Lattice: ``grid_size`` (required, the side of the square lattice in demes),
           ``immune_density`` (static immune cells seeded per stroma deme, or per deme of a field
           without glands, as a fraction of the deme's capacity; default 0) and
-          ``immune_duct_density`` (the same per duct-wall deme; default ``immune_density``).
-          Empty lumens get none.
+          ``immune_duct_density`` (the same per duct-wall deme, the intraepithelial lymphocytes;
+          default 0, the stroma only) and ``immune_composition`` (the shares of the immune subtypes,
+          ``{"immune": T and NK cells, "myeloid": ..., "bplasma": B and plasma cells}``; default all
+          T and NK cells). Empty lumens get none, and only T and NK cells kill.
         - Ductal field: ``structure_radius`` (default 0, no glands), ``n_glands`` (default 1),
           ``gland_radius`` (default ``structure_radius``), ``min_gland_sep`` (the minimum
           distance between gland centres), ``stroma_fill_frac`` (stromal cells seeded per stroma
@@ -395,6 +398,9 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
             "epithelial": (EpithelialCell, p.epithelial or {}),
             "stromal": (StromalCell, p.stromal or {}),
             "immune": (ImmuneCell, p.immune or {}),
+            # the immune subtypes that do not kill: myeloid, and B and plasma cells
+            "myeloid": (ImmuneCell, {**(p.immune or {}), "prob_kill": 0.0}),
+            "bplasma": (ImmuneCell, {**(p.immune or {}), "prob_kill": 0.0}),
             "host": (HostCell, p.host or {}),
         }
 
@@ -547,24 +553,54 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
 
         # Optional immune microenvironment: seed immune cells where they live in the tissue, so that
         # cancer growing into them experiences local immune pressure (and so that immunotherapy has
-        # a substrate to act on). In a ductal field they sit in the stroma (immune_density) and in
-        # the duct wall (immune_duct_density, the intraepithelial lymphocytes), never in an empty
-        # lumen; a field without glands has them in every deme. The count is a fraction of the
+        # a substrate to act on). In a ductal field they sit in the stroma (immune_density), and in
+        # the duct wall only if immune_duct_density is set (intraepithelial lymphocytes; default 0),
+        # never in an empty lumen; a field without glands has them in every deme. The count is a fraction of the
         # deme's own carrying capacity, so the immune fraction is not washed out once a deme fills
         # with cancer. Static: immune cells neither divide nor migrate.
         self.immune_density = p.spatial.get("immune_density", 0.0)
-        self.immune_duct_density = p.spatial.get("immune_duct_density", self.immune_density)
+        self.immune_duct_density = p.spatial.get("immune_duct_density", 0.0)
+        # The immune cells of each deme split into subtypes with the shares of immune_composition
+        # (default all T and NK cells), drawn per deme from the run's own stream, so the infiltrate is
+        # patchy and the growth stream is the same with or without the split.
+        composition = dict(p.spatial.get("immune_composition") or {"immune": 1.0})
+        unknown = set(composition) - set(IMMUNE_SUBTYPES)
+        if unknown or not np.isclose(sum(composition.values()), 1.0) or min(composition.values()) < 0:
+            raise ValueError(f"immune_composition takes non-negative shares of {list(IMMUNE_SUBTYPES)} "
+                             f"that sum to 1, got {composition}")
+        self.immune_composition = composition
         if self.immune_density > 0 or self.immune_duct_density > 0:
             lumen = (set(i for demes in self.gland_lumen_demes for i in demes)
                      if self.gland_id is not None else set())
+            names = list(composition)
+            shares = np.array([composition[k] for k in names], dtype=float)
+            split = (np.random.default_rng([int(self.seed), RUN_OFFSET_IMMUNE_SPLIT])
+                     if len(names) > 1 else None)
             for i in range(n_demes):
                 if i in lumen:
                     continue
                 duct = self.gland_id is not None and self.gland_id[i] != -1
                 cap = self._cap_of(i) if self._crowding else self._cap
                 n_immune = int(round((self.immune_duct_density if duct else self.immune_density) * cap))
-                if n_immune > 0:
-                    self._add(i, self._normal_genotype("immune"), n_immune)
+                if n_immune <= 0:
+                    continue
+                counts = split.multinomial(n_immune, shares) if split is not None else [n_immune]
+                for name, k in zip(names, counts):
+                    if k > 0:
+                        self._add(i, self._normal_genotype(name), int(k))
+            # baseline expression of the subtypes beside the T and NK cells, from their own layout
+            # sub-stream and only when present, so every other tumour's landscape is unchanged
+            present = [g for g in IMMUNE_SUBTYPES if g != "immune" and g in self.genotypes]
+            if present:
+                srng = np.random.default_rng(self.layout_seed + LAYOUT_OFFSET_IMMUNE_SUBTYPES)
+                for g in IMMUNE_SUBTYPES:
+                    if g == "immune":
+                        continue
+                    exp = srng.beta(0.1, 1.0, size=self.n_genes)
+                    exp[self.selection.get_tsgs()] = 0.8
+                    exp[self.selection.get_oncogenes()] = 0.01
+                    if g in present:
+                        self.celltype_exps[g] = exp
         # Metastasis: seed the second (met) grid AFTER primary immune seeding, so immune stays
         # primary-only and the met demes are appended at the tail. A no-op when met is off.
         self._seed_met()

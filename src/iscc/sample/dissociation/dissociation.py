@@ -54,7 +54,9 @@ DEFAULT_RECOVERY = {
     "epithelial": 0.09,
     "host": 0.09,
     "stromal": 0.27,
-    "immune": 0.9,
+    "immune": 0.9,          # T and NK cells
+    "myeloid": 0.45,        # macrophages, 5-8 times malignant cells in the same sample
+    "bplasma": 0.9,         # B and plasma cells, as T and NK cells (snRNA-seq barely captures them)
 }
 
 

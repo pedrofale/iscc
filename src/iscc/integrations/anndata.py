@@ -69,7 +69,9 @@ def _normal_ids():
 def biological_types(genotype_ids):
     """Coarse cell type per cell: cancer, epithelial, stromal, immune or host.
 
-    A normal cell's genotype id is its type name; any other id is a cancer clone.
+    A normal cell's genotype id is its type name, or for an immune cell its subtype (``immune`` for T
+    and NK cells, ``myeloid``, ``bplasma``), which all map to ``immune``; any other id is a cancer
+    clone. [`cell_subtypes`][iscc.integrations.cell_subtypes] keeps the immune subtypes apart.
 
     Parameters
     ----------
@@ -81,8 +83,31 @@ def biological_types(genotype_ids):
     numpy.ndarray of str
         One coarse type per cell.
     """
+    from ..constants import IMMUNE_SUBTYPES
     normals = _normal_ids()
-    return np.array([g if g in normals else "cancer" for g in map(str, genotype_ids)], dtype=object)
+    return np.array(["immune" if g in IMMUNE_SUBTYPES else g if g in normals else "cancer"
+                     for g in map(str, genotype_ids)], dtype=object)
+
+
+def cell_subtypes(genotype_ids):
+    """Cell type per cell with the immune cells by subtype: cancer, epithelial, stromal, host, and
+    ``T_NK``, ``myeloid`` or ``B_plasma`` for the immune cells (labels without slashes, so tools such as
+    RCTD and file names take them as they are).
+
+    Parameters
+    ----------
+    genotype_ids : array-like of str
+        The genotype id of each cell, as in the ``cell_type`` table of ``cell_data``.
+
+    Returns
+    -------
+    numpy.ndarray of str
+        One type per cell; the same as [`biological_types`][iscc.integrations.biological_types] except
+        for immune cells.
+    """
+    from ..constants import IMMUNE_SUBTYPES
+    coarse = biological_types(genotype_ids)
+    return np.array([IMMUNE_SUBTYPES.get(str(g), c) for g, c in zip(genotype_ids, coarse)], dtype=object)
 
 
 # ------------------------------------------------------------------ uns / value sanitising
@@ -466,6 +491,7 @@ def to_anndata(source, X="cell_exp", layers=None, obs_extra=True, spatial="xy",
             # biological type is derived alongside it.
             _add_obs(obs, "genotype", genotype, taken)
             _add_obs(obs, "cell_type", biological_types(genotype), taken)
+            _add_obs(obs, "cell_subtype", cell_subtypes(genotype), taken)
             clone, clone_uns = _clone_labels(tumor, index, clone_min_cells)
             _add_obs(obs, "clone", genotype if clone is None else clone, taken)
         if obs_extra:

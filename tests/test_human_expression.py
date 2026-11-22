@@ -88,11 +88,11 @@ def grown(reference):
 
 def test_packaged_tables():
     tab, info = load_atlas_baselines()
-    assert len(tab) == 36601 and set(tab.columns) == {"epithelial", "stromal", "immune"}
+    assert len(tab) == 36601 and set(tab.columns) == {"epithelial", "stromal", "immune", "myeloid", "bplasma"}
     assert np.allclose(tab.sum(axis=0), 1.0, atol=1e-4)
     assert set(info["type"]) == set(tab.columns)
     hp = load_hallmark_programs()
-    assert {"proliferation", "emt", "hypoxia"} <= set(hp["programme"])
+    assert {"proliferation", "emt", "hypoxia", "interferon_response"} <= set(hp["programme"])
 
 
 def test_cancer_takes_its_origins_baseline(grown):

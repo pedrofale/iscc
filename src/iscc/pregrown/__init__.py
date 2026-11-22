@@ -147,13 +147,14 @@ def cin():
 
 
 def immune():
-    """The tumor of the paper's regime with immune cells: T and NK cells in the stroma and, sparsely,
-    in the duct wall, which kill the cancer cells around them unless their immune resistance protects
-    them, and whose interferon-gamma induces the interferon response in nearby cancer cells.
+    """The tumor of the paper's regime with immune cells in the stroma: T and NK cells, which kill the
+    cancer cells around them unless their immune resistance protects them and whose interferon-gamma
+    induces the interferon response in nearby cancer cells, and myeloid cells and B and plasma cells,
+    which kill nothing.
 
-    Grown like [`ductal`][iscc.pregrown.ductal], with six immune cells in every stroma deme and one in
-    every deme of the duct wall. The immune cells are static, so the tumor grows around them; the
-    human genome layer gives them the T and NK cell baseline of the Human Breast Cell Atlas.
+    Grown like [`ductal`][iscc.pregrown.ductal], with six immune cells in every stroma deme, split into
+    the three subtypes with the shares of a breast cancer atlas, and none in the ducts. The immune cells are static, so the tumor grows around them; the
+    human genome layer gives each subtype its baseline from the Human Breast Cell Atlas.
 
     Returns
     -------

@@ -107,7 +107,8 @@ def load_atlas_baselines():
     -------
     (pandas.DataFrame, pandas.DataFrame)
         The baselines, indexed by ``gene_id`` with one column per iscc type (``epithelial``,
-        ``stromal``, ``immune``), each summing to 1 over the GRCh38-2020-A genes; and per type the atlas
+        ``stromal``) and immune subtype (``immune`` for T and NK cells, ``myeloid``, ``bplasma``), each
+        summing to 1 over the GRCh38-2020-A genes; and per type the atlas
         labels, cells, donors, mean counts and ``rna_content`` (mean counts relative to the epithelium).
     """
     return _table("hbca_type_baselines.tsv.gz").set_index("gene_id"), _table("hbca_types.tsv")

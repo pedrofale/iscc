@@ -409,8 +409,8 @@ class TissueMixin:
             total = sum(deme.values())
         if total == 0:
             return 0.0
-        immune = sum(cnt for gid, cnt in deme.items() if self.genotypes[gid].type == "immune")
-        return immune / total
+        # T and NK cells, the only immune subtype that kills
+        return deme.get("immune", 0) / total
 
     def _epithelial_fraction(self, deme, total=None):
         # Fraction of the deme that is (still) epithelial. Live composition, exactly like
@@ -461,7 +461,7 @@ class TissueMixin:
                     cancer.append((rep.ord, gid, rep, c))
                 continue
             n_normal += c
-            if tp == "immune":
+            if gid == "immune":           # T and NK cells; the other immune subtypes do not kill
                 n_immune += c
             elif tp == "epithelial":
                 n_epi += c

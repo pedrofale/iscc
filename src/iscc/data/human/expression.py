@@ -139,8 +139,12 @@ class HumanExpression:
 
     # -- per-cell factors -----------------------------------------------------------------------
     def _types(self, cell_data, cells):
+        """The baseline each cell takes: "cancer", or a normal genotype's id, which is its type or its
+        immune subtype."""
         gids = cell_data["cell_type"].iloc[:, 0].reindex(cells).to_numpy()
-        return np.array([getattr(self.tumor.genotypes.get(g), "type", "cancer") for g in gids])
+        G = self.tumor.genotypes
+        return np.array(["cancer" if getattr(G.get(g), "type", "cancer") == "cancer" else str(g)
+                         for g in gids])
 
     def _shuffled_programs(self, cell_data):
         """The program activities of every cell of ``cell_data``, shuffled among the cells of each type

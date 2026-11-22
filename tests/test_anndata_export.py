@@ -89,7 +89,9 @@ def clonal():
                       deme_params={"carrying_capacity": 16, "initial_cancer_cells": 5,
                                    "tau_deaths": "poisson", "tau_step": "fixed"},
                       spatial_params={"grid_size": 22, "structure_radius": 3,
-                                      "immune_density": 0.1},
+                                      # immune cells in the duct wall too, as when this fixture was
+                                      # tuned for the labelling tests (the default is now stroma only)
+                                      "immune_density": 0.1, "immune_duct_density": 0.1},
                       update_mode="tau", tau=1.0)
     t.grow(n_steps=80, seed=3)
     return t
@@ -156,7 +158,7 @@ class TestEverythingIsCarried:
 
     def test_obs_extra_off_keeps_only_identity_and_coordinates(self, plain):
         a = to_anndata(plain, obs_extra=False)
-        assert set(a.obs.columns) == {"genotype", "cell_type", "clone", "row", "col"}
+        assert set(a.obs.columns) == {"genotype", "cell_type", "cell_subtype", "clone", "row", "col"}
         assert set(a.layers)                                # the matrices are untouched
 
     def test_programs_land_in_obsm_not_in_obs(self, loaded):

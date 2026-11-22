@@ -2,3 +2,5 @@ type	atlas_column	atlas_labels	n_cells	n_donors	mean_counts	rna_content
 epithelial	author_cell_type	LummHR-SCGB;LummHR-active;LummHR-major;Lumsec-HLA;Lumsec-KIT;Lumsec-basal;Lumsec-lac;Lumsec-major;Lumsec-myo;Lumsec-prol	110374	107	11081.146484375	1.0
 stromal	cell_type	fibroblast	195127	107	6834.732421875	0.6167892854329047
 immune	cell_type	CD4-positive helper T cell;CD4-positive, alpha-beta T cell;CD8-positive, alpha-beta memory T cell;T cell;activated CD4-positive, alpha-beta T cell;activated CD8-positive, alpha-beta T cell;effector memory CD4-positive, alpha-beta T cell;effector memory CD8-positive, alpha-beta T cell;gamma-delta T cell;mature NK T cell;natural killer cell;regulatory T cell	71288	107	3146.3154296875	0.2839341068294666
+myeloid	cell_type	M1 macrophage;M2 macrophage;classical monocyte;conventional dendritic cell;macrophage;mast cell;myeloid cell;myeloid dendritic cell;non-classical monocyte;plasmacytoid dendritic cell	27066	107	8202.6416015625	0.7402340193885765
+bplasma	cell_type	IgA plasma cell;IgG plasma cell;class switched memory B cell;naive B cell;unswitched memory B cell	11523	107	8015.18896484375	0.7233176617731377

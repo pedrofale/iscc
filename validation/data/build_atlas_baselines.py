@@ -18,6 +18,9 @@ counts per cell relative to the luminal epithelium. iscc's types map onto the at
     iscc's ductal field has one epithelial type, lining the duct.
   * ``stromal``: fibroblasts.
   * ``immune``: T and NK cells, the cells that kill tumour cells in iscc's immune model.
+  * ``myeloid``: macrophages, monocytes, dendritic and mast cells (neutrophils, nearly absent from
+    dissociated tissue, are left out).
+  * ``bplasma``: B and plasma cells.
 
 Outputs (under ``src/iscc/data/human/reference/``):
   * ``hbca_type_baselines.tsv.gz`` — gene_id and one column per iscc type (GRCh38-2020-A genes; a
@@ -45,6 +48,8 @@ TYPES = {
     "epithelial": ("author_cell_type", ("LummHR", "Lumsec")),
     "stromal": ("cell_type", ("fibroblast",)),
     "immune": ("cell_type", ("T cell", "natural killer cell", "mature NK T cell")),
+    "myeloid": ("cell_type", ("macrophage", "monocyte", "dendritic cell", "myeloid cell", "mast cell")),
+    "bplasma": ("cell_type", ("B cell", "plasma cell")),
 }
 # iscc's named programmes and the Hallmark sets that seed them. `drug_resistance` has no Hallmark
 # counterpart; xenobiotic metabolism (drug-metabolising enzymes and transporters) is the closest, and

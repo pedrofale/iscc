@@ -88,6 +88,11 @@ def tasks(stage, overfill=None, d1=None, mu=None):
         kills = KILLS2 if stage == "immune_grid2" else KILLS
         return ([("current_ir", dict(selection=dict(sel)), CANONICAL_DISPERSAL, s) for s in range(1, 6)]
                 + [(f"immune_k{k:g}", immune(k, sel), CANONICAL_DISPERSAL, s) for k in kills for s in range(1, 6)])
+    if stage in ("immune_variant", "immune_subtypes"):
+        # the variant as regime.py states it (immune_variant: in the stroma only; immune_subtypes: with
+        # the immune subtypes and the rescaled kill rate), scored against immune_grid3's current_ir
+        law = dict(spatial=dict(RG.IMMUNE_SPATIAL), selection=dict(RG.IMMUNE_SELECTION), immune=dict(RG.IMMUNE))
+        return [(stage, law, CANONICAL_DISPERSAL, s) for s in range(1, 6)]
     if stage == "sweep":
         pts = [(f"v2_o{overfill:g}_d{d1:g}" + (f"_mu{mu:g}" if mu else ""),
                             v2(overfill, d1, mu))]

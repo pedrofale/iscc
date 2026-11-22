@@ -15,6 +15,10 @@ import pandas as pd
 import scipy.io
 import scipy.sparse as sp
 
+from ...constants import normal_names
+
+_NORMALS = frozenset(normal_names)
+
 GENOME = "GRCh38"
 # Dirichlet-multinomial concentration for Visium counts over the human genes, by indirect inference
 # against 10x's V1_Breast_Cancer_Block_A_Section_1. `estimate_visium` (count model "dm") on its 3,798
@@ -245,9 +249,11 @@ def write_scrna(out_dir, assay, layer, cell_data, allele=None, tumor=None, seed=
     os.makedirs(truth_dir, exist_ok=True)
     gids = layer._gids(cell_data, cells)
     tumour = (layer.is_tumour(gids, tumor) if tumor is not None
-              else np.array([str(g) not in ("epithelial", "stromal", "immune", "host") for g in gids]))
+              else np.array([str(g) not in _NORMALS for g in gids]))
+    from ...integrations.anndata import cell_subtypes
     pd.DataFrame({"barcode": bcs, "cell": cells, "genotype": [str(g) for g in gids],
-                  "is_tumour": tumour, "is_doublet": assay.obs["is_doublet"].to_numpy()}).to_csv(
+                  "cell_subtype": cell_subtypes(gids), "is_tumour": tumour,
+                  "is_doublet": assay.obs["is_doublet"].to_numpy()}).to_csv(
         os.path.join(truth_dir, "cells.tsv"), sep="\t", index=False)
     pd.DataFrame({"barcode": bcs, "celltype": np.where(tumour, "tumor", "normal")}).to_csv(
         os.path.join(out_dir, "clonalscope", "celltype.tsv"), sep="\t", index=False)
@@ -262,7 +268,7 @@ def _write_spot_truth(path, assay, layer, bcs, tumor):
     placed = assay._grid["placed"]
     gids_all = layer._gids(placed)
     tumour_all = (layer.is_tumour(gids_all, tumor) if tumor is not None
-                  else np.array([str(g) not in ("epithelial", "stromal", "immune", "host") for g in gids_all]))
+                  else np.array([str(g) not in _NORMALS for g in gids_all]))
     rows = []
     for s, (bc, m) in enumerate(zip(bcs, assay._grid["members"])):
         n = int(m.size)

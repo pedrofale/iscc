@@ -18,7 +18,7 @@ Additive and low-risk: nothing here changes the engine; each optional external d
 """
 from .lineage import LineageTree, to_lineage_tree, to_newick
 from .clones import clones_from_clades, clone_summary
-from .anndata import to_anndata, from_anndata, biological_types
+from .anndata import to_anndata, from_anndata, biological_types, cell_subtypes
 from .petracer import decompose_lineage_spatial, LineageSpatialDecomposition
 from .progression import (
     to_mhn_matrix, to_cell_fraction_matrix, to_mutation_tree, to_treemhn_trees, to_cbn_poset,
@@ -39,7 +39,7 @@ __all__ = [
     # the shared clone definition: lineage clades with enough sampled cells
     "clones_from_clades", "clone_summary",
     # the whole tumour as one AnnData, and the way back
-    "to_anndata", "from_anndata", "biological_types",
+    "to_anndata", "from_anndata", "biological_types", "cell_subtypes",
     "decompose_lineage_spatial", "LineageSpatialDecomposition",
     # cohort progression models (MHN/TreeMHN/CBN/REVOLVER) vs the planted epistasis network
     "to_mhn_matrix", "to_cell_fraction_matrix", "to_mutation_tree", "to_treemhn_trees",

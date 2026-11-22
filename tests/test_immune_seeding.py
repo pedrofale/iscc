@@ -1,6 +1,6 @@
 """Where immune cells are seeded: in the stroma at ``immune_density`` and in the duct wall at
-``immune_duct_density``, each a fraction of the deme's own capacity, never in an empty lumen; in every
-deme of a field without glands."""
+``immune_duct_density`` (default 0), each a fraction of the deme's own capacity, never in an empty lumen;
+in every deme of a field without glands."""
 from conftest import GENOME_PARAMS, SELECTION_PARAMS, CANCER_CELL_PARAMS
 from iscc.tumor.models import GenotypeTumor
 
@@ -29,9 +29,9 @@ def test_stroma_wall_and_lumen():
     assert _immune_by_compartment(t) == {"stroma": {3}, "wall": {2}, "lumen": {0}}
 
 
-def test_duct_density_defaults_to_the_stroma_density():
+def test_immune_cells_sit_in_the_stroma_only_by_default():
     t = _tumour({**FIELD, "immune_density": 0.3})
-    assert _immune_by_compartment(t) == {"stroma": {3}, "wall": {6}, "lumen": {0}}
+    assert _immune_by_compartment(t) == {"stroma": {3}, "wall": {0}, "lumen": {0}}
 
 
 def test_field_without_glands_has_immune_cells_everywhere():

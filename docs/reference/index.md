@@ -140,6 +140,7 @@ Hand the ground truth over in the forms that other tools read.
 | [`iscc.integrations.clone_summary`](clone_summary.md) | One row per clone: its size, representative genotype and mutations. |
 | [`iscc.integrations.to_anndata`](to_anndata.md) | A tumor or a sample as one AnnData, with coordinates and ground truth. |
 | [`iscc.integrations.biological_types`](biological_types.md) | The coarse cell type (cancer, epithelial, stromal, immune, host) of each cell. |
+| [`iscc.integrations.cell_subtypes`](cell_subtypes.md) | The cell type of each cell with immune cells by subtype (T_NK, myeloid, B_plasma). |
 
 ## Inference
 
