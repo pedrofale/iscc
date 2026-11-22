@@ -256,8 +256,12 @@ Breast Cell Atlas baseline (epithelial = luminal epithelium, stromal = fibroblas
 myeloid = macrophages, monocytes, dendritic and mast cells, bplasma = B and plasma cells, host = stroma), scaled by its relative RNA content; the cancer takes its `cell_of_origin`'s; named
 programmes load on their MSigDB Hallmark sets (proliferation, EMT, hypoxia, interferon response; drug resistance on
 xenobiotic metabolism as a proxy), the rest on random human genes, with the growth dictionary's loading
-distribution and the same `max_log_fold` bound. What the genotype and the niche do to a gene is read
-off the growth genes. Pass it as `gene_lift` to `scRNA.run` (chunked, sparse counts) and `Visium.run`
+distribution scaled by `programme_scale` (0.5) under the bound `programme_max_log_fold` (5.0). The pair
+is fitted on the cancer cells of 14 tumours of Wu et al. 2021 so that the fold changes of the Hallmark
+genes between the top and bottom deciles of cells scored by each programme match
+(`validation/data/fit_programme_strength.py`; 1.0 and 5.0 doubled them). On the held-out 10x Block A
+section it halves the share of spot UMIs on the programme genes (42% to 22%, against 11% in the real
+section). What the genotype and the niche do to a gene is read off the growth genes. Pass it as `gene_lift` to `scRNA.run` (chunked, sparse counts) and `Visium.run`
 (per-type pooling).
 The scRNA presets add no dropout, which suits the human genes: a logistic dropout midpoint is in
 counts per gene, so a midpoint of 1.5 UMIs deletes most of the human genes of a cell (410 genes per

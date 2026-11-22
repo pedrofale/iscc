@@ -20,6 +20,8 @@ What must hold:
    programme genes a cell's expression is unchanged; on them it changes by exactly the ratio of the
    shuffled to its own programme factor; the shuffle stays within each cell type, is fixed per
    sample and per seed, and Visium pools agree with it.
+8. **The programme scale and bound** (fitted defaults 0.5 and 5.0) set the human programme factor
+   ``exp(c tanh(s Z L / c))`` and touch nothing off the programme genes.
 """
 import warnings
 
@@ -241,3 +243,17 @@ def test_allele_counts_skip_spots_without_cells_under_spot_swapping(grown):
     assert empty.any() and np.asarray(vz.spot_counts.iloc[np.flatnonzero(empty)].sum(axis=1)).sum() > 0
     av = layer.visium_allele_counts(vz, t)
     assert av.total[empty].sum() == 0 and av.total[~empty].sum() > 0
+
+
+def test_the_programme_scale_and_bound_set_the_human_programme_factor(grown):
+    t, layer, expr = grown
+    assert (expr.programme_scale, expr.max_log_fold) == (0.5, 5.0)              # the fitted defaults
+    Z = np.abs(np.random.default_rng(0).normal(1.0, 1.0, size=(4, expr.Lh.shape[0])))
+    x = Z @ expr.Lh
+    assert np.allclose(expr._human_programme(Z), np.exp(5.0 * np.tanh(0.5 * x / 5.0)))
+    free = layer.expression(t, chunk=64, programme_scale=1.0, programme_max_log_fold=None)
+    assert np.allclose(free._human_programme(Z), np.exp(x))
+    cells = list(t.cell_data["cell_exp"].index[:20])
+    off = np.setdiff1d(np.arange(len(expr.genes)), expr.hp)
+    assert np.array_equal(expr.cell_expression(t.cell_data, cells)[:, off],
+                          free.cell_expression(t.cell_data, cells)[:, off])   # programme genes only

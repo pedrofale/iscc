@@ -33,6 +33,11 @@ import scipy.sparse as sp
 from .reference import load_atlas_baselines, load_hallmark_programs, load_visium_platform_factor
 
 TINY = 1e-30
+# How strongly a programme moves a human gene: the scale on the human loadings and the bound on the log
+# fold, fitted together on Wu et al. 2021's cancer cells (validation/data/fit_programme_strength.py,
+# 2026-11-23: the top-against-bottom-decile fold changes of the Hallmark genes; 1.0 and 5.0 before).
+HUMAN_PROGRAMME_SCALE = 0.5
+HUMAN_PROGRAMME_MAX_LOG_FOLD = 5.0
 
 
 class HumanExpression:
@@ -61,6 +66,15 @@ class HumanExpression:
         applied to the programme factor only (the growth-gene factor ``F`` still divides out each
         cell's own programmes). It breaks the link of a cell's state to its lineage and position while
         keeping each type's distribution of states. Default None: each cell keeps its own.
+    programme_scale : float, default 0.5
+        Scale on the human programme loadings: a programme multiplies a gene by
+        ``exp(c tanh(programme_scale * Z L / c))``. Readout only; growth is unchanged. The default and
+        ``programme_max_log_fold`` are fitted together so that the fold changes of the Hallmark genes
+        between the top and bottom deciles of cancer cells, scored by each programme, match those of
+        Wu et al. 2021's tumours (``validation/data/fit_programme_strength.py``).
+    programme_max_log_fold : float or None, default 5.0
+        The bound ``c`` on a programme's log fold on a human gene (fitted with ``programme_scale``);
+        None leaves it unbounded.
     visium_platform : {"default", None} or pandas.Series, default "default"
         Per-gene log factor applied to Visium spots only
         ([`load_visium_platform_factor`][iscc.data.human.load_visium_platform_factor], the sensitivity
@@ -81,7 +95,9 @@ class HumanExpression:
     """
 
     def __init__(self, layer, tumor, baselines=None, programmes=None, seed=None, chunk=512,
-                 permute_programmes=None, visium_platform="default"):
+                 permute_programmes=None, programme_scale=HUMAN_PROGRAMME_SCALE,
+                 programme_max_log_fold=HUMAN_PROGRAMME_MAX_LOG_FOLD,
+                 visium_platform="default"):
         self.layer, self.tumor = layer, tumor
         self.permute = None if permute_programmes is None else int(permute_programmes)
         self._shuffled = {}
@@ -115,7 +131,8 @@ class HumanExpression:
             warnings.warn("the tumour has no expression layer (expression_params): cancer cells are then "
                           "on the legacy scale (baseline x (1 + copies)) and there are no programmes",
                           stacklevel=2)
-        self.max_log_fold = getattr(self.P, "max_log_fold", None)
+        self.max_log_fold = None if programme_max_log_fold is None else float(programme_max_log_fold)
+        self.programme_scale = float(programme_scale)
         self.programme_genes = {}
         self.hp = np.array([], dtype=int)
         self.Lh = np.zeros((0, 0))
@@ -144,7 +161,7 @@ class HumanExpression:
         self.Lh = L[:, self.hp].toarray()
 
     def _human_programme(self, Z):
-        x = np.asarray(Z, float) @ self.Lh
+        x = self.programme_scale * (np.asarray(Z, float) @ self.Lh)
         if self.max_log_fold is not None:
             c = self.max_log_fold
             x = c * np.tanh(x / c)
