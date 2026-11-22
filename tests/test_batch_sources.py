@@ -2,6 +2,8 @@
 
 - ``run_scrna_batches(batch_kwargs=...)`` gives each batch its own technical settings on top of the
   shared ones, without moving any cell between batches; ``concat_batches`` records them.
+- ``atlas_scrna_batches`` draws each batch the settings fitted to one tumour of Wu et al. 2021, which
+  run as ``batch_kwargs``.
 - the scRNA assay itself takes per-call hyper-parameter overrides (every ``RNABatchHyperParams``
   field), which the per-batch settings rely on.
 - the dissociation-stress signature is two separable steps (choose the genes, apply the bump), and
@@ -17,7 +19,8 @@ import pytest
 from conftest import GENOME_PARAMS, SELECTION_PARAMS, CANCER_CELL_PARAMS, DEME_PARAMS
 from iscc.data import scRNA
 from iscc.data.batch import RNABatchHyperParams
-from iscc.data.rna import run_scrna_batches, concat_batches, BATCH_OVERRIDE_KEYS
+from iscc.data.rna import (run_scrna_batches, concat_batches, atlas_scrna_batches, BATCH_OVERRIDE_KEYS,
+                           ATLAS_AMBIENT_RANGE)
 from iscc.sample import Resection
 from iscc.sample.dissociation.dissociation import (
     Dissociation, DEFAULT_RECOVERY, apply_stress, choose_stress_genes)
@@ -103,6 +106,42 @@ def test_concat_records_each_batchs_hyperparameters():
     ad = concat_batches(assays)
     hp = ad.uns["batch_hyperparams"]
     assert hp["batch0"]["mu_lib"] == 900.0 and hp["batch1"]["mu_lib"] == 3000.0
+
+
+# --- settings fitted to an atlas ------------------------------------------------------------------
+def _atlas_table():
+    from importlib import resources
+    with resources.files("iscc.data").joinpath("reference", "wu2021_scrna_batches.tsv").open() as f:
+        return pd.read_csv(f, sep="\t", comment="#", index_col="tumor")
+
+
+def test_atlas_batches_take_one_fitted_tumour_each():
+    table = _atlas_table()
+    assert len(table) == 26                                  # every tumour of the atlas
+    s = atlas_scrna_batches(40, seed=1)
+    assert len(s) == 40 and s.index.name == "tumor" and s.index.isin(table.index).all()
+    for col in ["mu_lib", "sigma_lib", "dispersion", "dropout_mid", "dropout_shape", "doublet_rate",
+                "stress_strength"]:
+        np.testing.assert_allclose(s[col].to_numpy(), table.loc[s.index, col].to_numpy())
+    lo, hi = ATLAS_AMBIENT_RANGE
+    assert s["ambient_frac"].between(lo, hi).all()
+    assert set(s.columns) - {"stress_strength"} <= set(BATCH_OVERRIDE_KEYS)
+
+
+def test_atlas_batches_follow_the_seed():
+    pd.testing.assert_frame_equal(atlas_scrna_batches(6, seed=3), atlas_scrna_batches(6, seed=3))
+    assert not atlas_scrna_batches(6, seed=3).equals(atlas_scrna_batches(6, seed=4))
+    with pytest.raises(ValueError, match="at least 1"):
+        atlas_scrna_batches(0)
+
+
+def test_atlas_batches_run_as_batch_kwargs():
+    cd = _cell_data()
+    s = atlas_scrna_batches(3, seed=0)
+    assays = run_scrna_batches(cd, n_batches=3, design="split", n_cells=100, base_seed=2,
+                               batch_kwargs=s.drop(columns="stress_strength").to_dict("records"))
+    for a, (_, row) in zip(assays, s.iterrows()):
+        assert a.hypers.mu_lib == row["mu_lib"] and a.hypers.ambient_frac == row["ambient_frac"]
 
 
 # --- the stress signature in two steps -------------------------------------------------------------

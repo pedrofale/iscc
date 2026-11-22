@@ -544,6 +544,12 @@ A further saving is chosen by the caller.
 |---|---|---|---|
 | `make_cell_data(layers=...)`, also on `Resection.slice` / `dissociate` | `None` (every table) | table names (`"cell_exp"`, `"cell_snv"`, `"cell_cnv"`, `"cell_rna_vaf"`, `"cell_snv_p"`, `"cell_snv_m"`, `"cell_exp_p"`, `"cell_exp_m"`, `"cell_rna_baf"`) and/or assay names standing for the tables that assay reads (`"visium"` and `"imaging"`: expression; `"scrna"`: expression, SNVs and RNA VAF; `"scdna"`: SNVs and copy number). The small per-cell tables are always built. Values are byte-identical to a full build | an unknown name raises |
 
+### scRNA batches — `run_scrna_batches`, `run_cohort_batches`
+At the 10x preset every batch takes the same settings and differs from the others only by its own draw of the per-gene factor (`sigma_batch`, 0.10) and of the depth shift (`depth_batch_sigma`, 0.05), which separates batches far less than real runs do.
+`batch_kwargs` gives each batch its own settings, and `atlas_scrna_batches(n_batches, seed)` draws them from the fits to the 26 tumours of the breast cancer atlas of Wu et al. 2021, as the paper's batch model does.
+The fits ship as `src/iscc/data/reference/wu2021_scrna_batches.tsv`, built from the paper's fits by `validation/data/build_atlas_batches.py`.
+Each batch takes one tumour's `mu_lib`, `sigma_lib`, `dispersion`, `dropout_mid`, `dropout_shape` and `doublet_rate`, an `ambient_frac` drawn between 0.03 and 0.11, and the tumour's dissociation stress, which goes to `Resection.dissociate(stress_strength=...)`.
+
 ### Visium spots and depth — `iscc.data.Visium`
 A deme is ~50 µm, so the default spot is Visium v1's: 55 µm across at a 100 µm pitch.
 The capture field is normalised over the tissue spots, so a tissue spot holds `mu_counts` UMIs on average whatever share of the slide the section covers.

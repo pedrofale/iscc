@@ -80,6 +80,7 @@ Generate single-cell and bulk molecular data from the sampled cells.
 | [`iscc.data.DNA`](DNA.md) | Shared base of the DNA assays — breadth + coverage core. |
 | [`iscc.data.run_dna_batches`](run_dna_batches.md) | DNA batches of one sample that share biology and differ technically. |
 | [`iscc.data.run_scrna_batches`](run_scrna_batches.md) | scRNA batches of one sample that share biology and differ technically. |
+| [`iscc.data.atlas_scrna_batches`](atlas_scrna_batches.md) | Batch settings fitted to the tumours of a real scRNA atlas. |
 | [`iscc.data.concat_batches`](concat_batches.md) | The scRNA batches as one labelled AnnData. |
 | [`iscc.data.morans_i`](morans_i.md) | Moran's I, the spatial autocorrelation of a value over spots. |
 

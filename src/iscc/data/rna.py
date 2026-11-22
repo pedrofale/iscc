@@ -589,6 +589,73 @@ def run_scrna_batches(cell_data, n_batches=2, base_seed=42, design="shared",
     return assays
 
 
+# The soup share of a 10x run of dissociated tissue, from a few percent to about 11% of the counts of a
+# cell (Janssen et al. 2023, Genome Biol 24:140), the range atlas_scrna_batches draws ambient_frac from.
+ATLAS_AMBIENT_RANGE = (0.03, 0.11)
+_ATLAS_SETTINGS = ["mu_lib", "sigma_lib", "dispersion", "dropout_mid", "dropout_shape", "doublet_rate"]
+
+
+def atlas_scrna_batches(n_batches, seed=None):
+    """The settings of ``n_batches`` scRNA batches, each those fitted to one tumour of a real atlas.
+
+    Real batches differ by their own technical settings, which the 10x preset of
+    [`scRNA`][iscc.data.scRNA] does not: at the preset, batches differ only by their own draw of the
+    per-gene factor and depth shift. Each batch here takes the settings that
+    [`estimate_rna`][iscc.data.estimate_rna] fitted to the T cells of one tumour of the breast cancer
+    atlas of Wu et al. 2021 (Nat Genet 53:1334-1347, GEO GSE176078), in which every tumour was its own
+    10x run, drawn at random with replacement as in the batch model of the ``iscc`` paper:
+
+    * ``mu_lib``, ``sigma_lib``, ``dispersion``, ``dropout_mid`` and ``dropout_shape``, fitted on the T
+      cells of the tumour, so that its composition of cell types does not enter the fit;
+    * ``doublet_rate``, 10x's multiplet rate at the number of cells of the tumour;
+    * ``ambient_frac``, drawn per batch uniformly between 3% and 11% of the library, the soup share
+      measured in 10x runs of dissociated tissue (Janssen et al. 2023, Genome Biol 24:140), since the
+      counts of most tumours do not identify it;
+    * ``stress_strength``, the dissociation stress of the tumour: the expression of the
+      dissociation-response genes of van den Brink et al. 2017 in its T cells relative to the median
+      over the atlas, on the scale of ``stress_strength`` of [`Resection`][iscc.sample.Resection].
+
+    The technical settings go to [`run_scrna_batches`][iscc.data.run_scrna_batches] or
+    [`run_cohort_batches`][iscc.cohort.run_cohort_batches] as ``batch_kwargs``, and the stress to the
+    dissociation of each patient ([`Resection`][iscc.sample.Resection]). The dropout was fitted over
+    the human genes of the atlas; its midpoint is in counts per gene, so on a gene layout with fewer
+    genes, where each gene gets more of the library, it removes fewer counts.
+
+    Parameters
+    ----------
+    n_batches : int
+        Number of batches.
+    seed : int or numpy.random.Generator, optional
+        Seed of the draw of the tumours and of the ambient fractions.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per batch, in batch order, indexed by the tumour drawn, with the columns
+        ``mu_lib``, ``sigma_lib``, ``dispersion``, ``dropout_mid``, ``dropout_shape``,
+        ``doublet_rate``, ``ambient_frac`` and ``stress_strength``.
+
+    Examples
+    --------
+    >>> settings = atlas_scrna_batches(6, seed=0)
+    >>> batch_kwargs = settings.drop(columns="stress_strength").to_dict("records")
+    >>> batches = run_scrna_batches(cells, n_batches=6, design="split", batch_kwargs=batch_kwargs)
+    """
+    from importlib import resources
+
+    n_batches = int(n_batches)
+    if n_batches < 1:
+        raise ValueError(f"n_batches must be at least 1, got {n_batches}")
+    with resources.files("iscc.data").joinpath("reference", "wu2021_scrna_batches.tsv").open() as f:
+        table = pd.read_csv(f, sep="\t", comment="#", index_col="tumor")
+    rng = seed if isinstance(seed, np.random.Generator) else np.random.default_rng(seed)
+    drawn = table.iloc[rng.choice(len(table), size=n_batches, replace=True)]
+    out = drawn[_ATLAS_SETTINGS].copy()
+    out["ambient_frac"] = rng.uniform(*ATLAS_AMBIENT_RANGE, size=n_batches)
+    out["stress_strength"] = drawn["stress_strength"].to_numpy()
+    return out
+
+
 def concat_batches(assays):
     """Concatenate the batches of [`run_scrna_batches`][iscc.data.run_scrna_batches] into one
     labelled AnnData, for integration benchmarks.

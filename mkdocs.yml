@@ -167,6 +167,7 @@ nav:
           - Visium spot swapping: reference/visium_bleed.md
           - run_dna_batches: reference/run_dna_batches.md
           - run_scrna_batches: reference/run_scrna_batches.md
+          - atlas_scrna_batches: reference/atlas_scrna_batches.md
           - concat_batches: reference/concat_batches.md
           - morans_i: reference/morans_i.md
       - Human genome:

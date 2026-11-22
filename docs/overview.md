@@ -31,7 +31,8 @@ can be scored against it.
 - **Biases fitted to real data.** The technical parameters of each assay can be estimated from a real
   reference dataset. The default dispersions of the DNA, scRNA and Visium assays are fits to public
   reference data (HG002, DLP+, PBMC3k and a 10x breast-cancer section), and the other defaults are
-  set by hand.
+  set by hand. Each scRNA batch can take the settings fitted to one tumor of a breast cancer atlas
+  ([`atlas_scrna_batches`](reference/atlas_scrna_batches.md)).
 
 ## The pipeline
 
