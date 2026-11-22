@@ -69,10 +69,20 @@ n_trees <- length(unique(df$Tree_ID))
 tree_obj <- input_tree_df(n = n, tree_df = df, patients = as.character(seq_along(pids)),
                           mutations = events)
 mc <- TreeMHN:::get_MC_flags(tree_obj$N, n, tree_obj$trees, 500)
-set.seed(seed)
+# learn_MHN starts from a random Theta and, on trees past MC_threshold, samples orderings, so a fit
+# can stop with a non-finite objective ("L-BFGS-B needs finite values of 'fn'"). A failed start is
+# retried from the next seed, up to five; the seed that fitted is recorded.
 t_fit <- Sys.time()
-Theta <- learn_MHN(tree_obj, gamma = gamma, lambda_s = lambda_s, verbose = FALSE,
-                   return_Theta_only = TRUE)
+Theta <- NULL; failed <- character(0)
+for (seed_used in seed + 0:4) {
+  set.seed(seed_used)
+  Theta <- tryCatch(learn_MHN(tree_obj, gamma = gamma, lambda_s = lambda_s, verbose = FALSE,
+                              return_Theta_only = TRUE),
+                    error = function(e) { failed <<- c(failed, conditionMessage(e)); NULL })
+  if (!is.null(Theta)) break
+}
+if (is.null(Theta)) stop("learn_MHN failed from seeds ", seed, "-", seed + 4, ": ",
+                         paste(unique(failed), collapse = "; "))
 t_fit <- as.numeric(difftime(Sys.time(), t_fit, units = "secs"))
 rownames(Theta) <- colnames(Theta) <- events
 
@@ -91,7 +101,7 @@ rec <- list(
   model = "TreeMHN::learn_MHN", gamma = gamma, lambda_s = lambda_s, M = 100, iterations = 500,
   MC_threshold = 500, use_EM = FALSE, stability_selection = FALSE,
   inference = if (any(mc)) "MCEM (some trees exceed MC_threshold subtrees)" else "MLE (exact likelihood)",
-  seed = seed, omp_threads = nthreads, r_tempdir = normalizePath(tempdir()),
+  seed = seed, seed_used = seed_used, failed_starts = length(failed), omp_threads = nthreads, r_tempdir = normalizePath(tempdir()),
   convention = paste("Theta[i, j] (i != j): log effect of event j on the rate of event i;",
                      "Theta[i, i]: base log rate of event i"),
   versions = vers, host = Sys.info()[["nodename"]], date = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
