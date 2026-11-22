@@ -4,7 +4,8 @@
 Every tumour is the paper's regime (``validation/paper/regime.py``) on the arm-level human genome, as
 the registry's run R11 grows it, at the cm scale (grid 170) to 200,000 cancer cells. ``ductal`` is
 that tumour; ``neutral``, ``sweeps``, ``cin`` and ``immune`` are declared variants of it, and ``cohort`` is six
-patients of ``ductal``'s configuration at the mid scale (grid 96) to 60,000 cancer cells each. Each object is saved with its per-cell tables built, as
+patients of ``immune``'s configuration (immune cells are the commonest state shared across patients, which
+integration across patients should keep) at the mid scale (grid 96) to 60,000 cancer cells each. Each object is saved with its per-cell tables built, as
 ``grow`` leaves a tumour, so that a loaded tumour is in the same state.
 
 Usage:
@@ -149,7 +150,7 @@ def grow(out_dir, names, scale, target, cohort_scale=COHORT_SCALE, cohort_target
     for name in names:
         t0 = time.time()
         if name == "cohort":
-            seed, kw = TUMOURS["ductal"]
+            seed, kw = TUMOURS["immune"]
             at_scale, at_target = cohort_scale, cohort_target
             obj = Cohort(functools.partial(_grow, kw=kw, scale=at_scale, target=at_target),
                          patient_seeds=COHORT_SEEDS).run()

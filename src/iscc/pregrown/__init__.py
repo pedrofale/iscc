@@ -164,11 +164,12 @@ def immune():
 
 
 def cohort():
-    """Six patients grown over one configuration of the paper's regime, for analyses across
-    patients such as batch integration.
+    """Six patients grown over one configuration of the paper's regime with immune cells (that of
+    [`immune`][iscc.pregrown.immune]), for analyses across patients such as batch integration, where
+    immune cells are the commonest cell state the patients share.
 
     Each patient grows from its own seed to 60,000 cancer cells on the 96 by 96 field, the scale of
-    the paper's seeding runs. About 71 MB.
+    the paper's seeding runs.
 
     Returns
     -------
