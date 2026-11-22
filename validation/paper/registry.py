@@ -53,10 +53,14 @@ def _runs():
     """name -> list of (task_name, grow kwargs). Variants override the paper regime, nothing else."""
     runs = {}
     # R0: the showcase tumour, with its spatial history (one main seed plus replicates), and the
-    # metastatic lattice on (Fig 1a, 2a). The target counts primary and metastasis together.
+    # metastatic lattice on (Fig 1a, 2a). The target counts primary and metastasis together. It has the
+    # regime's immune cells (Pedro, 2026-11-22: the figures about measured data and tools use tumours
+    # with immune cells; the evolution sweeps do not).
     runs["R0"] = [(f"seed{s}", dict(seed=s, scale=SHOW, target_cancer=T["showcase_target"],
-                                    spatial_snapshot_every=2, selection=RG.MET_SELECTION,
-                                    spatial=RG.met_spatial(SHOW))) for s in (1, 2, 3)]
+                                    spatial_snapshot_every=2,
+                                    selection={**RG.MET_SELECTION, **RG.IMMUNE_SELECTION},
+                                    spatial={**RG.met_spatial(SHOW), **RG.IMMUNE_SPATIAL},
+                                    immune=dict(RG.IMMUNE))) for s in (1, 2, 3)]
     # R1: dispersal sweep, clonal territories through to intermixing.
     runs["R1"] = [(f"disp{d}_seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
                                             spatial_snapshot_every=8, cancer={"dispersal_rate": d}))
@@ -95,8 +99,11 @@ def _runs():
     runs["R5"] = [(f"wgd{w}_seed{s}", dict(seed=s, scale=SWEEP, target_cancer=T["sweep_target"],
                                            cancer={"wgd_rate": w}))
                   for w in R5_WGD for s in range(1, 2 * T["seeds"] + 1)]
-    # R6: a cohort of patients sharing one configuration (private evolution seeds).
-    runs["R6"] = [(f"patient{s}", dict(seed=100 + s, scale=SWEEP, target_cancer=T["sweep_target"]))
+    # R6: a cohort of patients sharing one configuration (private evolution seeds), with the regime's
+    # immune cells, the commonest state the patients share (Pedro, 2026-11-22).
+    runs["R6"] = [(f"patient{s}", dict(seed=100 + s, scale=SWEEP, target_cancer=T["sweep_target"],
+                                       selection=dict(RG.IMMUNE_SELECTION), spatial=dict(RG.IMMUNE_SPATIAL),
+                                       immune=dict(RG.IMMUNE)))
                   for s in range(1, 7)]
     # R10: compartment barriers on against off (the genotype-niche benchmark and Fig 3C).
     off = {"breach_gated_invasion": False, "stromal_hazard": 0.0}
