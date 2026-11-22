@@ -8,7 +8,7 @@ an iscc tumour with the paper regime's Visium settings, keeps the reference's ge
 reference's number of spots (the KDE statistic grows with the sample size), and computes the metrics
 with ``tools/spatialsimbench_ks.R`` (the OpenProblems port of SpatialSimBench's code).
 
-The Visium assay holds dense spots x genes tables over the 35,061 human genes, so a section of about
+The Visium assay holds dense spots x genes tables over the 36,601 human genes, so a section of about
 5,000 spots does not fit a laptop; the tumour is sectioned in four windows of 70 x 70 demes, each
 measured separately, and their spots pooled.
 

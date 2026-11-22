@@ -31,6 +31,10 @@ GENOME = "GRCh38"
 # also the default `VisiumBatchHyperParams.kappa`: the Dirichlet-multinomial inflates every gene's
 # variance by (N + kappa) / (1 + kappa) whatever the gene set, so the value holds for the growth genes
 # too. A small kappa (the old default was 50) piles each spot's counts onto a few genes at any gene count.
+# Not refitted since the depth change (864cd90) or the layer's move to all 36,601 genes: on 2026-11-22
+# the same check gave 80,480 at 300,000 and 97,673 at 1e9 over all genes (real 89,197), and 74,276 and
+# 90,126 over the arm genes (real 82,165), so the value no longer saturates; it is refitted after the
+# per-gene Visium platform factor, which moves the same statistic.
 HUMAN_VISIUM_KAPPA = 300_000.0
 
 

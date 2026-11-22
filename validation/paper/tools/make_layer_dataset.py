@@ -82,8 +82,9 @@ def _cell_truth(t, layer, sample, cells, min_frac):
     demes = sample["cell_deme"]["deme_id"].reindex(cells).to_numpy(int)
     epi = epi_deme[demes]
     cn_p, cn_m = layer.homolog_cn(gids, t)                           # cells x growth segments
-    tot = (cn_p + cn_m)[:, layer.segment]                             # cells x human genes
-    arms = layer.genes["arm"].to_numpy()
+    on = layer.on_arm                                                 # genes on the modelled arms
+    tot = (cn_p + cn_m)[:, layer.segment[on]]                         # cells x those human genes
+    arms = layer.genes["arm"].to_numpy()[on]
     arm_names = pd.unique(arms)
     arm_cn = np.stack([tot[:, arms == a].mean(axis=1) for a in arm_names], axis=1)
     return dict(tum=tum, clone=clones.astype(object).to_numpy(), hyp=hyp, epi=epi, arm_cn=arm_cn,

@@ -11,7 +11,7 @@ Not shipped: the 1000 Genomes phase-3 common SNPs (allele frequency above 5%) on
 distributed by cellsnp-lite (`genome1K.phase3.SNP_AF5e2.chr1toX.hg38.vcf.gz`, 92 MB, SHA-256
 `88e22ea3c4d416aed925e5b3efeb371ef023c954599a325dcb334dffcf6ad707`). 1000 Genomes data are released
 without restriction. `iscc.data.human.fetch_snps()` downloads it, checks the checksum, and keeps the
-4,035,522 SNPs inside the 35,061 modelled genes.
+4,035,522 SNPs inside the 35,061 genes on the modelled arms (the layer places SNPs on those genes only).
 
 ## Cell-type baselines and programmes (L3)
 

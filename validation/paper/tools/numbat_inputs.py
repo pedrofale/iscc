@@ -44,6 +44,7 @@ def main(ds):
                        "gene": [sym.get(g, g) for g in s["gene_id"]]})
     df.sort_values(["CHROM", "POS", "cell"]).to_csv(os.path.join(out, "df_allele.tsv.gz"), sep="\t", index=False)
     bed = pd.read_csv(os.path.join(ds, "clonalscope", "genes.bed"), sep="\t")
+    bed = bed[bed["chr"].isin([f"chr{c}" for c in range(1, 23)])]   # Numbat's gtf: the autosomes
     gtf = pd.DataFrame({"gene": [sym.get(g, g) for g in bed["geneID"]], "gene_start": bed["start"],
                         "gene_end": bed["end"],
                         "CHROM": bed["chr"].str.replace("chr", "", regex=False).astype(int),

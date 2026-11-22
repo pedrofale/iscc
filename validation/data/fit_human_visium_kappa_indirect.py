@@ -9,6 +9,12 @@ the real estimate. Result on 2026-11-13 (regime-v2, small scale, seed 1, 657 in-
 input 82,165 -> 55,416; 300,000 -> 81,464; 1e9 -> 81,592. The simulated tissue alone reproduces the
 real dispersion, so the data bound the technical kappa only from below; 300,000 is the smallest tested
 value within 1% of the real estimate, and is ``HUMAN_VISIUM_KAPPA``.
+
+Result on 2026-11-22, after the Visium depth change and with the layer emitting all 36,601 genes
+(634 in-tissue spots), against the real 89,197 over all genes: input 89,197 -> 53,597; 300,000 ->
+80,480; 1e9 -> 97,673. Over the arm genes alone the same sections give 74,276 and 90,126 at 300,000
+and 1e9, against the real 82,165. The estimate no longer saturates, so the value is to be refitted on a
+finer grid once the per-gene Visium platform factor is in.
 """
 import sys
 import time
@@ -32,7 +38,7 @@ layer = HumanGenomeLayer(tum)
 expr = layer.expression(tum)
 sec = RR.section(tum, depth_frac=0.5, max_cells=60_000)
 print(f"section {len(sec['cell_exp'])} cells, {time.time() - t0:.0f} s", flush=True)
-for kappa in (82_165.0, 300_000.0, 1e9):
+for kappa in (89_197.0, 300_000.0, 1e9):
     t = time.time()
     vz = Visium(seed=2, kappa=kappa).run(sec, gene_lift=expr)
     tissue = np.asarray(vz.obs.n_cells) > 0

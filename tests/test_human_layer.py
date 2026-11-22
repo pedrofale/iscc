@@ -103,8 +103,11 @@ def test_segment_drivers_places_exact_counts_and_unset_is_unchanged():
 def test_map_is_resolution_free_and_in_genomic_order(reference, n):
     layer = HumanGenomeLayer(genome_params=arm_genome(genes_per_segment=n, reference=reference)["genome_params"],
                              reference=reference, seed=0)
-    assert len(layer.genes) == 35061
-    for arm, g in layer.genes.groupby("arm", sort=False):
+    assert len(layer.genes) == 36601 and layer.on_arm.sum() == 35061   # every gene, 35,061 on the arms
+    off = layer.genes[~layer.on_arm]
+    assert (off["growth_gene"] == -1).all() and (off["segment"] == -1).all() and (off["arm"] == "").all()
+    assert {"chrX", "chrY", "chrM"} <= set(off["chrom"])
+    for arm, g in layer.genes[layer.on_arm].groupby("arm", sort=False):
         mids = (g["start"] + g["end"]) // 2
         cov = g["growth_gene"].to_numpy()[np.argsort(mids.to_numpy(), kind="stable")]
         assert np.all(np.diff(cov) >= 0)               # slices in genomic order
@@ -117,7 +120,7 @@ def test_a_genome_without_arms_needs_allow_linear_and_warns(reference):
         HumanGenomeLayer(genome_params=gp, reference=reference)
     with pytest.warns(UserWarning):
         layer = HumanGenomeLayer(genome_params=gp, reference=reference, allow_linear=True)
-    assert len(layer.genes) == 35061 and layer.cover.max() < 600
+    assert len(layer.genes) == 36601 and layer.on_arm.sum() == 35061 and layer.cover.max() < 600
 
 
 def test_growth_is_the_same_with_and_without_the_layer(reference):
@@ -151,19 +154,19 @@ def test_assays_count_human_genes_and_writers_produce_tool_inputs(reference, tum
     layer = HumanGenomeLayer(tumour, reference=reference)
     cd = tumour.cell_data
     sc = scRNA(n_cells=40, seed=1).run(cd, gene_lift=layer.lift)
-    assert sc.observed_counts.shape == (40, 35061)
+    assert sc.observed_counts.shape == (40, 36601)
     assert list(sc.observed_counts.columns[:3]) == layer.genes["gene_id"].tolist()[:3]
     write_scrna(str(tmp_path / "sc"), sc, layer, cd, allele=layer.scrna_allele_counts(sc, cd, tumour),
                 tumor=tumour)
     vz = Visium(seed=2, kappa=HUMAN_VISIUM_KAPPA).run(cd, grid_side=12, gene_lift=layer.lift)
-    assert vz.spot_counts.shape[1] == 35061
+    assert vz.spot_counts.shape[1] == 36601
     av = layer.visium_allele_counts(vz, tumour)
     write_visium(str(tmp_path / "vz"), vz, layer, allele=av, tumor=tumour)
 
     outs = tmp_path / "vz" / "outs"
     n_tissue = int((vz.obs["n_cells"] > 0).sum())
     with h5py.File(outs / "filtered_feature_bc_matrix.h5") as f:
-        assert tuple(f["matrix/shape"][()]) == (35061, n_tissue)
+        assert tuple(f["matrix/shape"][()]) == (36601, n_tissue)
         assert f["matrix/features/id"][0].decode() == layer.genes["gene_id"].iat[0]
         assert len(f["matrix/indptr"]) == n_tissue + 1
     pos = pd.read_csv(outs / "spatial" / "tissue_positions.csv")
@@ -181,7 +184,7 @@ def test_assays_count_human_genes_and_writers_produce_tool_inputs(reference, tum
         first = f.readline().rstrip("\n").split("\t")
     assert first[2] == "Gene Expression" and first[0].startswith("ENSG")
     bed = pd.read_csv(tmp_path / "sc" / "clonalscope" / "genes.bed", sep="\t")
-    assert list(bed.columns) == ["chr", "start", "end", "geneID"] and len(bed) == 35061
+    assert list(bed.columns) == ["chr", "start", "end", "geneID"] and len(bed) == 36601
     cells = pd.read_csv(tmp_path / "sc" / "truth" / "cells.tsv", sep="\t")
     assert len(cells) == 40 and cells["barcode"].is_unique
     seg = pd.read_csv(tmp_path / "vz" / "truth" / "cn_segments.tsv", sep="\t")

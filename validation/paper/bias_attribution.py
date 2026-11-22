@@ -194,11 +194,13 @@ def _score_infercnv(d, layer, region):
     score = result.obs["cnv_score"].reindex(truth.index)
     epi = kind.isin(["cancer", "epithelial"])
     auc = float(roc_auc_score(kind[epi] == "cancer", score[epi]))
-    # inferCNV's windows of 100 genes moved by 10, each assigned to the arm of its middle gene
-    genes = layer.genes.assign(chromosome=layer.genes["chrom"].str[3:].astype(int)).sort_values(["chromosome", "start"])
+    # inferCNV's windows of 100 genes moved by 10 along the autosomes, each assigned to the arm of its
+    # middle gene ("" for a gene on no modelled arm, an acrocentric short arm)
+    auto = layer.genes[layer.genes["chrom"].isin([f"chr{c}" for c in range(1, 23)])]
+    genes = auto.assign(chromosome=auto["chrom"].str[3:].astype(int)).sort_values(["chromosome", "start"])
     window_arm = np.concatenate([g["arm"].to_numpy()[np.arange(0, len(g) - 99, 10) + 50]
                                  for _, g in genes.groupby("chromosome")])
-    arms = pd.unique(genes["arm"])
+    arms = pd.unique(genes.loc[genes["arm"] != "", "arm"])
     inferred = pd.DataFrame(result.obsm["X_cnv"].toarray(), index=result.obs_names)
     inferred = inferred.T.groupby(window_arm).mean().T[arms].reindex(truth.index)
     seg = pd.read_csv(f"{d}/scrna/truth/cn_segments.tsv", sep="\t", dtype={"genotype": str})

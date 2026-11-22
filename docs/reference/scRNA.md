@@ -17,7 +17,7 @@ Neither preset adds dropout. UMI counts are not zero-inflated beyond the negativ
 (Svensson 2020): within the cell types of PBMC3k, the negative binomial alone gives the zero
 fraction at every mean, and leaves no excess zeros for a dropout to explain. `dropout_mid`
 switches on a logistic dropout for data that need one. Its midpoint is in counts per gene, so the
-same midpoint deletes far more of the genes of a cell over the 35,061 human genes than over the
+same midpoint deletes far more of the genes of a cell over the 36,601 human genes than over the
 growth genes, and it acts on every molecule in the droplet, ambient ones included.
 
 The ambient soup is a share of each library (`ambient_frac` of it), not counts on top, so it does

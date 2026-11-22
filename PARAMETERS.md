@@ -260,17 +260,22 @@ distribution and the same `max_log_fold` bound. What the genotype and the niche 
 off the growth genes. Pass it as `gene_lift` to `scRNA.run` (chunked, sparse counts) and `Visium.run`
 (per-type pooling).
 The scRNA presets add no dropout, which suits the human genes: a logistic dropout midpoint is in
-counts per gene, so a midpoint of 1.5 UMIs deletes most of the 35,061 genes of a cell (410 genes per
+counts per gene, so a midpoint of 1.5 UMIs deletes most of the human genes of a cell (410 genes per
 cell at 1,913 UMIs, against 1,523 at 3,494 without it, on 3,019 cells of an arm-genome tumour at the
-10x preset), and UMI counts are not zero-inflated beyond the negative binomial (Svensson 2020). A run
-on human genes with `dropout_mid > 0` warns. Over the human genes the 10x preset gives the zero
-fraction of PBMC3k within 0.02 at every mean.
+10x preset, measured when the layer emitted the 35,061 arm genes), and UMI counts are not
+zero-inflated beyond the negative binomial (Svensson 2020). A run on human genes with
+`dropout_mid > 0` warns. Over the human genes the 10x preset gives the zero fraction of PBMC3k within
+0.02 at every mean.
 
-The layer emits the 35,061 GRCh38-2020-A genes that lie on the 39 modelled arms (chrX, chrY, chrM, the
-acrocentric short arms and scaffolds are not modelled). Each takes the copy number per homolog of the
-growth gene covering its slice of the arm and, with the plain `layer.lift`, that growth
-gene's expression. Germline SNPs are the 1000 Genomes phase-3 common SNPs (allele frequency above 5%)
-inside those genes, drawn heterozygous at 2·AF·(1 − AF) and phased exactly onto the homologs;
+The layer emits all 36,601 GRCh38-2020-A genes, as Cell Ranger's reference does. The 35,061 genes on
+the 39 modelled arms each take the copy number per homolog of the growth gene covering its slice of
+the arm and, with the plain `layer.lift`, that growth gene's expression. The other 1,540 (chrX 1,148,
+chrY 111, chrM 13, and 268 on acrocentric short arms, centromeres and scaffolds) lie on no growth gene
+(`layer.on_arm` False, `cover` and `segment` -1): under `layer.expression` they take their cell type's
+atlas baseline and the cell's programmes at two copies, with no genotype or niche effect, and under the
+plain `layer.lift` they are 0. They hold about a tenth of each type's atlas expression (chrM 5-6%).
+Germline SNPs are the 1000 Genomes phase-3 common SNPs (allele frequency above 5%) inside the arm
+genes, drawn heterozygous at 2·AF·(1 − AF) and phased exactly onto the homologs;
 `fetch_snps()` downloads them (92 MB) and `ISCC_HUMAN_REF` points at the result.
 
 ### DNA assays — `bulkDNA`, `scDNA`

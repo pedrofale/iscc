@@ -39,8 +39,10 @@ class GeneLift:
     """Lift a matrix over growth genes to one over human genes.
 
     ``lift(X)`` returns ``X[:, cover]``: column ``h`` is the growth gene that covers human gene
-    ``h``. The map is linear, so lifting before or after pooling cells into spots gives the same
-    result, which lets [`Visium`][iscc.data.Visium] pool on the small growth axis first.
+    ``h``; a gene on no modelled arm (``cover`` -1: chrX, chrY, the mitochondrial genes, an acrocentric
+    short arm) is 0 under this lift, and takes its atlas baseline under
+    [`HumanExpression`][iscc.data.human.HumanExpression]. The map is linear, so lifting before or after
+    pooling cells into spots gives the same result, which lets [`Visium`][iscc.data.Visium] pool on the small growth axis first.
 
     Attributes
     ----------
@@ -55,7 +57,12 @@ class GeneLift:
         self.genes = pd.Index(genes, name="gene_id")
 
     def __call__(self, X):
-        return np.asarray(X)[:, self.cover]
+        X = np.asarray(X)
+        out = X[:, np.maximum(self.cover, 0)]
+        off = self.cover < 0
+        if off.any():
+            out[:, off] = 0          # a gene on no growth gene has no growth expression to copy
+        return out
 
 
 @dataclass
@@ -111,6 +118,12 @@ class HumanGenomeLayer:
     the ``j``-th of ``n`` equal slices of the arm, whatever ``n`` is. Any other genome is laid along
     the 39 arms end to end (``allow_linear=True``): its segments then straddle chromosome boundaries,
     which no real tumour shows, so that path warns.
+
+    Every gene of the reference is emitted (36,601, Cell Ranger's GRCh38-2020-A set). A gene on none
+    of the 39 arms (chrX, chrY, chrM, an acrocentric short arm, a centromere or a scaffold) is covered
+    by no growth gene: ``on_arm`` is False and ``cover`` and ``segment`` are -1. It is held at two
+    copies, carries no SNPs, and takes its cell type's atlas baseline and the cell's programmes under
+    [`HumanExpression`][iscc.data.human.HumanExpression].
 
     Parameters
     ----------
@@ -214,12 +227,17 @@ class HumanGenomeLayer:
             k = np.searchsorted(piece["lo"].to_numpy(), mid[on], side="right") - 1
             k = np.clip(k, 0, len(piece) - 1)
             cover[on] = piece["growth_gene"].to_numpy()[k]
-        keep = np.flatnonzero(cover >= 0)
-        self.ref_rows = keep                               # rows of reference.genes that are emitted
-        self.genes = ref.genes.iloc[keep].reset_index(drop=True)
-        self.cover = cover[keep]
-        self.segment = np.searchsorted(self.seg_offsets, self.cover, side="right") - 1
-        self.genes["arm"] = ref.arms["arm"].to_numpy()[arm_of[keep]]
+        # Every gene of the reference is emitted, as Cell Ranger's reference holds them all. A gene on
+        # no modelled arm (chrX, chrY, the mitochondrial genes, an acrocentric short arm) is covered by
+        # no growth gene (cover -1, segment -1): it keeps its atlas baseline and the cell's programmes,
+        # with copy number held at two and no genotype or niche effect.
+        self.ref_rows = np.arange(len(ref.genes))          # rows of reference.genes that are emitted
+        self.genes = ref.genes.reset_index(drop=True).copy()
+        self.cover = cover
+        self.on_arm = cover >= 0
+        self.segment = np.where(self.on_arm,
+                                np.searchsorted(self.seg_offsets, np.maximum(cover, 0), side="right") - 1, -1)
+        self.genes["arm"] = np.where(self.on_arm, ref.arms["arm"].to_numpy()[np.maximum(arm_of, 0)], "")
         self.genes["growth_gene"] = self.cover
         self.genes["segment"] = self.segment
 
@@ -230,8 +248,10 @@ class HumanGenomeLayer:
         row_to_gene = np.full(len(self.reference.genes), -1, dtype=np.int64)
         row_to_gene[self.ref_rows] = np.arange(len(self.ref_rows))
         gene = row_to_gene[snps["gene"].to_numpy()]
-        cand = snps.loc[gene >= 0].copy()
-        cand["gene"] = gene[gene >= 0]
+        keep = gene >= 0
+        keep[keep] = self.on_arm[gene[keep]]             # SNPs on the modelled arms only
+        cand = snps.loc[keep].copy()
+        cand["gene"] = gene[keep]
         rng = np.random.default_rng([self.seed, 0x6E])
         af = np.nan_to_num(cand["af"].to_numpy(float), nan=0.0)
         het = rng.random(len(cand)) < 2.0 * af * (1.0 - af)
@@ -435,7 +455,10 @@ class HumanGenomeLayer:
     def gene_cn(self, gids, tumor):
         """Total copy number of every human gene for each genotype: ``(len(gids), n_genes)`` int16."""
         cn_p, cn_m = self.homolog_cn(list(gids), tumor)
-        return (cn_p + cn_m)[:, self.segment]
+        tot = cn_p + cn_m
+        out = np.full((tot.shape[0], len(self.segment)), 2, dtype=tot.dtype)   # off the arms: two copies
+        out[:, self.on_arm] = tot[:, self.segment[self.on_arm]]
+        return out
 
     @staticmethod
     def is_tumour(gids, tumor):

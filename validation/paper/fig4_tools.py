@@ -99,12 +99,13 @@ def _compartments(t):
 
 def _arm_cn(t, layer, gids):
     """Per cell, the true total copy number averaged over each arm's human genes (cells x arms)."""
-    arms = layer.genes["arm"].to_numpy()
+    on = layer.on_arm
+    arms = layer.genes["arm"].to_numpy()[on]
     names = pd.unique(arms)
     uniq, inv = np.unique(np.asarray([str(g) for g in gids]), return_inverse=True)
     lookup = {str(g): g for g in gids}
     cn_p, cn_m = layer.homolog_cn([lookup[u] for u in uniq], t)
-    tot = (cn_p + cn_m)[:, layer.segment].astype(float)
+    tot = (cn_p + cn_m)[:, layer.segment[on]].astype(float)
     per = np.stack([tot[:, arms == a].mean(axis=1) for a in names], axis=1)
     return per[inv], names
 

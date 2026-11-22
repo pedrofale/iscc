@@ -44,7 +44,7 @@ PROTOCOL_PRESETS = {
     # No dropout: within types the NB alone gives the PBMC3k zero fraction at every mean (median
     # excess 0.0007 above 0.1 UMIs), so there are no zeros left for a dropout curve. A midpoint in
     # counts per gene also deletes far more of the genes of a cell when its library is spread over
-    # 35,061 human genes than over a few thousand growth genes.
+    # 36,601 human genes than over a few thousand growth genes.
     # kappa (count_model="dm" only): the Dirichlet-multinomial concentration fitted by moments within
     # the 8 annotated PBMC3k types, on the genes the dispersion is fitted on (1,463; the variance is
     # 2.9 times multinomial there). The DM inflates the variance of every gene by (N + kappa)/(1 + kappa)
@@ -147,7 +147,7 @@ class scRNA(Assay):
         to the expected count of a gene in the droplet, ambient molecules included); 0 disables
         dropout. UMI counts carry no zeros beyond the negative binomial, so both presets leave it
         off. The midpoint is in counts per gene, so its effect grows with the number of genes the
-        library is spread over: on the 35,061 human genes a midpoint of 1.5 deletes most of the
+        library is spread over: on the 36,601 human genes a midpoint of 1.5 deletes most of the
         genes of a cell. Default None -> preset (0.0, disabled).
     dropout_shape : float, optional
         Logistic dropout steepness (active only when ``dropout_mid > 0``). Default None ->

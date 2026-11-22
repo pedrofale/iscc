@@ -8,6 +8,7 @@ import pandas as pd
 import scipy.sparse as sp
 
 TOOLS = ("copykat", "calicost", "clonalscope", "cancerfinder")
+COPYKAT_CHROMS = [f"chr{c}" for c in range(1, 23)] + ["chrX"]
 
 
 def _check(rows, tool, name, value, threshold, passed):
@@ -36,7 +37,7 @@ def check_tool_ready(counts, genes, tools=TOOLS, allele=None):
     Notes
     -----
     - **CopyKAT**: more than 200 detected genes per cell, at least 7,000 genes detected in more than
-      5% of cells, and at least 5 such genes on every chromosome.
+      5% of cells, and at least 5 such genes on every chromosome it annotates (1-22 and X).
     - **CalicoST**: more than 50 UMIs and at least 50 SNP-covering UMIs per spot.
     - **Clonalscope**: without bulk DNA its segments are the arms, and it keeps an arm only if more
       than 150 genes there vary across barcodes (``RunCovCluster(ngene_filter=150)``) and at least 90%
@@ -59,7 +60,9 @@ def check_tool_ready(counts, genes, tools=TOOLS, allele=None):
                    float(np.mean(genes_per_bc > 200)), 1.0, np.mean(genes_per_bc > 200) >= 0.95)
             n5 = int((frac_bc_per_gene > 0.05).sum())
             _check(rows, tool, "genes detected in >5% of cells", n5, 7000, n5 >= 7000)
-            per_chr = pd.Series(frac_bc_per_gene > 0.05).groupby(genes["chrom"].to_numpy()).sum()
+            chrom = genes["chrom"].to_numpy()
+            annotated = np.isin(chrom, COPYKAT_CHROMS)          # CopyKAT annotates chr1-22 and X
+            per_chr = pd.Series(frac_bc_per_gene[annotated] > 0.05).groupby(chrom[annotated]).sum()
             _check(rows, tool, "fewest such genes on a chromosome", int(per_chr.min()), 5, per_chr.min() >= 5)
         elif tool == "calicost":
             _check(rows, tool, "share of spots with >50 UMIs", float(np.mean(umis > 50)), 1.0,
@@ -75,7 +78,7 @@ def check_tool_ready(counts, genes, tools=TOOLS, allele=None):
             arm = genes["arm"].to_numpy()
             varies = np.asarray(X.power(2).mean(axis=0)).ravel() - np.asarray(X.mean(axis=0)).ravel() ** 2 > 0
             n_var = pd.Series(varies).groupby(arm).sum()
-            arms = pd.Index(sorted(set(arm)))
+            arms = pd.Index(sorted(set(arm) - {""}))          # "": a gene on no modelled arm
             covered = []
             for a in arms:
                 cols = np.flatnonzero(arm == a)

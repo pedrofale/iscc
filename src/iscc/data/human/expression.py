@@ -78,7 +78,8 @@ class HumanExpression:
         self.permute = None if permute_programmes is None else int(permute_programmes)
         self._shuffled = {}
         self.genes = layer.lift.genes
-        self.cover = layer.cover
+        # a gene on no growth gene reads the extra, neutral column the factors carry (F 1, p share 0.5)
+        self.cover = np.where(layer.cover >= 0, layer.cover, layer.n_growth)
         self.chunk = int(chunk)
         H = len(self.genes)
         if baselines is None:
@@ -178,10 +179,11 @@ class HumanExpression:
             base *= self.P.gene_multiplier(Z)              # F divides out the cell's own programmes
             if self.permute is not None:
                 Z = self._shuffled_programs(cell_data).reindex(cells).to_numpy(np.float64)
-        F = np.ones_like(ce)
+        F = np.ones((ce.shape[0], ce.shape[1] + 1))      # the last column: genes on no growth gene
         ok = ce > 0
-        F[ok] = ce[ok] / np.maximum(base[ok], TINY)
-        F[(~ok) & (base > TINY)] = 0.0           # truly silent (e.g. both homologs lost)
+        Fg = F[:, :-1]
+        Fg[ok] = ce[ok] / np.maximum(base[ok], TINY)
+        Fg[(~ok) & (base > TINY)] = 0.0          # truly silent (e.g. both homologs lost)
         return F, types, Z
 
     def cell_expression(self, cell_data, cells):
@@ -209,7 +211,7 @@ class HumanExpression:
         rows = np.concatenate([np.full(members[s].size, i) for i, s in enumerate(occ)]) if occ.size else np.array([], int)
         cols = np.concatenate([members[s] for s in occ]) if occ.size else np.array([], int)
         M = sp.csr_matrix((np.ones(len(rows)), (rows, cols)), shape=(len(occ), len(cells))).tocsc()
-        G = self.layer.n_growth
+        G = self.layer.n_growth + 1                      # the growth genes and the neutral column
         pools, pools_p = {}, {}
         raw_hp = np.zeros((len(occ), self.hp.size))
         for lo in range(0, len(cells), self.chunk):
@@ -217,6 +219,7 @@ class HumanExpression:
             chunk_cells = cells[sl]
             F, types, Z = self._factors(placed, chunk_cells)
             frac = self.layer.hap_fraction(placed, chunk_cells, self.tumor)
+            frac = np.hstack([frac, np.full((frac.shape[0], 1), 0.5, dtype=frac.dtype)])
             Mc = M[:, sl]
             for t in np.unique(types):
                 r = np.flatnonzero(types == t)

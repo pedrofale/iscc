@@ -12,8 +12,10 @@ What must hold:
    1 on a balanced diploid arm, constant along an arm.
 4. **Per-type pooling is exact.** A Visium spot's pooled expression equals the sum of its cells'
    expression computed one by one.
-5. **The assays run on it.** scRNA counts come out sparse over the human genes; Visium spots too.
-6. **Shuffled programmes move only the programme factor** (`permute_programmes`). Off the
+5. **Genes on no modelled arm** (chrX, chrY, chrM, acrocentric short arms) take their type's atlas
+   baseline unchanged, at two copies.
+6. **The assays run on it.** scRNA counts come out sparse over the human genes; Visium spots too.
+7. **Shuffled programmes move only the programme factor** (`permute_programmes`). Off the
    programme genes a cell's expression is unchanged; on them it changes by exactly the ratio of the
    shuffled to its own programme factor; the shuffle stays within each cell type, is fixed per
    sample and per seed, and Visium pools agree with it.
@@ -112,14 +114,31 @@ def test_cancer_differs_from_epithelium_only_by_its_genotype(grown):
     off = off[expr.B["epithelial"][off] > 0]
     ratio = E[:, off] / expr.B["epithelial"][off][None, :]
     F, _, _ = expr._factors(cd, cells)
-    assert np.allclose(ratio, F[:, layer.cover[off]])     # nothing but the genotype/niche factor
+    assert np.allclose(ratio, F[:, expr.cover[off]])      # nothing but the genotype/niche factor
     gids = layer._gids(cd, cells)
     cn_p, cn_m = layer.homolog_cn(gids, t)
-    seg = layer.segment[off]
+    arm = layer.on_arm[off]
+    seg = layer.segment[off][arm]
     for i in range(len(cells)):
         bal = (cn_p[i, seg] == 1) & (cn_m[i, seg] == 1)
         if bal.any():
-            assert np.allclose(ratio[i, bal], 1.0, rtol=0.05)   # balanced diploid arm, no niche here
+            assert np.allclose(ratio[i, arm][bal], 1.0, rtol=0.05)   # balanced diploid arm, no niche here
+
+
+def test_a_gene_on_no_arm_keeps_its_baseline_at_two_copies(grown):
+    t, layer, expr = grown
+    cd = t.cell_data
+    cells = list(cd["cell_exp"].index)
+    E = expr.cell_expression(cd, cells)
+    F, types, _ = expr._factors(cd, cells)
+    assert np.all(F[:, -1] == 1.0)                         # the neutral column
+    off = np.setdiff1d(np.flatnonzero(~layer.on_arm), expr.hp)
+    for ty in np.unique(types):
+        b = expr.B[ty][off]
+        assert np.allclose(E[types == ty][:, off[b > 0]], b[b > 0][None, :])   # the atlas baseline, unscaled
+    tmsb4x = np.flatnonzero(layer.genes["gene_name"].to_numpy() == "TMSB4X")
+    assert layer.genes["chrom"].iat[tmsb4x[0]] == "chrX" and (E[:, tmsb4x] > 0).all()
+    assert (layer.gene_cn(layer._gids(cd, cells[:20]), t)[:, ~layer.on_arm] == 2).all()
 
 
 def test_per_type_pooling_is_exact(grown):

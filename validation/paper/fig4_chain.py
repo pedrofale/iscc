@@ -530,7 +530,7 @@ def informative_genes(X, gene_seg, profiles, n_max=RNA_GENES, min_counts=20):
     prof = profiles.to_numpy(float)
     seg_ok = (prof.std(axis=0) > 0) & (prof.min(axis=0) > 0) & (prof.max(axis=0) <= 6)
     tot = np.asarray(X.sum(axis=0)).ravel()
-    cand = np.flatnonzero(seg_ok[gene_seg] & (tot > min_counts))
+    cand = np.flatnonzero((gene_seg >= 0) & seg_ok[gene_seg] & (tot > min_counts))   # -1: on no arm
     if cand.size > n_max:
         cand = cand[np.argsort(-tot[cand])[:n_max]]
     return np.sort(cand)
