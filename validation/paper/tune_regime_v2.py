@@ -12,6 +12,7 @@ Usage (one task per Slurm array element)::
     python validation/paper/tune_regime_v2.py count sweep --overfill 1.5 --d1 5
     python validation/paper/tune_regime_v2.py task sweep 3 --overfill 1.5 --d1 5
     python validation/paper/tune_regime_v2.py collect        # -> <out>/regime-v2-tuning.csv
+    python validation/paper/tune_regime_v2.py task current 3  # the regime as it stands (also current_sweep)
 
 Outputs go to ``$ISCC_PAPER_OUT/tuning-v2`` (or ``analysis_data/paper/tuning-v2``).
 """
@@ -60,6 +61,10 @@ def tasks(stage, overfill=None, d1=None, mu=None):
     if stage == "mu":
         pts = [(f"v2_o{o:g}_d{d:g}_mu{m:g}", v2(o, d, m)) for o, d in MU_POINTS for m in MUS]
         return [(lab, kw, CANONICAL_DISPERSAL, s) for lab, kw in pts for s in SEEDS]
+    if stage == "current":         # the regime as it stands, to recheck the criteria after a model change
+        return [("current", {}, CANONICAL_DISPERSAL, s) for s in range(1, 11)]
+    if stage == "current_sweep":   # criterion 4 for the regime as it stands
+        return [("current", {}, d, s) for d in REG.R1_DISPERSAL for s in SEEDS]
     if stage == "sweep":
         pts = [(f"v2_o{overfill:g}_d{d1:g}" + (f"_mu{mu:g}" if mu else ""),
                             v2(overfill, d1, mu))]
@@ -119,6 +124,16 @@ def run_task(stage, i, overfill=None, d1=None, mu=None):
     occ = _occupancy(t)
     full = occ[occ >= 1.0 - 1e-9]
     sc = SS.score_tumour(t)
+    # the cell-weighted mean and spread of the division rate of the cancer cells (regime v3's extra measures)
+    n_g = {}
+    for deme in t.demes:
+        for g, c in deme.items():
+            if t._is_cancer(g):
+                n_g[g] = n_g.get(g, 0) + c
+    rates = np.array([t.genotypes[g].evolutionary_parameters["division_rate"] for g in n_g])
+    w = np.array(list(n_g.values()), dtype=float)
+    div_mean = float(np.average(rates, weights=w)) if w.sum() else None
+    div_cv = float(np.sqrt(np.average((rates - div_mean) ** 2, weights=w)) / div_mean) if div_mean else None
     m0, md = mode_indices(t, detection=0.0), mode_indices(t, detection=DETECTION)
     rec = dict(stage=stage, label=label, dispersal=disp, seed=seed, mutation_rate=cancer.get("mutation_rate"),
                wall_s=round(wall, 1),
@@ -129,7 +144,7 @@ def run_task(stage, i, overfill=None, d1=None, mu=None):
                breach_frac_at_invasion=mon["breach_frac_at_invasion"], max_occ=mon["max_occ"],
                frac_chunks_over_k=mon["chunks_over_k"] / max(mon["n_chunks"], 1),
                mean_occ_full_end=float(full.mean()) if full.size else None,
-               n_genotypes=len(t.genotypes),
+               n_genotypes=len(t.genotypes), division_rate_mean=div_mean, division_rate_cv=div_cv,
                **{k: sc.get(k) for k in ("frac_genome_altered", "mean_ploidy", "pct_wgd", "n_clones",
                                          "max_cna_freq", "n_truncal_segments", "stroma_pct", "flags")},
                n0=m0["n"], D0=m0["D"], J1=m0["J1"], nd=md["n"], Dd=md["D"])
