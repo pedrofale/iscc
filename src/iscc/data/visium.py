@@ -32,6 +32,7 @@ from .assay import Assay
 from .batch import VisiumBatch, VisiumBatchHyperParams, COUNT_MODELS
 
 import os
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -457,6 +458,12 @@ class Visium(Assay):
         clone_labels = ctype.reindex(cell_exp.index).iloc[:, 0].astype(str).values if ctype is not None else None
         n_spots = spot_coords.shape[0]
         n_cells_arr = g["n_cells"]
+        if len(cell_ids) and not np.any(np.asarray(n_cells_arr) > 0):
+            warnings.warn(
+                f"no spot of the slide covers a cell of the section ({len(cell_ids):,} cells): the "
+                "section lies outside the spot grid, so every spot is off tissue. Pass "
+                "section_frac=1.0 to place the slide over the section, or a grid_side that covers "
+                "its coordinates.", stacklevel=2)
 
         # 1-2. spot -> cell aggregation over the pre-placed grid (pool cell_exp; record ground truth)
         raw = np.zeros((n_spots, n_genes))

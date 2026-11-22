@@ -190,3 +190,21 @@ def test_default_spot_holds_about_one_deme_of_cells():
     xy = vz._grid["spot_coords"]
     inner = np.linalg.norm(xy - side / 2.0, axis=1) < 12.0
     assert 7 <= np.median(n[inner]) <= 16
+
+
+def test_a_section_outside_the_spot_grid_warns():
+    """A section whose coordinates lie beyond grid_side gets no spot over a cell; say so."""
+    import warnings as _w
+    import numpy as np
+    import pandas as pd
+    from iscc.data import Visium
+    n = 50
+    idx = [f"C{i}" for i in range(n)]
+    cells = {"cell_exp": pd.DataFrame(np.ones((n, 5)), index=idx, columns=[f"g{j}" for j in range(5)]),
+             "cell_crd": pd.DataFrame(np.full((n, 2), 150.0) + np.random.default_rng(0).random((n, 2)),
+                                      index=idx, columns=["row", "col"]),
+             "cell_type": pd.DataFrame({"cell_id": ["stromal"] * n}, index=idx)}
+    with _w.catch_warnings(record=True) as rec:
+        _w.simplefilter("always")
+        Visium(seed=1).run(cells, grid_side=64)
+    assert any("no spot of the slide covers a cell" in str(r.message) for r in rec)

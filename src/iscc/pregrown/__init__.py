@@ -86,8 +86,9 @@ def ductal():
     invasion of the stroma, with selection by niche.
 
     200,284 cancer cells on the 1 cm field (grid 170, eight glands) after 299 generations; driver
-    clones sweep in situ for about 200 generations before two invasive lesions grow, and some glands
-    still hold small in-situ tumours. 7% of the cancer cells have a doubled genome. About 40 MB.
+    clones sweep in situ for about 200 generations before cancer cells invade the stroma from
+    several glands, one large lesion and smaller ones, and some glands still hold small in-situ
+    tumours. 7% of the cancer cells have a doubled genome. About 40 MB.
 
     Returns
     -------

@@ -49,3 +49,8 @@ def test_a_missing_file_without_an_address_says_how_to_provide_it(shelf):
 def test_shipped_manifest_is_valid_json():
     m = json.loads(resources.files("iscc.pregrown").joinpath("manifest.json").read_text())
     assert set(m) == {"base_url", "files"}
+
+
+def test_pregrown_is_reachable_from_a_plain_import():
+    import iscc
+    assert iscc.pregrown.ductal is pregrown.ductal
