@@ -1,14 +1,19 @@
-"""Figures of Fig 5's batch panel, from validation.json (``batch_validation.py run``).
+"""S13 Fig, the batch validation, from validation.json (``batch_validation.py``).
 
-* ``fig5_batch_validation``: the panel before b-c, S1 and S3 for the real A-B contrast, ``iscc``'s
-  and Splatter's: the signed and the spread of the per-gene log2 fold change by mean expression
-  (the median over cell types of each decile), and the correlation of the fold changes between
-  pairs of cell types.
-* ``supp_batch_validation``: S0-S4, one small axis per summary (real; iscc's and Splatter's five
-  seeds and their median), and Splatter's two tuning curves.
+``supp_batch_validation``: the real A-B contrast of Ding et al., ``iscc``'s and Splatter's, in one
+figure, 165 mm wide (the text width) so that it is included at its true size:
 
-Written through ``style.save`` into ``<paper>/figures/paper1/`` (``$ISCC_PAPER_DIR``, see
-``validation/_paths.py``).
+* A, B (S1): the mean and the spread of the per-gene log2 fold change by mean expression (the median
+  over cell types of each decile), real against every seed of iscc and Splatter;
+* C (S3): the correlation of the fold changes between pairs of cell types, every pair of every seed;
+* D-G (S0, S1, S2, S4): one small axis per registered summary, real (diamond and dashed line)
+  against the five seeds of iscc and of Splatter (dots) and their median (bar).
+
+Splatter's tuning curves stay in validation.json; the caption gives the values chosen.
+
+The panels A-C were Fig 5's panel B; ``draw_s1``, ``draw_s3``, ``COL``, ``LABEL`` and ``_versions``
+are shared with ``fig5_figure.py``. Written through ``style.save`` into ``<paper>/figures/paper1/``
+(``$ISCC_PAPER_DIR``, see ``validation/_paths.py``).
 
     PYTHONPATH=src python validation/paper/batch_figure.py $D/batchval/validation.json
 """
@@ -31,7 +36,8 @@ COL = {"real": S.SOURCE["real"], "iscc": S.SOURCE["iscc"], "splatter": S.TOOL.ge
        "splatteriscc": S.TOOL.get("Splatter", "#A50026")}
 # Labels follow the paper's style for text inside figures (no parentheticals or settings: the caption
 # names the data set and how Splatter was matched).
-LABEL = {"real": "real", "iscc": "iscc", "splatter": "Splatter", "splatteriscc": "Splatter matched to iscc"}
+LABEL = {"real": "real", "iscc": "iscc", "splatter": "Splatter", "splatteriscc": "Splatter at iscc's size"}
+TICK = {"real": "real", "iscc": "iscc", "splatter": "Splatter", "splatteriscc": "Splatter at\niscc's size"}
 
 
 def _versions(v):
@@ -57,9 +63,8 @@ S1_YLABEL = {"mean_log2fc": "mean log$_2$ fold change", "sd_log2fc": "s.d. of lo
 
 def draw_s1(ax, v, key):
     """S1 on ``ax``: the median over cell types of each mean-expression decile's ``key``
-    ("mean_log2fc" or "sd_log2fc"), real against every seed of iscc and Splatter. Shared by
-    :func:`main_panel` and Fig 5's panel B (``fig5_figure.py``); the summary statistics are in
-    validation.json and the text, not printed on the axes."""
+    ("mean_log2fc" or "sd_log2fc"), real against every seed of iscc and Splatter. Shared with
+    ``fig5_figure.py``; the summary statistics are in validation.json and the text, not on the axes."""
     vs, groups = v["versions_stats"], _versions(v)
     for pre in ("splatteriscc", "splatter", "iscc"):
         for i, n in enumerate(groups.get(pre, [])):
@@ -88,105 +93,102 @@ def draw_s3(ax, v):
                    alpha=(0.8 if g == "real" else 0.35), linewidths=0)
         ax.hlines(np.median(meds), xi - 0.3, xi + 0.3, color=S.INK, lw=1.0, zorder=5)
     ax.set_xticks(range(len(order)))
-    ax.set_xticklabels([LABEL[g].replace(" matched", "\nmatched") for g in order])
+    ax.set_xticklabels([TICK[g] for g in order])
     ax.set_xlim(-0.6, len(order) - 0.4)
     ax.set_ylabel("correlation of log$_2$\nfold changes")
 
 
-def main_panel(v):
-    S.setup()
-    fig = S.figure("double", 52)
-    axes = [S.ax_mm(fig, 14, 7, 46, 36), S.ax_mm(fig, 74, 7, 46, 36), S.ax_mm(fig, 136, 7, 42, 36)]
-    draw_s1(axes[0], v, "mean_log2fc")
-    draw_s1(axes[1], v, "sd_log2fc")
-    axes[0].legend(loc="best")
-    draw_s3(axes[2], v)
-    for letter, x in (("A", 2), ("B", 63), ("C", 125)):
-        S.panel_letter(fig, letter, x, 2)
-    return S.save(fig, "fig5_batch_validation")
+# ------------------------------------------------------------------ S13 Fig
+# The registered summaries, one small axis each: (key, title, x label). Titles name what is measured;
+# the caption maps them to S0-S4 (style guide, "Text inside figures").
+ROWS = [
+    ("D", [("S0", "Size", "s.d. of log$_2$ fold change")]),
+    ("E", [("S1_spearman", "Dependence on mean", "Spearman correlation of\nfold change and mean"),
+           ("S1_spread_ratio", "Spread by mean", "fold change s.d., lowest over\nhighest tercile of mean")]),
+    ("F", [("S2_slope_low", "Lowest tercile of mean", "slope of detection change\non log$_2$ fold change"),
+           ("S2_slope_mid", "Middle tercile of mean", "slope of detection change\non log$_2$ fold change"),
+           ("S2_slope_high", "Highest tercile of mean", "slope of detection change\non log$_2$ fold change")]),
+    ("G", [("silhouette_batch", "Batches", "silhouette"),
+           ("silhouette_celltype", "Cell types", "silhouette"),
+           ("ilisi_batch", "Batches", "iLISI"),
+           ("clisi_celltype", "Cell types", "cLISI")]),
+]
+# Drawn at the text width, so that it is included at its true size (no text below 5.5 pt) and leaves
+# room on the page for the caption.
+W_MM, LEFT, RIGHT = 165, 24, 163
 
 
-# The supplementary panels: (key, title, y label). Titles are the statistics' names, defined in the
-# Methods; the y label is the measured quantity (style guide, "Text inside figures").
-SUPP = [("S0", "S0", "s.d. of log$_2$ fold change"),
-        ("S1_spearman", "S1", "Spearman correlation of\nfold change and mean"),
-        ("S1_spread_ratio", "S1", "fold change s.d., lowest\nover highest tercile"),
-        ("S2_slope_low", "S2 in the lowest tercile", "slope of detection\nchange on fold change"),
-        ("S2_slope_mid", "S2 in the middle tercile", "slope of detection\nchange on fold change"),
-        ("S2_slope_high", "S2 in the highest tercile", "slope of detection\nchange on fold change"),
-        ("S3_median_corr", "S3", "median correlation\nof fold changes"),
-        ("silhouette_batch", "S4", "silhouette of batches"),
-        ("silhouette_celltype", "S4", "silhouette of cell types"),
-        ("ilisi_batch", "S4", "iLISI"),
-        ("clisi_celltype", "S4", "cLISI")]
-SUPP_TICK = {"real": "real", "iscc": "iscc", "splatter": "Splatter", "splatteriscc": "Splatter\nmatched"}
-TUNING = (("de_tuning", "de_facLoc", "differential expression\nfactor location", "silhouette of cell types"),
-          ("batch_tuning", "batch_facScale", "batch factor scale", "s.d. of log$_2$ fold change"))
+def _value(st, key):
+    x = st["summary"].get(key) if key in st["summary"] else st["S4"].get(key)
+    return np.nan if x is None else float(x)
+
+
+def _strip(ax, v, key, order, labels):
+    """One summary: categories as rows (real on top), the statistic on the x axis."""
+    vs, groups = v["versions_stats"], _versions(v)
+    real = _value(vs["real"], key)
+    ax.axvline(real, color=S.GREY, lw=0.5, ls="--", zorder=0)
+    for i, g in enumerate(order):
+        vals = np.array([_value(vs[n], key) for n in groups[g]])
+        if g == "real":
+            ax.scatter(vals, [i], marker="D", s=9, color=S.INK, zorder=5)
+            continue
+        ax.scatter(vals, i + np.linspace(-0.18, 0.18, len(vals)), s=6, linewidths=0.6,
+                   facecolors=("none" if g == "splatteriscc" else COL[g]), edgecolors=COL[g], zorder=4)
+        ax.vlines(np.nanmedian(vals), i - 0.32, i + 0.32, color=S.INK, lw=1.0, zorder=5)
+    ax.set_ylim(len(order) - 0.5, -0.5)
+    ax.set_yticks(range(len(order)))
+    ax.set_yticklabels([TICK[g] for g in order] if labels else [])
+    ax.tick_params(axis="y", length=0)
+    ax.spines["left"].set_visible(False)
 
 
 def supp_panel(v):
-    """S0-S4, one small axis per statistic (real: diamond; iscc's and Splatter's five seeds: dots; their
-    median: bar), and Splatter's two tuning curves (the real value: dashed; the chosen value: solid).
-    The encodings are stated in the caption, not in the figure."""
     S.setup()
-    vs, groups = v["versions_stats"], _versions(v)
+    groups = _versions(v)
     order = [g for g in ("real", "iscc", "splatter", "splatteriscc") if g in groups]
-    fig = S.figure("double", 112)
-    cols, w, h, x0, gx, gy = 5, 25, 22, 11, 11, 14
-    letters = "ABCDEFGHIJKLMNOP"
+    strip_h = 4.0 * len(order) + 1.0
+    y_ac, h_ac = 7, 30                               # A-C, then the rows D-E, F and G
+    y_rows = [y_ac + h_ac + 20]
+    for _ in range(2):
+        y_rows.append(y_rows[-1] + strip_h + 19)
+    fig = S.figure(W_MM, y_rows[-1] + strip_h + 10)
 
-    def place(k):
-        r, c = divmod(k, cols)
-        x, y = x0 + c * (w + gx), 7 + r * (h + gy)
-        S.panel_letter(fig, letters[k], x - 9, y - 4.5)
-        return S.ax_mm(fig, x, y, w, h)
-    for k, (key, title, ylab) in enumerate(SUPP):
-        ax = place(k)
-        for xi, g in enumerate(order):
-            vals = []
-            for n in groups[g]:
-                st = vs[n]
-                vals.append(st["summary"].get(key, st["S4"].get(key)) if key in st["summary"] else st["S4"].get(key))
-            vals = np.array([np.nan if x is None else x for x in vals], float)
-            if g == "real":
-                ax.scatter([xi], vals, marker="D", s=9, color=S.INK, zorder=5)
-            else:
-                ax.scatter(xi + np.linspace(-0.15, 0.15, len(vals)), vals, s=5,
-                           facecolors=("none" if g == "splatteriscc" else COL[g]), edgecolors=COL[g],
-                           linewidths=0.5)
-                ax.hlines(np.nanmedian(vals), xi - 0.28, xi + 0.28, color=S.INK, lw=0.8)
-        ax.set_xticks(range(len(order)))
-        ax.set_xticklabels([SUPP_TICK[g] for g in order], fontsize=5.0)
-        ax.set_xlim(-0.6, len(order) - 0.4)
-        ax.set_title(title)
-        ax.set_ylabel(ylab, fontsize=5.5)
-    sp = v.get("splatter", {})
-    k = len(SUPP)
-    for key, chosen_key, xlab, ylab in TUNING:
-        tr = sp.get(key)
-        if not tr:
-            continue
-        ax = place(k)
-        k += 1
-        pts = sorted(tr["trace"], key=lambda d: d["value"])
-        ax.plot([d["value"] for d in pts], [d["stat"] for d in pts], color=COL["splatter"], lw=0.7, marker="o", ms=1.8)
-        ax.axhline(tr["target"], color=S.GREY, lw=0.5, ls="--")
-        chosen = sp.get(chosen_key)
-        if chosen is not None:
-            ax.axvline(chosen, color=S.INK, lw=0.5)
-        ax.set_xlabel(xlab, fontsize=5.5)
-        ax.set_ylabel(ylab, fontsize=5.5)
-        ax.set_title("Splatter tuning")
+    # A-C: the former Fig 5B
+    axA, axB, axC = S.ax_mm(fig, 13, y_ac, 38, h_ac), S.ax_mm(fig, 64, y_ac, 38, h_ac), S.ax_mm(fig, 117, y_ac, 46, h_ac)
+    draw_s1(axA, v, "mean_log2fc")
+    draw_s1(axB, v, "sd_log2fc")
+    hl = dict(zip(*axA.get_legend_handles_labels()[::-1]))
+    names = [LABEL[g] for g in order if LABEL[g] in hl]
+    axA.legend([hl[n] for n in names], names, loc="best")
+    draw_s3(axC, v)
+    for letter, x in (("A", 1), ("B", 53), ("C", 104)):
+        S.panel_letter(fig, letter, x, y_ac - 4)
+
+    # D-G: the registered summaries; D and E share a row
+    def row(y, items, w, gap, letters):
+        for j, ((key, title, xlab), letter) in enumerate(zip(items, letters)):
+            x = LEFT + j * (w + gap)
+            ax = S.ax_mm(fig, x, y, w, strip_h)
+            _strip(ax, v, key, order, labels=(j == 0))
+            ax.set_title(title)
+            ax.set_xlabel(xlab)
+            if letter:
+                S.panel_letter(fig, letter, (1 if j == 0 else x - 6), y - 5)
+    w3, g3 = (RIGHT - LEFT - 2 * 8) / 3, 8
+    w4, g4 = (RIGHT - LEFT - 3 * 6) / 4, 6
+    row(y_rows[0], ROWS[0][1] + ROWS[1][1], w3, g3, ["D", "E", None])
+    row(y_rows[1], ROWS[2][1], w3, g3, ["F", None, None])
+    row(y_rows[2], ROWS[3][1], w4, g4, ["G", None, None, None])
     return S.save(fig, "supp_batch_validation")
 
 
 def main(path):
     with open(path) as f:
         v = json.load(f)
-    a = main_panel(v)
-    b = supp_panel(v)
-    print(f"[batch figure] {a}\n[batch figure] {b}")
-    return a, b
+    out = supp_panel(v)
+    print(f"[batch figure] {out}")
+    return out
 
 
 if __name__ == "__main__":
