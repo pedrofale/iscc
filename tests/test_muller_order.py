@@ -93,3 +93,11 @@ def test_grid_plot_rebuilds_cell_data_only_when_it_is_not_the_whole_tumour(monke
     Resection(t).slice(depth_frac=0.5, install=True)
     t.plot_grid()
     assert len(calls) == 2 and calls[-1] == {}
+
+
+def test_a_population_of_one_clone_has_its_band():
+    """A tumour whose display collapses to one clone has no ancestry edge; its band is the whole stack."""
+    counts = pd.DataFrame({"2": [3.0, 5.0, 8.0, 13.0]})
+    pop_df, anc_df, _ = viz._prepare(counts.copy(), pd.DataFrame(index=[0]))
+    y = pymuller.logic._get_y_values(pop_df, anc_df, 1e-6)
+    np.testing.assert_allclose(y.sum(axis=1).to_numpy(), [3.0, 5.0, 8.0, 13.0])

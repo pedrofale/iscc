@@ -15,16 +15,19 @@ import pymuller
 from ..constants import normal_names, normal_cmap_rgba
 
 
-def _strains_ordering(adjacency_df):
+def _strains_ordering(adjacency_df, identities=()):
     """The nested band order of a Muller plot: each clone, its descendants, then the clone again.
 
     Replaces ``pymuller.logic._get_strains_ordering``, which starts a subtree at every identity not yet
     placed, in sorted string order. Genotype ids are numbers and the founder of a tumour is ``"2"``,
     so every clone whose id sorts before it (``"10"``, ``"11717"``) was laid out twice, once on its
     own and once under the founder, and its cells counted twice. Here the subtrees start from the
-    roots only, and the traversal is iterative, so a deep tree needs no recursion limit."""
+    roots only, and the traversal is iterative, so a deep tree needs no recursion limit.
+    ``identities`` (the clones of the population) adds as roots the clones no edge mentions, such as
+    the one clone of a tumour whose display collapses to a single clone."""
     children = adjacency_df.groupby("Parent")["Identity"].apply(sorted).to_dict()
-    roots = sorted(set(adjacency_df["Parent"]) - set(adjacency_df["Identity"]))
+    roots = sorted((set(adjacency_df["Parent"]) | {str(i) for i in identities})
+                   - set(adjacency_df["Identity"]))
     order, seen = [], set()
     stack = [(r, False) for r in reversed(roots)]
     while stack:
@@ -39,8 +42,29 @@ def _strains_ordering(adjacency_df):
     return np.array(order)
 
 
-# pymuller's _get_y_values looks the ordering up in its module, so the fix applies to every caller.
+def _y_values(populations_df, adjacency_df, smoothing_std):
+    """``pymuller.logic._get_y_values`` with the band order of :func:`_strains_ordering`, given the
+    clones of the population, so that a population of one clone (no ancestry edge) has its band."""
+    ordering = _strains_ordering(adjacency_df, populations_df["Identity"].astype(str).unique())
+    population_size_max = populations_df.groupby("Generation")["Population"].sum().max()
+    generations = populations_df["Generation"].max() - populations_df["Generation"].min()
+    pivot = populations_df.pivot(index="Generation", columns="Identity", values="Population").sort_index()
+    pivot.columns = pivot.columns.astype(str)
+    pivot = pivot.rolling(max(int(generations), 1), 1, True, "gaussian").mean(std=smoothing_std)
+    pivot = pivot.clip(0, population_size_max)
+    Y = pivot[ordering] / 2
+    keep = [0]
+    for i, c in enumerate(Y.columns[1:], 1):
+        if c == Y.columns[i - 1]:
+            Y.iloc[:, i] *= 2
+            keep.pop()
+        keep.append(i)
+    return Y.iloc[:, keep]
+
+
+# pymuller's functions look these up in its module, so the fix applies to every caller.
 pymuller.logic._get_strains_ordering = _strains_ordering
+pymuller.logic._get_y_values = _y_values
 
 
 #: Copy-number colormap convention: blue (loss) — white (diploid, CN=2) — red (gain).
@@ -766,7 +790,7 @@ def _get_y_values_hardcut(populations_df, adjacency_df, smoothing_std, cutoff_ge
     centerline afterward). Ordering + leaf-doubling mirror ``_get_y_values`` so the band colours line
     up exactly with the ordinarily-smoothed (non-cut) panels."""
     import scipy.ndimage as _ndi
-    ordering = _strains_ordering(adjacency_df)
+    ordering = _strains_ordering(adjacency_df, populations_df["Identity"].astype(str).unique())
     population_size_max = populations_df.groupby("Generation")["Population"].sum().max()
     pivot = populations_df.pivot(index="Generation", columns="Identity",
                                  values="Population").sort_index()
