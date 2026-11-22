@@ -3,7 +3,7 @@
 #   isccgif out --compartment --splash --skip-confinement --scale 0.55 -o docs/assets/landing_hero.gif
 # Measured on a laptop on 2026-11-22: isccsim 12 min at a 3.2 GB peak, a 62 MB trajectory; isccgif
 # about a minute, 135 frames of which --skip-confinement keeps 84 (the founding acinus is closed for
-# about half of the run), 2.1 MB.
+# about half of the run), 2.3 MB.
 #
 # The tumour is the paper's sweep tumour: every growth setting equals what validation/paper/regime.py's
 # config("mid", selection=realistic_regime.MET_SELECTION, spatial=met_spatial("mid")) builds (paper

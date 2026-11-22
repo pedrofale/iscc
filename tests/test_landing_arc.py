@@ -259,6 +259,31 @@ def test_splash_gif_keeps_a_tiny_clone_in_its_stage_colour(tmp_path, arc_run):
         assert (np.asarray(im.convert("RGB")) == purple).all(axis=-1).any(), f"frame {k} lost the purple"
 
 
+def test_splash_gif_keeps_a_cell_blended_with_the_page_in_its_hue(tmp_path):
+    """A cell smaller than a pixel renders as a blend of its stage colour with the page. The blend of
+    the met purple used to map to a chrome grey, so the hero's metastasis read grey; it keeps its hue."""
+    import matplotlib.pyplot as plt
+    from PIL import Image
+    page = np.array(comp._BG_RGB, dtype=float)
+    # most of the frame is a smooth ramp of many colours, which takes every adaptive entry, as the
+    # Mullers and the primary grid do in the hero; the blended cells are a few pixels each
+    frame = np.tile(page, (120, 400, 1))
+    ramp = plt.get_cmap("viridis")(np.linspace(0, 1, 360))[:, :3] * 255
+    frame[:, 40:] = ramp[None, :, :] * np.linspace(0.2, 1, 120)[:, None, None]
+    for k, stage in enumerate(["met", "stromal", "breach", "resistance"]):
+        col = np.array(arc.STAGE_COL[stage][:3]) * 255
+        for j, a in enumerate((0.3, 0.5, 0.8)):
+            frame[6 * k:6 * k + 2, 6 * j:6 * j + 2] = a * col + (1 - a) * page
+    img = frame.round().astype(np.uint8)
+    out = str(tmp_path / "blend.gif")
+    comp._save_gif_pillow(out, [img, img], [100, 100])
+    got = np.asarray(Image.open(out).convert("RGB")).astype(int)
+    for k in range(4):
+        for j in range(3):
+            r, g, b = got[6 * k, 6 * j]
+            assert max(r, g, b) - min(r, g, b) > 30, f"stage {k} at blend {j} quantised to grey {(r, g, b)}"
+
+
 # --- CLI: isccsim schedule -> trajectory, then isccgif --compartment --------------------------
 @pytest.fixture(scope="module")
 def landing_cfg_path(tmp_path_factory):

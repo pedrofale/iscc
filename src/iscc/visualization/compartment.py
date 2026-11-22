@@ -38,6 +38,12 @@ _CHROME_ANCHORS = [(13, 17, 23), (224, 224, 224), (179, 179, 179), (255, 255, 25
 # The clone stage colours are reserved too, so a clone too small to win an adaptive entry (a just-seeded
 # deposit, a few stromal-survival cells) keeps its own colour instead of taking the nearest bulk colour.
 _STAGE_ANCHORS = [tuple(int(round(255 * v)) for v in c[:3]) for c in STAGE_COL.values()]
+# A cell smaller than a pixel renders as a blend of its stage colour with the page, and the nearest
+# reserved colour to a half-strength purple is a chrome grey, so the metastasis read grey. Each stage
+# colour is therefore reserved at four blends with the page too.
+_BG_RGB = tuple(int(BG[i:i + 2], 16) for i in (1, 3, 5))
+_STAGE_BLENDS = [tuple(int(round(a * s + (1 - a) * b)) for s, b in zip(c, _BG_RGB))
+                 for c in _STAGE_ANCHORS for a in (0.25, 0.45, 0.65, 0.85)]
 
 
 def frame_cell_data(demes, deme_coords, n_primary_demes, gid_ord):
@@ -175,17 +181,17 @@ def draw_grid(ax, sub, gsz, colors, title, title_color=INK):
         sp.set_visible(False)
 
 
-def _save_gif_pillow(gif_path, imgs, per, budget_mb=5.95, candidates=(48, 32, 24, 20)):
+def _save_gif_pillow(gif_path, imgs, per, budget_mb=5.95, candidates=(96, 64, 48, 32)):
     """Write ``imgs`` as an optimised GIF via Pillow with ONE global palette = neutral chrome anchors
-    (so grey text stays grey) + the clone stage colours + an adaptive fill from a montage of
-    representative frames. Tries palette sizes largest-first and keeps the largest whose file is
-    <= ``budget_mb``. Returns the written MB."""
+    (so grey text stays grey) + the clone stage colours and their blends with the page + an adaptive
+    fill from a montage of representative frames. Tries palette sizes largest-first and keeps the
+    largest whose file is <= ``budget_mb``. Returns the written MB."""
     from PIL import Image
     idxs = sorted({0, len(imgs) // 3, 2 * len(imgs) // 3, len(imgs) - 1})
     montage = np.concatenate([imgs[i] for i in idxs], axis=1)
     best = None
     for ncol in candidates:
-        anchors = _CHROME_ANCHORS + _STAGE_ANCHORS
+        anchors = _CHROME_ANCHORS + _STAGE_ANCHORS + _STAGE_BLENDS
         n_fill = max(1, ncol - len(anchors))
         base = Image.fromarray(montage).convert("P", palette=Image.ADAPTIVE, colors=n_fill)
         pal = base.getpalette()[:3 * n_fill]
