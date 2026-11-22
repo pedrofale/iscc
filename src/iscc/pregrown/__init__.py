@@ -10,9 +10,9 @@ package and keeps it in a cache folder: ``ISCC_PREGROWN_DIR`` if it is set, othe
 ``iscc/pregrown`` in the user cache folder (``$XDG_CACHE_HOME``, by default ``~/.cache``). Later
 calls load the cached file.
 
-The four tumors grow in the ductal field of the paper, at its regime on the arm-level human genome of
+The five tumors grow in the ductal field of the paper, at its regime on the arm-level human genome of
 [`arm_genome`][iscc.data.human.arm_genome] (the paper's run R11) with the epithelium as the cell of
-origin, and differ in their evolution. They carry germline variants at the density of a genotyping
+origin, and differ in their evolution or, for the immune tumor, in its tissue. They carry germline variants at the density of a genotyping
 array (30% of the neutral genes heterozygous), so that the DNA assays carry the B-allele signal of
 allele-specific callers, and no segment at zero copies. ``scripts/build_pregrown.py`` in the
 repository grows them.
@@ -28,7 +28,7 @@ from ..data.human.reference import _sha256
 
 ENV_VAR = "ISCC_PREGROWN_DIR"
 
-__all__ = ["ductal", "neutral", "sweeps", "cin", "cohort"]
+__all__ = ["ductal", "neutral", "sweeps", "cin", "immune", "cohort"]
 
 
 def _manifest():
@@ -144,6 +144,23 @@ def cin():
         The grown tumor, read from the cache folder.
     """
     return _load("cin")
+
+
+def immune():
+    """The tumor of the paper's regime with immune cells: T and NK cells in the stroma and, sparsely,
+    in the duct wall, which kill the cancer cells around them unless their immune resistance protects
+    them, and whose interferon-gamma induces the interferon response in nearby cancer cells.
+
+    Grown like [`ductal`][iscc.pregrown.ductal], with six immune cells in every stroma deme and one in
+    every deme of the duct wall. The immune cells are static, so the tumor grows around them; the
+    human genome layer gives them the T and NK cell baseline of the Human Breast Cell Atlas.
+
+    Returns
+    -------
+    GenotypeTumor
+        The grown tumor, read from the cache folder.
+    """
+    return _load("immune")
 
 
 def cohort():

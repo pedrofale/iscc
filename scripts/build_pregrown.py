@@ -3,7 +3,7 @@
 
 Every tumour is the paper's regime (``validation/paper/regime.py``) on the arm-level human genome, as
 the registry's run R11 grows it, at the cm scale (grid 170) to 200,000 cancer cells. ``ductal`` is
-that tumour; ``neutral``, ``sweeps`` and ``cin`` are declared variants of it, and ``cohort`` is six
+that tumour; ``neutral``, ``sweeps``, ``cin`` and ``immune`` are declared variants of it, and ``cohort`` is six
 patients of ``ductal``'s configuration at the mid scale (grid 96) to 60,000 cancer cells each. Each object is saved with its per-cell tables built, as
 ``grow`` leaves a tumour, so that a loaded tumour is in the same state.
 
@@ -56,13 +56,15 @@ def _arm(driver_scale=0.4):
 GERMLINE = {"het_frac": 0.3, "hom_frac": 0.33}
 
 
-def _variant(selection=None, cancer=None, spatial=None, driver_scale=0.4):
+def _variant(selection=None, cancer=None, spatial=None, immune=None, driver_scale=0.4):
     kw = _arm(driver_scale)
     kw["germline"] = dict(GERMLINE)
     kw["selection"].update(selection or {})
     kw["cancer"].update(cancer or {})
     if spatial:
         kw["spatial"] = dict(spatial)
+    if immune:
+        kw["immune"] = dict(immune)
     return kw
 
 
@@ -70,7 +72,8 @@ def _variant(selection=None, cancer=None, spatial=None, driver_scale=0.4):
 # neutral has no selection at all: drivers without effect, no niche traits, and the duct wall and the
 # stroma open to every cell (R10's "open" arm). With the barriers on, a tumour without drivers never
 # selects breach against its cost and stays in its glands (a smoke run held 6,359 cells after 1,500
-# generations).
+# generations). immune is the regime's immune variant (regime.IMMUNE_SPATIAL, IMMUNE_SELECTION, IMMUNE),
+# read out with the interferon response.
 TUMOURS = {
     "ductal": (2, _variant()),
     "neutral": (2, _variant(selection={"driver_effects": 1.0, "prop_breach": 0.0,
@@ -79,6 +82,7 @@ TUMOURS = {
     "sweeps": (2, _variant(selection={"driver_effects": 1.15}, driver_scale=0.1)),
     "cin": (2, _variant(cancer={"cnv_prob": 4 * _arm()["cancer"]["cnv_prob"],
                                 "wgd_rate": 5 * _arm()["cancer"]["wgd_rate"]})),
+    "immune": (2, _variant(selection=RG.IMMUNE_SELECTION, spatial=RG.IMMUNE_SPATIAL, immune=RG.IMMUNE)),
 }
 COHORT_SEEDS = [11, 12, 13, 14, 15, 16]
 

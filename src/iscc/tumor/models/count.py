@@ -103,8 +103,11 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
     spatial_params : dict
         The lattice, the tissue and the metastatic site, given as keys of this dict.
 
-        - Lattice: ``grid_size`` (required, the side of the square lattice in demes) and
-          ``immune_density`` (immune cells seeded per deme, as a fraction of K; default 0).
+        - Lattice: ``grid_size`` (required, the side of the square lattice in demes),
+          ``immune_density`` (static immune cells seeded per stroma deme, or per deme of a field
+          without glands, as a fraction of the deme's capacity; default 0) and
+          ``immune_duct_density`` (the same per duct-wall deme; default ``immune_density``).
+          Empty lumens get none.
         - Ductal field: ``structure_radius`` (default 0, no glands), ``n_glands`` (default 1),
           ``gland_radius`` (default ``structure_radius``), ``min_gland_sep`` (the minimum
           distance between gland centres), ``stroma_fill_frac`` (stromal cells seeded per stroma
@@ -542,18 +545,26 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
             self._add(center, self.founder_id, self._n_founder)
             self._origin_demes = (center,)
 
-        # Optional immune microenvironment: seed immune cells in every deme so that
-        # cancer growing into them experiences local immune pressure (and so that
-        # immunotherapy has a substrate to act on). The count scales with carrying
-        # capacity (immune_density = immune cells per capacity unit) so the immune
-        # fraction is not washed out once a deme fills with cancer. Static: immune cells
-        # neither divide nor migrate.
+        # Optional immune microenvironment: seed immune cells where they live in the tissue, so that
+        # cancer growing into them experiences local immune pressure (and so that immunotherapy has
+        # a substrate to act on). In a ductal field they sit in the stroma (immune_density) and in
+        # the duct wall (immune_duct_density, the intraepithelial lymphocytes), never in an empty
+        # lumen; a field without glands has them in every deme. The count is a fraction of the
+        # deme's own carrying capacity, so the immune fraction is not washed out once a deme fills
+        # with cancer. Static: immune cells neither divide nor migrate.
         self.immune_density = p.spatial.get("immune_density", 0.0)
-        n_immune = int(round(self.immune_density * self._cap))
-        if n_immune > 0:
-            imm = self._normal_genotype("immune")
+        self.immune_duct_density = p.spatial.get("immune_duct_density", self.immune_density)
+        if self.immune_density > 0 or self.immune_duct_density > 0:
+            lumen = (set(i for demes in self.gland_lumen_demes for i in demes)
+                     if self.gland_id is not None else set())
             for i in range(n_demes):
-                self._add(i, imm, n_immune)
+                if i in lumen:
+                    continue
+                duct = self.gland_id is not None and self.gland_id[i] != -1
+                cap = self._cap_of(i) if self._crowding else self._cap
+                n_immune = int(round((self.immune_duct_density if duct else self.immune_density) * cap))
+                if n_immune > 0:
+                    self._add(i, self._normal_genotype("immune"), n_immune)
         # Metastasis: seed the second (met) grid AFTER primary immune seeding, so immune stays
         # primary-only and the met demes are appended at the tail. A no-op when met is off.
         self._seed_met()

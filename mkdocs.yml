@@ -141,6 +141,7 @@ nav:
           - neutral: reference/pregrown_neutral.md
           - sweeps: reference/pregrown_sweeps.md
           - cin: reference/pregrown_cin.md
+          - immune: reference/pregrown_immune.md
           - cohort: reference/pregrown_cohort.md
       - Treatment:
           - Chemotherapy: reference/Chemotherapy.md

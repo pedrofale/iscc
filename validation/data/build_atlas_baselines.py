@@ -29,6 +29,7 @@ Outputs (under ``src/iscc/data/human/reference/``):
 Usage::
 
     python validation/data/build_atlas_baselines.py --h5ad <atlas.h5ad> --gmt <h.all...gmt>
+    python validation/data/build_atlas_baselines.py --gmt <h.all...gmt>     # the programmes only
 """
 import argparse
 import gzip
@@ -47,12 +48,14 @@ TYPES = {
 }
 # iscc's named programmes and the Hallmark sets that seed them. `drug_resistance` has no Hallmark
 # counterpart; xenobiotic metabolism (drug-metabolising enzymes and transporters) is the closest, and
-# is a proxy. `immune_evasion` and the background programmes have none and stay on random genes.
+# is a proxy. `interferon_response` is the response of tumour cells to the IFN-gamma of nearby T and NK
+# cells. `immune_evasion` and the background programmes have none and stay on random genes.
 PROGRAM_SETS = {
     "proliferation": ["HALLMARK_E2F_TARGETS", "HALLMARK_G2M_CHECKPOINT"],
     "emt": ["HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION"],
     "hypoxia": ["HALLMARK_HYPOXIA"],
     "drug_resistance": ["HALLMARK_XENOBIOTIC_METABOLISM"],
+    "interferon_response": ["HALLMARK_INTERFERON_GAMMA_RESPONSE"],
 }
 
 
@@ -133,19 +136,20 @@ def hallmark_programs(gmt, genes):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--h5ad", required=True)
+    ap.add_argument("--h5ad", default=None, help="the atlas; without it the baselines are kept")
     ap.add_argument("--gmt", default=None, help="MSigDB Hallmark GMT; without it the programme table is kept")
     ap.add_argument("--out", default=OUT)
     args = ap.parse_args()
     with gzip.open(os.path.join(args.out, "grch38_2020A_genes.tsv.gz"), "rt") as f:
         genes = pd.read_csv(f, sep="\t")
-    prof, info, n_missing = type_profiles(args.h5ad, genes)
-    out = pd.concat([genes[["gene_id"]], prof], axis=1)
-    with gzip.open(os.path.join(args.out, "hbca_type_baselines.tsv.gz"), "wt", compresslevel=9) as f:
-        out.to_csv(f, sep="\t", index=False, float_format="%.6g")
-    info.to_csv(os.path.join(args.out, "hbca_types.tsv"), sep="\t", index=False)
-    print(info.to_string())
-    print(f"GRCh38-2020-A genes the atlas does not measure: {n_missing} of {len(genes)}")
+    if args.h5ad:
+        prof, info, n_missing = type_profiles(args.h5ad, genes)
+        out = pd.concat([genes[["gene_id"]], prof], axis=1)
+        with gzip.open(os.path.join(args.out, "hbca_type_baselines.tsv.gz"), "wt", compresslevel=9) as f:
+            out.to_csv(f, sep="\t", index=False, float_format="%.6g")
+        info.to_csv(os.path.join(args.out, "hbca_types.tsv"), sep="\t", index=False)
+        print(info.to_string())
+        print(f"GRCh38-2020-A genes the atlas does not measure: {n_missing} of {len(genes)}")
     if args.gmt:
         hp = hallmark_programs(args.gmt, genes)
         hp.to_csv(os.path.join(args.out, "hallmark_programs.tsv"), sep="\t", index=False)

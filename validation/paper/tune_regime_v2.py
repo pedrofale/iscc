@@ -13,6 +13,7 @@ Usage (one task per Slurm array element)::
     python validation/paper/tune_regime_v2.py task sweep 3 --overfill 1.5 --d1 5
     python validation/paper/tune_regime_v2.py collect        # -> <out>/regime-v2-tuning.csv
     python validation/paper/tune_regime_v2.py task current 3  # the regime as it stands (also current_sweep)
+    python validation/paper/tune_regime_v2.py task immune_grid 7   # the immune variant's kill rate
 
 Outputs go to ``$ISCC_PAPER_OUT/tuning-v2`` (or ``analysis_data/paper/tuning-v2``).
 """
@@ -45,6 +46,18 @@ OVERFILLS, D1S = (1.1, 1.5, 2.0), (2.2, 5.0, 20.0)
 # rule): the two points that met every other criterion, at lower mutation rates.
 MU_POINTS, MUS = ((1.5, 5.0), (2.0, 5.0)), (0.25, 0.2, 0.15)
 CANONICAL_DISPERSAL = 0.9
+# The immune variant (regime.IMMUNE_SPATIAL): its kill rate is picked on `immune_grid`, five seeds per
+# rate beside five immune-free tumours of the same code.
+KILLS = (0.5, 1.0, 2.0, 4.0)
+KILLS2 = KILLS + (8.0,)            # the second grid adds a rate of 8 (appended, so earlier tasks keep their index)
+
+
+def immune(kill, selection=None):
+    law = dict(spatial=dict(RG.IMMUNE_SPATIAL), immune={"prob_kill": kill})
+    if selection:
+        law["selection"] = dict(selection)
+    return law
+
 
 def v2(overfill, d1, mu=None):
     """The new laws at one grid point. The first grid ran at the ER+ preset's mutation rate (0.30),
@@ -65,6 +78,16 @@ def tasks(stage, overfill=None, d1=None, mu=None):
         return [("current", {}, CANONICAL_DISPERSAL, s) for s in range(1, 11)]
     if stage == "current_sweep":   # criterion 4 for the regime as it stands
         return [("current", {}, d, s) for d in REG.R1_DISPERSAL for s in SEEDS]
+    if stage == "immune_grid":     # the kill rate of the immune variant
+        return ([("current", {}, CANONICAL_DISPERSAL, s) for s in range(1, 6)]
+                + [(f"immune_k{k:g}", immune(k), CANONICAL_DISPERSAL, s) for k in KILLS for s in range(1, 6)])
+    if stage in ("immune_grid2", "immune_grid3"):
+        # immune_grid2: the variant's immune-resistance target in both arms (effect 1.1);
+        # immune_grid3: the variant's target and per-hit effect (regime.IMMUNE_SELECTION)
+        sel = ({"prop_immune_resistance": 0.002} if stage == "immune_grid2" else RG.IMMUNE_SELECTION)
+        kills = KILLS2 if stage == "immune_grid2" else KILLS
+        return ([("current_ir", dict(selection=dict(sel)), CANONICAL_DISPERSAL, s) for s in range(1, 6)]
+                + [(f"immune_k{k:g}", immune(k, sel), CANONICAL_DISPERSAL, s) for k in kills for s in range(1, 6)])
     if stage == "sweep":
         pts = [(f"v2_o{overfill:g}_d{d1:g}" + (f"_mu{mu:g}" if mu else ""),
                             v2(overfill, d1, mu))]
@@ -92,6 +115,27 @@ def _stroma(t):
                 if t.genotypes[g].evolutionary_parameters.get("breach", 0.0) > 0:
                     nb += c
     return n, nb
+
+
+def _immune(t):
+    """The cell-weighted mean immune resistance of the cancer cells, the share of cancer cells with
+    at least one resistance hit's worth of it (1 - 1/effect), and the immune share of the cells in
+    the demes that hold cancer."""
+    hit = 1.0 - 1.0 / float(t.selection.immune_resistant_effects)
+    n = ir = n_hit = n_imm = n_all = 0
+    for deme in t.demes:
+        cancer = [(g, c) for g, c in deme.items() if t._is_cancer(g)]
+        if not cancer:
+            continue
+        for g, c in cancer:
+            r = t.genotypes[g].evolutionary_parameters["immune_resistance"]
+            n += c
+            ir += c * r
+            n_hit += c * (r >= hit - 1e-12)
+        n_imm += deme.get("immune", 0)
+        n_all += sum(deme.values())
+    return dict(immune_resistance_mean=ir / n if n else None, immune_resistant_frac=n_hit / n if n else None,
+                immune_share_tumour=n_imm / n_all if n_all else None)
 
 
 def run_task(stage, i, overfill=None, d1=None, mu=None):
@@ -147,7 +191,7 @@ def run_task(stage, i, overfill=None, d1=None, mu=None):
                n_genotypes=len(t.genotypes), division_rate_mean=div_mean, division_rate_cv=div_cv,
                **{k: sc.get(k) for k in ("frac_genome_altered", "mean_ploidy", "pct_wgd", "n_clones",
                                          "max_cna_freq", "n_truncal_segments", "stroma_pct", "flags")},
-               n0=m0["n"], D0=m0["D"], J1=m0["J1"], nd=md["n"], Dd=md["D"])
+               n0=m0["n"], D0=m0["D"], J1=m0["J1"], nd=md["n"], Dd=md["D"], **_immune(t))
     os.makedirs(os.path.join(OUT, stage), exist_ok=True)
     with open(os.path.join(OUT, stage, f"{label}_disp{disp:g}_seed{seed}.json"), "w") as f:
         json.dump(rec, f)

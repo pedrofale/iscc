@@ -488,6 +488,25 @@ class TissueMixin:
             stro[i] = self._stromal_fraction(deme, total)
         return epi, stro
 
+    def _immune_field(self, lengthscale=1.0):
+        """Per-deme immune signal, an (n_demes,) array: the immune cells of each primary deme as a
+        fraction of its capacity, smoothed over the lattice with a Gaussian of ``lengthscale`` demes,
+        since the IFN-gamma T and NK cells release reaches the cancer cells around them and not only
+        those of their own deme. A niche field for the program layer. The metastatic lattice holds no
+        immune cells and stays at 0, and so does every deme when no immune cells were seeded."""
+        out = np.zeros(len(self.demes))
+        if not getattr(self, "_has_immune", "immune" in self.genotypes):
+            return out
+        G = self.grid_size
+        density = np.array([self.demes[i].get("immune", 0) / max(self._cap_of(i) if self._crowding
+                                                                  else self._cap, 1)
+                            for i in range(G * G)], dtype=float)
+        if lengthscale > 0:
+            from scipy.ndimage import gaussian_filter
+            density = gaussian_filter(density.reshape(G, G), sigma=float(lengthscale), mode="nearest").ravel()
+        out[:G * G] = density
+        return out
+
     def _origin_tick(self, generations):
         """Advance the founding acinus's confinement clock by ``generations`` and release it once the
         lesion has filled the acinus and then distended it for long enough.

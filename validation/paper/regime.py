@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 import programs_common as PC  # noqa: E402
 import realistic_regime as RR  # noqa: E402
 from iscc.tumor.models import GenotypeTumor  # noqa: E402
+from iscc.tumor.programs import DEFAULT_SEEDED_PROGRAMS  # noqa: E402
 
 TIER = os.environ.get("ISCC_PAPER_TIER", "preview")
 TIERS = {
@@ -103,6 +104,39 @@ DEME = {"crowding_overfill": CROWDING_OVERFILL, "crowding_d1": CROWDING_D1,
 MET_SELECTION = {"prop_met_survival": 0.015, "met_survival_effects": 3.0, "met_survival_cost": 0.15}
 
 
+# Immune cells (a declared variant; the canonical regime has none). Static T and NK cells, the cells
+# that kill in iscc's immune model, seeded in the stroma at 0.2 of K_stroma (6 per stroma deme, beside
+# its 9 fibroblasts: twice the T/NK-to-fibroblast ratio of the normal-breast atlas, 0.37, for the
+# infiltrate of a carcinoma; not fitted) and in the duct wall at 0.02 of K_duct (one per wall deme, the
+# intraepithelial lymphocytes). A variant passes IMMUNE_SPATIAL as `spatial`, IMMUNE_SELECTION as
+# `selection` and IMMUNE as `immune`.
+IMMUNE_SPATIAL = {"immune_density": 0.2, "immune_duct_density": 0.02}
+# Immune resistance at 0.2% of genes, the target breach and stromal survival were cut to (14 genes
+# instead of the example config's 116). At 2% the trait is a passenger of copy-number gains: under the
+# dosage law a gain of a segment carrying m resistance genes gives a resistance of 1 - 1.1**-m, and in
+# five immune-free tumours of the small field 62-100% of cancer cells carried at least one hit's worth
+# of it, leaving no room for immune pressure to select it (exp-immune-variant). One hit protects 75%
+# (effect 4.0, stromal survival's): at the example config's 1.1 a hit protects 9%, and immune pressure
+# selected no resistance until it was strong enough to double the growth time. Escape events in
+# tumours (HLA or B2M loss) protect substantially with one event. Neither change moves another gene's
+# role.
+IMMUNE_SELECTION = {"prop_immune_resistance": 0.002, "immune_resistant_effects": 4.0}
+# The kill rate: a cancer cell dies at prob_kill x (the immune share of its deme) x (1 - its immune
+# resistance). Picked on preview tumours (stage immune_grid3 of tune_regime_v2, five seeds per rate)
+# as the largest of 0.5-16 at which the regime still met its criteria and immune resistance was
+# selected: at 8, growth to 15,000 cancer cells takes 1.3 times as long as without immune cells and
+# the mean immune resistance of cancer cells is 13 times as high; at 16 the cost is 5 times
+# (exp-immune-variant). A wild-type cancer cell entering a stroma deme then dies of immune killing at
+# about 3 per generation, so invading the stroma takes immune resistance as well as breach.
+IMMUNE = {"prob_kill": 8.0}
+# The interferon response of cancer cells near T and NK cells (readout only): the immune density of
+# each deme, smoothed over one deme (the IFN-gamma they release reaches the cells around them), drives
+# an `interferon_response` program, which the human genome layer loads on the Hallmark IFN-gamma
+# response set. The gain of 10 gives a drive of 2 at the stromal density, against 3 for a full duct
+# wall and full hypoxia; a choice, not a fit.
+IMMUNE_SIGNAL = {"field": "immune", "program": "interferon_response", "strength": 10.0, "lengthscale": 1.0}
+
+
 def met_spatial(scale):
     """The metastatic lattice at ``scale``: as large as the primary field, with the landing's host
     tissue, vessel entry and transit floor."""
@@ -142,8 +176,10 @@ MICROENV["hypoxia"].update(O2)
 DOSAGE = {"dosage_law": "total", "dosage_sensitivity_mean": 0.86, "dosage_sensitivity_sd": 0.61}
 
 
-def expression():
-    """The program layer with both niche arms and allele-specific dosage (a fresh copy per call)."""
+def expression(immune=False):
+    """The program layer with both niche arms and allele-specific dosage (a fresh copy per call).
+    ``immune`` adds the interferon response to nearby immune cells (:data:`IMMUNE_SIGNAL`), for the
+    immune variant."""
     e = PC.expression_params(scatter=1.0)
     e["dosage_params"]["allele_specific"] = True
     # Cancer cells start from the baseline of the epithelium they transformed from, and differ from it
@@ -157,10 +193,18 @@ def expression():
     # The bound on a program's log-fold, set here so that a
     # tumour grown by `grow` carries it; `registry.load` still sets it on tumours stored before.
     e["program_params"]["max_log_fold"] = PROGRAM_MAX_LOG_FOLD
+    if immune:
+        # The program takes the first background slot: its genes and loadings are that slot's draws,
+        # so the rest of the program layer is the same as without it.
+        e["program_params"]["seeded_programs"] = [*DEFAULT_SEEDED_PROGRAMS, IMMUNE_SIGNAL["program"]]
+        cp["niche_program_map"][IMMUNE_SIGNAL["field"]] = IMMUNE_SIGNAL["program"]
+        cp["niche_program_strength"] = {"__default__": cp["niche_program_strength"],
+                                        IMMUNE_SIGNAL["field"]: IMMUNE_SIGNAL["strength"]}
+        cp["immune_signal_lengthscale"] = IMMUNE_SIGNAL["lengthscale"]
     return e
 
 
-def config(scale, selection=None, cancer=None, deme=None, spatial=None, genome=None,
+def config(scale, selection=None, cancer=None, deme=None, spatial=None, genome=None, immune=None,
            update_mode="tau", tau=RR.TAU, coarsen=RR.COARSEN, germline=None):
     """Every :class:`GenotypeTumor` keyword of the paper regime at ``scale`` except the seed and the
     readout layers, with a variant's overrides on top.
@@ -169,11 +213,14 @@ def config(scale, selection=None, cancer=None, deme=None, spatial=None, genome=N
     paper-regime tumour another way (``supp_tau.py`` runs the exact engine through ``update_mode``).
     ``coarsen`` sets ``coarsen_passengers`` (R2 runs it off). ``germline`` replaces the germline
     parameters of the example config (heterozygous at 0.5% of the neutral genes); it changes no growth
-    statistic, only the density of the germline sites the DNA assays read."""
+    statistic, only the density of the germline sites the DNA assays read. ``immune`` is the
+    ``immune_cell_params`` of a variant with immune cells (:data:`IMMUNE`)."""
     sp = {"origin_confinement": dict(ORIGIN_CONFINEMENT), **STROMA, **(spatial or {})}
     blocks = RR.config_for(scale, genome=genome, selection={**SELECTION, **(selection or {})},
                            cancer={**CANCER, **(cancer or {})}, deme={**DEME, **(deme or {})},
                            spatial=sp)
+    if immune is not None:
+        blocks["immune_cell_params"] = dict(immune)
     return dict(blocks, update_mode=update_mode, tau=tau, coarsen_passengers=coarsen,
                 founder_mutations=RR.FOUNDER_MUTATIONS,
                 germline_params=RR.GERMLINE if germline is None else germline)
@@ -193,13 +240,15 @@ def grow(seed, scale, target_cancer, spatial_snapshot_every=0, max_steps=3_000, 
     Growth stops at the first event (exact) or tau leap that reaches ``target_cancer``, not at the end
     of a chunk, so ``t.get_cancer_size()`` is the size reached, just past the target, and ``t.time``
     the time it took.
-    ``overrides`` are :func:`config`'s (the variant's blocks, ``update_mode``, ``tau``).
+    ``overrides`` are :func:`config`'s (the variant's blocks, ``update_mode``, ``tau``); a variant
+    with immune cells (``immune``) reads out with the interferon response, ``expression(immune=True)``.
     ``on_chunk(t)``, if given, is called after every chunk, for monitoring.
     ``layout_seed`` is :class:`GenotypeTumor`'s (``None``, the default, is the package's
     ``DEFAULT_LAYOUT_SEED``), so ``functools.partial(grow, scale=..., target_cancer=...)`` is the
     growth function of an :class:`iscc.cohort.Cohort`."""
     cfg = config(scale, coarsen=coarsen, **overrides)
-    expr = expression() if expression_params == "default" else expression_params
+    expr = (expression(immune=overrides.get("immune") is not None) if expression_params == "default"
+            else expression_params)
     menv = copy.deepcopy(MICROENV) if microenv_params == "default" else microenv_params
     t = GenotypeTumor(seed=seed, layout_seed=layout_seed, max_cells=1, expression_params=expr,
                       microenv_params=menv, spatial_snapshot_every=spatial_snapshot_every, **cfg)

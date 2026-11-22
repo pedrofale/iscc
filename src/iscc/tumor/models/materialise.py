@@ -953,6 +953,13 @@ class MaterialiseMixin:
                     self.microenv_truth = {}
                 self.microenv_truth["epithelial"] = epi_frac
                 self.microenv_truth["stromal"] = stro_frac
+            # The immune signal, for the interferon response of cancer cells near T and NK cells.
+            if "immune" in (P.coupling_params.get("niche_program_map") or {}):
+                lengthscale = float(P.coupling_params.get("immune_signal_lengthscale", 1.0))
+                fields["immune"] = self._immune_field(lengthscale)
+                if getattr(self, "microenv_truth", None) is None:
+                    self.microenv_truth = {}
+                self.microenv_truth["immune"] = fields["immune"]
             if fields:
                 niche_drive = P.niche_drive(fields)
 

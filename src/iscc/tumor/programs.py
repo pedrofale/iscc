@@ -451,13 +451,21 @@ class ProgramModel:
         nmap = cp.get("niche_program_map")
         if not nmap:
             return D
-        strength = float(cp.get("niche_program_strength", 1.0))
+        # `niche_program_strength` is a scalar gain shared by every field, or a per-field dict
+        # {field: gain, "__default__": gain}, as `phenotype_program_strength` is per phenotype: the
+        # fields live on different scales (hypoxia and the compartment shares span [0, 1], the immune
+        # density a fraction of a deme's capacity that rarely passes 0.3).
+        strength_cfg = cp.get("niche_program_strength", 1.0)
         idx = self.dictionary.program_index
         for field_name, prog in dict(nmap).items():
             k = idx.get(prog)
             field = fields.get(field_name)
             if k is None or field is None:
                 continue
+            if isinstance(strength_cfg, dict):
+                strength = float(strength_cfg.get(field_name, strength_cfg.get("__default__", 1.0)))
+            else:
+                strength = float(strength_cfg)
             D[:, k] += strength * np.asarray(field, dtype=float)
         return D
 

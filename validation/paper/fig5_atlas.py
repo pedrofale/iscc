@@ -24,7 +24,8 @@ Entry points (``python validation/paper/fig5_atlas.py <cmd> ...``, with ``PYTHON
 
 **The cohort** (``grow``): 50 patients (seeds :data:`COHORT_SEEDS`) at the sweep scale (``mid`` at
 ``ISCC_PAPER_TIER=full``: 96 x 96 demes), on the regime's ductal field with its metastatic lattice
-(``RG.met_spatial``, ``RG.MET_SELECTION``), each grown to its own size, drawn uniformly in
+(``RG.met_spatial``, ``RG.MET_SELECTION``) with the regime's immune cells (``RG.IMMUNE_SPATIAL``,
+``RG.IMMUNE_SELECTION``, ``RG.IMMUNE``), each grown to its own size, drawn uniformly in
 8,000-60,000 cancer cells from a fixed seed (:data:`TARGET_SEED`). The planted network
 (:data:`NETWORK`): seven event modules, E0 (the control: an own effect, no interaction) and E1-E6 as
 package indices 0-6; own effects 0.1 and E6's 0.2, counted only once E5 is present (fitness gating);
@@ -163,10 +164,14 @@ def pilot_targets(n, lo_hi=None):
 
 
 def grow_one(seeds, targets, i, scale, spatial, ep):
-    """Grow patient ``i`` through the thin Cohort, each patient with its own target size."""
+    """Grow patient ``i`` through the thin Cohort, each patient with its own target size. Every
+    patient grows the regime's immune variant (T and NK cells in the stroma and the duct wall,
+    ``RG.IMMUNE_SPATIAL``, ``RG.IMMUNE_SELECTION``, ``RG.IMMUNE``), so that the dissociated cells hold
+    immune cells, the shared state of integration across patients."""
     from iscc.cohort import Cohort
-    sel = {**RG.MET_SELECTION, "epistasis_params": ep, "dependency_params": dict(GATING)}
-    grow = functools.partial(RG.grow, scale=scale, selection=sel, spatial=spatial)
+    sel = {**RG.MET_SELECTION, **RG.IMMUNE_SELECTION, "epistasis_params": ep, "dependency_params": dict(GATING)}
+    grow = functools.partial(RG.grow, scale=scale, selection=sel, spatial={**spatial, **RG.IMMUNE_SPATIAL},
+                             immune=dict(RG.IMMUNE))
     coh = Cohort(grow, patient_seeds=list(seeds), patient_kwargs=[{"target_cancer": t} for t in targets])
     return coh.grow_patient(i)
 
@@ -365,28 +370,24 @@ def _cells(t, n_cells, settings=None, rng=None):
     cell type ("cancer" or the normal type), cancer flag and the patient's clone (clades of at least
     4% of the cancer cells, as Part I).
 
-    With ``settings`` (see :func:`dissociation_settings`), ``settings["materialise"]`` cells (default
-    twice ``n_cells``) are materialised, :class:`iscc.sample.dissociation.Dissociation` applies the
-    per-type recovery and the stress signature, and ``n_cells`` of the recovered cells are kept at
-    random. Without, the primary is dissociated to ``n_cells`` as Part I did. Returns the arrays, the
-    number of clones and the dissociation's own record."""
+    With ``settings`` (see :func:`dissociation_settings`), the tumour of the primary (its cancer
+    demes and a rim of one deme, ``Resection.cancer_region``) is dissociated with the patient's
+    per-type recovery and stress signature (``Resection.dissociate``, which materialises enough cells
+    that about ``n_cells`` survive the recovery) and ``n_cells`` of the recovered cells are kept at
+    random. Without, the primary is dissociated to ``n_cells`` as Part I did. Returns the
+    arrays, the number of clones and the dissociation's own record."""
     import common as C
     meta = dict(settings=settings or {})
     if settings:
-        from iscc.sample.dissociation import Dissociation
-        m = int(settings.get("materialise", 2 * n_cells))
-        cd = RG.RR.resect(t).dissociate(max_cells=m, layers="scrna")
-        diss = Dissociation(cd, rng=rng, recovery_probs=settings.get("recovery_probs"),
-                            stress_strength=float(settings.get("stress_strength", 0.0)),
-                            n_stress_genes=settings.get("n_stress_genes"))
-        chosen, dmeta, exp_override = diss.run()
-        exp = exp_override if exp_override is not None else cd["cell_exp"]
-        chosen = np.asarray(chosen)
-        if len(chosen) > n_cells:
-            chosen = np.sort(rng.choice(chosen, size=n_cells, replace=False))
-        gid = cd["cell_type"]["cell_id"].loc[chosen].astype(str)
-        exp = exp.loc[chosen]
-        meta.update(materialised=int(len(cd["cell_type"])), dissociation=dmeta)
+        spec = RG.RR.resect(t)
+        cd = spec.dissociate(region=spec.cancer_region(margin=1), max_cells=n_cells, layers="scrna",
+                             recovery_probs=settings.get("recovery_probs") or "default",
+                             stress_strength=float(settings.get("stress_strength", 0.0)),
+                             n_stress_genes=settings.get("n_stress_genes"), seed=rng)
+        dmeta = spec.dissociation_meta
+        gid = cd["cell_type"]["cell_id"].astype(str)
+        exp = cd["cell_exp"]
+        meta.update(materialised=int(dmeta["n_materialised"]), dissociation=dmeta)
     else:
         cd = RG.RR.resect(t).dissociate(max_cells=n_cells, layers="scrna")
         gid = cd["cell_type"]["cell_id"].astype(str)
@@ -507,9 +508,8 @@ def grow_patient(args):
 def dissociation_settings(i, seed, args):
     """Per-patient dissociation settings for the cells step. A STUB until the registration states
     their source: today they come from ``--dissociation-file`` (JSON ``{"<patient index>": {...}}``)
-    with ``--stress-strength`` / ``--recovery type=p,...`` / ``--materialise`` on top. Keys:
-    ``recovery_probs`` (per biological type), ``stress_strength``, ``n_stress_genes``,
-    ``materialise`` (cells materialised before recovery). An empty dict means Part I's plain
+    with ``--stress-strength`` / ``--recovery type=p,...`` on top. Keys: ``recovery_probs`` (per
+    biological type), ``stress_strength``, ``n_stress_genes``. An empty dict means Part I's plain
     dissociation."""
     st = {}
     if args.dissociation_file:
@@ -519,8 +519,6 @@ def dissociation_settings(i, seed, args):
         st["recovery_probs"] = {k: float(v) for k, v in (x.split("=") for x in args.recovery.split(","))}
     if args.stress_strength is not None:
         st["stress_strength"] = args.stress_strength
-    if args.materialise is not None:
-        st["materialise"] = args.materialise
     return st
 
 
@@ -1007,7 +1005,6 @@ def main(argv=None):
     p.add_argument("--dissociation-file", default=None, help="JSON of per-patient settings (a stub)")
     p.add_argument("--recovery", default=None, help="type=p,... recovery probabilities (on top of the file)")
     p.add_argument("--stress-strength", type=float, default=None)
-    p.add_argument("--materialise", type=int, default=None, help="cells materialised before recovery")
     p.add_argument("--no-check", action="store_true", help="skip the check against the grow record")
     p = sub.add_parser("integrate")
     common(p)
