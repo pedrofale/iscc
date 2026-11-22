@@ -8,8 +8,9 @@ here; those belong to the scRNA assay. This module is the sample-prep biology:
 * **cell-type-dependent dissociation efficiency -> composition bias** (the
   headline piece): each biological type (cancer / immune / stromal /
   epithelial / host parenchyma) has a recovery probability, so the sampled type
-  fractions differ from the true tissue fractions (e.g. immune is typically
-  under-recovered by enzymatic dissociation).
+  fractions differ from the true tissue fractions (by default malignant and epithelial
+  cells are recovered worst and T and NK cells best, as in breast tissue measured both
+  by scRNA-seq and by snRNA-seq; see ``DEFAULT_RECOVERY``).
 * **dissociation-stress expression signature** (optional knob): a multiplicative
   shift on a small stress-gene set in ``cell_exp`` for dissociated cells.
 
@@ -39,16 +40,21 @@ from ...constants import normal_names
 # counted as tumour and overstate the purity of any sample containing a metastasis.
 NORMAL_TYPES = tuple(normal_names)
 
-# Default per-type recovery probabilities. Immune cells are the hardest to
-# recover from enzymatic tumour dissociation, epithelial the easiest — so the
-# default biases composition AGAINST immune and toward epithelial/cancer.
-# Host parenchyma dissociates like the other resident epithelium.
+# Default per-type recovery probabilities, from breast tissue measured by scRNA-seq after enzymatic
+# dissociation and by snRNA-seq, which needs none. Relative to malignant cells, fibroblasts are
+# recovered about 3 times as well and T and NK cells 20-50 times in a triple-negative breast cancer
+# measured both ways (Slyper et al., Nat Med 2020, HTAPP-963, GEO GSE140819; two nuclei protocols),
+# and in the normal breast atlas fibroblasts 2.9 times as well as epithelium (Kumar et al., Nature
+# 2023, separate donors). Malignant and epithelial cells are the hardest to recover and T and NK
+# cells the easiest. snRNA-seq under-captures the small nuclei of lymphocytes, so the T and NK ratios
+# are upper bounds, and 10 is taken. The best-recovered type is set to 0.9; host parenchyma
+# dissociates like the other resident epithelium.
 DEFAULT_RECOVERY = {
-    "cancer": 0.9,
-    "epithelial": 0.8,
-    "host": 0.8,
-    "stromal": 0.6,
-    "immune": 0.4,
+    "cancer": 0.09,
+    "epithelial": 0.09,
+    "host": 0.09,
+    "stromal": 0.27,
+    "immune": 0.9,
 }
 
 

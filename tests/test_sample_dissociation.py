@@ -42,22 +42,24 @@ def test_biological_type_mapping():
 def test_downweighted_type_fraction_drops():
     cd = make_mixed_cell_data()
     diss = Dissociation(cd, rng=np.random.default_rng(1),
-                        recovery_probs={"immune": 0.1})
+                        recovery_probs={"immune": 0.1, "cancer": 0.9, "stromal": 0.9, "epithelial": 0.9})
     chosen, meta, exp_override = diss.run()
     inp = meta["input_composition"]["immune"]
     out = meta["sampled_composition"]["immune"]
     assert out < inp                      # immune under-recovered
     assert meta["composition_shift"]["immune"] < 0
-    # cancer (recovered at default 0.9) should rise as a fraction
+    # cancer (recovered at 0.9) should rise as a fraction
     assert meta["sampled_composition"]["cancer"] > meta["input_composition"]["cancer"]
 
 
-def test_default_recovery_underrepresents_immune():
+def test_default_recovery_overrepresents_immune_and_loses_cancer():
     cd = make_mixed_cell_data()
     diss = Dissociation(cd, rng=np.random.default_rng(2))  # DEFAULT_RECOVERY
     chosen, meta, _ = diss.run()
-    # default has immune lowest -> immune fraction should fall
-    assert meta["composition_shift"]["immune"] < 0
+    # as in breast tissue measured by scRNA-seq and snRNA-seq: T and NK cells are recovered best,
+    # malignant and epithelial cells worst
+    assert meta["composition_shift"]["immune"] > 0
+    assert meta["composition_shift"]["cancer"] < 0
 
 
 def test_subset_and_ground_truth_preserved():
@@ -106,7 +108,7 @@ def test_cli_dissociation_smoke(tmp_path):
     out = str(tmp_path / "sample")
     r = CliRunner().invoke(
         sample_main,
-        [src, "--method", "dissociation", "--recovery", "immune=0.2,stromal=0.5",
+        [src, "--method", "dissociation", "--recovery", "cancer=0.9,epithelial=0.9,immune=0.2,stromal=0.5",
          "--stress-strength", "0.2", "-o", out],
         catch_exceptions=False,
     )
