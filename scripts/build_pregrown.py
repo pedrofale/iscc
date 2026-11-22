@@ -3,7 +3,8 @@
 
 Every tumour is the paper's regime (``validation/paper/regime.py``) on the arm-level human genome, as
 the registry's run R11 grows it, at the cm scale (grid 170) to 200,000 cancer cells. ``ductal`` is
-that tumour; ``neutral``, ``sweeps``, ``cin`` and ``immune`` are declared variants of it, and ``cohort`` is six
+that tumour; ``immune`` is it with the regime's immune cells, ``neutral``, ``sweeps`` and ``cin`` are variants
+of ``immune``, and ``cohort`` is six
 patients of ``immune``'s configuration (immune cells are the commonest state shared across patients, which
 integration across patients should keep) at the mid scale (grid 96) to 60,000 cancer cells each. Each object is saved with its per-cell tables built, as
 ``grow`` leaves a tumour, so that a loaded tumour is in the same state.
@@ -70,20 +71,27 @@ def _variant(selection=None, cancer=None, spatial=None, immune=None, driver_scal
 
 
 # name -> (seed, regime overrides). Seed 1 of R11 is swept by a genome doubling, so ductal is seed 2.
-# neutral has no selection at all: drivers without effect, no niche traits, and the duct wall and the
-# stroma open to every cell (R10's "open" arm). With the barriers on, a tumour without drivers never
-# selects breach against its cost and stays in its glands (a smoke run held 6,359 cells after 1,500
-# generations). immune is the regime's immune variant (regime.IMMUNE_SPATIAL, IMMUNE_SELECTION, IMMUNE),
-# read out with the interferon response.
+# ductal is the paper's tumour, without immune cells. Every other tumour has the regime's immune
+# variant (regime.IMMUNE_SPATIAL, IMMUNE_SELECTION, IMMUNE, read out with the interferon response), so
+# that the tutorials, which load these, show the most complete simulation (Pedro, 2026-11-22): immune is
+# ductal with immune cells, and sweeps and cin are its variants. neutral has no selection at all:
+# drivers without effect, no niche traits, the duct wall and the stroma open to every cell (R10's "open"
+# arm), and immune cells that kill nothing, since immune killing selects resistance. With the barriers
+# on, a tumour without drivers never selects breach against its cost and stays in its glands (a smoke
+# run held 6,359 cells after 1,500 generations).
+IMMUNE = dict(selection=RG.IMMUNE_SELECTION, spatial=RG.IMMUNE_SPATIAL, immune=RG.IMMUNE)
 TUMOURS = {
     "ductal": (2, _variant()),
+    "immune": (2, _variant(**IMMUNE)),
     "neutral": (2, _variant(selection={"driver_effects": 1.0, "prop_breach": 0.0,
                                        "prop_stromal_survival": 0.0, "prop_immune_resistance": 0.0},
-                            spatial={"breach_gated_invasion": False, "stromal_hazard": 0.0})),
-    "sweeps": (2, _variant(selection={"driver_effects": 1.15}, driver_scale=0.1)),
+                            spatial={**RG.IMMUNE_SPATIAL, "breach_gated_invasion": False,
+                                     "stromal_hazard": 0.0},
+                            immune={"prob_kill": 0.0})),
+    "sweeps": (2, _variant(selection={**RG.IMMUNE_SELECTION, "driver_effects": 1.15},
+                           spatial=RG.IMMUNE_SPATIAL, immune=RG.IMMUNE, driver_scale=0.1)),
     "cin": (2, _variant(cancer={"cnv_prob": 4 * _arm()["cancer"]["cnv_prob"],
-                                "wgd_rate": 5 * _arm()["cancer"]["wgd_rate"]})),
-    "immune": (2, _variant(selection=RG.IMMUNE_SELECTION, spatial=RG.IMMUNE_SPATIAL, immune=RG.IMMUNE)),
+                                "wgd_rate": 5 * _arm()["cancer"]["wgd_rate"]}, **IMMUNE)),
 }
 COHORT_SEEDS = [11, 12, 13, 14, 15, 16]
 
