@@ -112,14 +112,13 @@ MET_SELECTION = {"prop_met_survival": 0.015, "met_survival_effects": 3.0, "met_s
 # `selection` and IMMUNE as `immune`.
 IMMUNE_SPATIAL = {"immune_density": 0.2, "immune_duct_density": 0.02}
 # Immune resistance at 0.2% of genes, the target breach and stromal survival were cut to (14 genes
-# instead of the example config's 116). At 2% the trait is a passenger of copy-number gains: under the
-# dosage law a gain of a segment carrying m resistance genes gives a resistance of 1 - 1.1**-m, and in
-# five immune-free tumours of the small field 62-100% of cancer cells carried at least one hit's worth
-# of it, leaving no room for immune pressure to select it (exp-immune-variant). One hit protects 75%
-# (effect 4.0, stromal survival's): at the example config's 1.1 a hit protects 9%, and immune pressure
-# selected no resistance until it was strong enough to double the growth time. Escape events in
-# tumours (HLA or B2M loss) protect substantially with one event. Neither change moves another gene's
-# role.
+# instead of the example config's 116). At 2% point mutations hit the trait so often that it spreads
+# without any immune cells (traits follow trait_source "mutation", so only mutated copies count): in an
+# immune-free tumour of the small field 74% of cancer cells carry a mutated resistance copy, which leaves
+# no room for immune pressure to select it (exp-immune-variant). One hit protects 75% (effect 4.0,
+# stromal survival's): at the example config's 1.1 a hit protects 9%, and immune pressure selected no
+# resistance until it was strong enough to double the growth time. Escape events in tumours (HLA or
+# B2M loss) protect substantially with one event. Neither change moves another gene's role.
 IMMUNE_SELECTION = {"prop_immune_resistance": 0.002, "immune_resistant_effects": 4.0}
 # The kill rate: a cancer cell dies at prob_kill x (the immune share of its deme) x (1 - its immune
 # resistance). Picked on preview tumours (stage immune_grid3 of tune_regime_v2, five seeds per rate)
