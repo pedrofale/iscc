@@ -455,3 +455,13 @@ class TestPlatformPresets:
         a, b = run_dna_batches(cd, mode="sc", n_batches=2, n_cells=10, platform="tapestri")
         assert a.breadth == b.breadth == "panel"
         assert a.hypers.kappa_loci == 584
+
+
+def test_tapestri_preset_reads_the_amplicons_of_its_fitted_panel():
+    """The Tapestri fit is on 584 amplicons; the panel breadth alone reads 30 loci."""
+    from iscc.data import scDNA
+    genes = [f"g{i}" for i in range(6000)]
+    preset = scDNA(platform="tapestri", seed=1)
+    assert len(preset._select_loci(genes)) == 584
+    assert len(scDNA(platform="tapestri", target_genes=0.1, seed=1)._select_loci(genes)) == 600
+    assert len(scDNA(breadth="panel", seed=1)._select_loci(genes)) == 30

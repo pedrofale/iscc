@@ -77,8 +77,9 @@ SCDNA_PLATFORM_PRESETS = {
     # Mission Bio Tapestri (Mays et al. 2024, KaryoTap experiment 1): reads per amplicon per
     # cell, with capture spread, allelic dropout and allele overdispersion fitted at germline
     # heterozygous sites.
-    "tapestri": dict(breadth="panel", mu_depth=42.7, kappa=4_679.0, kappa_loci=584,
-                     nb_dispersion=0.157, capture_sigma=0.389, ado_rate=0.325,
+    # target_genes: the 584 amplicons of the fitted panel, where the panel breadth alone reads 30.
+    "tapestri": dict(breadth="panel", target_genes=584, mu_depth=42.7, kappa=4_679.0,
+                     kappa_loci=584, nb_dispersion=0.157, capture_sigma=0.389, ado_rate=0.325,
                      beta_binom_conc=4.51),
 }
 _PLATFORM_ALIASES = {
@@ -243,10 +244,11 @@ class DNA(Assay):
         set, the depth regime (mean per-locus coverage: wgs ~30x / wes ~120x / panel ~1500x;
         single-cell scales this down), and the dominant capture bias (wgs GC; wes per-target;
         panel per-amplicon).
-    target_genes : {"all"} or list or float, default "all"
+    target_genes : {"all"} or list or float or int, default "all"
         Overrides the breadth's default locus set. A list/array selects exactly those loci; a
-        float in (0, 1] a random fraction of loci; ``"all"`` defers to the breadth regime
-        (wgs = all loci, wes ~30%, panel = 30 drivers). Seeded, so stable across batches.
+        float in (0, 1] a random fraction of loci; an int that number of random loci; ``"all"``
+        defers to the breadth regime (wgs = all loci, wes ~30%, panel = 30 drivers). Seeded, so
+        stable across batches.
     data_mode : str, default "counts"
         Output mode. ``"counts"`` emits count-level results (coverage / alt-count / VAF /
         log2 ratio); ``"binary"`` additionally produces a post-ADO genotype call (single-cell
@@ -350,6 +352,8 @@ class DNA(Assay):
         elif isinstance(tg, float):
             k = max(1, int(round(tg * n)))
             idx = sorted(rng.choice(n, size=k, replace=False))
+        elif isinstance(tg, (int, np.integer)) and not isinstance(tg, bool):
+            idx = sorted(rng.choice(n, size=min(int(tg), n), replace=False))
         else:  # 'all' -> breadth regime
             preset = DNA_BREADTH_PRESETS[self.breadth]
             if preset["locus_frac"] is not None and preset["locus_frac"] >= 1.0:
@@ -591,7 +595,9 @@ class scDNA(DNA):
     def __init__(self, n_cells=100, platform=None, **dna_kwargs):
         self.platform = resolve_platform(platform)
         if self.platform is not None:
-            dna_kwargs.setdefault("breadth", SCDNA_PLATFORM_PRESETS[self.platform]["breadth"])
+            for key in ("breadth", "target_genes"):
+                if key in SCDNA_PLATFORM_PRESETS[self.platform]:
+                    dna_kwargs.setdefault(key, SCDNA_PLATFORM_PRESETS[self.platform][key])
         super(scDNA, self).__init__(**dna_kwargs)
         self.n_cells = int(n_cells)
 
@@ -601,7 +607,7 @@ class scDNA(DNA):
         d = dict(DNA_MODE_DEFAULTS["sc"])
         if self.platform is not None:
             d.update({k: v for k, v in SCDNA_PLATFORM_PRESETS[self.platform].items()
-                      if k != "breadth"})
+                      if k not in ("breadth", "target_genes")})
         return d
 
     def _select_cells(self, cells_index, cell_subset):
