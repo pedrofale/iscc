@@ -431,3 +431,16 @@ def test_landing_config_is_valid_and_schedule_shaped():
     assert cfg["selection_params"]["prop_met_survival"] > 0 > -cfg["selection_params"]["prop_treatment_resistance"]
     assert 0 < cfg["selection_params"]["met_survival_cost"] < cfg["selection_params"]["treatment_resistance_cost"]
     assert cfg["spatial_params"]["met_hazard"] == 3.5 and cfg["spatial_params"]["met_grid_size"]
+
+
+def test_even_pace_keeps_one_frame_per_stretch_of_the_trace():
+    """The schedule captures phases at different cadences; even_pace keeps a frame every `every`
+    snapshots, so each kept frame advances the tumour by about the same time."""
+    cursors = [0, 8, 16, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 40]     # sparse growth, then every step
+    traj = {"frames": [{"cursor": c, "phase": "p"} for c in cursors], "traces": list(range(41))}
+    kept = [f["cursor"] for f in arc.even_pace(traj, 2)["frames"]]
+    assert kept[0] == 0 and kept[-1] == 40
+    gaps = np.diff(kept[:-1])
+    assert (gaps >= 2).all() and kept[:4] == [0, 8, 16, 24]   # a phase sparser than `every` keeps every frame
+    assert kept[4:-1] == [26, 28, 30, 32, 34]
+    assert arc.even_pace(traj, 1) is traj and arc.even_pace(traj, 0) is traj

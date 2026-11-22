@@ -275,6 +275,7 @@ def render_animation(traj, out_path, splash=False, poster=True, scale=1.0):
     if splash:
         LOOP_MS = 17000
         per = [max(40, round(LOOP_MS / len(imgs)))] * len(imgs)
+        per[-1] = max(per[-1], 1200)        # hold the relapse a moment before the loop restarts
     else:
         per = [170] * len(imgs)
         per[0] = 900

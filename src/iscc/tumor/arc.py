@@ -328,6 +328,29 @@ def trim_confinement(trajectory, min_demes=2):
     return out
 
 
+def even_pace(trajectory, every):
+    """Keep one frame per ``every`` snapshots of the trace, so the animation runs at one pace.
+
+    The schedule captures each phase at its own cadence (growth every ``pre_seed_every`` generations,
+    the treatment at every step), and a GIF shows each frame for the same time, so the tumour moved
+    faster in some phases than in others. A frame is kept when its cursor is at least ``every``
+    snapshots past the last frame kept; the first and the last frames are always kept. A phase
+    captured more sparsely than ``every`` keeps all its frames, so the schedule should capture every
+    phase at least that densely.
+
+    Purely a render-time transform: returns a NEW trajectory; the original is untouched.
+    """
+    frames = trajectory["frames"]
+    if every <= 1 or len(frames) < 3:
+        return trajectory
+    kept = [frames[0]]
+    for f in frames[1:-1]:
+        if int(f["cursor"]) - int(kept[-1]["cursor"]) >= every:
+            kept.append(f)
+    kept.append(frames[-1])
+    return dict(trajectory, frames=kept)
+
+
 def write_trajectory(output_path, trajectory):
     """Persist the trajectory pickle under ``output_path`` (the isccsim output dir)."""
     os.makedirs(output_path, exist_ok=True)

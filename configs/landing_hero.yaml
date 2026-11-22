@@ -1,9 +1,9 @@
 # The docs landing hero (docs/assets/landing_hero.gif). Reproduce:
 #   isccsim --sim-config configs/landing_hero.yaml -o out --no-tables
-#   isccgif out --compartment --splash --skip-confinement --scale 0.55 -o docs/assets/landing_hero.gif
-# Measured on a laptop on 2026-11-22: isccsim 12 min at a 3.2 GB peak, a 62 MB trajectory; isccgif
-# about a minute, 135 frames of which --skip-confinement keeps 84 (the founding acinus is closed for
-# about half of the run), 2.3 MB.
+#   isccgif out --compartment --splash --skip-confinement --pace 2 --scale 0.55 -o docs/assets/landing_hero.gif
+# Measured on a laptop on 2026-11-22: isccsim 9 min, a 66 MB trajectory; isccgif about a minute, 321
+# frames of which --skip-confinement keeps 120 (the founding acinus is closed for most of the run) and
+# --pace 2 keeps 96, one every two snapshots of the trace in every phase, 2.7 MB.
 #
 # The tumour is the paper's sweep tumour: every growth setting equals what validation/paper/regime.py's
 # config("mid", selection=realistic_regime.MET_SELECTION, spatial=met_spatial("mid")) builds (paper
@@ -218,7 +218,8 @@ schedule:
   # that actually sticks and grows the deposit.
   seeding_establishes_at: 50
   capture:
-    pre_seed_every: 8        # landing_hero: 4 in configs/landing.yaml
+    # every 2 generations, as dense as the rest, so that --pace 2 runs every phase at one pace
+    pre_seed_every: 2        # landing_hero: 4 in configs/landing.yaml
     post_seed_every: 1       # landing_hero: 3 in configs/landing.yaml
   phases:
     # grow to the tutorial's development before resecting, so the hero shows the SAME dense DCIS->IDC
