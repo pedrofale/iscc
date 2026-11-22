@@ -3,7 +3,7 @@
 iscc's selection is otherwise **additive**: abstract mode scores the *count* of mutated drivers, so
 the true event x event dependency network is ~empty and a cohort-progression benchmark (MHN, TreeMHN,
 CBN/H-CBN, REVOLVER) could only measure a method's false-positive rate. This module lets a
-**known network be planted** — the answer key those methods are scored against.
+**known network be planted** — the ground truth those methods are scored against.
 
 Three interaction types, all planted:
 
@@ -263,7 +263,7 @@ class EpistasisNetwork:
 
         # -- mutual exclusivity / synthetic lethality: strongly negative edges ----------------
         # Drawn from pairs NOT already carrying an interaction, so the two signals stay distinct in
-        # the answer key (self.exclusive_pairs).
+        # the ground truth (self.exclusive_pairs).
         self.exclusive_pairs = []
         n_excl = int(ep["n_exclusive_pairs"])
         mex = float(ep["mutual_exclusivity_strength"])
@@ -347,7 +347,7 @@ class EpistasisNetwork:
             key = (min(i, j), max(i, j))
             if key in seen:
                 raise ValueError(f"planted exclusive pair {key} is also an interaction or given "
-                                 "twice; keep the two signals distinct in the answer key")
+                                 "twice; keep the two signals distinct in the ground truth")
             seen.add(key)
             self.exclusive_pairs.append(key)
         if self.exclusive_pairs and not self.lethal:
@@ -525,7 +525,7 @@ class EpistasisNetwork:
 
     # ------------------------------------------------------------------ ground truth
     def true_interaction_matrix(self):
-        """The planted ``E`` — the answer key for edge precision/recall."""
+        """The planted ``E`` — the ground truth for edge precision/recall."""
         return self.E.copy()
 
     def true_edges(self, threshold=0.0):
@@ -535,7 +535,7 @@ class EpistasisNetwork:
                 if abs(self.E[i, j]) > threshold]
 
     def true_dag_edges(self):
-        """Planted conjunctive constraints as ``(parent, child)`` — the ordering answer key."""
+        """Planted conjunctive constraints as ``(parent, child)`` — the ordering ground truth."""
         return list(self.dag_edges)
 
     def true_order_constraints(self):

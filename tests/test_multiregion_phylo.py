@@ -22,7 +22,7 @@ from iscc.integrations import multiregion as mr
 
 
 # Small, fast, deterministic tumour: ~1600 loci keeps the per-allele infinite-sites model sparse
-# (clean single-origin answer key); low dispersal + capacity gives spatial clone territories.
+# (clean single-origin ground truth); low dispersal + capacity gives spatial clone territories.
 GENOME = {"n_segments": 20, "segment_size": 80}
 SELECTION = {"prop_driver": 0.05, "prop_dispersal": 0.1}
 # Per-deme crowding: seed a founder cluster (or a low-dispersal tumour goes
@@ -104,7 +104,7 @@ def test_hamming_nj_tree_groups_identical_leaves():
 
 
 # ---------------------------------------------------------------------------------------------
-# Answer key (true origins)
+# Ground truth (true origins)
 # ---------------------------------------------------------------------------------------------
 def test_answer_key_has_single_origin_loci(answer_key):
     ak = answer_key

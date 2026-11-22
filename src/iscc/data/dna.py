@@ -408,7 +408,7 @@ class bulkDNA(DNA):
     After ``run``, ``purity`` holds the pool's TRUE tumour purity (the fraction of pooled
     cells that are cancer cells, ``None`` when the sample carries no cell types) and
     ``n_cells_pooled`` its size. Purity is what turns an observed VAF into a cancer-cell
-    fraction, so it is both an input to that calculation and the answer key for any method
+    fraction, so it is both an input to that calculation and the ground truth for any method
     that estimates purity from the data.
 
     See [`DNA`][iscc.data.DNA] for the constructor parameters.

@@ -830,7 +830,7 @@ def score_traits(fit, names=PANEL_E_TOOL):
 
 
 def truth_orders(recs):
-    """The answer key of panel e, from each tumour's genealogy: for each pair of [E0, traits], the
+    """The ground truth of panel e, from each tumour's genealogy: for each pair of [E0, traits], the
     tumours (with any cancer cell carrying both, and with both present at 5%) in which the majority
     of the cells carrying both acquired the first before the second, and the same share by cells."""
     out = {}

@@ -2,7 +2,7 @@
 
 A bulk biopsy region is a mixture of clones, so a tree built from regional mutation profiles reflects
 similarity, not descent, and infers parallel origins for mutations that arose once. iscc scores this
-against its answer key: the true number of origins of every locus on the true clone tree. Only loci
+against its ground truth: the true number of origins of every locus on the true clone tree. Only loci
 that arose once are scored (the 6,000-gene genome makes most loci recurrent at tumour scale, see the
 Methods).
 

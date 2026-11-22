@@ -3,7 +3,7 @@
 Exactly the structure that no simulator provides and that real cohorts can never give:
 
   * :func:`recurrence_table`          — recurrent-vs-private drivers (per-gene recurrence across patients);
-  * :func:`true_recurrent_drivers`    — the known recurrent driver set (onc ∪ tsg, the answer key);
+  * :func:`true_recurrent_drivers`    — the known recurrent driver set (onc ∪ tsg, the ground truth);
   * :func:`private_mutation_table`    — per-patient private (singleton) mutations;
   * :func:`shared_private_labels`     — per-cell (shared cell-state, private patient) label pair;
   * :func:`subgroup_response_table`   — per-patient subgroup + true therapy response.
@@ -47,7 +47,7 @@ def recurrence_table(cohort, clonal_thresh=0.05):
 
     Columns: ``is_oncogene``, ``is_tsg``, ``is_driver``, ``n_patients_mutated``, ``recurrence``
     (fraction of patients), ``is_recurrent`` (>= 2 patients). The recurrent DRIVERS should sit at high
-    recurrence and the private passengers at low — the answer key for the recurrence/driver-detection
+    recurrence and the private passengers at low — the ground truth for the recurrence/driver-detection
     benchmark."""
     M, genes = patient_gene_mutated(cohort, clonal_thresh=clonal_thresh)
     sel = cohort.selection
@@ -67,7 +67,7 @@ def recurrence_table(cohort, clonal_thresh=0.05):
 
 
 def true_recurrent_drivers(cohort):
-    """The known driver gene indices (onc ∪ tsg) — the recurrent-driver answer key."""
+    """The known driver gene indices (onc ∪ tsg) — the recurrent-driver ground truth."""
     sel = cohort.selection
     return np.array(sorted(set(int(x) for x in sel.get_oncogenes()) |
                            set(int(x) for x in sel.get_tsgs())), dtype=int)
@@ -104,7 +104,7 @@ def shared_private_labels(meta):
 
 
 def subgroup_response_table(cohort):
-    """Per-patient subgroup + true therapy response (the stratification / biomarker answer key)."""
+    """Per-patient subgroup + true therapy response (the stratification / biomarker ground truth)."""
     rows = []
     for i in range(cohort.n_patients):
         sub = cohort.subgroup_of(i)

@@ -1,4 +1,4 @@
-"""Fig 4c and 4d on one tumour: the errors one modality hands the next, scored against the answer key.
+"""Fig 4c and 4d on one tumour: the errors one modality hands the next, scored against the ground truth.
 
 4c (``dna-rna``). clonealign assigns the tumour's scRNA cells to clones twice: once given the TRUE clones
 and their copy-number profiles, once given the clones called from SIMULATED scDNA. The DNA chain is the
@@ -18,7 +18,7 @@ cell, is never read. CalicoST runs alongside (its clone labels; it reads no refe
 spot is scored against the spot's true clone fractions by ``fig4_score.py``. ``--only`` redoes some of the
 three tools and keeps the others' stored labels, refusing when the rebuilt spots differ from the stored.
 
-The true clones are the answer key's: lineage clades (``clones_from_clades``) holding at least 3% of the
+The true clones are the ground truth's: lineage clades (``clones_from_clades``) holding at least 3% of the
 sampled tumour cells, counted over the dissociated and the sectioned cells together so that scRNA, scDNA
 and Visium share one set of labels, and clades whose arm-level profiles are proportional merged into one
 clone, since no copy-number method can tell them apart (expression and single-cell depth are both
@@ -65,7 +65,7 @@ MIN_CLONE_FRAC = 0.03       # Fig 4b's truth (make_layer_dataset --min-clone-fra
 N_DNA = 1500                # single-cell WGS libraries, a DLP+ run's order of magnitude
 RNA_MAX_CELLS = 3000        # tumour cells handed to clonealign
 RNA_GENES = 4000            # at most this many genes, the most expressed of the informative ones
-COARSE_K = 4                # --coarse: the answer key's clones in this many copy-number groups
+COARSE_K = 4                # --coarse: the ground truth's clones in this many copy-number groups
 # The Visium section's cell cap. The tier's max_cells (8,000) leaves about 1.4 cells per spot, so nearly
 # every spot holds one clone; 50,000, Fig 1's section, gives about 5. The dissociated sample (scDNA,
 # scRNA) keeps the tier's cap. The section is materialised with only the frames Visium and the allele
@@ -93,13 +93,13 @@ def _commit():
 
 
 # ---------------------------------------------------------------------------------------------------
-# the tumour, its samples and the answer key
+# the tumour, its samples and the ground truth
 # ---------------------------------------------------------------------------------------------------
 def sample(run, task, section_max_cells=SECTION_MAX_CELLS):
     """The stored tumour, its human-gene layer, and the two samples of the paper's figures: the
     dissociated half (scRNA, scDNA, at the tier's max_cells) and the section (Visium, at
     ``section_max_cells``), cut as make_layer_dataset cuts them. Every step slices the same section,
-    since the answer key's clones are counted over both samples."""
+    since the ground truth's clones are counted over both samples."""
     import realistic_regime as RR
     import regime as RG
     import registry as REG
@@ -164,7 +164,7 @@ def _proportional_key(profile):
 
 
 def true_clones(t, layer, samples, min_frac=MIN_CLONE_FRAC):
-    """The answer key's clones over the union of ``samples``.
+    """The ground truth's clones over the union of ``samples``.
 
     Returns ``(clone_of, profiles, members)``: ``clone_of`` maps a genotype id to its clone label
     (``"above_clades"`` for a cancer genotype above every clade when those cells are as many as a clade must
@@ -216,7 +216,7 @@ def true_clones(t, layer, samples, min_frac=MIN_CLONE_FRAC):
 
 
 def label_cells(gids, clone_of):
-    """The answer-key label of each cell: a clone, ``"other"``, or ``"normal"``."""
+    """The ground-truth label of each cell: a clone, ``"other"``, or ``"normal"``."""
     return np.array([clone_of.get(g, NORMAL) for g in gids], dtype=object)
 
 
@@ -254,7 +254,7 @@ def write_reference(ds, barcodes, reference):
 
 
 def coarse_clones(profiles, k=COARSE_K):
-    """The answer key's clones grouped into ``k`` copy-number groups (average linkage on the L1
+    """The ground truth's clones grouped into ``k`` copy-number groups (average linkage on the L1
     distance between their relative profiles). Returns clone -> group label and the groups' profiles
     (each group's largest clone's, by the cell counts true_clones attaches)."""
     from scipy.cluster.hierarchy import fcluster, linkage

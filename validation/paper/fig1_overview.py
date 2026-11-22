@@ -1,4 +1,4 @@
-"""Figure 1: one structured tumour, many modalities, one answer key.
+"""Figure 1: one structured tumour, many modalities, one ground truth.
 
 The panels of Fig 1, all on the showcase
 tumour (registry R0/seed1: a 170 x 170 primary field with a 170 x 170 metastatic lattice appended):
@@ -40,7 +40,7 @@ Definitions:
     the package's 10x defaults; Visium takes the regime's fit to a real breast-cancer section
     (``regime.VISIUM``);
   * DNA depth is GC-corrected as a caller corrects it (a quadratic in GC per cell or sample, not the
-    assay's own efficiency, which is part of the answer key);
+    assay's own efficiency, which is part of the ground truth);
   * scDNA calls: per cell, the corrected coverage is averaged in bins of 50 loci and divided by its
     mean; the cell's scale (ploidy) is the value in 1.5-6 that brings the scaled bins closest to
     integers (Ginkgo's scan), and each bin is called at the rounded value. Calls are scored against the
@@ -446,7 +446,7 @@ def umap_coords(counts, seed=0):
 def _gc_correct(cov, gc, deg=2):
     """Per-row GC correction as a copy-number caller does it (HMMcopy's, with a polynomial for the
     loess): each row's coverage, divided by its mean, over a degree-``deg`` fit against the loci's GC
-    content; returns rows of mean 1. The assay's own efficiency (the answer key) is not used."""
+    content; returns rows of mean 1. The assay's own efficiency (the ground truth) is not used."""
     cov = np.atleast_2d(np.asarray(cov, float))
     out = np.empty_like(cov)
     for i, row in enumerate(cov):

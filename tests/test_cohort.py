@@ -368,7 +368,7 @@ def test_recurrence_table_annotates_drivers():
     co = _cohort(n=8).run()
     rt = recurrence_table(co)
     assert {"is_oncogene", "is_tsg", "is_driver", "recurrence", "is_recurrent"} <= set(rt.columns)
-    # the known recurrent-driver answer key is the onc U tsg gene set
+    # the known recurrent-driver ground truth is the onc U tsg gene set
     assert len(true_recurrent_drivers(co)) == int(rt["is_driver"].sum())
     # recurrence is a fraction in [0, 1]
     assert rt["recurrence"].between(0, 1).all()

@@ -1725,7 +1725,7 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
 
     # --- epistasis ground truth -----------------------------------------------
     def epistasis_ground_truth(self):
-        """The planted network — the answer key for MHN/TreeMHN/CBN/REVOLVER edge + order recovery.
+        """The planted network — the ground truth for MHN/TreeMHN/CBN/REVOLVER edge + order recovery.
 
         Returns the true ``E`` matrix, the marginal effects ``beta``, the interaction edges, the
         conjunctive dependency DAG, the mutually-exclusive pairs and the event->gene modules; or

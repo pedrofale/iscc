@@ -350,7 +350,7 @@ DEMUX_IMMUNE = {"division_rate": 0.0, "death_rate": 0.1, "dispersal_rate": 0.1}
 def demux_cohort(n_patients=8, steps=450, n_germline=40):
     """Solid tumours WITH a normal compartment (epithelial/stromal + immune), each patient carrying its
     own PRIVATE germline markers (the individual background genetic demux exploits). Pooled N:1, the
-    patient-of-origin answer key is the private germline fingerprint carried by EVERY cell."""
+    patient-of-origin ground truth is the private germline fingerprint carried by EVERY cell."""
     markers = (draw_germline_markers(shared_selection(DEMUX_GENOME, DEMUX_SEL), n_patients, n_germline)
                if n_germline else None)
     grow = functools.partial(grow_tumor, genome_params=DEMUX_GENOME, selection_params=DEMUX_SEL,

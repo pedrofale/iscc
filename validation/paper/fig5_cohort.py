@@ -481,7 +481,7 @@ def _compartments(t):
 
 
 def _trait_order(t):
-    """The true order of the dissemination traits (the answer key of III-3): for each pair of traits,
+    """The true order of the dissemination traits (the ground truth of III-3): for each pair of traits,
     the cancer cells carrying both, split by which was acquired first along their lineage."""
     from iscc import integrations as ig
     tbl = ig.trait_table(t, with_events=True)

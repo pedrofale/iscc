@@ -1,10 +1,10 @@
-"""Figure 4: a shared answer key lets integration be scored link by link.
+"""Figure 4: a shared ground truth lets integration be scored link by link.
 
 Draws the five panels of the figure plan ("Fig 4") from the summaries the Fig 4 jobs keep; it computes
 nothing heavy and reads no tumour:
 
   (a) the benchmark, a schematic: one tumour measured by WGS, scDNA, scRNA and Visium, the tools on each
-      modality and how they chain across modalities, every link scored against the answer key;
+      modality and how they chain across modalities, every link scored against the ground truth;
   (b) single-modality calls against the truth by niche (duct wall, hypoxic core, stroma): the malignancy
       AUC and the per-arm copy-number correlation per tool and assay, one dot per tumour, the bar the
       mean (``fig4_tools.py``: ``$FIG4_DEV/b/<tumour>/scores.csv``);
@@ -93,7 +93,7 @@ def _arrow(ax, x0, y0, x1, y1, color="#6F6F6F", lw=0.6, ls="-"):
 
 
 def panel_a(fig, ov):
-    """The benchmark as a schematic: modalities, tools, the chains across modalities, the answer key."""
+    """The benchmark as a schematic: modalities, tools, the chains across modalities, the ground truth."""
     S.panel_letter(fig, "a", 2, 3)
     DNA, RNA, SP = S.MODALITY["DNA"], S.MODALITY["RNA"], S.MODALITY["spatial"]
     pale = {DNA: "#E4E1F0", RNA: "#FBE0D1", SP: "#D9EEDD"}
@@ -132,9 +132,9 @@ def panel_a(fig, ov):
     _arrow(ov, 26, 18, 108, 9.5, color="#BDBDBD", lw=0.4)
     for x, y, lab in ((81, 29.5, "B"), (81, 39.5, "B"), (131.5, 29.5, "C"), (131.5, 39.5, "D"), (131.5, 9.5, "E")):
         ov.text(x, y, lab, fontsize=5.5, fontweight="bold", color=S.GREY, va="center")
-    # the answer key, scored against every link
+    # the ground truth, scored against every link
     _box(ov, 145, 9, 36, 31, "", "#F4F4F4", ec=S.INK)
-    ov.text(163, 12, "answer key", ha="center", va="top", fontsize=5.6, fontweight="bold")
+    ov.text(163, 12, "ground truth", ha="center", va="top", fontsize=5.6, fontweight="bold")
     ov.text(163, 17.5, "true clones and genealogy\ncopy number per cell\nand chromosome arm\nmalignant or normal per cell\n"
             "clone fractions per spot\nniche of every cell\nfields of the environment", ha="center", va="top",
             fontsize=4.7, linespacing=1.4, color=S.INK)

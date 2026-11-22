@@ -300,7 +300,7 @@ truth is surfaced as `cell_data["cell_wgd"]["is_wgd"]` (present only when `wgd_r
 ### Epistasis / dependency network (R14, optional; **off by default**) — `selection_params.epistasis_params`
 
 Selection is **additive** by default (fitness reads the *count* of mutated drivers), so the true
-event×event dependency network is empty. These knobs **plant a known network** — the answer key the
+event×event dependency network is empty. These knobs **plant a known network** — the ground truth the
 cohort progression models (MHN, TreeMHN, CBN/H-CBN, REVOLVER) are scored against. With
 `epistasis_params` absent, or `n_events: 0`, nothing is built and the engine is **bit-identical** to
 the additive model. See `validation/validate_epistasis.py`.

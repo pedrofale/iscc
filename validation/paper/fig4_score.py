@@ -8,7 +8,7 @@ writes ``OUT/scores_c.csv`` and ``OUT/scores_d.csv``, and draws ``fig4cd_draft.p
 
 4c, per tumour: clonealign's accuracy on the tumour's scRNA cells given the true clones and profiles, and
 given the clones called from simulated scDNA. A cell assigned to a DNA clone counts as right when most of
-that clone's DNA cells belong to the cell's true clone, which only a shared answer key can say.
+that clone's DNA cells belong to the cell's true clone, which only a shared ground truth can say.
 
 4d, per tumour and tool, over the spots holding cells of a true clone. Each spot has true clone
 fractions p (its tumour cells' clones; cells above every clade and normal cells left out). Both tools
@@ -68,7 +68,7 @@ def _spot_scores(P, dom, pred_idx, labels):
 
 
 def score_spots(spots, c_dir=None):
-    """Per-tool scores of one tumour's spots table (fig4_chain.py spatial): against the answer key's
+    """Per-tool scores of one tumour's spots table (fig4_chain.py spatial): against the ground truth's
     clones (``fine``), and against their copy-number groups (``coarse``, from 4c's true_clones.tsv)."""
     out = {"fine": _score_spots(spots, c_dir)}
     tc = os.path.join(c_dir, "true_clones.tsv") if c_dir else None
@@ -225,7 +225,7 @@ def _panel_d(ax, d, order, short, S, colours):
 
 
 def figure(c, d, path):
-    """Draft panels against the answer key's clones: 4c (clonealign accuracy and balanced accuracy, given
+    """Draft panels against the ground truth's clones: 4c (clonealign accuracy and balanced accuracy, given
     the true clones against the DNA-called ones) and 4d (per-spot clone-fraction error). The coarse
     resolution stays in the score tables only."""
     import matplotlib

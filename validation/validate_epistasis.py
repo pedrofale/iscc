@@ -30,7 +30,7 @@ THE FINDING — **the observable, not the cohort size, is what decides recovery.
     is recovered perfectly; **fitness** gating leaves the same planted DAG with no trace (panel D).
 
 Panels (figure the paper repo's figures/validation_epistasis.png):
-  A. The ANSWER KEY: the planted E matrix.
+  A. The GROUND TRUTH: the planted E matrix.
   B. THE MECHANISM: planted E vs the realised cancer-cell fraction of the clones carrying the pair —
      a large, monotone dose-response, against the flat binary-presence observable. The fitness clamp
      is marked (a planted |E| above log(b_max/b_0) cannot express itself).
@@ -415,7 +415,7 @@ def make_figure(net, strength_df, thr_df, tool_df, order_df, gate_df, out):
     fig, axes = plt.subplots(2, 2, figsize=(13.5, 10.5))
     axA, axB, axC, axD = axes.ravel()
 
-    # -- A: the answer key
+    # -- A: the ground truth
     E = net.true_interaction_matrix()
     lim = max(0.5, np.abs(E).max())
     im = axA.imshow(E, cmap="RdBu_r", vmin=-lim, vmax=lim)
@@ -425,7 +425,7 @@ def make_figure(net, strength_df, thr_df, tool_df, order_df, gate_df, out):
         for j in range(net.n_events):
             if abs(E[i, j]) > 1e-9:
                 axA.text(j, i, f"{E[i, j]:.1f}", ha="center", va="center", fontsize=9)
-    axA.set_title("A. The answer key: E planted on the (E0, E1) pair\n"
+    axA.set_title("A. The ground truth: E planted on the (E0, E1) pair\n"
                   "(the conjunctive DAG is a separate experiment — panel D)")
     fig.colorbar(im, ax=axA, fraction=0.046, label="$E_{ij}$ (log-fitness interaction)")
 

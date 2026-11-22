@@ -13,7 +13,7 @@ key**, because it has *both* the true clone phylogeny (``genotypes_parents`` / :
 real spatial admixture (clonal territories that intermix — tune via the cancer ``dispersal_rate``).
 This module provides the self-contained machinery (no ete3 / dendropy needed):
 
-  * :func:`true_origin_counts` — the **answer key**: for every locus, the true number of independent
+  * :func:`true_origin_counts` — the **ground truth**: for every locus, the true number of independent
     mutational origins, from Fitch parsimony on the *true* clone tree (pruned to the observed clones).
     Under the engine's per-allele infinite-sites model a locus arises once (origin == 1) unless it is
     genuinely recurrent; the single-origin loci are the clean substrate for scoring *spurious*
@@ -205,7 +205,7 @@ def robinson_foulds(children_a, root_a, leafmap_a, children_b, root_b, leafmap_b
 
 
 # =============================================================================================
-# The true clone tree (answer key)
+# The true clone tree (ground truth)
 # =============================================================================================
 def clone_lineage_tree(tumor, present_clones=None):
     """The true clone genealogy pruned to the *observed* clones.
@@ -270,7 +270,7 @@ def _clone_presence(cell_data, gid=None):
 
 
 def true_origin_counts(tumor, cell_data=None):
-    """The **answer key**: per-locus number of independent mutational origins on the true clone tree.
+    """The **ground truth**: per-locus number of independent mutational origins on the true clone tree.
 
     For each locus, Fitch parsimony on the pruned true clone tree (:func:`clone_lineage_tree`) with
     per-clone presence gives the minimum number of origins consistent with the true topology — 1 for

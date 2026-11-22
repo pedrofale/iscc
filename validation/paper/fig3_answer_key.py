@@ -1,4 +1,4 @@
-"""Figure 3: what only the join provides, a coupled answer key with a history.
+"""Figure 3: what only the join provides, a coupled ground truth with a history.
 
 (a) One clone across modalities (R0): its copy number in scDNA, its expression shift against each
     gene's true dosage sensitivity, its allelic imbalance in RNA, and its territory.
@@ -727,7 +727,7 @@ def main():
     S.text_mm(fig, 126, 47.4, "The key separates genotype from niche", fontsize=7, va="top")
     out["c"] = panel_c(fig, 46)
     S.panel_letter(fig, "d", 1, 92)
-    S.text_mm(fig, 6, 93.4, "The answer key has a history", fontsize=7, va="top")
+    S.text_mm(fig, 6, 93.4, "The ground truth has a history", fontsize=7, va="top")
     out["d"] = panel_d(fig, 92)
     S.panel_letter(fig, "e", 1, 142)
     S.text_mm(fig, 6, 143.4, "Across patients", fontsize=7, va="top")

@@ -73,7 +73,7 @@ class Subgroup:
     variants are present in every cell of an individual, not only the tumour. Appropriate for a
     hereditary subtype-defining background (e.g. a germline predisposition variant), NOT for modelling
     acquired resistance (which must emerge). ``therapy_response`` is a free-form ground-truth label
-    (e.g. "sensitive"/"resistant", or a numeric expected response) — the stratification answer key.
+    (e.g. "sensitive"/"resistant", or a numeric expected response) — the stratification ground truth.
 
     To :class:`Cohort` a Subgroup is only a label; what it changes in growth travels in the per-patient
     overrides :func:`patient_overrides` builds from it.

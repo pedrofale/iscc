@@ -2,7 +2,7 @@
 
 The companion to :mod:`iscc.tumor.components.epistasis`. That module PLANTS a known event x event
 network; this one exports a cohort in the shape those tools consume, and scores what they recover
-against the planted answer key.
+against the planted ground truth.
 
 Three export shapes:
 

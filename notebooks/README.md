@@ -6,14 +6,14 @@ Every notebook is committed with its outputs; re-execute one with `jupyter nbcon
 
 ## Using iscc
 
-- **`01_quickstart.ipynb`**: one tumor and its four data sets in a few calls, and the answer key (clones, genealogy, copy number, cell types, niches).
+- **`01_quickstart.ipynb`**: one tumor and its four data sets in a few calls, and the ground truth (clones, genealogy, copy number, cell types, niches).
 - **`02_shape_the_tumor.ipynb`**: what each part of the configuration does to the tumor (selection, mutation, tissue architecture, niche selection, the metastatic site, treatment), shown by contrasting runs.
 - **`03_shape_the_data.ipynb`**: the assays and their technology presets, the measurement biases, fitting the assay parameters to a real data set, and batches.
-- **`04_cohort.ipynb`**: many patients over one configuration, pooled into sequencing batches, with the answer key across patients.
+- **`04_cohort.ipynb`**: many patients over one configuration, pooled into sequencing batches, with the ground truth across patients.
 
 ## Analysis tools
 
-One notebook per main use case, each running one standard tool as its documentation shows and scoring it against the answer key.
+One notebook per main use case, each running one standard tool as its documentation shows and scoring it against the ground truth.
 Each tool runs in its own conda environment (`iscc-<tool>`), never in the environment of `iscc`.
 
 - **`tool_ascat_pyclonevi.ipynb`**: purity, ploidy and allele-specific copy number from bulk WGS with ASCAT, then clones with PyClone-VI.

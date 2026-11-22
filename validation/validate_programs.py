@@ -3,7 +3,7 @@ degrade with SNV/CNA burden? (R13, `DESIGN_expression.md` §4.2)
 
 iscc knows the true `loading` matrix and the true per-cell activity `z` (`tumor.program_truth`), so
 it can ask a question no real dataset can: not "do these factors look biological?" but "are they the
-right ones?" — scored against the answer key, across a genotype-burden sweep.
+right ones?" — scored against the ground truth, across a genotype-burden sweep.
 
 **Flagship: scDEF** (hierarchical Bayesian factor model). **Comparator: cNMF** (the field-standard
 consensus-NMF GEP method). Each in its own dedicated env (`iscc-scdef`, `iscc-cnmf`), per
@@ -31,7 +31,7 @@ so clone identity leaks into expression through a NON-dosage channel. All four a
 tools' own assumptions do not contain.
 
 Panels (figure the paper repo's figures/validation_programs.png):
-  A. The ANSWER KEY: the true loading matrix — scattered (default) vs the CNA-mimicking control
+  A. The GROUND TRUTH: the true loading matrix — scattered (default) vs the CNA-mimicking control
      (`program_genomic_scatter=0`).
   B. Recovery vs CNA burden (fraction-genome-altered): loading cosine + activity correlation.
   C. Recovery vs SNV burden.
@@ -131,7 +131,7 @@ def make_figure(truth_scattered, truth_clustered, cna_res, snv_res, control_res,
     seg_sizes = [pc.GENOME["segment_size"]] * pc.GENOME["n_segments"]
     null_mean, null_p95 = pc.scattered_null(seg_sizes)
 
-    # A1/A2 — the answer key, and the CNA-mimicking control
+    # A1/A2 — the ground truth, and the CNA-mimicking control
     for ax, M, ttl in ((axes[0, 0], truth_scattered,
                         "A1. Truth: scattered programs (default) — programs ⟂ CNAs"),
                        (axes[1, 0], truth_clustered,
