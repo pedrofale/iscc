@@ -351,6 +351,18 @@ def test_run_cohort_batches_carries_ground_truth():
     assert comb.uns["n_batches"] == 2
 
 
+def test_run_cohort_batches_takes_each_batch_its_own_settings():
+    co = _cohort(n=4).run()
+    own = [{"mu_lib": 500.0}, {}, {"mu_lib": 20000.0, "doublet_rate": 0.0}, {}]
+    assays, batches, _ = run_cohort_batches(co, n_cells_per_patient=25, batch_kwargs=own, dispersion=0.2)
+    hypers = [a.hypers.to_dict() for a in assays]
+    assert [h["mu_lib"] for h in hypers] == [500.0, 4000.0, 20000.0, 4000.0]   # the 10x preset elsewhere
+    assert all(h["dispersion"] == 0.2 for h in hypers)                         # shared settings kept
+    assert hypers[2]["doublet_rate"] == 0.0
+    with pytest.raises(ValueError, match="one mapping per batch"):
+        run_cohort_batches(co, n_cells_per_patient=25, batch_kwargs=own[:3])
+
+
 # ================================ cohort ground truth ==================================
 def test_recurrence_table_annotates_drivers():
     co = _cohort(n=8).run()

@@ -126,7 +126,7 @@ def pool_cell_data(patient_results, n_cells_per_patient=None, base_seed=0):
 
 def run_cohort_batches(cohort, mapping="one_to_one", capacity=None, explicit=None,
                        n_cells_per_patient=100, protocol="10x", count_model="nb",
-                       base_seed=1000, **scrna_kwargs):
+                       base_seed=1000, batch_kwargs=None, **scrna_kwargs):
     """Measure a grown cohort by scRNA in sequencing batches, with the chosen patient-to-batch mapping.
 
     Parameters
@@ -143,6 +143,10 @@ def run_cohort_batches(cohort, mapping="one_to_one", capacity=None, explicit=Non
         The count model of [`scRNA`][iscc.data.scRNA].
     base_seed : int, default 1000
         Batch ``b`` draws its cells and its technical noise from ``base_seed + b``.
+    batch_kwargs : list of dict, optional
+        Each batch's own technical settings, one mapping per batch in batch order, applied on top of
+        ``scrna_kwargs``, as in [`run_scrna_batches`][iscc.data.run_scrna_batches] (an empty mapping
+        keeps the shared settings).
     **scrna_kwargs
         Further keywords of [`scRNA`][iscc.data.scRNA], shared by every batch.
 
@@ -154,16 +158,18 @@ def run_cohort_batches(cohort, mapping="one_to_one", capacity=None, explicit=Non
         and ``assignment``, the maps of [`assign_batches`][iscc.cohort.assign_batches].
     """
     from ..data import scRNA
+    from ..data.rna import _check_batch_kwargs
 
     if not cohort.patients:
         raise RuntimeError("run the cohort first (cohort.run()) before emitting batches")
     assignment, batches = assign_batches(cohort.n_patients, mapping, capacity, explicit)
+    per_batch = _check_batch_kwargs(batch_kwargs, len(batches))
     assays = []
-    for bid, pids in batches.items():
+    for (bid, pids), own in zip(batches.items(), per_batch):
         pooled, meta = pool_cell_data([cohort.patients[p] for p in pids],
                                       n_cells_per_patient=n_cells_per_patient, base_seed=base_seed + bid)
         assay = scRNA(n_cells=len(meta), protocol=protocol, count_model=count_model,
-                      batch_label=f"batch{bid}", seed=base_seed + bid, **scrna_kwargs)
+                      batch_label=f"batch{bid}", seed=base_seed + bid, **{**scrna_kwargs, **own})
         assay.run(pooled, cell_subset=list(meta.index))
         m = meta.reindex(assay.obs.index)
         assay.obs["patient"] = m["patient"].values
