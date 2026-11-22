@@ -61,8 +61,8 @@ the parameter to change.
 On the home page we show one simulated tumor carried through a clinical arc on a field of 96 by 96
 demes. The lesion fills the ducts (DCIS), invades the stroma after a breach of the duct wall (IDC)
 and seeds a metastasis. The share of cancer cells with stromal survival increases in the stroma. We
-then resect the primary and give chemotherapy, under which the metastasis shrinks to about a twentieth
-of its size and then regrows from a resistant subclone. It is reproducible from the ordinary `iscc`
+then resect the primary and give chemotherapy, under which the metastasis shrinks to about a fifth of
+its size and then regrows from a resistant subclone. It is reproducible from the ordinary `iscc`
 CLI with the provided config file:
 
 ```bash

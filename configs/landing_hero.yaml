@@ -1,9 +1,9 @@
 # The docs landing hero (docs/assets/landing_hero.gif). Reproduce:
 #   isccsim --sim-config configs/landing_hero.yaml -o out --no-tables
 #   isccgif out --compartment --splash --skip-confinement --scale 0.55 -o docs/assets/landing_hero.gif
-# Measured on a laptop on 2026-11-18: isccsim 22 min at a 5.6 GB peak memory footprint, a 62 MB
-# trajectory; isccgif 2.7 min, 162 frames of which --skip-confinement keeps 111 (the founding acinus
-# is closed for about half of the run), 3.03 MB.
+# Measured on a laptop on 2026-11-22: isccsim 12 min at a 3.2 GB peak, a 62 MB trajectory; isccgif
+# about a minute, 135 frames of which --skip-confinement keeps 84 (the founding acinus is closed for
+# about half of the run), 2.1 MB.
 #
 # The tumour is the paper's sweep tumour: every growth setting equals what validation/paper/regime.py's
 # config("mid", selection=realistic_regime.MET_SELECTION, spatial=met_spatial("mid")) builds (paper
@@ -11,22 +11,26 @@
 # configs/landing.yaml. The resistance genes shift the gene layout, so a seed grows a different
 # tumour here than in the paper's R12.
 #
-# The seed (4) was chosen for illustration, so that stromal survival visibly rises in the stroma.
-# Whether it sweeps varies between tumours, as in the paper's Fig 2C: across R12's ten seeds at this
-# scale it is carried by 1% to 99.6% of stromal cancer cells. Under this config, at the growth stop:
-#   seed 1: stroma 36,410 breach, 3,076 stromal survival (7.6%), 512 blue, 96 resistant.
-#   seed 2: stroma 32,345 breach, 624 stromal survival (1.9%), 85 blue, 64 resistant.
-#   seed 3: stroma 45,709 breach, 709 stromal survival (1.5%), 102 blue, 35 resistant.
-#   seed 4: stroma 26,338 breach, 20,187 stromal survival (43%), 86 blue, 206 resistant.
+# The seed (6) was chosen for illustration, so that the arc shows each stage: a proliferating lesion
+# in the ducts, breach and stromal-survival clones in the stroma, a metastasis and a resistant relapse.
+# Whether stromal survival sweeps varies between tumours, as in the paper's Fig 2C. Since no segment
+# may reach zero copies (2026-11-21), the seed chosen on 2026-11-18 (4) no longer seeds a metastasis
+# that survives the course, so the seeds were scanned again; cancer cells of the primary at the
+# resection (ducts and stroma together) and of the metastasis after the relapse:
+#   seed 1: 30,328 stromal survival, 14,037 breach, 9,071 blue; the course eradicates the metastasis.
+#   seed 2: 51,649 breach, 10,492 blue, 162 stromal survival; relapse without resistance (24,918).
+#   seed 3: 59,452 breach, 837 stromal survival, no blue; relapse 42,000 resistant.
+#   seed 4: 30,110 breach, 17,836 stromal survival, no blue; the course eradicates the metastasis.
+#   seed 5: 29,857 breach, 9,472 blue, 793 stromal survival; relapse 36,661 resistant.
+#   seed 6: 27,437 breach, 18,048 stromal survival, 10,718 blue; relapse 41,886 resistant.
+#   seed 7: 30,503 breach, 10,598 blue, 2,330 stromal survival; relapse 95,239 resistant.
+#   seed 8: 42,183 stromal survival, 7,496 blue, 205 breach; the course eradicates the metastasis.
 #
-# The arc, in tumour time. The acinus opens at t ~ 202 and the lesion fills the five ducts (~11,300
-# cells) by t ~ 214 and stays in situ until breach and stromal-survival clones invade the stroma from
-# t ~ 338. The deposit reaches 50 cells at t ~ 350, and growth stops at 60,000 cancer cells (t = 360:
-# 12,086 in the ducts, 46,817 in the stroma, 3,813 in the metastasis; the stroma counts are the seed-4
-# line above). After resection the deposit holds 6,610 cells, 14 of them resistant, at the start of
-# the course (t = 362). The drug takes it to 374 cells (t = 369.5). Resistant cells regrow it under
-# the drug to 13,671 cells at the end of the course (t = 382; 99.5% resistant, 5% of the met grid),
-# and the relapse ends at 41,452 cells (t = 387; 95.0% resistant, 11% of the met grid).
+# The arc of seed 6. Growth stops at 60,000 cancer cells, primary and metastasis together. After
+# resection the metastasis holds 6,643 cells, two of them resistant, at the start of the course. The
+# drug takes it to 1,484 cells; resistant cells regrow it under the drug to 19,465 cells at the end of
+# the course (99% resistant, 6% of the met grid), and the relapse ends at 48,613 cells (86% resistant,
+# 12% of the met grid).
 #
 # A copy of configs/landing.yaml (the tutorial tumour with a metastasis compartment and treatment, run
 # through the clinical-arc `schedule`), with these values changed, each marked `landing_hero:` where
@@ -56,21 +60,20 @@
 #     generations.
 #   The met-survival trait and the metastatic site already equal the paper's (regime.MET_SELECTION
 #   and met_spatial), so they are unchanged.
-#   schedule.seed 2 -> 4: see above.
+#   schedule.seed 2 -> 6: see above.
 # Treatment, because the story needed it (effectiveness and toxicity are unchanged).
 #   chemotherapy steps and duration 120 -> 40, relapse steps 90 -> 10: the standing resistant cells
 #     regrow the deposit under the drug, and a long course fills the met grid. (On seed 2 of this
 #     regime the 40-step course and 10-step relapse ended with the relapse on 23% of the grid; on the
 #     earlier tutorial-regime hero a 60-step course ended with 47% covered.)
-#   chemotherapy kill_rate 1.0 -> 0.9: in this seed's deposit the resistant cells are weak (mean
-#     resistance level 0.46, against 0.67 in seed 1) and at 1.0 they died with the sensitive bulk, so
-#     the deposit was eradicated 28 steps into the course. From the chemo-start checkpoint, 0.9 gives
-#     the arc above, and 0.8 left sensitive survivors whose regrowth made the relapse only 38%
-#     resistant.
+#   chemotherapy kill_rate 1.0 -> 0.9: set on seed 4 of 2026-11-18, whose resistant cells were weak
+#     (mean resistance level 0.46, against 0.67 in seed 1) and died with the sensitive bulk at 1.0;
+#     0.8 left sensitive survivors whose regrowth made the relapse only 38% resistant. Kept for seed 6,
+#     where it gives the arc above.
 # Drawing, which does not change the dynamics.
 #   schedule.capture.post_seed_every 3 -> 1: more frames of invasion and seeding.
-#   schedule.capture.pre_seed_every 4 -> 8 (Pedro, 2026-11-18): the in-situ phase of this seed is long
-#     (t ~ 214 to 338) and took 64 of 149 frames (43%) at 4; at 8 it takes 32 of 111 (29%).
+#   schedule.capture.pre_seed_every 4 -> 8 (Pedro, 2026-11-18): the in-situ phase of seed 4 was long
+#     (t ~ 214 to 338) and took 64 of 149 frames (43%) at 4, and 32 of 111 (29%) at 8.
 #   schedule.min_freq 0.002 -> 0.0005 (about 30 of 60,000 cells): the fish plot folds every clone
 #     whose subtree never reaches min_freq of the grown population into its nearest shown ancestor,
 #     and at 0.002 (about 120 cells) the many blue clones of the ~60-cell closed acinus were painted
@@ -204,7 +207,7 @@ spatial_params:
   met_transit_floor: 0.001
 
 schedule:
-  seed: 4                 # landing_hero: 2 (the tutorial's) in configs/landing.yaml; chosen for illustration
+  seed: 6                 # landing_hero: 2 (the tutorial's) in configs/landing.yaml; chosen for illustration
   # Muller clone-merge threshold. LOW (0.002, not the usual 0.02) on purpose: the DCIS->IDC invasion is a
   # POLYCLONAL sweep (dozens of independent stromal_survival clones, each <2%), so at 0.02 they all fold
   # into their grey stage-'none' founder and the Muller reads grey while the per-cell grid reads green.
