@@ -595,9 +595,11 @@ class scDNA(DNA):
     def __init__(self, n_cells=100, platform=None, **dna_kwargs):
         self.platform = resolve_platform(platform)
         if self.platform is not None:
-            for key in ("breadth", "target_genes"):
-                if key in SCDNA_PLATFORM_PRESETS[self.platform]:
-                    dna_kwargs.setdefault(key, SCDNA_PLATFORM_PRESETS[self.platform][key])
+            preset = SCDNA_PLATFORM_PRESETS[self.platform]
+            # The fitted loci belong to the platform's breadth: an explicit other breadth reads its own.
+            if dna_kwargs.setdefault("breadth", preset["breadth"]) == preset["breadth"] \
+                    and "target_genes" in preset:
+                dna_kwargs.setdefault("target_genes", preset["target_genes"])
         super(scDNA, self).__init__(**dna_kwargs)
         self.n_cells = int(n_cells)
 

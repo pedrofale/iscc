@@ -465,3 +465,5 @@ def test_tapestri_preset_reads_the_amplicons_of_its_fitted_panel():
     assert len(preset._select_loci(genes)) == 584
     assert len(scDNA(platform="tapestri", target_genes=0.1, seed=1)._select_loci(genes)) == 600
     assert len(scDNA(breadth="panel", seed=1)._select_loci(genes)) == 30
+    # an explicit other breadth reads its own loci, not the fitted panel's
+    assert len(scDNA(platform="tapestri", breadth="wgs", seed=1)._select_loci(genes)) == 6000

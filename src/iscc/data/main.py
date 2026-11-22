@@ -161,7 +161,8 @@ def main(sample_path, assay, assay_config, grid_side, protocol, breadth, depth_m
     Path(output_path).mkdir(parents=True, exist_ok=True)
     instrument.write(output_path)
     logging.info("Saved %s output to %s", ASSAY_NAMES[assay], output_path)
-    print(f"{ASSAY_NAMES[assay]} finished -> {output_path}")
+    detail = f" ({instrument.breadth})" if assay in ("bdna", "scdna") else ""
+    print(f"{ASSAY_NAMES[assay]}{detail} finished -> {output_path}")
 
 
 if __name__ == "__main__":

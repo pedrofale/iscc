@@ -4,6 +4,7 @@ Guards the entry points and the I/O schema, so the three commands stay runnable 
 on-disk contract stays stable.
 """
 import os
+import re
 
 import yaml
 import pytest
@@ -92,7 +93,7 @@ def test_isccdata_takes_the_breadth_of_a_platform_in_the_config(tmp_path, sample
     import pandas as pd
     cfg = tmp_path / "tapestri.yaml"
     yaml.safe_dump({"platform": "tapestri", "n_cells": 5}, open(cfg, "w"))
-    n_loci = {}
+    breadth, n_loci = {}, {}
     for name, extra in [("wgs", []), ("platform", []), ("explicit", ["--breadth", "wgs"])]:
         out = str(tmp_path / f"scdna_{name}")
         args = [sample_dir, "-a", "scdna", "-o", out, *extra]
@@ -100,5 +101,8 @@ def test_isccdata_takes_the_breadth_of_a_platform_in_the_config(tmp_path, sample
             args += ["--assay-config", str(cfg)]
         r = CliRunner().invoke(data_main, args, catch_exceptions=False)
         assert r.exit_code == 0
+        breadth[name] = re.search(r"\b(wgs|wes|panel)\) finished", r.output).group(1)
         n_loci[name] = pd.read_csv(os.path.join(out, "coverage.csv"), index_col=0).shape[1]
-    assert n_loci["platform"] < n_loci["wgs"] == n_loci["explicit"]
+    # the 584 amplicons of the Tapestri panel cover the whole toy genome, so the breadth tells the runs apart
+    assert breadth == {"wgs": "wgs", "platform": "panel", "explicit": "wgs"}
+    assert n_loci["wgs"] == n_loci["explicit"]
