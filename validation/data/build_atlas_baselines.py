@@ -68,8 +68,25 @@ def type_profiles(h5ad, genes, chunk=20000):
     a = ad.read_h5ad(h5ad, backed="r")
     obs = a.obs
     v3 = obs["assay"].astype(str) == "10x 3' v3"
-    gene_pos = pd.Index(a.raw.var_names if a.raw is not None else a.var_names)
+    var = a.raw.var if a.raw is not None else a.var
+    gene_pos = pd.Index(var.index)
     col = gene_pos.get_indexer(genes["gene_id"])          # -1: not measured by the atlas
+    # The atlas is annotated with a later GENCODE release than GRCh38-2020-A (release 32), in which a few
+    # genes changed Ensembl ID (SOD2, for one, became ENSG00000291237), so a gene the atlas does not hold
+    # under its ID takes the atlas gene of the same symbol, when that symbol is unique in both and the
+    # atlas gene is not already matched.
+    if "feature_name" in var:
+        sym = pd.Series(var["feature_name"].astype(str).to_numpy())
+        unique_sym = sym[~sym.duplicated(keep=False)]
+        atlas_by_sym = pd.Series(unique_sym.index.to_numpy(), index=unique_sym.to_numpy())
+        names = genes["gene_name"]
+        unique_name = ~names.duplicated(keep=False)
+        taken = set(col[col >= 0])
+        for i in np.flatnonzero((col < 0) & unique_name.to_numpy()):
+            j = atlas_by_sym.get(names.iat[i])
+            if j is not None and j not in taken:
+                col[i] = j
+                taken.add(j)
     prof, rows = {}, []
     for t, (column, patterns) in TYPES.items():
         sel = np.flatnonzero(_select(obs, column, patterns).to_numpy() & v3.to_numpy())
@@ -117,7 +134,7 @@ def hallmark_programs(gmt, genes):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--h5ad", required=True)
-    ap.add_argument("--gmt", required=True)
+    ap.add_argument("--gmt", default=None, help="MSigDB Hallmark GMT; without it the programme table is kept")
     ap.add_argument("--out", default=OUT)
     args = ap.parse_args()
     with gzip.open(os.path.join(args.out, "grch38_2020A_genes.tsv.gz"), "rt") as f:
@@ -129,9 +146,10 @@ def main():
     info.to_csv(os.path.join(args.out, "hbca_types.tsv"), sep="\t", index=False)
     print(info.to_string())
     print(f"GRCh38-2020-A genes the atlas does not measure: {n_missing} of {len(genes)}")
-    hp = hallmark_programs(args.gmt, genes)
-    hp.to_csv(os.path.join(args.out, "hallmark_programs.tsv"), sep="\t", index=False)
-    print(hp.groupby("programme").size().to_string())
+    if args.gmt:
+        hp = hallmark_programs(args.gmt, genes)
+        hp.to_csv(os.path.join(args.out, "hallmark_programs.tsv"), sep="\t", index=False)
+        print(hp.groupby("programme").size().to_string())
 
 
 if __name__ == "__main__":
