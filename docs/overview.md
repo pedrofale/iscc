@@ -29,8 +29,9 @@ can be scored against it.
   number, niche and program activity of every cell, and the place and time at which every clone
   arose.
 - **Biases fitted to real data.** The technical parameters of each assay can be estimated from a real
-  reference dataset. Some defaults were fitted to public reference data, and the others are set by
-  hand.
+  reference dataset. The default dispersions of the DNA, scRNA and Visium assays are fits to public
+  reference data (HG002, DLP+, PBMC3k and a 10x breast-cancer section), and the other defaults are
+  set by hand.
 
 ## The pipeline
 
@@ -49,12 +50,17 @@ can be scored against it.
 isccsim --sim-config notebooks/example_config.yaml --steps 320 --random-seed 2 -o sim_out
 ```
 
-`notebooks/example_config.yaml` configures the tumor of the tutorials, a ductal field grown by
-tau-leaping. It keeps the package default driver effect of 1.1, at which almost every cell reaches the
-maximum division rate during the in-situ phase, so competition between clones is nearly neutral
-afterwards. The settings of the paper are in `validation/paper/regime.py`. After growth,
+`notebooks/example_config.yaml` is the base configuration of the paper's regime, a ductal field grown
+by tau-leaping. It keeps the package default driver effect of 1.1, at which almost every cell reaches
+the maximum division rate during the in-situ phase, so competition between clones is nearly neutral
+afterwards. The settings of the paper are in `validation/paper/regime.py`, and
+`notebooks/tutorial_config.yaml` holds them at the scale of the tutorials. After growth,
 `tumor.diagnose()` flags degenerate tumors, such as extinct, monoclonal or well-mixed ones, and names
 the parameter to change.
+
+To generate data without growing a tumor, [`iscc.pregrown`](reference/index.md#pregrown-tumors) loads
+four tumors of 200,000 cancer cells and a cohort of six patients, grown once with the paper's regime:
+`iscc.pregrown.ductal()` returns a tumor ready to be resected, sampled and measured.
 
 ## Reproducing the landing animation
 
