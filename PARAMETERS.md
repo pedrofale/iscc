@@ -278,6 +278,16 @@ Germline SNPs are the 1000 Genomes phase-3 common SNPs (allele frequency above 5
 genes, drawn heterozygous at 2·AF·(1 − AF) and phased exactly onto the homologs;
 `fetch_snps()` downloads them (92 MB) and `ISCC_HUMAN_REF` points at the result.
 
+Visium spots on the human genes take a per-gene platform factor (`HumanExpression(visium_platform=)`,
+default the packaged `load_visium_platform_factor()` table): the sensitivity of Visium to each gene
+relative to droplet scRNA-seq, fitted on the four tumours of Wu et al. 2021 measured by both assays
+(7,101 genes, log-factor sd 0.62; lowest for the immediate-early genes that dissociation induces, such
+as JUN, FOS and ATF3, and for nuclear lncRNAs such as MALAT1). It carries no part shared by the genes of
+a cell type, so the composition of a spot is still the tissue's. On the held-out 10x Block A section it
+raises the correlation of log gene shares from 0.846 to 0.851 and lowers the median absolute log2
+ratio from 1.09 to 1.00 (`validation/data/check_visium_platform_factor.py`). `visium_platform=None`
+draws spots from the scRNA-seq composition. scRNA-seq is unchanged.
+
 ### DNA assays — `bulkDNA`, `scDNA`
 
 The coverage spread of a Dirichlet-multinomial depth draw is set by `kappa` and by the number of loci:

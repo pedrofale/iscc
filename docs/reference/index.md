@@ -117,6 +117,7 @@ tools (CopyKAT, CalicoST, Clonalscope, Cancer-Finder). Growth never reads it.
 | [`iscc.data.human.fetch_snps`](fetch_snps.md) | Download and prepare the 1000 Genomes common SNPs. |
 | [`iscc.data.human.load_atlas_baselines`](load_atlas_baselines.md) | The packaged per-cell-type baselines from the Human Breast Cell Atlas. |
 | [`iscc.data.human.load_hallmark_programs`](load_hallmark_programs.md) | The packaged Hallmark gene sets that seed the named programmes. |
+| [`iscc.data.human.load_visium_platform_factor`](load_visium_platform_factor.md) | The packaged per-gene sensitivity of Visium relative to droplet scRNA-seq. |
 
 ## Reads
 

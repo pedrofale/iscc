@@ -19,6 +19,7 @@ from .expression import HumanExpression
 from .layer import AlleleCounts, GeneLift, HumanGenomeLayer
 from .ready import check_tool_ready
 from .reference import (HumanReference, fetch_snps, load_atlas_baselines, load_hallmark_programs,
+                        load_visium_platform_factor,
                         load_reference, prepare_snps, read_snps)
 from .writers import HUMAN_VISIUM_KAPPA, barcodes, write_scrna, write_visium
 
@@ -26,5 +27,5 @@ __all__ = [
     "arm_genome", "HumanGenomeLayer", "GeneLift", "AlleleCounts", "HumanReference", "load_reference",
     "fetch_snps", "prepare_snps", "read_snps", "write_visium", "write_scrna", "check_tool_ready",
     "barcodes", "HUMAN_VISIUM_KAPPA", "HumanExpression", "load_atlas_baselines",
-    "load_hallmark_programs",
+    "load_hallmark_programs", "load_visium_platform_factor",
 ]

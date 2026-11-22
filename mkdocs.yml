@@ -184,6 +184,7 @@ nav:
           - fetch_snps: reference/fetch_snps.md
           - load_atlas_baselines: reference/load_atlas_baselines.md
           - load_hallmark_programs: reference/load_hallmark_programs.md
+          - load_visium_platform_factor: reference/load_visium_platform_factor.md
       - Reads:
           - emit_dna_reads: reference/emit_dna_reads.md
           - emit_scrna_reads: reference/emit_scrna_reads.md

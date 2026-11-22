@@ -15,6 +15,12 @@ Result on 2026-11-22, after the Visium depth change and with the layer emitting 
 80,480; 1e9 -> 97,673. Over the arm genes alone the same sections give 74,276 and 90,126 at 300,000
 and 1e9, against the real 82,165. The estimate no longer saturates, so the value is to be refitted on a
 finer grid once the per-gene Visium platform factor is in.
+
+With the platform factor (2026-11-22, inputs as arguments): 300,000 -> 71,934; 600,000 -> 81,254;
+1e6 -> 90,198; 2e6 -> 88,508; 5e6 -> 89,653; 1e9 -> 88,257, against the real 89,197. A section of an
+immune-variant R14 tumour gives 63,693 at 300,000 up to 74,768 at 1e9, below the real at any input.
+The programme fold changes are calibrated next and change the tissue's own dispersion, so the value
+is refitted after them.
 """
 import sys
 import time
@@ -38,7 +44,7 @@ layer = HumanGenomeLayer(tum)
 expr = layer.expression(tum)
 sec = RR.section(tum, depth_frac=0.5, max_cells=60_000)
 print(f"section {len(sec['cell_exp'])} cells, {time.time() - t0:.0f} s", flush=True)
-for kappa in (89_197.0, 300_000.0, 1e9):
+for kappa in [float(k) for k in (sys.argv[1:] or (89_197, 300_000, 1e9))]:
     t = time.time()
     vz = Visium(seed=2, kappa=kappa).run(sec, gene_lift=expr)
     tissue = np.asarray(vz.obs.n_cells) > 0

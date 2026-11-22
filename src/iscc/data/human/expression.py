@@ -30,7 +30,7 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 
-from .reference import load_atlas_baselines, load_hallmark_programs
+from .reference import load_atlas_baselines, load_hallmark_programs, load_visium_platform_factor
 
 TINY = 1e-30
 
@@ -61,6 +61,11 @@ class HumanExpression:
         applied to the programme factor only (the growth-gene factor ``F`` still divides out each
         cell's own programmes). It breaks the link of a cell's state to its lineage and position while
         keeping each type's distribution of states. Default None: each cell keeps its own.
+    visium_platform : {"default", None} or pandas.Series, default "default"
+        Per-gene log factor applied to Visium spots only
+        ([`load_visium_platform_factor`][iscc.data.human.load_visium_platform_factor], the sensitivity
+        of Visium to a gene relative to droplet scRNA-seq); a Series is indexed by Ensembl ID. None
+        draws spots from the scRNA-seq composition.
 
     Attributes
     ----------
@@ -70,10 +75,13 @@ class HumanExpression:
         Baseline per cell type over the human genes; ``B["cancer"]`` is the cell of origin's.
     programme_genes : dict
         Human-gene indices each program loads on.
+    visium_factor : numpy.ndarray
+        The Visium platform factor of each human gene (1 where none is fitted, and for every gene with
+        ``visium_platform=None``).
     """
 
     def __init__(self, layer, tumor, baselines=None, programmes=None, seed=None, chunk=512,
-                 permute_programmes=None):
+                 permute_programmes=None, visium_platform="default"):
         self.layer, self.tumor = layer, tumor
         self.permute = None if permute_programmes is None else int(permute_programmes)
         self._shuffled = {}
@@ -82,6 +90,10 @@ class HumanExpression:
         self.cover = np.where(layer.cover >= 0, layer.cover, layer.n_growth)
         self.chunk = int(chunk)
         H = len(self.genes)
+        if isinstance(visium_platform, str) and visium_platform == "default":
+            visium_platform = load_visium_platform_factor().set_index("gene_id")["log_factor"]
+        self.visium_factor = (np.ones(H) if visium_platform is None
+                              else np.exp(pd.Series(visium_platform).reindex(self.genes).fillna(0.0).to_numpy(float)))
         if baselines is None:
             tab, info = load_atlas_baselines()
             scale = dict(zip(info["type"], info["rna_content"]))
@@ -202,7 +214,8 @@ class HumanExpression:
         """Pooled human-gene expression of each spot of a placed Visium grid, ``(n_spots, n_human)``.
 
         Cells are pooled per type on the growth genes, then lifted with their type's baseline; the
-        programme genes are summed cell by cell. Also keeps the per-type pools of homolog-``p``
+        programme genes are summed cell by cell, and every gene is scaled by the Visium platform
+        factor (``visium_platform``). Also keeps the per-type pools of homolog-``p``
         expression for [`spot_hap_fraction`][iscc.data.human.HumanExpression.spot_hap_fraction]."""
         placed, members = grid["placed"], grid["members"]
         cells = np.asarray(placed["cell_exp"].index)
@@ -239,7 +252,7 @@ class HumanExpression:
         if self.hp.size:
             raw_occ[:, self.hp] = raw_hp
         raw = np.zeros((n_spots, len(self.genes)))
-        raw[occ] = raw_occ
+        raw[occ] = raw_occ * self.visium_factor[None, :]     # Visium's sensitivity to each gene
         self._spot = {"occ": occ, "n_spots": n_spots, "pools": pools, "pools_p": pools_p}
         return raw
 

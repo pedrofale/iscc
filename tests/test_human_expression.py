@@ -11,7 +11,8 @@ What must hold:
    cancer cell's human-gene expression divided by the epithelial baseline is its dosage factor:
    1 on a balanced diploid arm, constant along an arm.
 4. **Per-type pooling is exact.** A Visium spot's pooled expression equals the sum of its cells'
-   expression computed one by one.
+   expression computed one by one, times the Visium platform factor, which scales the spots and
+   nothing else (not scRNA, not depth).
 5. **Genes on no modelled arm** (chrX, chrY, chrM, acrocentric short arms) take their type's atlas
    baseline unchanged, at two copies.
 6. **The assays run on it.** scRNA counts come out sparse over the human genes; Visium spots too.
@@ -150,8 +151,22 @@ def test_per_type_pooling_is_exact(grown):
     for s, m in enumerate(vz._grid["members"]):
         if m.size:
             brute = expr.cell_expression(vz._grid["placed"], list(cells[m])).sum(axis=0)
-            assert np.allclose(raw[s], brute, rtol=1e-9, atol=1e-12)
+            assert np.allclose(raw[s], brute * expr.visium_factor, rtol=1e-9, atol=1e-12)
             break
+
+
+def test_the_platform_factor_scales_visium_genes_only(grown):
+    t, layer, expr = grown
+    plain = layer.expression(t, chunk=64, visium_platform=None)
+    assert np.all(plain.visium_factor == 1.0) and not np.all(expr.visium_factor == 1.0)
+    vz = Visium(seed=2, kappa=HUMAN_VISIUM_KAPPA)
+    vz.place_grid(t.cell_data, grid_side=12)
+    assert np.allclose(expr.pool_spots(vz._grid), plain.pool_spots(vz._grid) * expr.visium_factor[None, :])
+    cells = list(t.cell_data["cell_exp"].index[:10])
+    assert np.array_equal(expr.cell_expression(t.cell_data, cells), plain.cell_expression(t.cell_data, cells))
+    a = Visium(seed=2, kappa=HUMAN_VISIUM_KAPPA).run(t.cell_data, grid_side=12, gene_lift=expr)
+    b = Visium(seed=2, kappa=HUMAN_VISIUM_KAPPA).run(t.cell_data, grid_side=12, gene_lift=plain)
+    assert np.array_equal(a.obs["library"].to_numpy(), b.obs["library"].to_numpy())   # depth unchanged
 
 
 def test_assays_run_on_human_expression(grown):
@@ -214,7 +229,7 @@ def test_permuted_programmes_move_only_the_programme_factor(grown):
     for s_, m in enumerate(vz._grid["members"]):
         if m.size:
             brute = perm.cell_expression(vz._grid["placed"], list(pc[m])).sum(axis=0)
-            assert np.allclose(P1[s_], brute, rtol=1e-9, atol=1e-12)
+            assert np.allclose(P1[s_], brute * perm.visium_factor, rtol=1e-9, atol=1e-12)
             break
 
 

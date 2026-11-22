@@ -114,6 +114,16 @@ def load_atlas_baselines():
     return _table("hbca_type_baselines.tsv.gz").set_index("gene_id"), _table("hbca_types.tsv")
 
 
+def load_visium_platform_factor():
+    """The packaged per-gene Visium platform factor: ``gene_id``, ``gene_name``, ``log_factor``.
+
+    The natural log of the sensitivity of Visium to a gene relative to droplet scRNA-seq, fitted on the
+    four tumours of Wu et al. 2021 profiled by both (``validation/data/fit_visium_platform_factor.py``);
+    a gene not in the table has a factor of 1.
+    """
+    return _table("visium_platform_factor.tsv.gz")
+
+
 def load_hallmark_programs():
     """The packaged Hallmark gene sets that seed iscc's named programmes: ``programme``,
     ``hallmark_set``, ``gene_id``, ``gene_name`` (MSigDB v2025.1, CC BY 4.0)."""
