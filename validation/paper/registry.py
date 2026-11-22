@@ -151,6 +151,12 @@ def _runs():
                                                 spatial_snapshot_every=8,
                                                 cancer={**arm_rates, "dispersal_rate": d}, **arm))
                       for d, s in ((0.1, 1), (0.1, 2), (0.9, 1), (0.9, 2))])
+    # R14: R11's design and seeds with the regime's immune variant (regime.IMMUNE_SPATIAL,
+    # IMMUNE_SELECTION, IMMUNE): the tumours of Fig 3's bias attribution, whose tools read cell types
+    # (inferCNV's normal reference, RCTD's cell types) and whose dissociation recovers immune cells best.
+    runs["R14"] = [(task, dict(kw, selection={**kw["selection"], **RG.IMMUNE_SELECTION},
+                               spatial=dict(RG.IMMUNE_SPATIAL), immune=dict(RG.IMMUNE)))
+                   for task, kw in runs["R11"]]
     return runs
 
 
