@@ -11,7 +11,7 @@ The facts live in :data:`BIASES`, built from the code: every entry names where i
 (``src``) and, when an estimator fits it, the line that records the fit (``fit_src``), as
 ``path:line`` relative to the repository root. ``python validation/paper/supp_biases.py --check``
 confirms that each of those lines still mentions the parameter, so a refactor that moves a default
-shows up here. Fig 1c's strip reads the same structure (:func:`biases`).
+shows up here.
 
 Run from the iscc repository root:
     python validation/paper/supp_biases.py --check     # verify every path:line
@@ -148,7 +148,7 @@ FITTED_GIVEN = {
 
 
 def biases(step=None, tech=None):
-    """The entries of :data:`BIASES` for one step and/or one technology (Fig 1c's strip uses this)."""
+    """The entries of :data:`BIASES` for one step and/or one technology."""
     return [b for b in BIASES if (step is None or b.step == step) and (tech is None or tech in b.techs)]
 
 
