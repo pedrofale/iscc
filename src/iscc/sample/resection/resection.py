@@ -126,6 +126,38 @@ class Resection:
             out.extend(range(base, base + side * side))
         return out
 
+    def cancer_region(self, margin=1):
+        """The piece of tumour a pathologist sends for dissociation: the demes of the specimen that
+        hold cancer cells, with a rim of ``margin`` demes around them.
+
+        A resection of the simulated field is mostly normal tissue, so dissociating all of it gives a
+        sample of mostly normal cells, the more so as malignant cells are the hardest to recover.
+        Pass the result as ``region`` to [`dissociate`][iscc.sample.Resection.dissociate] or
+        [`slice`][iscc.sample.Resection.slice].
+
+        Parameters
+        ----------
+        margin : int, default 1
+            Width of the rim of normal tissue around the cancer cells, in demes (Chebyshev distance);
+            0 keeps only the demes that hold cancer cells.
+
+        Returns
+        -------
+        list of int
+            Deme indices, in index order.
+        """
+        import numpy as np
+        from scipy.ndimage import binary_dilation
+        G_ = self.tumor.genotypes
+        out = []
+        for base, side in self._grids:
+            mask = np.array([any(G_[g].type == "cancer" for g in self.tumor.demes[base + i])
+                             for i in range(side * side)]).reshape(side, side)
+            if margin > 0 and mask.any():
+                mask = binary_dilation(mask, structure=np.ones((3, 3), bool), iterations=int(margin))
+            out.extend(base + int(i) for i in np.flatnonzero(mask.ravel()))
+        return out
+
     def bisect(self, frac=0.5, axis="x"):
         """In-plane cut: split the specimen into two disjoint 2-D parts.
 

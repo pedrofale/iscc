@@ -182,6 +182,22 @@ def test_dissociate_applies_recovery_and_stress(tumour):
     np.testing.assert_allclose(cd["cell_exp"].loc[kept, other], plain["cell_exp"].loc[kept, other])
 
 
+def test_cancer_region_is_the_cancer_demes_and_a_rim(tumour):
+    spec = Resection(tumour)
+    core = spec.cancer_region(margin=0)
+    rim = spec.cancer_region(margin=1)
+    has_cancer = [i for i, d in enumerate(tumour.demes[:tumour.grid_size ** 2])
+                  if any(tumour.genotypes[g].type == "cancer" for g in d)]
+    assert core == has_cancer and set(core) < set(rim)
+    G = tumour.grid_size
+    for i in rim:                                             # every rim deme touches a cancer deme
+        r, c = divmod(i, G)
+        assert any(divmod(j, G)[0] in (r - 1, r, r + 1) and divmod(j, G)[1] in (c - 1, c, c + 1)
+                   for j in core)
+    cd = spec.dissociate(region=rim, max_cells=200, layers="scrna", recovery_probs="default", seed=0)
+    assert set(cd["cell_deme"]["deme_id"]) <= set(rim)
+
+
 def test_dissociate_returns_max_cells_under_the_default_recovery(tumour):
     spec = Resection(tumour)
     cd = spec.dissociate(max_cells=300, layers="scrna", recovery_probs="default", seed=3)
