@@ -1,8 +1,9 @@
 """The paper-1 run registry: every simulation the figures read, defined in one place.
 
 Each run is a named design (the showcase tumour, the dispersal sweep, ...) expanded into tasks, one
-per (variant, seed). A task grows a paper-regime tumour (:mod:`regime`), pickles it to
-``analysis_data/paper/<tier>/<run>/<task>.pkl`` and writes a manifest line (config, seed, wall time,
+per (variant, seed). A task grows a paper-regime tumour (:mod:`regime`), saves it compressed with
+``GenotypeTumor.save`` to ``analysis_data/paper/<tier>/<run>/<task>.iscc`` (about a twentieth of the
+plain pickle the registry wrote before; :func:`load` still reads those) and writes a manifest line (config, seed, wall time,
 peak memory, size, whether it reached its target). Figures and analyses only ever read these files,
 so a tumour is grown once however many panels use it, and the manifests become the supplementary
 table of benchmark setups.
@@ -157,6 +158,11 @@ RUNS = _runs()
 
 
 def task_path(run, task):
+    return os.path.join(OUT, run, f"{task}.iscc")
+
+
+def _pickle_path(run, task):
+    """Where the registry wrote a tumour before it saved them compressed."""
     return os.path.join(OUT, run, f"{task}.pkl")
 
 
@@ -186,10 +192,9 @@ def _grow_task(run, task, kw):
     path = task_path(run, task)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     # Written beside the target and renamed into place, so a task killed mid-write (out of memory while
-    # pickling a large tumour) leaves no truncated pickle that later steps would take for a grown tumour.
+    # saving a large tumour) leaves no truncated file that later steps would take for a grown tumour.
     part = path + ".part"
-    with open(part, "wb") as f:
-        pickle.dump(t, f, protocol=pickle.HIGHEST_PROTOCOL)
+    t.save(part)
     os.replace(part, path)
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 ** 2 if sys.platform == "darwin" else 1024)
     # CPU time, not wall time, is the cost: a laptop that sleeps mid-run inflates wall time tenfold.
@@ -218,13 +223,17 @@ def _grow_safe(job):
 
 
 def load(run, task):
-    """The pickled tumour of one task, with the paper regime's current O2 field.
+    """The saved tumour of one task, with the paper regime's current O2 field.
 
     The microenvironment is readout-only (it picks its target genes once, at construction, and is
     applied when cell data are materialised), so a stored tumour takes the regime's O2 settings
     without regrowing."""
-    with open(task_path(run, task), "rb") as f:
-        t = pickle.load(f)
+    if os.path.exists(task_path(run, task)):
+        from iscc.tumor import GenotypeTumor
+        t = GenotypeTumor.load(task_path(run, task))
+    else:                                   # a tumour the registry pickled before it saved them compressed
+        with open(_pickle_path(run, task), "rb") as f:
+            t = pickle.load(f)
     hyp = (t.microenv_params or {}).get("hypoxia") if isinstance(t.microenv_params, dict) else None
     if hyp is not None:
         hyp.update(RG.O2)
@@ -258,7 +267,7 @@ def _apply_dosage(t):
     t.programs.dosage_sensitivity = fresh.dosage_sensitivity
     t.programs.dosage_law = getattr(fresh, "dosage_law", "haplotype")
     t.expression_params = ep
-    if getattr(t, "program_truth", None) is not None:     # the answer key reports the dosage in use
+    if getattr(t, "program_truth", None) is not None:     # the ground truth reports the dosage in use
         t.program_truth = t.programs.truth()
 
 
