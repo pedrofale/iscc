@@ -161,22 +161,33 @@ def test_plain_dissociate_is_unchanged(tumour):
 
 
 def test_dissociate_applies_recovery_and_stress(tumour):
-    spec = Resection(tumour)
-    full = spec.dissociate(max_cells=400, layers="scrna")
     probs = {t: 0.5 for t in DEFAULT_RECOVERY}
+    plain = Resection(tumour).dissociate(max_cells=400, layers="scrna", recovery_probs=probs, seed=11)
+    spec = Resection(tumour)
     cd = spec.dissociate(max_cells=400, layers="scrna", recovery_probs=probs, stress_strength=0.8,
                          seed=11)
     meta = spec.dissociation_meta
-    assert meta is not None and 0 < meta["n_recovered"] < meta["n_input"] == len(full["cell_type"])
+    # enough cells are materialised that max_cells survive a recovery of one half, and max_cells are kept
+    assert meta["n_materialised"] == meta["n_input"]
+    assert abs(meta["n_input"] - 880) <= 0.02 * 880              # 1.1 x 400 / 0.5, rounded per deme
+    assert 400 < meta["n_recovered"] < meta["n_input"]
     assert meta["recovery_probs"]["immune"] == 0.5 and meta["stress_strength"] == 0.8
     kept = cd["cell_type"].index
-    assert set(kept) <= set(full["cell_type"].index)
+    assert len(kept) == 400 and list(kept) == list(plain["cell_type"].index)
     assert all(len(df) == len(kept) for df in cd.values())     # every table subset to the same cells
     g = meta["stress_genes"]
     assert g and set(g) <= set(cd["cell_exp"].columns)
-    np.testing.assert_allclose(cd["cell_exp"].loc[kept, g], full["cell_exp"].loc[kept, g] * 1.8, rtol=1e-6)
+    np.testing.assert_allclose(cd["cell_exp"].loc[kept, g], plain["cell_exp"].loc[kept, g] * 1.8, rtol=1e-6)
     other = [c for c in cd["cell_exp"].columns if c not in g]
-    np.testing.assert_allclose(cd["cell_exp"].loc[kept, other], full["cell_exp"].loc[kept, other])
+    np.testing.assert_allclose(cd["cell_exp"].loc[kept, other], plain["cell_exp"].loc[kept, other])
+
+
+def test_dissociate_returns_max_cells_under_the_default_recovery(tumour):
+    spec = Resection(tumour)
+    cd = spec.dissociate(max_cells=300, layers="scrna", recovery_probs="default", seed=3)
+    meta = spec.dissociation_meta
+    assert len(cd["cell_type"]) == 300 and meta["n_recovered"] >= 300
+    assert meta["n_materialised"] > 300
 
 
 def test_recovery_and_stress_genes_do_not_depend_on_the_strength(tumour):

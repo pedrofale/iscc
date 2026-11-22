@@ -196,7 +196,11 @@ class Resection:
             Deme indices of the part to dissociate (e.g. the first element of [`bisect`][iscc.sample.Resection.bisect]). ``None``
             dissociates the whole resected ``compartment`` (the primary by default).
         max_cells : int, optional
-            Cap on materialised cells (a representative subsample above it).
+            Cap on the cells returned (a representative subsample above it). With a recovery bias,
+            enough cells are materialised that about ``max_cells`` survive it, from the expected
+            recovery of the part's cell types and a 10% margin, and ``max_cells`` of the recovered
+            cells are kept at random, as a single-cell run captures a target number of cells from a
+            suspension.
         install : bool, default False
             Also make this sample the tumour's own ``cell_data``. Off by default: a sample is not
             the tumour, and installing it would silently redefine what ``to_anndata(tumor)`` and
@@ -238,11 +242,6 @@ class Resection:
         import numpy as np
         from ..dissociation import Dissociation, DEFAULT_RECOVERY
 
-        cd = self._materialise(install, section=False, region=region, max_cells=max_cells,
-                               layers=layers)
-        if float(stress_strength) != 0.0 and cd.get("cell_exp") is None:
-            raise ValueError("a stress signature needs the expression table; pass layers that "
-                             "build cell_exp (e.g. 'scrna')")
         if recovery_probs is None:
             probs = {t: 1.0 for t in DEFAULT_RECOVERY}
         elif isinstance(recovery_probs, str):
@@ -251,10 +250,27 @@ class Resection:
             probs = {}
         else:
             probs = dict(recovery_probs)
+        n_materialise = max_cells
+        if max_cells is not None:
+            rate = self._expected_recovery(region, {**DEFAULT_RECOVERY, **probs})
+            if 0 < rate < 1:
+                n_materialise = int(np.ceil(1.1 * max_cells / rate))
+        cd = self._materialise(install, section=False, region=region, max_cells=n_materialise,
+                               layers=layers)
+        if float(stress_strength) != 0.0 and cd.get("cell_exp") is None:
+            raise ValueError("a stress signature needs the expression table; pass layers that "
+                             "build cell_exp (e.g. 'scrna')")
         rng = seed if isinstance(seed, np.random.Generator) else np.random.default_rng(seed)
+        # the cells kept after recovery come from a child generator, which leaves the recovery and
+        # stress-gene draws as they were and keeps the kept cells independent of the stress strength
+        keep_rng = rng.spawn(1)[0]
         diss = Dissociation(cd, rng=rng, recovery_probs=probs, stress_strength=stress_strength,
                             n_stress_genes=n_stress_genes, stress_genes=stress_genes)
         chosen, meta, exp_override = diss.run()
+        if max_cells is not None and len(chosen) > max_cells:
+            chosen = np.sort(keep_rng.choice(np.asarray(chosen), size=max_cells, replace=False))
+            meta["n_kept"] = int(max_cells)
+        meta["n_materialised"] = int(len(cd["cell_type"]))
         out = {}
         for key, df in cd.items():
             src = exp_override if (key == "cell_exp" and exp_override is not None) else df
@@ -266,6 +282,18 @@ class Resection:
         if install:
             self.tumor.cell_data = out
         return out
+
+    def _expected_recovery(self, region, probs):
+        """The share of the cells of ``region`` a dissociation recovers on average, from their types
+        (a cell of an unlisted type is recovered, as in ``Dissociation``)."""
+        n = kept = 0.0
+        G = self.tumor.genotypes
+        for i in region:
+            for gid, c in self.tumor.demes[i].items():
+                t = "cancer" if G[gid].type == "cancer" else G[gid].type
+                n += c
+                kept += c * float(probs.get(t, 1.0))
+        return kept / n if n else 1.0
 
     def slice(self, region=None, depth_frac=0.5, max_cells=None, install=False, layers=None):
         """Cut a thin histology / Visium **section**: a depth cut of a 2-D part.
