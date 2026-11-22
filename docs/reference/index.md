@@ -13,7 +13,7 @@ tau-leaping.
 
 | | |
 |---|---|
-| [`iscc.tumor.GenotypeTumor`](GenotypeTumor.md) | The tumour engine: per-deme genotype **counts**, exact or tau-leaping. |
+| [`iscc.tumor.GenotypeTumor`](GenotypeTumor.md) | The tumor engine: per-deme genotype **counts**, exact or tau-leaping. |
 
 ## Cohort
 
@@ -22,8 +22,8 @@ expression and programs and differ in their evolution.
 
 | | |
 |---|---|
-| [`iscc.cohort.Cohort`](Cohort.md) | A cohort of patient tumours grown over one shared gene layout. |
-| [`iscc.cohort.grow_tumor`](grow_tumor.md) | Grow one patient tumour for a fixed number of steps. |
+| [`iscc.cohort.Cohort`](Cohort.md) | A cohort of patient tumors grown over one shared gene layout. |
+| [`iscc.cohort.grow_tumor`](grow_tumor.md) | Grow one patient tumor for a fixed number of steps. |
 | [`iscc.cohort.assign_batches`](assign_batches.md) | Assign the patients of a cohort to sequencing batches. |
 | [`iscc.cohort.pool_cell_data`](pool_cell_data.md) | Pool the cells of several patients into the per-cell tables of one batch. |
 | [`iscc.cohort.run_cohort_batches`](run_cohort_batches.md) | Measure a cohort by scRNA in sequencing batches. |
@@ -137,7 +137,7 @@ Hand the ground truth over in the forms that other tools read.
 |---|---|
 | [`iscc.integrations.clones_from_clades`](clones_from_clades.md) | Clone labels of sampled cells, as clades of the true genealogy with enough sampled cells. |
 | [`iscc.integrations.clone_summary`](clone_summary.md) | One row per clone: its size, representative genotype and mutations. |
-| [`iscc.integrations.to_anndata`](to_anndata.md) | A tumour or a sample as one AnnData, with coordinates and ground truth. |
+| [`iscc.integrations.to_anndata`](to_anndata.md) | A tumor or a sample as one AnnData, with coordinates and ground truth. |
 | [`iscc.integrations.biological_types`](biological_types.md) | The coarse cell type (cancer, epithelial, stromal, immune, host) of each cell. |
 
 ## Inference

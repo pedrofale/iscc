@@ -1,8 +1,8 @@
-"""Tumours and a cohort grown once with ``iscc``, to generate data from.
+"""Tumors and a cohort grown once with ``iscc``, to generate data from.
 
 Each function returns a grown [`GenotypeTumor`][iscc.tumor.GenotypeTumor] (or, for the cohort, a
 [`Cohort`][iscc.cohort.Cohort]) that can be resected, sampled and measured as one grown in the session.
-Growth from the same seed can differ between processor architectures, so these tumours, grown once
+Growth from the same seed can differ between processor architectures, so these tumors, grown once
 on one machine, are what makes an analysis repeatable everywhere.
 
 The first call downloads the file, checks its SHA-256 checksum against the one that ships with the
@@ -10,7 +10,7 @@ package and keeps it in a cache folder: ``ISCC_PREGROWN_DIR`` if it is set, othe
 ``iscc/pregrown`` in the user cache folder (``$XDG_CACHE_HOME``, by default ``~/.cache``). Later
 calls load the cached file.
 
-The four tumours grow in the ductal field of the paper, at its regime on the arm-level human genome of
+The four tumors grow in the ductal field of the paper, at its regime on the arm-level human genome of
 [`arm_genome`][iscc.data.human.arm_genome] (the paper's run R11) with the epithelium as the cell of
 origin, and differ in their evolution. They carry germline variants at the density of a genotyping
 array (30% of the neutral genes heterozygous), so that the DNA assays carry the B-allele signal of
@@ -82,23 +82,24 @@ def _load(name):
 
 
 def ductal():
-    """The tumour of the paper's regime: growth inside the glands, breach of the duct wall and
+    """The tumor of the paper's regime: growth inside the glands, breach of the duct wall and
     invasion of the stroma, with selection by niche.
 
     200,284 cancer cells on the 1 cm field (grid 170, eight glands) after 299 generations; driver
     clones sweep in situ for about 200 generations before cancer cells invade the stroma from
     several glands, one large lesion and smaller ones, and some glands still hold small in-situ
-    tumours. 7% of the cancer cells have a doubled genome. About 40 MB.
+    tumors. 7% of the cancer cells have a doubled genome. About 40 MB.
 
     Returns
     -------
     GenotypeTumor
+        The grown tumor, read from the cache folder.
     """
     return _load("ductal")
 
 
 def neutral():
-    """A tumour grown without selection: drivers without effect, no niche traits, and the duct wall
+    """A tumor grown without selection: drivers without effect, no niche traits, and the duct wall
     and the stroma open to every cell.
 
     200,030 cancer cells on the 1 cm field after 246 generations, in six lesions that are each a
@@ -108,12 +109,13 @@ def neutral():
     Returns
     -------
     GenotypeTumor
+        The grown tumor, read from the cache folder.
     """
     return _load("neutral")
 
 
 def sweeps():
-    """A tumour with fewer and stronger drivers than the paper's regime, so that new drivers sweep
+    """A tumor with fewer and stronger drivers than the paper's regime, so that new drivers sweep
     and a few large, nested clones dominate.
 
     200,005 cancer cells on the 1 cm field after 242 generations, in three large lesions each
@@ -122,21 +124,24 @@ def sweeps():
     Returns
     -------
     GenotypeTumor
+        The grown tumor, read from the cache folder.
     """
     return _load("sweeps")
 
 
 def cin():
-    """A chromosomally unstable tumour: four times the copy-number events and five times the genome
+    """A chromosomally unstable tumor: four times the copy-number events and five times the genome
     doubling of the paper's regime, so that its clones differ mostly in copy number.
 
     200,156 cancer cells on the 1 cm field after 228 generations; every cancer cell has a doubled
-    genome (mean ploidy 3.7), and many copy-number clones spread over lesions from several glands.
+    genome (mean ploidy 3.7), lesions grow from several glands, and nearly every cancer cell has its
+    own arm-level copy-number profile.
     About 40 MB.
 
     Returns
     -------
     GenotypeTumor
+        The grown tumor, read from the cache folder.
     """
     return _load("cin")
 
@@ -151,5 +156,6 @@ def cohort():
     Returns
     -------
     Cohort
+        The six grown patients, read from the cache folder.
     """
     return _load("cohort")
