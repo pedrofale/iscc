@@ -95,7 +95,7 @@ def _commit():
 # ---------------------------------------------------------------------------------------------------
 # the tumour, its samples and the ground truth
 # ---------------------------------------------------------------------------------------------------
-def sample(run, task, section_max_cells=SECTION_MAX_CELLS):
+def sample(run, task, section_max_cells=SECTION_MAX_CELLS, dosage="regime"):
     """The stored tumour, its human-gene layer, and the two samples of the paper's figures: the
     dissociated half (scRNA, scDNA, at the tier's max_cells) and the section (Visium, at
     ``section_max_cells``), cut as make_layer_dataset cuts them. Every step slices the same section,
@@ -105,6 +105,8 @@ def sample(run, task, section_max_cells=SECTION_MAX_CELLS):
     import registry as REG
     from iscc.data.human import HumanGenomeLayer
     t = REG.load(run, task)
+    if dosage == "proportional":            # the counterfactual: every gene follows copy number, clonealign's law
+        t.programs.dosage_sensitivity = np.ones_like(t.programs.dosage_sensitivity)
     layer = HumanGenomeLayer(t, allow_linear=t.genome_params.get("arms") is None)
     spec = RR.resect(t)
     dis = spec.dissociate(max_cells=RG.T["max_cells"])
@@ -589,12 +591,12 @@ def run_oracle_set(a):
 
 def run_dna_rna(a):
     from sklearn.metrics import adjusted_rand_score
-    out = os.path.join(a.out, "c", f"{a.run}_{a.task}")
+    out = os.path.join(a.out, "c" if a.dosage == "regime" else f"c_{a.dosage}", f"{a.run}_{a.task}")
     os.makedirs(out, exist_ok=True)
     work = os.path.join(a.work, f"c_{a.run}_{a.task}")
     os.makedirs(work, exist_ok=True)
     wall, t0 = {}, time.time()
-    t, layer, dis, sec = sample(a.run, a.task, a.section_max_cells)
+    t, layer, dis, sec = sample(a.run, a.task, a.section_max_cells, dosage=a.dosage)
     t0 = _lap(wall, "load_and_sample", t0)
     tinfo = write_tumour_info(t, a)
     clone_of, true_prof, members = true_clones(t, layer, [dis, sec])
@@ -859,6 +861,9 @@ def main():
     ap.add_argument("--rna-genes", type=int, default=RNA_GENES)
     ap.add_argument("--section-max-cells", type=int, default=SECTION_MAX_CELLS,
                     help="cells in the Visium section (default $ISCC_SECTION_MAX_CELLS or 50,000)")
+    ap.add_argument("--dosage", choices=("regime", "proportional"), default="regime",
+                    help="dna-rna: the regime's buffered dosage, or every gene proportional to copy number (the "
+                         "counterfactual of exp-paper1-dosage-counterfactual), written to OUT/c_proportional")
     ap.add_argument("--coarse", action="store_true",
                     help="also run clonealign on the copy-number groups of the true clones (a diagnostic)")
     ap.add_argument("--only", default=None,
