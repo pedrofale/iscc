@@ -33,8 +33,10 @@ GENOME = "GRCh38"
 # too. A small kappa (the old default was 50) piles each spot's counts onto a few genes at any gene count.
 # Not refitted since the depth change (864cd90) or the layer's move to all 36,601 genes: on 2026-11-22
 # the same check gave 80,480 at 300,000 and 97,673 at 1e9 over all genes (real 89,197), and 74,276 and
-# 90,126 over the arm genes (real 82,165), so the value no longer saturates; it is refitted after the
-# per-gene Visium platform factor, which moves the same statistic.
+# 90,126 over the arm genes (real 82,165), so the value no longer saturates. With the platform factor
+# and the fitted programme strength (2026-11-23) an immune R14 section gives 79,904 at 300,000 and
+# 91,310-93,634 from 1e6 up (real 89,197); it is refitted once it is settled whether normal cells carry
+# programmes on the human genes, which moves the tissue's own dispersion again.
 HUMAN_VISIUM_KAPPA = 300_000.0
 
 
