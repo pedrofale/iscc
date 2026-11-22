@@ -74,8 +74,9 @@ def panel_a(ax):
     ax.set_yscale("log")
     ax.set_xlabel("Drivers per cell, n")
     ax.set_ylabel("Clonal diversity, D")
-    # the shares of real tumors inside the iscc hull (cov) are reported in the numbers file, not drawn
-    ax.legend(fontsize=4.5, loc="upper left")
+    # the shares of real tumors inside the iscc hull (cov) are reported in the numbers file, not drawn;
+    # the legend keeps the house 5.5 pt, the paper's minimum
+    ax.legend(loc="upper left")
     return dict(n_sim=len(sim), coverage=cov, D_median_detected=float(sim.Dd.median()), n_median_detected=float(sim.nd.median()),
                 D_median_census=float(sim.D0.median()), D_median_real=float(emp.D.median()))
 
@@ -106,7 +107,7 @@ def panel_c(ax):
     df = pd.DataFrame([dict(rate=float(r["task"].split("_")[0][3:]), frac=r["wgd_frac"]) for r in rows])
     prev = df.assign(wgd=df.frac > 0.5).groupby("rate").wgd.mean()
     ax.axhspan(0.30, 0.50, color=S.PASTEL["yellow"], lw=0, zorder=0)
-    ax.text(prev.index.max(), 0.40, "PCAWG", fontsize=4.8, ha="right", va="center", color=S.GREY)
+    ax.text(prev.index.max(), 0.40, "PCAWG", fontsize=5.5, ha="right", va="center", color=S.GREY)
     ax.plot(prev.index, prev.values, marker="o", ms=2.5, color=S.SOURCE["iscc"], lw=0.8)
     ax.set_xlabel("Whole-genome duplication rate per mutating division", fontsize=5.5)
     ax.set_ylabel("Share of tumors with a\nwhole-genome duplication")

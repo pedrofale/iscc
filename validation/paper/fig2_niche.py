@@ -1,22 +1,25 @@
-"""Figure 2: selection depends on the niche, and the tumours resemble real ones.
+"""Figure 2 and S10 Fig: selection depends on the niche, and the tumours resemble real ones.
 
-The panels of Fig 2:
-  (a) one tumour's history up to metastasis (R0 seed 1, the showcase): five snapshots coloured by
-      clone, and the cancer cells in gland, stroma and metastasis over generations, with clone births,
-      the first invasion and the first seeding of the metastasis;
-  (b) escape from the gland across seeds (R10, with barriers against without): (i) generations from
-      founding to the first invasion, (ii) how many clones reach the stroma within a window after it;
-  (c) traits are selected where they pay (R12 seeds 1-10 against R13's three controls, paired by seed):
+Fig 2, drawn at half a page (165 by at most 114 mm) by ``render`` below:
+  (A) the showcase (R0 seed 1) up to metastasis: five snapshots coloured by clone, and the metastasis;
+  (B) traits are selected where they pay (R12 seeds 1-10 against R13's three controls, paired by seed):
       the share of cancer cells carrying each trait in each compartment, in the selected tumour and in
       the control without that trait's selection, side by side (the log2 enrichment is kept in the
       numbers file only);
-  (d) confinement shapes the genome (R3): truncal copy-number fraction and clonal diversity, with the
+  (C) metastatic seeding across R12's 20 seeds: the lineages founding each metastasis, and the release,
+      first invasion and seeding as fractions of the primary's age;
+  (D) against real tumours: fig2_realism.py's panel a, from summaries.py's caches of R1-R4.
+S10 Fig (``supp_niche_extra.py``) draws the panels moved out of it with the functions below:
+  (A) the showcase's cancer cells in gland, stroma and metastasis over generations, with clone births,
+      the first invasion and the first seeding of the metastasis;
+  (B, C) escape from the gland across seeds (R10, with barriers against without): generations from
+      founding to the first invasion, and how many clones reach the stroma within a window after it;
+  (D) confinement shapes the genome (R3): truncal copy-number fraction and clonal diversity, with the
       definitions of the old Fig 4f-g (fig4_space_lineage.py);
-  (e) metastatic seeding: (i) the showcase's clone tree, branches coloured by where their cells live,
-      seeding marked; (ii) across R12's 20 seeds, the lineages founding each metastasis, and the
-      release, first invasion and seeding as fractions of the primary's age;
-  (f) against real tumours: fig2_realism.py's panels a and c, from summaries.py's caches of R1-R5;
-  (g) speed: wall time and peak memory (GB) of one run against cancer cells (the v4 runtime logs).
+  (E) the showcase's clone tree, branches coloured by where their cells live, seeding marked;
+  (F) whole-genome-duplication prevalence across rates (fig2_realism.py's panel c, R5).
+The speed panel of the earlier Fig 2 is S4 Fig (supp_runtime.py), which reads the same runs from
+``comparisons/results/runtime.csv``.
 
 Definitions used throughout:
   * compartments: gland = primary demes of a gland (lumen or wall, ``gland_id >= 0``); stroma =
@@ -25,15 +28,15 @@ Definitions used throughout:
   * first invasion: the first snapshot of the spatial history with a cancer cell in a stroma deme (its
     resolution is the snapshot interval, 8 leaps or about 4 generations in R10 and R12);
   * clones: ``common.Clones`` (clades of the true genealogy holding >= 4% of the cancer cells);
-  * clones reaching the stroma (b ii): for every cancer cell in a stroma deme at a snapshot within
+  * clones reaching the stroma (S10 C): for every cancer cell in a stroma deme at a snapshot within
     WINDOW generations of the first invasion, the lineage that crossed (its genotype or, if that was
     born in the stroma, its first ancestor born outside it); the count is of the distinct clones of
     those crossing genotypes, clones defined on the whole tumour at the end of the window ("ancestral"
     counts as one). Clones born inside the stroma after a crossing therefore do not add to it;
-  * carrier share (c): cancer cells with the trait's level > 0 over cancer cells, per compartment, at
+  * carrier share (Fig 2B): cancer cells with the trait's level > 0 over cancer cells, per compartment, at
     the end of growth; the enrichment in the numbers file is log2 of the selected share over the
     control's at the same seed, with one pseudo-cell added to each side;
-  * founding lineage of the metastasis (e): for each live metastatic cancer cell, its genotype or the
+  * founding lineage of the metastasis (Fig 2C): for each live metastatic cancer cell, its genotype or the
     first ancestor born in the primary (the genotype that crossed; a mutant born on arrival has its
     parent as the crossing genotype); seeding time = the first seeding event of any founding lineage;
     the number of founding lineages is their effective number, 1 / sum p_i^2 over the metastasis'
@@ -47,15 +50,15 @@ its cache, so rerunning it after more tumours have grown adds only the new ones.
 Usage (from the iscc repository root, with ISCC_PAPER_OUT and ISCC_PAPER_TIER set as for the registry):
     python validation/paper/fig2_niche.py --part a [--source R0/seed1]
     python validation/paper/fig2_niche.py --part b|c|d|e [--jobs N] [--force]
-    python validation/paper/fig2_niche.py --part g [--runtime-logs DIR]
-    python validation/paper/fig2_niche.py                   # render from the caches
-Panel f reads ``summaries.py``'s caches: ``python validation/paper/summaries.py R1,R2,R3,R4,R5``.
+    python validation/paper/fig2_niche.py                   # render Fig 2 from the caches
+    python validation/paper/supp_niche_extra.py             # render S10 Fig from the caches
+The cache parts keep their old letters (a: the showcase, b: escape, c: traits, d: confinement, e:
+seeding). Fig 2D and S10 Fig F read ``summaries.py``'s caches: ``python validation/paper/summaries.py
+R1,R2,R3,R4,R5``.
 """
 import argparse
-import glob
 import json
 import os
-import re
 import sys
 from collections import Counter, defaultdict
 
@@ -78,11 +81,9 @@ CONTROL = {"breach": "no_breach_sel", "stromal_survival": "no_stromal_sel", "met
 WINDOW = 10.0            # generations after the first invasion in which crossing lineages count (b ii);
 # about a third of the median time from first invasion to the target size in R10's barrier arm
 SHOWCASE = "R0/seed1"
-STAND_IN = "R12/seed1"   # panel a and e(i) are built and tested on it until R0 is grown
-RUNTIME_LOGS = ("logs", "runtime-v4")         # under $ISCC_DATA_DIR, unless --runtime-logs is given
-RUNTIME_VARIANT = "v4"                          # the regime the runtime runs grew on
+STAND_IN = "R12/seed1"   # the showcase panels are built and tested on it until R0 is grown
 # Line colours of the three compartments (darker versions of style.COMPARTMENT's tissue fills) and of
-# where a clone's cells live in the tree of panel e.
+# where a clone's cells live in the tree of S10 Fig E.
 LINE = {"gland": S.COMPARTMENT["epithelium"], "stroma": "#B8875A", "met": "#3E7CB1"}
 WHERE = {"primary": "#8C8C8C", "met": LINE["met"], "both": "#B2182B"}
 
@@ -578,37 +579,23 @@ def compute_part(part, jobs, force):
             print(f"  {key}: ok", flush=True)
 
 
-def _parse_runtime_log(path):
-    text = open(path, errors="replace").read()
-    head = re.search(r"TOOL=(\S+)(?: VARIANT=(\S+))? N_CANCER=(\d+) SEED=(\d+) NODE=(\S+) CPU=(.*)", text)
-    if not head:
-        return None
-    walls = re.findall(r"Elapsed \(wall clock\) time \(h:mm:ss or m:ss\): (\S+)", text)
-    rss = re.findall(r"Maximum resident set size \(kbytes\): (\d+)", text)
-    codes = re.findall(r"Exit status: (\d+)", text)
-    js = [json.loads(line) for line in text.splitlines() if line.startswith("{") and '"tool"' in line]
-    if not (walls and rss and codes and js):
-        return None                                       # still running, or died before timing
-    sec = sum(float(p) * 60 ** i for i, p in enumerate(reversed(walls[-1].split(":"))))
-    j = js[-1]
-    return dict(tool=head.group(1), variant=head.group(2), n_cancer=int(head.group(3)),
-                seed=int(head.group(4)), node=head.group(5), cpu=head.group(6).strip(), wall_s=sec,
-                peak_mb=int(rss[-1]) / 1024, ok=codes[-1] == "0" and bool(j.get("reached", True)),
-                n_reached=j.get("n_cancer"), grow_s=j.get("grow_s"), total_s=j.get("total_s"),
-                scale=j.get("scale"), commit=j.get("commit"), log=os.path.basename(path))
-
-
-def compute_g(logdir):
-    rows = [r for r in (_parse_runtime_log(p) for p in sorted(glob.glob(os.path.join(logdir, "*.out"))))
-            if r and r["tool"] == "iscc" and r["variant"] == RUNTIME_VARIANT]
-    _write("g", dict(logdir=logdir, rows=rows))
-    print(f"part g: {len(rows)} completed runs from {logdir}")
-
-
 # --- render ----------------------------------------------------------------------------------------
+# Each panel draws into axes its caller places, so the main figure (render below) and S10 Fig
+# (supp_niche_extra.py) lay out the same panels. No text is set below 5.5 pt, the paper's minimum at
+# the size the figures are printed.
+SMALL = 5.5
+NAME = {"gland": "gland", "stroma": "stroma", "met": "metastasis"}
+
+
 def pending(ax, msg="pending: registry run not grown yet"):
-    ax.text(0.5, 0.5, msg, ha="center", va="center", fontsize=4.8, color=S.GREY, transform=ax.transAxes)
+    ax.text(0.5, 0.5, msg, ha="center", va="center", fontsize=SMALL, color=S.GREY, transform=ax.transAxes)
     S.despine(ax, False, False)
+
+
+def below(ax, mm):
+    """A point ``mm`` below the bottom of ``ax``, in its axes fraction (to anchor a legend under it)."""
+    H = ax.figure.get_size_inches()[1] / S.MM
+    return -mm / (ax.get_position().height * H)
 
 
 def _hexrgb(h):
@@ -649,75 +636,43 @@ def _frame(ax, colour=S.GREY, lw=0.4):
         sp.set_color(colour)
 
 
-def render_a(fig, y):
+def render_snapshots(fig, x, y, size, gap):
+    """Fig 2A: the showcase at five moments coloured by clone, and its metastasis at the last, as one
+    row of ``size`` mm maps from (x, y). The rings and the dotted box are explained in the caption."""
+    from matplotlib.patches import Rectangle
     a = cached("a")
-    axes = [S.ax_mm(fig, 9 + i * 30.5, y + 7, 26, 26) for i in range(5)]
-    axm = S.ax_mm(fig, 160, y + 13, 20, 20)
-    axh = S.ax_mm(fig, 18, y + 46, 150, 24)
+    axes = [S.ax_mm(fig, x + i * (size + gap), y, size, size) for i in range(6)]
+    axes, axm = axes[:5], axes[5]
     if a is None:
-        for ax in axes + [axm, axh]:
-            pending(ax, "pending: the showcase (R0) not grown yet")
+        for ax in axes + [axm]:
+            pending(ax, "pending: R0")
         return None
     r0, r1, c0, c1 = a["crop"]
     G = a["grid"]
-    # each map is titled with the state it shows: the second is a snapshot after the acinus opened (the
-    # opening itself, a["release"], is the dotted line below), so it reads "acinus open", not "opens";
-    # the first breach is the event panels b and e call the first invasion (first_invasion), so one term
+    # each map is titled with the state it shows: the second is a snapshot after the acinus opened, so
+    # it reads "acinus open", not "opens"; the first breach is what the text calls the first invasion
     state = {"acinus opens": "acinus open", "first breach": "first invasion"}
     for i, (ax, m) in enumerate(zip(axes, a["maps"])):
         img = _rgb(a, m["primary"])
         ax.imshow(img[r0:r1, c0:c1] if i == 0 else img, interpolation="nearest")
         _frame(ax)
-        ax.set_title(f"{state.get(m['name'], m['name'])}\n{m['time']:.0f} generations", fontsize=5.5,
-                     linespacing=1.1)
+        ax.set_title(f"{state.get(m['name'], m['name'])}\n{m['time']:.0f} generations", linespacing=1.1)
         if i == 0:                                    # the closed acinus: ring its cancer demes
             rr, cc = np.divmod(np.asarray([d for d, _, _ in m["primary"]], dtype=int), G)
-            ax.scatter(cc - c0, rr - r0, s=22, facecolors="none", edgecolors=S.INK, lw=0.6)
+            ax.scatter(cc - c0, rr - r0, s=18, facecolors="none", edgecolors=S.INK, lw=0.6)
         if m["name"] == "first breach" and a.get("breach_demes"):
             rr, cc = np.divmod(np.asarray(a["breach_demes"]), G)
-            ax.scatter(cc, rr, s=14, facecolors="none", edgecolors=LINE["stroma"], lw=0.6)
-    from matplotlib.patches import Rectangle
+            ax.scatter(cc, rr, s=12, facecolors="none", edgecolors=LINE["stroma"], lw=0.6)
     axes[1].add_patch(Rectangle((c0 - 0.5, r0 - 0.5), c1 - c0, r1 - r0, fill=False, lw=0.4, ec=S.INK, ls=":"))
-    S.text_mm(fig, 9, y + 34, "ring: the cancer", fontsize=4.3, color=S.GREY, va="top")
-    S.text_mm(fig, 39.5, y + 34, "dotted box: the founding gland; ring: the first cancer cells in the stroma",
-              fontsize=4.3, color=S.GREY, va="top")
-    last = a["maps"][-1]
     if a["met_grid"]:
-        axm.imshow(_rgb(a, last["met"], primary=False), interpolation="nearest")
+        axm.imshow(_rgb(a, a["maps"][-1]["met"], primary=False), interpolation="nearest")
         _frame(axm, LINE["met"], 0.6)
-        axm.set_title("metastasis", fontsize=5, color=LINE["met"], linespacing=1.1)
+        axm.set_title("metastasis", color=LINE["met"])
     else:
         axm.axis("off")
-    # bottom: cancer cells in each compartment over generations
-    h = a["hist"]
-    tt = np.asarray(h["time"])
-    for k in COMPS:
-        v = np.asarray(h[k], dtype=float)
-        if v.max() <= 0:
-            continue
-        v[v <= 0] = np.nan
-        axh.plot(tt, v, color=LINE[k], lw=1.0, marker=".", ms=1.6,
-                 label={"gland": "gland", "stroma": "stroma", "met": "metastasis"}[k])
-    axh.set_yscale("log")
-    axh.set_xlim(0, a["end"] * 1.01)
-    axh.set_xlabel("Generations since founding")
-    axh.set_ylabel("Cancer cells")
-    ymax = axh.get_ylim()[1]
-    col = dict(zip(a["labels"], a["colours"]))
-    for lab, bt in a["births"]:
-        axh.plot(bt, ymax * 0.7, "v", ms=3, color=col[lab], mec=S.INK, mew=0.3, clip_on=False)
-    axh.plot([], [], "v", ms=3, color=S.GREY, mec=S.INK, mew=0.3, ls="none", label="clone birth")
-    marks = [("acinus opens", a["release"], S.GREY, ":"), ("first invasion", a["t_inv"], LINE["stroma"], "-"),
-             ("seeding", (a["seeding"] or {}).get("t_seed"), LINE["met"], "-")]
-    for name, x, c, ls in marks:
-        if x is None:
-            continue
-        axh.axvline(x, color=c, lw=0.6, ls=ls, zorder=0)
-        axh.text(x, ymax * 1.6, name, fontsize=4.5, color=c, ha="center", va="bottom", clip_on=False)
-    axh.legend(loc="upper left", fontsize=4.8, ncol=4)
     if a["source"] != SHOWCASE:
-        S.text_mm(fig, 8, y - 1.3, f"stand-in: {a['source'].replace('/', ' ')} (the showcase R0 is not grown yet)",
-                  fontsize=5, color="#B2182B", va="top")
+        S.text_mm(fig, x + 30, y - 7, f"stand-in: {a['source'].replace('/', ' ')} (R0 not grown yet)",
+                  fontsize=SMALL, color="#B2182B", va="bottom")
     sd = a["seeding"] or {}
     return dict(source=a["source"], release=a["release"], first_breach=a["t_inv"], seeding=sd.get("t_seed"),
                 end=a["end"], n_clones=len(a["labels"]) - 1, met_cancer=sd.get("met_cancer"),
@@ -725,9 +680,45 @@ def render_a(fig, y):
                 moments=[(m["name"], round(m["time"], 1)) for m in a["maps"]])
 
 
-def render_b(fig, x, y):
+def render_history(ax):
+    """S10 Fig A: the showcase's cancer cells in each compartment over generations, with clone births,
+    the opening of the acinus, the first invasion and the seeding of the metastasis."""
+    a = cached("a")
+    if a is None:
+        return pending(ax, "pending: R0")
+    h = a["hist"]
+    tt = np.asarray(h["time"])
+    for k in COMPS:
+        v = np.asarray(h[k], dtype=float)
+        if v.max() <= 0:
+            continue
+        v[v <= 0] = np.nan
+        ax.plot(tt, v, color=LINE[k], lw=1.0, marker=".", ms=1.6, label=NAME[k])
+    ax.set_yscale("log")
+    ax.set_xlim(0, a["end"] * 1.01)
+    ax.set_xlabel("Generations since founding")
+    ax.set_ylabel("Cancer cells")
+    ymax = ax.get_ylim()[1]
+    col = dict(zip(a["labels"], a["colours"]))
+    for lab, bt in a["births"]:
+        ax.plot(bt, ymax * 0.7, "v", ms=3, color=col[lab], mec=S.INK, mew=0.3, clip_on=False)
+    ax.plot([], [], "v", ms=3, color=S.GREY, mec=S.INK, mew=0.3, ls="none", label="clone birth")
+    marks = [("acinus opens", a["release"], S.GREY, ":"), ("first invasion", a["t_inv"], LINE["stroma"], "-"),
+             ("seeding", (a["seeding"] or {}).get("t_seed"), LINE["met"], "-")]
+    for name, x, c, ls in marks:
+        if x is None:
+            continue
+        ax.axvline(x, color=c, lw=0.6, ls=ls, zorder=0)
+        ax.text(x, ymax * 1.6, name, fontsize=SMALL, color=c, ha="center", va="bottom", clip_on=False)
+    ax.legend(loc="upper left", ncol=4)
+    return dict(release=a["release"], first_invasion=a["t_inv"], seeding=(a["seeding"] or {}).get("t_seed"),
+                births=a["births"])
+
+
+def render_escape(ax1, ax2):
+    """S10 Fig B and C (R10): generations from founding to the first invasion, with barriers and
+    without, and how many clones cross into the stroma within WINDOW generations of it."""
     d = cached("b")
-    ax1, ax2 = S.ax_mm(fig, x, y, 32, 28), S.ax_mm(fig, x + 45, y, 16, 28)
     if not d:
         pending(ax1)
         pending(ax2, "")
@@ -753,15 +744,14 @@ def render_b(fig, x, y):
                         median_after_release=float(np.median(ti - np.median(rel))) if len(ti) and rel else None)
     if rel:
         ax1.axvline(np.median(rel), color=S.GREY, lw=0.5, ls=":")
-        ax1.text(np.median(rel), 1.02, "acinus\nopens", fontsize=4.3, color=S.GREY, ha="right", va="bottom",
+        ax1.text(np.median(rel), 1.02, "acinus\nopens", fontsize=SMALL, color=S.GREY, ha="right", va="bottom",
                  transform=ax1.get_xaxis_transform())
-    ax1.set_ylim(0, 1.0)
-    if rel:
         ax1.set_xlim(np.median(rel) - 25, None)
+    ax1.set_ylim(0, 1.0)
     ax1.set_xlabel("Generations from founding\nto first invasion")
     ax1.set_ylabel("Share of tumors invaded")
-    ax1.legend(loc="lower right", fontsize=4.5)
-    # (ii) clones reaching the stroma within WINDOW generations of the first invasion
+    ax1.legend(loc="lower right")
+    # clones reaching the stroma within WINDOW generations of the first invasion
     cats = ["1", "2", "3+"]
     shades = [S.PASTEL["blue"], "#7FB2DA", S.SOURCE["iscc"]]
     for j, (arm, rs) in enumerate(arms.items()):
@@ -781,9 +771,9 @@ def render_b(fig, x, y):
                                                  for r in rs if r.get("cross_then_end")]
         out[arm]["crossing_genotypes"] = [r["n_crossing_genotypes"] for r in rs if "n_crossing_genotypes" in r]
     ax2.set_xticks([0, 1])
-    ax2.set_xticklabels(["with\nbarriers", "without\nbarriers"], fontsize=4.8)
+    ax2.set_xticklabels(["with\nbarriers", "without\nbarriers"])
     ax2.set_ylim(0, 1)
-    ax2.set_ylabel("Share of tumors, by clones\ncrossing into the stroma", fontsize=5.5)
+    ax2.set_ylabel("Share of tumors, by clones\ncrossing into the stroma")
     _key(ax2, shades, cats, "clones")
     return out
 
@@ -791,12 +781,7 @@ def render_b(fig, x, y):
 def _key(ax, shades, cats, title):
     from matplotlib.patches import Patch
     ax.legend(handles=[Patch(color=c, label=lab) for c, lab in zip(shades[::-1], cats[::-1])], title=title,
-              loc="upper left", bbox_to_anchor=(1.0, 1.0), fontsize=4.5, title_fontsize=4.5,
-              handlelength=0.8)
-
-
-def _pct(x):
-    return f"{100 * x:.1f}%" if x < 0.1 else f"{x:.0%}"
+              loc="upper left", bbox_to_anchor=(1.0, 1.0), title_fontsize=SMALL, handlelength=0.8)
 
 
 def _enrichment(sel, ctl, comp, trait):
@@ -807,16 +792,16 @@ def _enrichment(sel, ctl, comp, trait):
     return float(np.log2((a[trait] + 1) / (a["n"] + 1)) - np.log2((b[trait] + 1) / (b["n"] + 1))), b[trait] == 0
 
 
-def render_c(fig, x, y):
-    """The share of cancer cells carrying each trait in each compartment, in the selected tumour and in
-    the control without that trait's selection at the same seed, side by side (one dot per seed, a thin
-    line joining the two tumours of a seed, ticks at the medians). The shares run from 0 to 1 with
-    several near 0, so the axis is linear below 0.1% and logarithmic above (0 is drawn at 0). The log2
-    enrichment of the earlier version is kept only in the numbers file."""
+def render_traits(axes, legend_mm):
+    """Fig 2B: the share of cancer cells carrying each trait in each compartment (one axes each), in
+    the selected tumour and in the control without that trait's selection at the same seed, side by side
+    (one dot per seed, a thin line joining the two tumours of a seed, ticks at the medians). The shares
+    run from 0 to 1 with several near 0, so the axis is linear below 0.1% and logarithmic above (0 is
+    drawn at 0). The log2 enrichment is kept only in the numbers file. The legend sits ``legend_mm``
+    below the middle axes."""
     from matplotlib.lines import Line2D
     from matplotlib.ticker import NullLocator
     d = cached("c")
-    axes = [S.ax_mm(fig, x + i * 26, y, 22, 28) for i in range(3)]
     if not d:
         for ax in axes:
             pending(ax)
@@ -865,28 +850,30 @@ def render_c(fig, x, y):
         ax.xaxis.set_minor_locator(NullLocator())
         ax.set_ylim(-0.5, 2.5)
         ax.set_yticks([2, 1, 0])
-        ax.set_yticklabels([names[tr] for tr in TRAITS] if j == 0 else [], fontsize=5)
-        ax.set_title({"gland": "gland", "stroma": "stroma", "met": "metastasis"}[comp], fontsize=5.5)
+        ax.set_yticklabels([names[tr] for tr in TRAITS] if j == 0 else [])
+        ax.set_title(NAME[comp])
         if j == 1:
             ax.set_xlabel("Cancer cells carrying the trait (%)")
             ax.legend(handles=[Line2D([], [], marker="o", ms=2.2, ls="none", color=S.INK, mew=0,
                                       label="selected"),
                                Line2D([], [], marker="o", ms=2.2, ls="none", mfc="none", mec=S.INK, mew=0.5,
                                       label="control without that selection")],
-                      loc="upper center", bbox_to_anchor=(0.5, -0.33), ncol=2, fontsize=4.8)
+                      loc="upper center", bbox_to_anchor=(0.5, below(ax, legend_mm)), ncol=2)
     return out
 
 
-def render_d(fig, x, y):
+def render_confinement(axes):
+    """S10 Fig D (R3): the old Fig 4f-g's truncal copy-number fraction and clonal diversity of confined
+    and free tumours, neutral and selected."""
     d = cached("d")
-    axes = [S.ax_mm(fig, x + i * 25, y, 18, 28) for i in range(2)]
     if not d:
         for ax in axes:
             pending(ax)
         return None
     out = {}
     groups = [("confined", "neutral"), ("confined", "selected"), ("free", "neutral"), ("free", "selected")]
-    for ax, (col, ylab) in zip(axes, (("trunk_fraction", "Truncal copy number fraction"), ("D", "Clonal diversity, D"))):
+    for ax, (col, ylab) in zip(axes, (("trunk_fraction", "Truncal copy number fraction"),
+                                      ("D", "Clonal diversity, D"))):
         for j, (arch, sel) in enumerate(groups):
             v = np.asarray([r[col] for k, r in d.items() if k.split("/")[1].startswith(f"{arch}_{sel}_")],
                            dtype=float)
@@ -894,13 +881,14 @@ def render_d(fig, x, y):
                 continue
             xx = j + np.random.default_rng(j).uniform(-0.12, 0.12, len(v))
             c = S.CLONE_FAMILIES[0][1] if arch == "confined" else S.CLONE_FAMILIES[2][1]
-            ax.scatter(xx, v, s=3, color=c, alpha=0.8 if sel == "selected" else 0.45)
+            ax.scatter(xx, v, s=4, color=c, alpha=0.8 if sel == "selected" else 0.45)
             ax.plot([j - 0.25, j + 0.25], [v.mean()] * 2, color=S.INK, lw=0.8)
-            out[f"{col}/{arch}/{sel}"] = dict(n=len(v), mean=round(float(v.mean()), 3))
+            out[f"{col}/{arch}/{sel}"] = dict(n=len(v), mean=round(float(v.mean()), 3),
+                                              nonzero=int((v > 0).sum()) if col == "trunk_fraction" else None)
         ax.set_xticks(range(4))
-        # four groups on an 18 mm axis: the full words fit only rotated
+        # four groups on a narrow axis: the full words fit only rotated
         ax.set_xticklabels(["confined, neutral", "confined, selected", "free, neutral", "free, selected"],
-                           rotation=90, fontsize=4.8)
+                           rotation=90)
         ax.set_ylabel(ylab)
     return out
 
@@ -933,57 +921,62 @@ def _where(n):
     return "both" if p and m else ("met" if m else "primary")
 
 
-def render_e(fig, x, y):
-    a, d = cached("a"), cached("e")
-    ax1 = S.ax_mm(fig, x, y, 40, 30)
-    ax2, ax3 = S.ax_mm(fig, x + 54, y, 16, 30), S.ax_mm(fig, x + 82, y, 26, 30)
-    out = {}
+def render_tree(ax, legend_mm):
+    """S10 Fig E: the showcase's clone tree, branches coloured by where their cells live, with the
+    seedings that founded at least 1% of the metastasis; the legend sits ``legend_mm`` below the axes."""
+    a = cached("a")
     if a is None or not a.get("tree"):
-        pending(ax1, "pending: the showcase (R0)")
-    else:
-        nodes, kids, xpos = _tree_layout(a["tree"])
-        col = dict(zip(a["labels"], a["colours"]))
-        end = a["end"]
-        for g, n in nodes.items():
-            c = WHERE[_where(n)]
-            if n["parent"] is not None:
-                p = nodes[n["parent"]]
-                ax1.plot([xpos[g], xpos[g]], [p["time"], n["time"]], color=c, lw=0.9, solid_capstyle="butt")
-                ax1.plot([xpos[n["parent"]], xpos[g]], [p["time"]] * 2, color=WHERE[_where(p)], lw=0.9)
+        return pending(ax, "pending: R0")
+    nodes, kids, xpos = _tree_layout(a["tree"])
+    col = dict(zip(a["labels"], a["colours"]))
+    end = a["end"]
+    for g, n in nodes.items():
+        c = WHERE[_where(n)]
+        if n["parent"] is not None:
+            p = nodes[n["parent"]]
+            ax.plot([xpos[g], xpos[g]], [p["time"], n["time"]], color=c, lw=0.9, solid_capstyle="butt")
+            ax.plot([xpos[n["parent"]], xpos[g]], [p["time"]] * 2, color=WHERE[_where(p)], lw=0.9)
+        if not kids[g]:
+            ax.plot([xpos[g], xpos[g]], [n["time"], end], color=c, lw=1.8, solid_capstyle="butt")
+        if n["label"]:
+            ax.scatter([xpos[g]], [n["time"]], s=8, color=col[n["label"]], edgecolors=S.INK, lw=0.3, zorder=3)
             if not kids[g]:
-                ax1.plot([xpos[g], xpos[g]], [n["time"], end], color=c, lw=1.8, solid_capstyle="butt")
-            if n["label"]:
-                ax1.scatter([xpos[g]], [n["time"]], s=7, color=col[n["label"]], edgecolors=S.INK, lw=0.3, zorder=3)
-                if not kids[g]:
-                    ax1.text(xpos[g], end * 1.03, n["label"].replace("clone ", ""), fontsize=4.3, ha="center",
-                             va="top", color=S.INK)
-        met_total = max(sum(s[2] for s in a["tree"]["seeds"]), 1)
-        shown = [s for s in a["tree"]["seeds"] if s[1] is not None and s[2] / met_total >= 0.01]
-        for g, ts, c in shown:
-            if g in xpos:
-                ax1.scatter([xpos[g]], [ts], marker="*", s=12 + 40 * c / met_total, color=WHERE["met"],
-                            edgecolors=S.INK, lw=0.3, zorder=4)
-        ax1.set_ylim(end * 1.02, 0)
-        ax1.set_xticks([])
-        ax1.spines["bottom"].set_visible(False)
-        ax1.set_xlabel("Clone", fontsize=5, labelpad=6)
-        ax1.set_ylabel("Generations")
-        handles = [ax1.plot([], [], color=WHERE[k], lw=1.5, label=lab)[0]
-                   for k, lab in (("primary", "primary only"), ("met", "metastasis only"), ("both", "both"))]
-        handles.append(ax1.scatter([], [], marker="*", s=14, color=WHERE["met"], edgecolors=S.INK, lw=0.3,
-                                   label="seeding"))
-        ax1.legend(handles=handles, loc="lower left", fontsize=4.3, bbox_to_anchor=(0, -0.42), ncol=2)
-        out["tree"] = dict(n_nodes=len(nodes), n_leaves=sum(1 for g in nodes if not kids[g]),
-                           where=Counter(_where(n) for g, n in nodes.items() if not kids[g]),
-                           seeds_shown=len(shown), seeds_total=len(a["tree"]["seeds"]))
+                ax.text(xpos[g], end * 1.03, n["label"].replace("clone ", ""), fontsize=SMALL, ha="center",
+                        va="top", color=S.INK)
+    met_total = max(sum(s[2] for s in a["tree"]["seeds"]), 1)
+    shown = [s for s in a["tree"]["seeds"] if s[1] is not None and s[2] / met_total >= 0.01]
+    for g, ts, c in shown:
+        if g in xpos:
+            ax.scatter([xpos[g]], [ts], marker="*", s=14 + 40 * c / met_total, color=WHERE["met"],
+                       edgecolors=S.INK, lw=0.3, zorder=4)
+    ax.set_ylim(end * 1.02, 0)
+    ax.set_xticks([])
+    ax.spines["bottom"].set_visible(False)
+    ax.set_xlabel("Clone", labelpad=8)
+    ax.set_ylabel("Generations")
+    handles = [ax.plot([], [], color=WHERE[k], lw=1.5, label=lab)[0]
+               for k, lab in (("primary", "primary only"), ("met", "metastasis only"), ("both", "both"))]
+    handles.append(ax.scatter([], [], marker="*", s=16, color=WHERE["met"], edgecolors=S.INK, lw=0.3,
+                              label="seeding"))
+    ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(0, below(ax, legend_mm)), ncol=4)
+    return dict(n_nodes=len(nodes), n_leaves=sum(1 for g in nodes if not kids[g]),
+                where=Counter(_where(n) for g, n in nodes.items() if not kids[g]),
+                seeds_shown=len(shown), seeds_total=len(a["tree"]["seeds"]))
+
+
+def render_seeding(ax2, ax3):
+    """Fig 2C (R12): the effective number of founding lineages per metastasis, by genotype and by clone,
+    and the release, first invasion and first seeding as fractions of the primary's age."""
+    from matplotlib.ticker import MaxNLocator
+    d = cached("e")
     if not d:
         pending(ax2, "")
         pending(ax3)
-        return out
+        return None
     rows = list(d.values())
     seeded = [r for r in rows if r.get("met_cancer")]
-    # (ii) founding lineages per metastasis: the effective number (inverse Simpson index of the met's
-    # cells over its founding lineages), by founding genotype and by the clone of the founding genotype
+
+    # the effective number: the inverse Simpson index of the met's cells over its founding lineages
     def eff_n(weights):
         p = np.asarray(list(weights), dtype=float)
         p = p / p.sum()
@@ -1001,15 +994,16 @@ def render_e(fig, x, y):
         if not len(v):
             continue
         xx = j + np.random.default_rng(5 + j).uniform(-0.15, 0.15, len(v))
-        ax2.scatter(xx, v, s=4, color=LINE["met"], lw=0)
+        ax2.scatter(xx, v, s=5, color=LINE["met"], lw=0)
         ax2.plot([j - 0.3, j + 0.3], [np.median(v)] * 2, color=S.INK, lw=0.8)
     ax2.axhline(1, color=S.GREY, lw=0.5, ls=":")
     ax2.set_xticks([0, 1])
-    ax2.set_xticklabels(["genotypes", "clones"], rotation=90, fontsize=4.8)
-    ax2.set_xlim(-0.6, 1.6)
+    ax2.set_xticklabels(["genotypes", "clones"])
+    ax2.set_xlim(-0.7, 1.7)
     ax2.set_ylim(0, max(2.0, 1.1 * float(max(eff_g.max(), eff_c.max()))) if len(eff_g) else 2)
-    ax2.set_ylabel("Effective number of founding\nlineages per metastasis", fontsize=5.5)
-    # the release, the first invasion and the seeding as fractions of the primary's age
+    ax2.yaxis.set_major_locator(MaxNLocator(5, integer=True))
+    ax2.set_ylabel("Effective number of\nfounding lineages")
+    out = {}
     keys = [("release", "acinus\nopens", S.GREY), ("t_inv", "first\ninvasion", LINE["stroma"]),
             ("t_seed", "first\nseeding", LINE["met"])]
     for j, (k, lab, c) in enumerate(keys):
@@ -1017,14 +1011,15 @@ def render_e(fig, x, y):
         if not len(v):
             continue
         xx = j + np.random.default_rng(j).uniform(-0.15, 0.15, len(v))
-        ax3.scatter(xx, v, s=4, color=c, lw=0)
+        ax3.scatter(xx, v, s=5, color=c, lw=0)
         ax3.plot([j - 0.3, j + 0.3], [np.median(v)] * 2, color=S.INK, lw=0.8)
         out[f"frac_{k}"] = dict(n=len(v), median=round(float(np.median(v)), 3), min=round(float(v.min()), 3),
                                 max=round(float(v.max()), 3))
     ax3.set_xticks(range(3))
-    ax3.set_xticklabels([k[1] for k in keys], fontsize=4.5)
+    ax3.set_xticklabels([k[1] for k in keys])
+    ax3.set_xlim(-0.6, 2.6)
     ax3.set_ylim(0, 1)
-    ax3.set_ylabel("Fraction of the age of the primary")
+    ax3.set_ylabel("Fraction of the\nage of the primary")
     out.update(n_tumours=len(rows), n_seeded=len(seeded), founders=nf.tolist(),
                effective_genotypes=eff_g.round(2).tolist(), effective_clones=eff_c.round(2).tolist(),
                median_effective_genotypes=float(np.median(eff_g)) if len(eff_g) else None,
@@ -1035,91 +1030,58 @@ def render_e(fig, x, y):
     return out
 
 
-def render_f(fig, x, y):
+def render_noble(ax):
+    """Fig 2D: drivers per cell against clonal diversity, iscc against the real tumours of Noble et al.
+    (fig2_realism.py's panel a, from summaries.py's caches of R1-R4)."""
     import fig2_realism as FR
-    ax1, ax2 = S.ax_mm(fig, x, y, 40, 28), S.ax_mm(fig, x + 52, y, 32, 28)
-    out = dict(noble=FR.panel_a(ax1), wgd=FR.panel_c(ax2))
+    return FR.panel_a(ax)
+
+
+def render_wgd(ax):
+    """S10 Fig F: whole-genome-duplication prevalence across rates against PCAWG (fig2_realism.py's
+    panel c, from summaries.py's cache of R5), with the paper's rate marked."""
+    import fig2_realism as FR
+    out = FR.panel_c(ax)
     w = RG.CANCER["wgd_rate"]
-    ax2.set_xticks(REG.R5_WGD)
-    ax2.set_xticklabels([f"{r:g}" for r in REG.R5_WGD], rotation=90, fontsize=4.8)
-    ax2.axvline(w, color=S.INK, lw=0.5, ls=":")
-    ax2.text(w, 0.95, " this paper", fontsize=4.5, color=S.INK, va="top", ha="left")
+    ax.set_xticks(REG.R5_WGD)
+    ax.set_xticklabels([f"{r:g}" for r in REG.R5_WGD], rotation=90)
+    ax.axvline(w, color=S.INK, lw=0.5, ls=":")
+    ax.text(w, 0.95, " this paper", fontsize=SMALL, color=S.INK, va="top", ha="left")
     return out
 
 
-def render_g(fig, x, y):
-    d = cached("g")
-    axes = [S.ax_mm(fig, x, y, 22, 28), S.ax_mm(fig, x + 33, y, 22, 28)]
-    if not d or not d["rows"]:
-        for ax in axes:
-            pending(ax, "pending: runtime logs")
-        return None
-    import pandas as pd
-    df = pd.DataFrame(d["rows"])
-    df = df[df.ok]
-    out = {}
-    # memory is drawn in GB (MB / 1000, as the paper states it); the numbers file keeps MB
-    for ax, col, ylab, scale in zip(axes, ("wall_s", "peak_mb"), ("Wall time (s)", "Peak memory (GB)"), (1, 1e-3)):
-        g = df.groupby("n_cancer")[col]
-        xs = np.array(sorted(g.groups))
-        med, lo, hi = g.median().loc[xs], g.min().loc[xs], g.max().loc[xs]
-        ax.plot(xs, med * scale, color=S.SOURCE["iscc"], marker="o", ms=2.5, lw=0.9)
-        ax.vlines(xs, lo * scale, hi * scale, color=S.SOURCE["iscc"], lw=0.8)
-        ax.set_xscale("log")
-        ax.set_yscale("log")
-        ax.set_xticks(xs)
-        ax.set_xticklabels([f"{v / 1000:g}k" for v in xs], fontsize=4.8)
-        ax.minorticks_off()
-        if col == "peak_mb":                     # 0.74 to 8 GB: plain ticks rather than a lone 10^0
-            ax.set_yticks([1, 2, 5])
-            ax.set_yticklabels(["1", "2", "5"])
-        ax.set_xlabel("Cancer cells")
-        ax.set_ylabel(ylab)
-        out[col] = {int(k): round(float(v), 1) for k, v in med.items()}
-    out["n_runs"] = int(len(df))
-    out["seeds_per_size"] = {int(k): int(v) for k, v in df.groupby("n_cancer").size().items()}
-    return out
-
-
-def render():
-    S.setup()
-    fig = S.figure("double", 240)
-    out = {}
-    S.panel_letter(fig, "a", 2, 2)
-    out["a"] = render_a(fig, 3)
-    S.panel_letter(fig, "b", 2, 83)
-    S.text_mm(fig, 8, 83.6, "i", fontsize=6, va="top")
-    S.text_mm(fig, 53, 83.6, "ii", fontsize=6, va="top")
-    out["b"] = render_b(fig, 12, 89)
-    S.panel_letter(fig, "c", 92, 83)
-    out["c"] = render_c(fig, 106, 89)
-    S.panel_letter(fig, "d", 2, 136)
-    out["d"] = render_d(fig, 12, 142)
-    S.panel_letter(fig, "e", 60, 136)
-    S.text_mm(fig, 65, 136.6, "i", fontsize=6, va="top")
-    S.text_mm(fig, 116, 136.6, "ii", fontsize=6, va="top")
-    out["e"] = render_e(fig, 70, 142)
-    S.panel_letter(fig, "f", 2, 194)
-    out["f"] = render_f(fig, 12, 200)
-    S.panel_letter(fig, "g", 108, 194)
-    out["g"] = render_g(fig, 120, 200)
-    path = S.save(fig, "fig2_niche")
-    print("wrote", path)
+def _numbers(out, name):
     for k, v in out.items():
         print(k, json.dumps(v, default=str))
     os.makedirs(CACHE, exist_ok=True)
-    with open(os.path.join(CACHE, "niche_render_numbers.json"), "w") as f:
+    with open(os.path.join(CACHE, name), "w") as f:
         json.dump(out, f, default=str, indent=1)
+
+
+def render():
+    """Fig 2 at the paper's half page: 165 mm wide and at most 114 mm tall."""
+    S.setup()
+    fig = S.figure(165, 106)
+    out = {}
+    S.panel_letter(fig, "A", 1, 1)
+    out["A"] = render_snapshots(fig, 6, 8.5, 23.0, 3.4)
+    S.panel_letter(fig, "B", 1, 34)
+    out["B"] = render_traits([S.ax_mm(fig, 15 + i * 23, 41, 20, 38) for i in range(3)], legend_mm=8)
+    S.panel_letter(fig, "C", 86, 34)
+    out["C"] = render_seeding(S.ax_mm(fig, 99, 41, 22, 23), S.ax_mm(fig, 132, 41, 31, 23))
+    S.panel_letter(fig, "D", 86, 71)
+    out["D"] = render_noble(S.ax_mm(fig, 99, 76, 64, 23))
+    path = S.save(fig, "fig2_niche")
+    print("wrote", path)
+    _numbers(out, "niche_render_numbers.json")
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--part", choices=["a", "b", "c", "d", "e", "g"])
+    ap.add_argument("--part", choices=["a", "b", "c", "d", "e"])
     ap.add_argument("--source", default=None, help="run/task of panel a (default R0/seed1, else the stand-in)")
     ap.add_argument("--jobs", type=int, default=1)
     ap.add_argument("--force", action="store_true")
-    ap.add_argument("--runtime-logs", default=None,
-                    help="directory of the runtime logs (default $ISCC_DATA_DIR/logs/runtime-v4)")
     ap.add_argument("--one", nargs=2, metavar=("PART", "RUN/TASK"), help=argparse.SUPPRESS)
     a = ap.parse_args()
     if a.one:
@@ -1131,9 +1093,6 @@ def main():
             return
         _write("a", compute_a(src))
         print(f"part a: cached from {src}")
-    elif a.part == "g":
-        import _paths as P
-        compute_g(a.runtime_logs or P.data_dir(*RUNTIME_LOGS))
     elif a.part:
         compute_part(a.part, a.jobs, a.force)
     else:
