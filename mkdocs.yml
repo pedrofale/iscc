@@ -132,6 +132,10 @@ nav:
       - Cohort:
           - Cohort: reference/Cohort.md
           - grow_tumor: reference/grow_tumor.md
+          - assign_batches: reference/assign_batches.md
+          - pool_cell_data: reference/pool_cell_data.md
+          - run_cohort_batches: reference/run_cohort_batches.md
+          - concat_cohort_batches: reference/concat_cohort_batches.md
       - Pregrown:
           - ductal: reference/pregrown_ductal.md
           - neutral: reference/pregrown_neutral.md
@@ -160,6 +164,10 @@ nav:
           - RNABatchHyperParams: reference/RNABatchHyperParams.md
           - VisiumBatchHyperParams: reference/VisiumBatchHyperParams.md
           - Visium spot swapping: reference/visium_bleed.md
+          - run_dna_batches: reference/run_dna_batches.md
+          - run_scrna_batches: reference/run_scrna_batches.md
+          - concat_batches: reference/concat_batches.md
+          - morans_i: reference/morans_i.md
       - Human genome:
           - arm_genome: reference/arm_genome.md
           - HumanGenomeLayer: reference/HumanGenomeLayer.md
@@ -182,6 +190,7 @@ nav:
           - clones_from_clades: reference/clones_from_clades.md
           - clone_summary: reference/clone_summary.md
           - to_anndata: reference/to_anndata.md
+          - biological_types: reference/biological_types.md
       - Inference:
           - ABC: reference/ABC.md
           - Prior: reference/Prior.md

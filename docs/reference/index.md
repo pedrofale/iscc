@@ -24,6 +24,10 @@ expression and programs and differ in their evolution.
 |---|---|
 | [`iscc.cohort.Cohort`](Cohort.md) | A cohort of patient tumours grown over one shared gene layout. |
 | [`iscc.cohort.grow_tumor`](grow_tumor.md) | Grow one patient tumour for a fixed number of steps. |
+| [`iscc.cohort.assign_batches`](assign_batches.md) | Assign the patients of a cohort to sequencing batches. |
+| [`iscc.cohort.pool_cell_data`](pool_cell_data.md) | Pool the cells of several patients into the per-cell tables of one batch. |
+| [`iscc.cohort.run_cohort_batches`](run_cohort_batches.md) | Measure a cohort by scRNA in sequencing batches. |
+| [`iscc.cohort.concat_cohort_batches`](concat_cohort_batches.md) | The batches of a cohort as one AnnData. |
 
 ## Pregrown tumors
 
@@ -73,6 +77,10 @@ Generate single-cell and bulk molecular data from the sampled cells.
 | [`iscc.data.scRNA`](scRNA.md) | Single-cell RNA expression. |
 | [`iscc.data.Visium`](Visium.md) | 10x Visium spatial transcriptomics. |
 | [`iscc.data.DNA`](DNA.md) | Shared base of the DNA assays — breadth + coverage core. |
+| [`iscc.data.run_dna_batches`](run_dna_batches.md) | DNA batches of one sample that share biology and differ technically. |
+| [`iscc.data.run_scrna_batches`](run_scrna_batches.md) | scRNA batches of one sample that share biology and differ technically. |
+| [`iscc.data.concat_batches`](concat_batches.md) | The scRNA batches as one labelled AnnData. |
+| [`iscc.data.morans_i`](morans_i.md) | Moran's I, the spatial autocorrelation of a value over spots. |
 
 Each assay page also lists **technology presets** — the parameter settings that approximate named
 platforms (DLP+ / Tapestri for scDNA, WGS / WES / panel for bulk DNA, and 10x / Smart-seq3
@@ -130,6 +138,7 @@ Hand the ground truth over in the forms that other tools read.
 | [`iscc.integrations.clones_from_clades`](clones_from_clades.md) | Clone labels of sampled cells, as clades of the true genealogy with enough sampled cells. |
 | [`iscc.integrations.clone_summary`](clone_summary.md) | One row per clone: its size, representative genotype and mutations. |
 | [`iscc.integrations.to_anndata`](to_anndata.md) | A tumour or a sample as one AnnData, with coordinates and ground truth. |
+| [`iscc.integrations.biological_types`](biological_types.md) | The coarse cell type (cancer, epithelial, stromal, immune, host) of each cell. |
 
 ## Inference
 

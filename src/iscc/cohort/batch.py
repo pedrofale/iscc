@@ -27,8 +27,26 @@ _POOL_KEYS = ("cell_evo", "cell_snv", "cell_cnv", "cell_exp", "cell_crd", "cell_
 
 
 def assign_batches(n_patients, mapping="one_to_one", capacity=None, explicit=None):
-    """Return ``(assignment, batches)``: ``assignment`` = {patient_idx: batch_id}; ``batches`` =
-    {batch_id: [patient_idx, ...]} (both ordered)."""
+    """Assign the patients of a cohort to sequencing batches.
+
+    Parameters
+    ----------
+    n_patients : int
+        Number of patients.
+    mapping : {"one_to_one", "multiplex"}, default "one_to_one"
+        ``"one_to_one"`` gives each patient its own batch; ``"multiplex"`` (also ``"n_to_one"`` or
+        ``"pool"``) pools ``capacity`` consecutive patients per batch.
+    capacity : int, optional
+        Patients per batch under ``"multiplex"``. Default None pools every patient into one batch.
+    explicit : dict, optional
+        ``{patient_idx: batch_id}``, used instead of ``mapping`` when given.
+
+    Returns
+    -------
+    (dict, dict)
+        ``assignment``, ``{patient_idx: batch_id}``, and ``batches``, ``{batch_id: [patient_idx,
+        ...]}``, both ordered.
+    """
     if explicit is not None:
         assignment = {int(k): int(v) for k, v in dict(explicit).items()}
     elif mapping == "one_to_one":
@@ -53,10 +71,25 @@ def _namespace(name, pid):
 def pool_cell_data(patient_results, n_cells_per_patient=None, base_seed=0):
     """Concatenate several patients' ``cell_data`` into one pooled ``cell_data`` for a shared batch.
 
-    Cell names are namespaced ``P{patient_id}::{orig}`` so they never collide. Returns
-    ``(pooled_cell_data, meta)`` where ``meta`` is a per-cell DataFrame (indexed by the namespaced
-    name) carrying ``patient``, ``subgroup``, and ``orig_cell`` — the cohort ground truth attached to
-    the emitted batch. ``n_cells_per_patient`` optionally subsamples each patient (seeded)."""
+    Cell names are namespaced ``P{patient_id}::{orig}`` so that they never collide.
+
+    Parameters
+    ----------
+    patient_results : sequence of PatientResult
+        The patients to pool, for example ``cohort.patients[i]`` of a
+        [`Cohort`][iscc.cohort.Cohort]. The per-cell tables of each are built first if missing.
+    n_cells_per_patient : int, optional
+        Subsample each patient to this many cells (seeded). Default None keeps every cell.
+    base_seed : int, default 0
+        Seed of the subsampling.
+
+    Returns
+    -------
+    (dict, pandas.DataFrame)
+        The pooled ``cell_data`` and ``meta``, one row per pooled cell (indexed by the namespaced
+        name) with its ``patient``, ``subgroup``, ``orig_cell``, ``clone`` (genotype id) and
+        ``cell_type`` (the type of its genotype): the cohort ground truth of the batch.
+    """
     rng = np.random.default_rng(base_seed)
     per_key = {k: [] for k in _POOL_KEYS}
     meta_rows = []
@@ -94,11 +127,31 @@ def pool_cell_data(patient_results, n_cells_per_patient=None, base_seed=0):
 def run_cohort_batches(cohort, mapping="one_to_one", capacity=None, explicit=None,
                        n_cells_per_patient=100, protocol="10x", count_model="nb",
                        base_seed=1000, **scrna_kwargs):
-    """Emit per-batch scRNA over the cohort with the chosen patient->batch mapping.
+    """Measure a grown cohort by scRNA in sequencing batches, with the chosen patient-to-batch mapping.
 
-    Returns ``(assays, batches, assignment)``: ``assays`` is one run ``scRNA`` per batch (each with
-    ``.obs`` carrying ``patient`` / ``subgroup`` / ``clone`` ground truth and ``.batch_id``);
-    ``batches`` / ``assignment`` are the maps from :func:`assign_batches`.
+    Parameters
+    ----------
+    cohort : Cohort
+        A grown [`Cohort`][iscc.cohort.Cohort] (after ``run``, or loaded).
+    mapping, capacity, explicit
+        The patient-to-batch mapping, as in [`assign_batches`][iscc.cohort.assign_batches].
+    n_cells_per_patient : int, default 100
+        Cells drawn from each patient into its batch.
+    protocol : {"10x", "smartseq3"}, default "10x"
+        The scRNA protocol preset of every batch.
+    count_model : {"nb", "dm"}, default "nb"
+        The count model of [`scRNA`][iscc.data.scRNA].
+    base_seed : int, default 1000
+        Batch ``b`` draws its cells and its technical noise from ``base_seed + b``.
+    **scrna_kwargs
+        Further keywords of [`scRNA`][iscc.data.scRNA], shared by every batch.
+
+    Returns
+    -------
+    (list of scRNA, dict, dict)
+        ``assays``, one run [`scRNA`][iscc.data.scRNA] per batch, each with ``obs`` carrying the
+        ``patient``, ``subgroup`` and ``clone`` of every cell and a ``batch_id``; and ``batches``
+        and ``assignment``, the maps of [`assign_batches`][iscc.cohort.assign_batches].
     """
     from ..data import scRNA
 
@@ -121,7 +174,19 @@ def run_cohort_batches(cohort, mapping="one_to_one", capacity=None, explicit=Non
 
 
 def concat_cohort_batches(assays):
-    """Concatenate per-batch AnnData into one labelled cohort AnnData (patient/subgroup preserved)."""
+    """Concatenate the batches of [`run_cohort_batches`][iscc.cohort.run_cohort_batches] into one
+    AnnData, keeping the patient and subgroup of every cell.
+
+    Parameters
+    ----------
+    assays : list of scRNA
+        The run batches.
+
+    Returns
+    -------
+    anndata.AnnData
+        The cells of every batch, with ``obs["batch_index"]`` naming the batch.
+    """
     import anndata as ad
 
     adatas = [a.to_anndata() for a in assays]

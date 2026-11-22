@@ -69,7 +69,17 @@ def _normal_ids():
 def biological_types(genotype_ids):
     """Coarse cell type per cell: cancer, epithelial, stromal, immune or host.
 
-    A normal cell's genotype id IS its type name; anything else is a cancer clone.
+    A normal cell's genotype id is its type name; any other id is a cancer clone.
+
+    Parameters
+    ----------
+    genotype_ids : array-like of str
+        The genotype id of each cell, as in the ``cell_type`` table of ``cell_data``.
+
+    Returns
+    -------
+    numpy.ndarray of str
+        One coarse type per cell.
     """
     normals = _normal_ids()
     return np.array([g if g in normals else "cancer" for g in map(str, genotype_ids)], dtype=object)

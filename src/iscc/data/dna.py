@@ -781,7 +781,30 @@ def run_dna_batches(cell_data, mode="bulk", n_batches=2, base_seed=42, design="s
       * "split"  — the sampled cells are partitioned across batches (single-cell only;
                    bulk pools all cells so "split" falls back to "shared").
     `breadth` defaults to the assay's own ("wgs", or the breadth of a single-cell `platform`).
-    Returns the list of run assay instances (each with `.batch.label` and `.to_anndata()`).
+
+    Parameters
+    ----------
+    cell_data : dict
+        The per-cell tables of a sample.
+    mode : {"bulk", "sc"}, default "bulk"
+        [`bulkDNA`][iscc.data.bulkDNA] or [`scDNA`][iscc.data.scDNA].
+    n_batches : int, default 2
+        Number of batches.
+    base_seed : int, default 42
+        Seed of the cell selection; batch ``i`` draws its technical noise from ``base_seed + 1 + i``.
+    design : {"shared", "split"}, default "shared"
+        Whether every batch measures the same cells or a share of them, as above.
+    breadth : {"wgs", "wes", "panel"}, optional
+        Capture breadth of every batch. Default None keeps the assay's own.
+    n_cells : int, default 100
+        Cells per batch (single-cell only).
+    **dna_kwargs
+        Further keywords of the assay, shared by every batch.
+
+    Returns
+    -------
+    list of DNA
+        One run assay per batch, each with ``batch.label`` and ``to_anndata()``.
     """
     cls = {"bulk": bulkDNA, "sc": scDNA}[mode]
     snv = cell_data["cell_snv"]

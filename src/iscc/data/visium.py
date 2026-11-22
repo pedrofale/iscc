@@ -46,7 +46,21 @@ def morans_i(values, coords, lengthscale=None):
     ``I = (n / W) * sum_ij w_ij z_i z_j / sum_i z_i^2`` with z the mean-centred values and a
     Gaussian distance weight ``w_ij = exp(-d_ij^2 / (2*L^2))`` (self-weight 0). I > 0 means
     nearby spots have similar values (positive autocorrelation); ~0 means no spatial structure.
-    `lengthscale` L defaults to the median nearest-neighbour distance (a local-neighbourhood scale).
+
+    Parameters
+    ----------
+    values : array-like, shape (n,)
+        One value per spot, for example its total counts.
+    coords : array-like, shape (n, 2)
+        The spot coordinates.
+    lengthscale : float, optional
+        The length scale L of the weights. Default None takes the median nearest-neighbour
+        distance, a local-neighbourhood scale.
+
+    Returns
+    -------
+    float
+        Moran's I, or NaN for fewer than three spots or constant values.
     """
     v = np.asarray(values, dtype=float).ravel()
     coords = np.asarray(coords, dtype=float)

@@ -526,6 +526,35 @@ def run_scrna_batches(cell_data, n_batches=2, base_seed=42, design="shared",
     differ by their own fitted parameters rather than only by their seed's realisation. The cell
     selection does not depend on it: the same cells land in the same batches whatever the
     overrides.
+
+    Parameters
+    ----------
+    cell_data : dict
+        The per-cell tables of a sample, for example a dissociation of
+        [`Resection`][iscc.sample.Resection].
+    n_batches : int, default 2
+        Number of batches.
+    base_seed : int, default 42
+        Seed of the cell selection; batch ``i`` draws its technical noise from ``base_seed + 1 + i``.
+    design : {"shared", "split"}, default "shared"
+        Whether every batch measures the same cells or a share of them, as above.
+    protocol : {"10x", "smartseq3"}, default "10x"
+        The protocol preset of every batch.
+    n_cells : int, default 100
+        Cells per batch.
+    count_model : {"nb", "dm"}, default "nb"
+        The count model of [`scRNA`][iscc.data.scRNA].
+    plate_layout : optional
+        One plate map for the whole run (plate protocols), as above.
+    batch_kwargs : list of dict, optional
+        Per-batch technical settings, as above.
+    **scrna_kwargs
+        Further keywords of [`scRNA`][iscc.data.scRNA], shared by every batch.
+
+    Returns
+    -------
+    list of scRNA
+        One run [`scRNA`][iscc.data.scRNA] per batch.
     """
     per_batch = _check_batch_kwargs(batch_kwargs, n_batches)
     cell_states = cell_data["cell_exp"]
@@ -561,10 +590,21 @@ def run_scrna_batches(cell_data, n_batches=2, base_seed=42, design="shared",
 
 
 def concat_batches(assays):
-    """Concatenate per-batch AnnData into one labelled object (for integration benchmarks).
+    """Concatenate the batches of [`run_scrna_batches`][iscc.data.run_scrna_batches] into one
+    labelled AnnData, for integration benchmarks.
 
-    Each batch's own hyper-parameters are kept in ``uns["batch_hyperparams"]`` (keyed by batch
+    The hyper-parameters of each batch are kept in ``uns["batch_hyperparams"]`` (keyed by batch
     label), so a run whose batches had different technical settings records them all.
+
+    Parameters
+    ----------
+    assays : list of scRNA
+        The run batches.
+
+    Returns
+    -------
+    anndata.AnnData
+        The cells of every batch, with ``obs["batch_index"]`` naming the batch.
     """
     import anndata as ad
 
