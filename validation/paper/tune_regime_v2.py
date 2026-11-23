@@ -50,6 +50,7 @@ CANONICAL_DISPERSAL = 0.9
 # rate beside five immune-free tumours of the same code.
 KILLS = (0.5, 1.0, 2.0, 4.0)
 KILLS2 = KILLS + (8.0,)            # the second grid adds a rate of 8 (appended, so earlier tasks keep their index)
+DISPLACED_KILLS = (7.0, 14.0, 28.0, 56.0)   # with the subtypes (8 / 0.575 = 14); 56 grown because 28 passed
 
 
 def immune(kill, selection=None):
@@ -88,6 +89,10 @@ def tasks(stage, overfill=None, d1=None, mu=None):
         kills = KILLS2 if stage == "immune_grid2" else KILLS
         return ([("current_ir", dict(selection=dict(sel)), CANONICAL_DISPERSAL, s) for s in range(1, 6)]
                 + [(f"immune_k{k:g}", immune(k, sel), CANONICAL_DISPERSAL, s) for k in kills for s in range(1, 6)])
+    if stage == "immune_displaced":   # the kill rate again, with immune cells that cancer displaces
+        sel, sp = dict(RG.IMMUNE_SELECTION), {**RG.IMMUNE_SPATIAL, "immune_displaceable": True}
+        return [(f"immune_k{k:g}", dict(spatial=dict(sp), selection=dict(sel), immune={"prob_kill": k}),
+                 CANONICAL_DISPERSAL, s) for k in DISPLACED_KILLS for s in range(1, 6)]
     if stage in ("immune_variant", "immune_subtypes"):
         # the variant as regime.py states it (immune_variant: in the stroma only; immune_subtypes: with
         # the immune subtypes and the rescaled kill rate), scored against immune_grid3's current_ir

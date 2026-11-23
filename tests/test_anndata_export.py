@@ -89,9 +89,11 @@ def clonal():
                       deme_params={"carrying_capacity": 16, "initial_cancer_cells": 5,
                                    "tau_deaths": "poisson", "tau_step": "fixed"},
                       spatial_params={"grid_size": 22, "structure_radius": 3,
-                                      # immune cells in the duct wall too, as when this fixture was
-                                      # tuned for the labelling tests (the default is now stroma only)
-                                      "immune_density": 0.1, "immune_duct_density": 0.1},
+                                      # immune cells in the duct wall too, and never displaced, as when
+                                      # this fixture was tuned for the labelling tests (the defaults are
+                                      # now stroma only, displaced by cancer cells)
+                                      "immune_density": 0.1, "immune_duct_density": 0.1,
+                                      "immune_displaceable": False},
                       update_mode="tau", tau=1.0)
     t.grow(n_steps=80, seed=3)
     return t

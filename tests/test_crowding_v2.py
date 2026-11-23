@@ -87,12 +87,39 @@ def test_structural_cap_holds_with_immortal_residents_and_eviction_opens_the_wal
 
 
 def test_immune_cells_hold_slots_but_are_not_evictable():
-    t = _tumour(K=10, spatial={"immune_density": 0.4}, update_mode="tau", tau=1.0)
+    t = _tumour(K=10, spatial={"immune_density": 0.4, "immune_displaceable": False}, update_mode="tau", tau=1.0)
     assert t._n_evictable(0) == 0                       # immune only -> nothing displaceable
     t.grow(n_steps=25, seed=1)
     _assert_cap(t)
     # immune cells are static and never displaced, so their count is exactly what was seeded
     assert all(d.get("immune", 0) == 4 for d in t.demes if "immune" in d)
+
+
+def test_cancer_above_capacity_displaces_immune_cells():
+    """The crowding law holds a full deme near K, below the slot cap where eviction acts, so cancer
+    takes immune cells' places through `_displace_immune`: one per cancer birth above K."""
+    for flag, left in ((True, 2), (False, 4)):
+        t = _tumour(K=10, spatial={"immune_density": 0.4, "immune_displaceable": flag}, update_mode="tau", tau=1.0)
+        d = next(i for i, x in enumerate(t.demes) if x.get("immune") == 4 and sum(x.values()) == 4)
+        cancer = next(g for g in t.genotypes if t._is_cancer(g))
+        assert t._n_evictable(d) == 0                   # never by slot eviction
+        t._add(d, cancer, 7)                            # 11 cells, one above K
+        assert t._displace_immune(d, 5, np.random.default_rng(0)) == (1 if flag else 0)
+        t._add(d, cancer, 1)                            # 11 again after the displacement
+        t._displace_immune(d, 1, np.random.default_rng(0))
+        assert t.demes[d]["immune"] == left
+
+
+def test_displacement_empties_tumour_nests_of_immune_cells():
+    on, off = (_tumour(K=10, spatial={"immune_density": 0.4, "immune_displaceable": f}, update_mode="tau", tau=1.0)
+               for f in (True, False))
+    for t in (on, off):
+        t.grow(n_steps=40, seed=1)
+        _assert_cap(t)
+    def immune_in_nests(t):
+        return sum(d.get("immune", 0) for i, d in enumerate(t.demes)
+                   if sum(c for g, c in d.items() if t._is_cancer(g)) >= t._cap_of(i) - 4)
+    assert immune_in_nests(on) < immune_in_nests(off)
 
 
 # --------------------------------------------------------------------------- the lottery competes

@@ -110,7 +110,10 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
           ``immune_duct_density`` (the same per duct-wall deme, the intraepithelial lymphocytes;
           default 0, the stroma only) and ``immune_composition`` (the shares of the immune subtypes,
           ``{"immune": T and NK cells, "myeloid": ..., "bplasma": B and plasma cells}``; default all
-          T and NK cells). Empty lumens get none, and only T and NK cells kill.
+          T and NK cells), and ``immune_displaceable`` (default True: each cancer birth that leaves a
+          deme above its carrying capacity pushes one immune cell out, so tumour nests lose them while
+          the stroma and the invasive front keep them). Empty lumens get none, and only T and NK
+          cells kill.
         - Ductal field: ``structure_radius`` (default 0, no glands), ``n_glands`` (default 1),
           ``gland_radius`` (default ``structure_radius``), ``min_gland_sep`` (the minimum
           distance between gland centres), ``stroma_fill_frac`` (stromal cells seeded per stroma
@@ -1529,6 +1532,7 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
                     self._convert_in_place(key[1], key[2], n, rng)
                 else:
                     self._add(tgt, key[1], n)
+            self._displace_immune(tgt, int(np.sum(acc)), rng)
         for di, gid, n in lost_swaps:
             self._convert_in_place(di, gid, n, rng)
 

@@ -16,6 +16,9 @@ class TissueMixin:
     _EVICTABLE = ("epithelial", "stromal", "host")
     def _init_compartment_hazards(self, p):
         """The compartment hazards and the basement-membrane gate."""
+        # Cancer taking over a deme pushes its immune cells out (`_displace_immune`), so dense tumour
+        # nests lose them while the stroma and the invasive front keep them. Default on.
+        self._immune_displaceable = bool((p.spatial or {}).get("immune_displaceable", True))
         # Compartment-dependent selection. Two local hazards,
         # each contributed by a resident normal compartment the gland geometry seeds and each
         # attenuated by a MATCHING heritable trait (breach / stromal_survival), exactly the shape of
@@ -340,6 +343,33 @@ class TissueMixin:
                 self._remove(deme_idx, g, int(k))
         return take
 
+    def _displace_immune(self, deme_idx, n_births, rng):
+        """Push immune cells out of a deme that cancer is taking over: each of ``n_births`` cancer
+        births that leaves the deme above its carrying capacity displaces one immune cell, while any
+        remain, drawn across the immune genotypes in proportion to their counts. The crowding law
+        holds a full deme near its carrying capacity, well below the slot cap where `_evict` acts,
+        so this is the step that removes immune cells from tumour nests. Returns the number removed;
+        draws no random number when it removes none or the deme holds one immune genotype."""
+        if not getattr(self, "_immune_displaceable", False) or not self._crowding or n_births <= 0:
+            return 0                                     # well mixed: no carrying capacity to exceed
+        deme = self.demes[deme_idx]
+        n = min(int(n_births), sum(deme.values()) - self._cap_of(deme_idx))
+        if n <= 0:
+            return 0
+        gids = sorted((g for g in deme if self.genotypes[g].type == "immune"), key=lambda g: self.genotypes[g].ord)
+        if not gids:
+            return 0
+        if len(gids) == 1:
+            k = min(n, deme[gids[0]])
+            self._remove(deme_idx, gids[0], k)
+            return k
+        counts = np.array([deme[g] for g in gids], dtype=np.int64)
+        take = min(n, int(counts.sum()))
+        for g, k in zip(gids, rng.multivariate_hypergeometric(counts, take)):
+            if k:
+                self._remove(deme_idx, g, int(k))
+        return take
+
     def _can_place(self, deme_idx, total=None):
         """Whether a newborn cell can acquire a slot in this deme — either a free one or one taken
         from a displaceable resident."""
@@ -361,6 +391,8 @@ class TissueMixin:
         if sum(self.demes[deme_idx].values()) >= self._slot_cap_of(deme_idx) and not self._evict(deme_idx, 1, rng):
             return False
         self._add(deme_idx, gid, 1)
+        if self._is_cancer(gid):
+            self._displace_immune(deme_idx, 1, rng)
         return True
 
     def _cross_gland_target(self, src_gland, rng):

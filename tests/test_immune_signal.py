@@ -41,10 +41,10 @@ def test_niche_strength_per_field():
 
 
 def test_immune_field_is_the_smoothed_immune_density():
-    t = _tumour(10.0)
+    t = _tumour(10.0, immune_displaceable=False)
     field = t.microenv_truth["immune"]
     assert field.shape == (len(t.demes),)
-    # uniform seeding at 0.3 of K: the field is 0.3 everywhere, smoothing or not
+    # uniform seeding at 0.3 of K, none displaced: the field is 0.3 everywhere, smoothing or not
     np.testing.assert_allclose(field, 0.3)
     np.testing.assert_allclose(t._immune_field(lengthscale=0), 0.3)
 

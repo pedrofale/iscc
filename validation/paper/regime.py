@@ -111,7 +111,12 @@ MET_SELECTION = {"prop_met_survival": 0.015, "met_survival_effects": 3.0, "met_s
 # 9,675, B-cells and Plasmablasts 6,730 of 51,619 immune cells) corrected by the default recovery (T and
 # NK, B and plasma cells 10 and myeloid cells 5 times malignant cells): 0.575, 0.315 and 0.11. A variant passes IMMUNE_SPATIAL as `spatial`, IMMUNE_SELECTION as
 # `selection` and IMMUNE as `immune`.
-IMMUNE_SPATIAL = {"immune_density": 0.2, "immune_duct_density": 0.0,
+# Immune cells stay in their demes (`immune_displaceable` False, the variant every stored immune tumour
+# was grown with). With displacement, each cancer birth above a deme's carrying capacity pushes one immune
+# cell out, so tumour nests lose them; the registered pick at that setting is rate 28, at which growth takes
+# 1.5 times the immune-free time and resistance is selected 14.6 times (exp-immune-variant). Adopting it
+# awaits Pedro: True here, prob_kill 28 in IMMUNE, and R14, R0, R6 and the Fig 5 pilot regrown.
+IMMUNE_SPATIAL = {"immune_density": 0.2, "immune_duct_density": 0.0, "immune_displaceable": False,
                   "immune_composition": {"immune": 0.575, "myeloid": 0.315, "bplasma": 0.11}}
 # Immune resistance at 0.2% of genes, the target breach and stromal survival were cut to (14 genes
 # instead of the example config's 116). At 2% point mutations hit the trait so often that it spreads
