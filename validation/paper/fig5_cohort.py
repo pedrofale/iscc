@@ -174,15 +174,13 @@ def _cpu():
 
 
 def _peak_mb():
-    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    # ru_maxrss is in bytes on macOS and in kilobytes on Linux.
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 ** 2 if sys.platform == "darwin" else 1024)
 
 
 def _commit():
-    try:
-        return subprocess.run(["git", "-C", REPO, "rev-parse", "--short", "HEAD"], capture_output=True,
-                              text=True, check=True).stdout.strip()
-    except Exception:
-        return None
+    # A copy without .git (a cluster rsync, a laptop snapshot) reads ISCC_COMMIT or the COMMIT file.
+    return REG._commit()
 
 
 def blocks(n_patients, block):
