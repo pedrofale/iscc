@@ -33,6 +33,7 @@ Bias = namedtuple("Bias", "step techs bias param default how cond src fit_src")
 _D, _B, _R, _V = "src/iscc/data/dna.py", "src/iscc/data/batch.py", "src/iscc/data/rna.py", "src/iscc/data/visium.py"
 _ED, _ER, _EV = "src/iscc/data/estimate_dna.py", "src/iscc/data/estimate.py", "src/iscc/data/estimate_visium.py"
 _DIS, _RES = "src/iscc/sample/dissociation/dissociation.py", "src/iscc/sample/resection/resection.py"
+_HX = "src/iscc/data/human/expression.py"
 
 # One entry per (bias, technologies that share its default and fit status). ``src`` / ``fit_src`` are
 # tuples of "path:line"; the default and the estimator's bookkeeping must be on those lines.
@@ -40,69 +41,71 @@ BIASES = [
     # --- sampling: the sample-prep biology, before any library is made -------------------------------
     Bias("sampling", ("scDNA", "scRNA"), "cell-type recovery", "recovery_probs",
          "immune 0.4 ... cancer 0.9", SET, None,
-         (f"{_DIS}:46",), None),                                       # DEFAULT_RECOVERY
+         (f"{_DIS}:52",), None),                                       # DEFAULT_RECOVERY
     Bias("sampling", ("scRNA",), "dissociation stress", "stress_strength", "0 (random 5% of genes)", SET, None,
-         (f"{_DIS}:127", f"{_DIS}:78"), None),
+         (f"{_DIS}:135", f"{_DIS}:86"), None),
     Bias("sampling", ("Visium",), "section thickness", "depth_frac", "0.5", SET, None,
-         (f"{_RES}:256",), None),
+         (f"{_RES}:330",), None),
     # --- library: capture and amplification ------------------------------------------------------------
     Bias("library", ("WGS", "scDNA"), "GC bias", "gc_curve_sigma", "0.20 (panel 0.05)", COND, "needs GC",
-         (f"{_D}:41", f"{_D}:47"), (f"{_ED}:449",)),
+         (f"{_D}:45", f"{_D}:51"), (f"{_ED}:126",)),
     Bias("library", ("WGS", "scDNA"), "capture variability", "capture_sigma", "0 (panel 0.45)", COND,
-         "WES or panel", (f"{_D}:41", f"{_D}:47"), (f"{_ED}:475",)),
+         "WES or panel", (f"{_D}:45", f"{_D}:51"), (f"{_ED}:127",)),
     Bias("library", ("WGS", "scDNA"), "FFPE C>T damage", "ffpe_ct_rate", "0", COND, "needs C>T mask",
-         (f"{_B}:711",), (f"{_ED}:492",)),
-    Bias("library", ("scDNA",), "amplification lumpiness", "kappa", "5", FIT, None,
-         (f"{_D}:530",), (f"{_ED}:470",)),
+         (f"{_B}:751",), (f"{_ED}:489",)),
+    Bias("library", ("scDNA",), "amplification lumpiness", "kappa", "202,799 on 5,787 loci", FIT, None,
+         (f"{_D}:65",), (f"{_ED}:223",)),
     Bias("library", ("scDNA",), "allelic dropout", "ado_rate", "0.20", COND, "needs het sites",
-         (f"{_D}:530",), (f"{_ED}:500",)),
+         (f"{_D}:65",), (f"{_ED}:365",)),
     Bias("library", ("scDNA",), "allelic imbalance", "beta_binom_conc", "30", COND, "needs het sites",
-         (f"{_D}:531",), (f"{_ED}:503",)),
+         (f"{_D}:66",), (f"{_ED}:128",)),
     Bias("library", ("scDNA",), "doublets", "doublet_rate", "0.02", SET, None,
-         (f"{_D}:531",), (f"{_ED}:66",)),                              # estimate_dna _PRIOR_ONLY
+         (f"{_D}:66",), (f"{_ED}:63",)),                              # estimate_dna _PRIOR_ONLY
     Bias("library", ("scRNA",), "count overdispersion", "dispersion", "0.35", FIT, None,
-         (f"{_R}:55",), (f"{_ER}:471",)),
+         (f"{_R}:55",), (f"{_ER}:488",)),
     Bias("library", ("scRNA",), "dropout", "dropout_mid", "0 (off)", COND, "fit_dropout=True",
-         (f"{_R}:56", f"{_R}:69"), (f"{_ER}:477",)),
+         (f"{_R}:56", f"{_R}:69"), (f"{_ER}:528",)),
     Bias("library", ("scRNA",), "ambient RNA", "ambient_frac", "0.05", SET, None,
          (f"{_R}:56",), (f"{_ER}:69",)),                               # estimate_rna _PRIOR_ONLY
     Bias("library", ("scRNA",), "doublets", "doublet_rate", "0.05", SET, None,
          (f"{_R}:56",), (f"{_ER}:69",)),
     Bias("library", ("Visium",), "count overdispersion", "kappa", "1,400,000", FIT, None,
-         (f"{_B}:943",), (f"{_EV}:675",)),
+         (f"{_B}:983",), (f"{_EV}:675",)),
     Bias("library", ("Visium",), "ambient RNA", "ambient_frac", "0.05", SET, None,
-         (f"{_B}:941",), (f"{_EV}:68",)),                              # estimate_visium _PRIOR_ONLY
+         (f"{_B}:981",), (f"{_EV}:68",)),                              # estimate_visium _PRIOR_ONLY
+    Bias("library", ("Visium",), "gene capture", "visium_platform", "per gene, Wu et al. 2021", FIT, None,
+         (f"{_HX}:105",), None),                                # load_visium_platform_factor
     # --- sequencing: depth and its dispersion -----------------------------------------------------------
     Bias("sequencing", ("WGS", "scDNA"), "depth", "mu_depth", "30 (x0.3 single cell)", FIT, None,
-         (f"{_D}:41", f"{_D}:270"), (f"{_ED}:440",)),
-    Bias("sequencing", ("WGS",), "depth dispersion", "kappa", "2000", FIT, None,
-         (f"{_D}:360",), (f"{_ED}:470",)),
+         (f"{_D}:45", f"{_D}:593"), (f"{_ED}:435",)),
+    Bias("sequencing", ("WGS",), "depth dispersion", "kappa", "121,241 on 20,000 loci", FIT, None,
+         (f"{_D}:63",), (f"{_ED}:223",)),
     Bias("sequencing", ("WGS", "scDNA"), "base errors", "error_rate", "0.001", COND, "needs variant mask",
-         (f"{_B}:706",), (f"{_ED}:488",)),
+         (f"{_B}:746",), (f"{_ED}:127",)),
     Bias("sequencing", ("scRNA",), "library size", "mu_lib, sigma_lib", "4000, 0.35", FIT, None,
-         (f"{_R}:55",), (f"{_ER}:468",)),
+         (f"{_R}:55",), (f"{_ER}:111",)),
     Bias("sequencing", ("Visium",), "spot depth", "mu_counts, sigma_counts", "20000, 0.45", FIT, None,
-         (f"{_B}:930", f"{_B}:931"), (f"{_EV}:658",)),
+         (f"{_B}:970", f"{_B}:971"), (f"{_EV}:658",)),
     # --- spatial: Visium only (the dissociated assays lose cell positions) ----------------------------
     Bias("spatial", ("Visium",), "capture field", "field_sigma, field_lengthscale", "0.70, 18", FIT, None,
-         (f"{_B}:932", f"{_B}:933"), (f"{_EV}:660", f"{_EV}:663")),
+         (f"{_B}:973", f"{_B}:972"), (f"{_EV}:660", f"{_EV}:663")),
     Bias("spatial", ("Visium",), "edge falloff", "edge_sigma", "0.30", COND, "needs off-tissue spots",
-         (f"{_B}:934",), (f"{_EV}:622",)),
+         (f"{_B}:974",), (f"{_EV}:622",)),
     Bias("spatial", ("Visium",), "spot swapping", "bleed_rate", "0 (off)", COND, "needs off-tissue spots",
-         (f"{_B}:937",), (f"{_EV}:615",)),
+         (f"{_B}:977",), (f"{_EV}:615",)),
     Bias("spatial", ("Visium",), "lateral diffusion", "diffusion_sigma", "0", SET, None,
-         (f"{_B}:936",), (f"{_EV}:68",)),
+         (f"{_B}:976",), (f"{_EV}:68",)),
     # --- batch: what differs between two runs of the same assay ---------------------------------------
     Bias("batch", ("WGS", "scDNA"), "depth shift", "depth_batch_sigma", "0.05", COND, ">=2 batches",
-         (f"{_B}:707",), (f"{_ED}:511",)),
+         (f"{_B}:747",), (f"{_ED}:510",)),
     Bias("batch", ("scRNA",), "per-gene factor", "sigma_batch", "0.10", COND, ">=2 batches",
-         (f"{_R}:55",), (f"{_ER}:491",)),
+         (f"{_R}:55",), (f"{_ER}:503",)),
     Bias("batch", ("scRNA",), "depth shift", "depth_batch_sigma", "0.05", COND, ">=2 batches",
-         (f"{_R}:58",), (f"{_ER}:491",)),
+         (f"{_R}:58",), (f"{_ER}:504",)),
     Bias("batch", ("scRNA",), "plate depth", "plate_sigma, well_sigma", "0, 0.15 (Smart-seq3)", SET, None,
          (f"{_R}:70",), (f"{_ER}:70",)),
     Bias("batch", ("Visium",), "per-gene factor", "sigma_batch", "0.10", COND, ">=2 sections",
-         (f"{_B}:940",), (f"{_EV}:685",)),
+         (f"{_B}:980",), (f"{_EV}:685",)),
 ]
 
 
@@ -116,7 +119,7 @@ PLAIN = {
     ("GC bias", "gc_curve_sigma", "0.20 (panel 0.05)"): "curve strength 0.20, panel 0.05",
     ("capture variability", "capture_sigma", "0 (panel 0.45)"): "log-normal SD 0, panel 0.45",
     ("FFPE C>T damage", "ffpe_ct_rate", "0"): "rate 0",
-    ("amplification lumpiness", "kappa", "5"): "concentration 5",
+    ("amplification lumpiness", "kappa", "202,799 on 5,787 loci"): "concentration 202,799 on 5,787 loci",
     ("allelic dropout", "ado_rate", "0.20"): "rate 0.20",
     ("allelic imbalance", "beta_binom_conc", "30"): "beta-binomial concentration 30",
     ("doublets", "doublet_rate", "0.02"): "rate 0.02",
@@ -126,7 +129,7 @@ PLAIN = {
     ("doublets", "doublet_rate", "0.05"): "rate 0.05",
     ("count overdispersion", "kappa", "1,400,000"): "concentration 1,400,000",
     ("depth", "mu_depth", "30 (x0.3 single cell)"): "mean 30x, single cells 9x",
-    ("depth dispersion", "kappa", "2000"): "concentration 2000",
+    ("depth dispersion", "kappa", "121,241 on 20,000 loci"): "concentration 121,241 on 20,000 loci",
     ("base errors", "error_rate", "0.001"): "rate 0.001",
     ("library size", "mu_lib, sigma_lib", "4000, 0.35"): "mean 4000, log-normal SD 0.35",
     ("spot depth", "mu_counts, sigma_counts", "20000, 0.45"): "mean 20000, log-normal SD 0.45",
@@ -137,6 +140,7 @@ PLAIN = {
     ("depth shift", "depth_batch_sigma", "0.05"): "log-normal SD 0.05",
     ("per-gene factor", "sigma_batch", "0.10"): "log-normal SD 0.10",
     ("plate depth", "plate_sigma, well_sigma", "0, 0.15 (Smart-seq3)"): "plate SD 0, well SD 0.15 in Smart-seq3",
+    ("gene capture", "visium_platform", "per gene, Wu et al. 2021"): "factor per human gene, fitted on real tumors",
 }
 FITTED_GIVEN = {
     "needs GC": "fitted given GC content", "WES or panel": "fitted on exome or panel data",
@@ -173,7 +177,26 @@ def check(repo=REPO):
             missing = [t for t in tokens if t not in text]
             if missing:
                 bad.append(f"{b.bias} [{', '.join(b.techs)}] {kind} {locs}: no {missing}")
+            if kind == "src" and b.param not in _VALUE_UNCHECKED:
+                stale = [v for v in _numbers(b.default, percent=True) if v not in _numbers(text)]
+                if stale:
+                    bad.append(f"{b.bias} [{', '.join(b.techs)}] src {locs}: default {stale} not on the line")
     return bad
+
+
+# Defaults whose printed value is not a number on the src line (a dict spread over lines, a citation).
+_VALUE_UNCHECKED = ("recovery_probs", "visium_platform")
+
+
+def _numbers(text, percent=False):
+    """The numbers written in ``text`` (``1,400,000`` and ``1_400_000.0`` alike; ``5%`` as 0.05 when
+    ``percent``), rounded so that ``0.20`` and ``0.2`` agree."""
+    import re
+    out = set()
+    for m in re.finditer(r"(?<![\w.])(\d[\d,_]*(?:\.\d+)?)(%?)", text):
+        v = float(m.group(1).replace(",", "").replace("_", ""))
+        out.add(round(v / 100 if (percent and m.group(2)) else v, 6))
+    return out
 
 
 # --- render --------------------------------------------------------------------------------------
