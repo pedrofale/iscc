@@ -61,8 +61,9 @@ selection_params:
   prop_immune_resistance: 0.02
   # This is a DCIS->IDC sample with NO metastasis and NO treatment, so the met + chemo-resistance
   # traits are turned OFF (they belong to configs/landing.yaml). Otherwise the engine's default
-  # non-zero rates seed latent met_survival / treatment_resistance genes that never get selected here
-  # but would mislabel most clones as "metastatic" / "chemo-resistant" in the stage view.
+  # treatment-resistance rate (0.1) seeds latent treatment_resistance genes that never get selected
+  # here but would mislabel most clones as "chemo-resistant" in the stage view (met_survival is 0 in
+  # the engine too; it is set here explicitly).
   prop_met_survival: 0.0
   prop_treatment_resistance: 0.0
   # BREACH-GATED invasion (see spatial_params.breach_gated_invasion): crossing the basement membrane

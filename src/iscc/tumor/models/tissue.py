@@ -52,9 +52,10 @@ class TissueMixin:
         # per-deme fixed point sits at K/(1+margin) (slightly below K) and the restoring force above
         # K is firm rather than marginal. 0 recovers the plain fixed-point-at-K form. See _death_rate.
         self.crowding_margin = p.deme.get("crowding_margin", 0.1)
-        # maximum_death_rate MUST be >= max_birth_rate for the cap to bind: a clone whose division
+        # maximum_death_rate must exceed max_birth_rate for the cap to bind: a clone whose division
         # evolved up to max_birth_rate needs its crowding death to be able to reach (and exceed) that
-        # rate. Default 1.0 (>= the 0.8 max_birth_rate default); a lower value lets a deme overfill.
+        # rate. Default 1.0 (above Cell's max_birth_rate default of 0.3); with crowding on, a value at or
+        # below max_birth_rate fails at construction (the effective-d1 check below).
         self.maximum_death_rate = p.deme.get("maximum_death_rate", 1.0)
         # Resident-pressure reference division rate (invasion gate). A deme's
         # immortal normal cells (epithelial/stromal) contribute to a cancer cell's crowding death at

@@ -7,9 +7,8 @@ repo_name: pedrofale/iscc
 edit_uri: edit/dev/docs/
 docs_dir: docs
 
-# Not published yet (kept in docs/ to finish privately): the Guide pages (parameters/schema).
+# Not published yet (kept in docs/ to finish privately): the output schema page.
 exclude_docs: |
-  parameters.md
   schema.md
 
 theme:
@@ -113,6 +112,7 @@ nav:
   - Home: index.md
   - Overview: overview.md
   - Installation: installation.md
+  - Parameters: parameters.md
   - Tutorials:
       - Quickstart: tutorials/01_quickstart.ipynb
       - Shape the tumor: tutorials/02_shape_the_tumor.ipynb

@@ -28,14 +28,13 @@ DEFAULT_THRESHOLDS = {
     "min_subclones": 2,      # fewer resolvable subclones than this (at high diversity) -> a
                              # mutation-saturated cloud with no clonal structure
     "tmb_min": 1.0,          # mean mutated sites/cell below this -> no-mutation monoclonal
-    "tmb_frac_max": 0.5,     # fraction of the genome mutated/cell above this -> hypermutated mush
+    "tmb_frac_max": 0.5,     # fraction of the genome mutated/cell above this -> hypermutated
     "sweep_enrichment": 1.5, # driver-vs-passenger VAF ratio above this -> a selective sweep
     "confinement_min": 0.1,  # clone spatial confinement below this (>=2 subclones) -> well-mixed
     "contrast_min": 0.05,    # hypoxia core-rim contrast below this -> no O2 gradient
     "fga_max": 0.95,         # fraction-genome-altered above this -> CNA runaway
     "ploidy_max_plausible": 4.5,  # mean cancer ploidy above this -> implausible (WGD/amp runaway; advisory)
     "min_genes": 100,        # fewer than this many genes -> trivial genome
-    "overfill_mult": 3.0,    # mean cells/occupied-deme above this x carrying_capacity -> demes over-filling
     "within_clone_frac_min": 0.05,  # within-clone share of program-activity variance below this ->
                                     # clone == expression state (skipped when programs are off)
     "vaf_1f_rsq": None,      # reported only (context-dependent under selection); not a hard gate
@@ -197,14 +196,16 @@ def clone_confinement(tumor, subclone_freq=0.01):
     distance of its cells from the clone centroid) relative to the whole tumour's spread; a clone
     confined to a compact patch has a small ratio, a clone smeared across the whole lesion has a
     ratio near 1. We return ``1 - (size-weighted mean ratio)``, so **high ⇒ territories** and
-    **~0 ⇒ well-mixed** — the regime (dispersal_rate too high vs division_rate) that breaks the
-    PEtracer lineage–space confound and the multi-region-phylogeny benchmarks.
+    **~0 ⇒ well-mixed** — the regime (dispersal_rate, the per-division probability that a daughter
+    disperses, too high) that breaks the PEtracer lineage–space confound and the
+    multi-region-phylogeny benchmarks.
 
-    We use spatial confinement rather than a naive Moran's I of clone labels because, in this
-    engine, raising the dispersal rate ALSO lowers the mutation branch probability
-    ``mut/(mut+dispersal)`` and so reduces the number of clones — a label-Moran's I is confounded by
-    that (fewer, larger clones can look *more* autocorrelated), whereas per-clone spatial spread
-    isolates mixing cleanly. Returns nan with fewer than two subclones or an unresolved geometry.
+    We use spatial confinement rather than a naive Moran's I of clone labels because a label-Moran's
+    I also depends on how many clones there are and how large they grow (fewer, larger clones can
+    look *more* autocorrelated), whereas per-clone spatial spread isolates mixing. In this engine
+    mutation and dispersal are independent per division (``mutation_rate`` and ``dispersal_rate``
+    are separate per-division probabilities), so dispersal moves cells without changing how often
+    they mutate. Returns nan with fewer than two subclones or an unresolved geometry.
     """
     gc = _cancer_gids_counts(tumor)
     total_cancer = sum(c for _, c in gc)
@@ -422,8 +423,8 @@ def diagnose(tumor, thresholds=None, verbose=False):
 
     if extinct:
         # everything downstream is undefined on an empty tumour; skip the phenotype checks.
-        for name in ("monoclonal", "low_mutation", "hypermutated", "well_mixed", "cna_runaway",
-                     "overfilled", "clone_is_state"):
+        for name in ("monoclonal", "no_subclones", "low_mutation", "hypermutated", "well_mixed",
+                     "cna_runaway", "overfilled", "clone_is_state"):
             checks.append(Check(name, True, None, None, skipped=True))
         checks.append(Check("no_gradient", True, None, None, skipped=True))
         diag = TumorDiagnosis(metrics, checks, advisories)
@@ -445,14 +446,15 @@ def diagnose(tumor, thresholds=None, verbose=False):
                         "too few mutations/cell: raise mutation_rate / n_snvs_per_allele"))
     checks.append(Check("hypermutated", tmb_frac <= th["tmb_frac_max"], tmb_frac,
                         th["tmb_frac_max"],
-                        "hypermutated mush (broken 1/f tail): lower mutation_rate / n_snvs_per_allele"))
+                        "hypermutated (broken 1/f tail): lower mutation_rate / n_snvs_per_allele"))
 
     # well-mixed — only meaningful with >=2 spatial subclones (else it is monoclonal, not mixed).
     if n_subclones >= 2 and not np.isnan(confinement):
         checks.append(Check("well_mixed", confinement >= th["confinement_min"], confinement,
                             th["confinement_min"],
-                            "well-mixed (no clonal territories): lower dispersal_rate relative to "
-                            "division_rate -- BREAKS the PEtracer & multi-region benchmarks"))
+                            "well-mixed (no clonal territories): lower dispersal_rate (a "
+                            "per-division probability) -- BREAKS the PEtracer & multi-region "
+                            "benchmarks"))
     else:
         checks.append(Check("well_mixed", True, confinement, th["confinement_min"], skipped=True))
 
@@ -490,19 +492,21 @@ def diagnose(tumor, thresholds=None, verbose=False):
         checks.append(Check("clone_is_state", True, within_frac, th["within_clone_frac_min"],
                             skipped=True))
 
-    # demes over-filling — the carrying-capacity QC. With density-dependent
-    # death the mean cells/occupied-deme should sit near carrying_capacity; a value far above K means
-    # the cap is not binding (cells piling into a few demes rather than spreading). Skipped in the
-    # well-mixed regime (carrying_capacity None/0), which has no per-deme ceiling by design.
-    K = getattr(tumor, "carrying_capacity", None)
-    crowding_on = getattr(tumor, "_crowding", K is not None and (K or 0) > 0)
-    if crowding_on and K and not np.isnan(occupancy):
-        limit = th["overfill_mult"] * K
-        checks.append(Check("overfilled", occupancy <= limit, occupancy, limit,
-                            "demes over-filling (mean cells/deme >> carrying_capacity): the per-deme "
-                            "cap is not binding -- set maximum_death_rate >= max_birth_rate"))
+    # demes over their slot cap — the carrying-capacity QC. A deme holds at most
+    # floor(crowding_overfill x K) cells, with its own K (K_duct / K_stroma / K_met where the field
+    # sets one): a newborn or arriving cell takes a free slot, takes the place of a displaced
+    # resident, or fails (``_slot_cap_of``, ``_place_one``). This is an invariant of the engine, so a
+    # failure means the cap was bypassed, not a parameter to tune. Skipped in the well-mixed regime
+    # (carrying_capacity None/0), which has no per-deme ceiling by design. ``deme_occupancy`` stays a
+    # reported metric.
+    slot_cap = getattr(tumor, "_slot_cap_of", None)
+    if getattr(tumor, "_crowding", False) and slot_cap is not None:
+        n_over = sum(1 for i, d in enumerate(tumor.demes) if d and sum(d.values()) > slot_cap(i))
+        checks.append(Check("overfilled", n_over == 0, n_over, 0,
+                            "demes above their slot cap floor(crowding_overfill x K): the structural "
+                            "cap was bypassed -- an engine bug, please report it"))
     else:
-        checks.append(Check("overfilled", True, occupancy, None, skipped=True))
+        checks.append(Check("overfilled", True, None, None, skipped=True))
 
     # no microenvironment gradient — only when hypoxia is enabled.
     if np.isnan(contrast):

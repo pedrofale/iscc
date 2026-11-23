@@ -12,7 +12,6 @@ import numpy as np
 import pytest
 
 from iscc.tumor.models import GenotypeTumor
-from iscc.tumor.diagnostics import DEFAULT_THRESHOLDS
 
 GENOME = {"n_segments": 3, "segment_size": 60}
 SELECTION = {"prop_driver": 0.1, "driver_effects": 1.1}
@@ -133,12 +132,28 @@ def test_no_gradient_skipped_when_microenv_off():
     assert ng.skipped and ng.ok
 
 
-def test_overfilled_check_passes_when_demes_cap():
-    # with density-dependent death, demes cap near K, so mean cells/deme is close to
-    # carrying_capacity and the over-fill check passes.
-    diag = _grow(steps=900).diagnose()
-    assert "overfilled" not in _flags(diag)
-    assert diag["deme_occupancy"] <= DEFAULT_THRESHOLDS["overfill_mult"] * DEME["carrying_capacity"]
+def test_overfilled_check_passes_on_a_grown_tumour():
+    # a birth or an arriving disperser takes a free slot or fails, so no deme of a grown tumour holds
+    # more than floor(crowding_overfill * K) cells: the slot-cap check runs and passes.
+    t = _grow(steps=900)
+    diag = t.diagnose()
+    ov = [c for c in diag.checks if c.name == "overfilled"][0]
+    assert not ov.skipped and ov.ok and ov.value == 0
+    assert diag["deme_occupancy"] <= max(t._slot_cap_of(i) for i, d in enumerate(t.demes) if d)
+
+
+def test_overfilled_check_fails_when_a_deme_exceeds_its_slot_cap():
+    # the engine never fills a deme past its slot cap, so push one occupied deme over it by hand.
+    t = _grow(steps=900)
+    i = next(i for i, d in enumerate(t.demes) if any(t._is_cancer(g) for g in d))
+    gid = next(g for g in t.demes[i] if t._is_cancer(g))
+    extra = t._slot_cap_of(i) - sum(t.demes[i].values()) + 1
+    t.demes[i][gid] += extra
+    t.genotypes_counts[gid] += extra
+    diag = t.diagnose()
+    assert "overfilled" in _flags(diag)
+    ov = [c for c in diag.checks if c.name == "overfilled"][0]
+    assert ov.value == 1 and "slot cap" in ov.hint
 
 
 def test_overfilled_skipped_when_well_mixed():
