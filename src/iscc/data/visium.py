@@ -151,13 +151,12 @@ class Visium(Assay):
         Per-gene batch-factor LogNormal sd, shared across spots (Splatter ``batch.facScale``).
     ambient_frac : float, default 0.05
         Fraction of each spot's library drawn as ambient "soup" contamination.
-    kappa : float, default 300000.0
+    kappa : float, default 1400000.0
         Dirichlet-multinomial concentration (only for ``count_model="dm"``); large -> ~
         multinomial, small -> lumpy proportions. It inflates every gene's variance by
         ``(N + kappa) / (1 + kappa)`` at a spot depth ``N``, whatever the gene set, so a fitted value
         applies to growth genes and human genes alike. The default is the human layer's
-        ``HUMAN_VISIUM_KAPPA``: the real section bounds the technical concentration from below
-        only.
+        ``HUMAN_VISIUM_KAPPA``, fitted by indirect inference to a real section.
     nb_dispersion : float, default 0.30
         Negative-binomial overdispersion phi (``var = mu + phi*mu^2``; only for
         ``count_model="nb"``).

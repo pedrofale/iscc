@@ -22,22 +22,20 @@ _NORMALS = frozenset(normal_names)
 GENOME = "GRCh38"
 # Dirichlet-multinomial concentration for Visium counts over the human genes, by indirect inference
 # against 10x's V1_Breast_Cancer_Block_A_Section_1. `estimate_visium` (count model "dm") on its 3,798
-# in-tissue spots gives 82,165 over the layer's 35,061 genes (validation/data/fit_human_visium_kappa.py;
-# 89,197 over all 36,601 features), but that reads the section's tissue heterogeneity as count noise.
-# The same estimator on a simulated section returns 55,416 at an input of 82,165, 81,464 at
-# 300,000 and 81,592 with no count noise at all (fit_human_visium_kappa_indirect.py): iscc's simulated
-# tissue already accounts for the real dispersion, so the technical concentration is only bounded from
-# below, and 300,000 is the smallest tested value that reproduces the real estimate within 1%. It is
-# also the default `VisiumBatchHyperParams.kappa`: the Dirichlet-multinomial inflates every gene's
+# in-tissue spots gives 89,197 over all 36,601 features (validation/data/fit_human_visium_kappa.py), but
+# that reads the section's tissue heterogeneity as count noise, so the same estimator runs on simulated
+# sections at several inputs (fit_human_visium_kappa_indirect.py) and the input that reproduces the real
+# estimate is kept. On a section of the regrown immune R14 tumour (disp0.9_seed1, 2,608 spots, three
+# Visium seeds per input; 2026-11-23, programme factor on cancer cells only) the estimate is 77,014 at
+# 300,000, 85,698 at 600,000, 87,996 at 1e6, 90,274 at 2e6, 93,476 at 5e6 and 93,523 at 1e9 (seed sd
+# 1,200-3,200), so it crosses 89,197 at about 1.4e6 (log-linear between 1e6 and 2e6; not run at 1.4e6).
+# It is also the default `VisiumBatchHyperParams.kappa`: the Dirichlet-multinomial inflates every gene's
 # variance by (N + kappa) / (1 + kappa) whatever the gene set, so the value holds for the growth genes
 # too. A small kappa (the old default was 50) piles each spot's counts onto a few genes at any gene count.
-# Not refitted since the depth change (864cd90) or the layer's move to all 36,601 genes: on 2026-11-22
-# the same check gave 80,480 at 300,000 and 97,673 at 1e9 over all genes (real 89,197), and 74,276 and
-# 90,126 over the arm genes (real 82,165), so the value no longer saturates. With the platform factor
-# and the fitted programme strength (2026-11-23) an immune R14 section gives 79,904 at 300,000 and
-# 91,310-93,634 from 1e6 up (real 89,197); it is refitted once it is settled whether normal cells carry
-# programmes on the human genes, which moves the tissue's own dispersion again.
-HUMAN_VISIUM_KAPPA = 300_000.0
+# It was 300,000 from 2026-11-13, when the simulated estimate saturated below the real one; the depth
+# change, the move to all genes, the platform factor and the programme strength each changed the
+# simulated tissue's own dispersion since.
+HUMAN_VISIUM_KAPPA = 1_400_000.0
 
 
 def barcodes(n, seed=0, suffix="-1"):

@@ -68,7 +68,7 @@ BIASES = [
          (f"{_R}:56",), (f"{_ER}:69",)),                               # estimate_rna _PRIOR_ONLY
     Bias("library", ("scRNA",), "doublets", "doublet_rate", "0.05", SET, None,
          (f"{_R}:56",), (f"{_ER}:69",)),
-    Bias("library", ("Visium",), "count overdispersion", "kappa", "300,000", FIT, None,
+    Bias("library", ("Visium",), "count overdispersion", "kappa", "1,400,000", FIT, None,
          (f"{_B}:943",), (f"{_EV}:675",)),
     Bias("library", ("Visium",), "ambient RNA", "ambient_frac", "0.05", SET, None,
          (f"{_B}:941",), (f"{_EV}:68",)),                              # estimate_visium _PRIOR_ONLY
@@ -124,7 +124,7 @@ PLAIN = {
     ("dropout", "dropout_mid", "0 (off)"): "midpoint 0 (off)",
     ("ambient RNA", "ambient_frac", "0.05"): "share 0.05",
     ("doublets", "doublet_rate", "0.05"): "rate 0.05",
-    ("count overdispersion", "kappa", "300,000"): "concentration 300,000",
+    ("count overdispersion", "kappa", "1,400,000"): "concentration 1,400,000",
     ("depth", "mu_depth", "30 (x0.3 single cell)"): "mean 30x, single cells 9x",
     ("depth dispersion", "kappa", "2000"): "concentration 2000",
     ("base errors", "error_rate", "0.001"): "rate 0.001",

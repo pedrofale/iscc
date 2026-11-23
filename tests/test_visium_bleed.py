@@ -48,8 +48,9 @@ def _digest(vz):
 # digest of the default assay on this section: with bleed and the tissue edge off it must not move.
 # Re-pinned (was cdf7ab731f44d5f7) when the capture field became normalised over the tissue spots,
 # the ambient soup became a share of the library rather than counts on top of it, and the default
-# kappa became 300,000 (visium-depth).
-DEFAULT_DIGEST = "9572b2c7e5dcecab"
+# kappa became 300,000 (visium-depth); re-pinned again (was 9572b2c7e5dcecab) when the default kappa became
+# 1,400,000 (visium-kappa-refit).
+DEFAULT_DIGEST = "5f7add0ff4f1470c"
 
 
 def test_kernel_columns_sum_to_one():

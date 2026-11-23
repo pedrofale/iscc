@@ -960,7 +960,7 @@ class VisiumBatchHyperParams:
     # their composition, so unlike the DNA concentration (kappa_loci) it is not rescaled by the number
     # of genes. The direct fit (89,197 over the section's 3,798 in-tissue spots) reads the tissue's
     # heterogeneity as count noise, so it bounds the technical kappa from below; a simulated section
-    # reproduces the real estimate from an input of 300,000 up (HUMAN_VISIUM_KAPPA, by indirect
+    # reproduces the real estimate at an input of about 1,400,000 (HUMAN_VISIUM_KAPPA, by indirect
     # inference). The old default of 50 inflated each gene's variance about 390-fold at 20,000 UMIs
     # per spot: over 6,000 growth genes a spot detected 281 genes instead of ~4,700 and put 77% of
     # its counts in 50 of them.
@@ -980,7 +980,7 @@ class VisiumBatchHyperParams:
     sigma_batch: float = 0.10
     ambient_frac: float = 0.05
     count_model: str = "dm"
-    kappa: float = 300_000.0         # technical noise near multinomial; see the note above
+    kappa: float = 1_400_000.0       # technical noise near multinomial; see the note above
     nb_dispersion: float = 0.30
 
     def to_dict(self):
