@@ -111,12 +111,10 @@ MET_SELECTION = {"prop_met_survival": 0.015, "met_survival_effects": 3.0, "met_s
 # 9,675, B-cells and Plasmablasts 6,730 of 51,619 immune cells) corrected by the default recovery (T and
 # NK, B and plasma cells 10 and myeloid cells 5 times malignant cells): 0.575, 0.315 and 0.11. A variant passes IMMUNE_SPATIAL as `spatial`, IMMUNE_SELECTION as
 # `selection` and IMMUNE as `immune`.
-# Immune cells stay in their demes (`immune_displaceable` False, the variant every stored immune tumour
-# was grown with). With displacement, each cancer birth above a deme's carrying capacity pushes one immune
-# cell out, so tumour nests lose them; the registered pick at that setting is rate 28, at which growth takes
-# 1.5 times the immune-free time and resistance is selected 14.6 times (exp-immune-variant). Adopting it
-# awaits Pedro: True here, prob_kill 28 in IMMUNE, and R14, R0, R6 and the Fig 5 pilot regrown.
-IMMUNE_SPATIAL = {"immune_density": 0.2, "immune_duct_density": 0.0, "immune_displaceable": False,
+# Cancer taking over a deme pushes its immune cells out (`immune_displaceable`; Pedro, 2026-11-23): each
+# cancer birth that leaves a deme above its carrying capacity removes one immune cell, so tumour nests
+# lose them, as real tumour nests are mostly free of immune cells.
+IMMUNE_SPATIAL = {"immune_density": 0.2, "immune_duct_density": 0.0, "immune_displaceable": True,
                   "immune_composition": {"immune": 0.575, "myeloid": 0.315, "bplasma": 0.11}}
 # Immune resistance at 0.2% of genes, the target breach and stromal survival were cut to (14 genes
 # instead of the example config's 116). At 2% point mutations hit the trait so often that it spreads
@@ -134,9 +132,12 @@ IMMUNE_SELECTION = {"prop_immune_resistance": 0.002, "immune_resistant_effects":
 # missed the cost bound (3.6 times the immune-free wall time, against 3), so the variant takes the next
 # passing rate, 4 (growth 1.2 times as long, mean immune resistance 9.6 times the immune-free level);
 # with the subtypes it is 4 / 0.575 = 7, which keeps the expected killing of each deme
-# (exp-immune-variant). A wild-type cancer cell entering a stroma deme then dies of immune killing at
-# about 1.5 per generation against a division rate of about 1.75.
-IMMUNE = {"prob_kill": 7.0}
+# (exp-immune-variant). With displacement immune pressure acts mostly at the invasive front, and the same
+# rule picks 28 (stage immune_displaced, five seeds per rate of 7, 14, 28 and 56; 56 failed): growth takes
+# 1.5 times the immune-free time and the mean immune resistance is 14.6 times the immune-free level.
+# A wild-type cancer cell entering a stroma deme then dies of immune killing at about 6 per generation
+# against a division rate of about 1.75, so the front advances through resistant cells.
+IMMUNE = {"prob_kill": 28.0}
 # The interferon response of cancer cells near T and NK cells (readout only): the immune density of
 # each deme, smoothed over one deme (the IFN-gamma they release reaches the cells around them), drives
 # an `interferon_response` program, which the human genome layer loads on the Hallmark IFN-gamma
