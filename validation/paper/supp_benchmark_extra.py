@@ -41,7 +41,7 @@ def panel_a(fig, d, nums):
     w = 0.22
     sub_all = d[d["resolution"] == "fine"] if len(d) else d
     for i, task in enumerate(F4.TUMOURS):
-        g = sub_all[sub_all["tumour"] == f"R11_{task}"] if len(sub_all) else sub_all
+        g = sub_all[sub_all["tumour"] == f"{F4.RUN}_{task}"] if len(sub_all) else sub_all
         if not len(g):
             continue
         base = g[g["tool"] == "one clone everywhere"]["error"]
@@ -54,7 +54,7 @@ def panel_a(fig, d, nums):
             if len(v):
                 ax.plot(i + (j - 1) * w, v.iat[0], "o", ms=4, mfc=TOOL_D[n], mec="white", mew=0.4, zorder=3)
                 rec[n] = round(float(v.iat[0]), 3)
-        sj = os.path.join(F4.OUT, "d", f"R11_{task}", "score.json")
+        sj = os.path.join(F4.OUT, "d", f"{F4.RUN}_{task}", "score.json")
         if os.path.exists(sj):
             with open(sj) as f:
                 rj = json.load(f)

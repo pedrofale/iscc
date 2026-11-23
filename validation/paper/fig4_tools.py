@@ -39,8 +39,8 @@ Only summaries reach ``--out``/b/<run>_<task>/:
 
 so that the runs can be scored again without rerunning them (``--rescore``, on the login node: seconds).
 
-    python validation/paper/fig4_tools.py --run R11 --task seed1 --out OUT --work $SNIC_TMP
-    python validation/paper/fig4_tools.py --run R11 --task seed1 --out OUT --work - --rescore
+    python validation/paper/fig4_tools.py --run R14 --task seed1 --out OUT --work $SNIC_TMP
+    python validation/paper/fig4_tools.py --run R14 --task seed1 --out OUT --work - --rescore
 """
 import argparse
 import json
@@ -264,7 +264,7 @@ def score_dir(out):
 def main():
     import score_tools as ST
     ap = argparse.ArgumentParser()
-    ap.add_argument("--run", default="R11")
+    ap.add_argument("--run", default="R14")
     ap.add_argument("--task", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--work", required=True)
