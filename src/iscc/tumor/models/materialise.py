@@ -986,12 +986,14 @@ class MaterialiseMixin:
         # constant) while the genotype drive is per-clone — so the drive sets each clone's MEAN and
         # `activity_noise` supplies the within-clone spread. Drawn for all cells at once, so the stream
         # does not depend on how the expression below is chunked.
+        # The niche drives cancer cells only: a normal cell's programs are its type's (Pedro,
+        # 2026-11-23), and the human layer's atlas baseline already holds a normal type's usual activity.
         Z = None
         if P is not None and n_cells:
             drive = np.empty((n_cells, P.n_programs))
             for deme_idx, gid, start, count in runs:
                 drive_row = drive_cache[gid]
-                if niche_drive is not None:
+                if niche_drive is not None and self._is_cancer(gid):
                     drive_row = drive_row + niche_drive[deme_idx]
                 drive[start:start + count] = drive_row
             Z = P.sample_z(drive, P.activity_rng())
