@@ -22,6 +22,10 @@ What must hold:
    sample and per seed, and Visium pools agree with it.
 8. **The programme scale and bound** (fitted defaults 0.5 and 5.0) set the human programme factor
    ``exp(c tanh(s Z L / c))`` and touch nothing off the programme genes.
+9. **Only cancer cells take the programme factor** (a normal type's atlas baseline already holds its
+   usual activity): a normal cell's human expression is its baseline times its genotype-and-niche
+   factor on every gene, in scRNA and in Visium pools; `normal_programmes=True` applies the factor
+   to normal cells too and leaves cancer cells unchanged.
 """
 import warnings
 
@@ -213,7 +217,10 @@ def test_permuted_programmes_move_only_the_programme_factor(grown):
     F1, _, Z1 = perm._factors(cd, cells)
     assert np.array_equal(F0, F1)                                       # F keeps each cell's own
     on = E0[:, expr.hp] > 0
-    ratio = perm._human_programme(Z1) / expr._human_programme(Z0)
+    prog = types == "cancer"                                            # normal cells take no factor
+    assert prog.any() and (~prog).any()
+    ratio = np.ones((len(cells), expr.hp.size))
+    ratio[prog] = perm._human_programme(Z1[prog]) / expr._human_programme(Z0[prog])
     assert np.allclose(E1[:, expr.hp][on] / E0[:, expr.hp][on], ratio[on])
     assert not np.allclose(Z0, Z1)
     for ty in np.unique(types):                                         # a shuffle within each type
@@ -257,3 +264,31 @@ def test_the_programme_scale_and_bound_set_the_human_programme_factor(grown):
     off = np.setdiff1d(np.arange(len(expr.genes)), expr.hp)
     assert np.array_equal(expr.cell_expression(t.cell_data, cells)[:, off],
                           free.cell_expression(t.cell_data, cells)[:, off])   # programme genes only
+
+
+def test_only_cancer_cells_take_the_programme_factor(grown):
+    t, layer, expr = grown
+    cd = t.cell_data
+    cells = list(cd["cell_exp"].index)
+    F, types, Z = expr._factors(cd, cells)
+    normal = types != "cancer"
+    assert normal.any() and (~normal).any()
+    E = expr.cell_expression(cd, cells)
+    base = np.empty_like(E)
+    for ty in np.unique(types):
+        r = types == ty
+        base[r] = F[r][:, expr.cover] * expr.B[ty][None, :]
+    assert np.allclose(E[normal], base[normal], rtol=1e-12, atol=0)    # baseline x genotype and niche
+    both = layer.expression(t, chunk=64, normal_programmes=True)
+    Eb = both.cell_expression(cd, cells)
+    assert np.allclose(Eb[~normal], E[~normal], rtol=1e-12, atol=0)    # cancer cells unchanged
+    assert not np.allclose(Eb[np.ix_(normal, expr.hp)], E[np.ix_(normal, expr.hp)])
+    vz = Visium(seed=2, kappa=HUMAN_VISIUM_KAPPA)
+    vz.place_grid(cd, grid_side=12)
+    P = expr.pool_spots(vz._grid)
+    pc = np.asarray(vz._grid["placed"]["cell_exp"].index)
+    for s_, m in enumerate(vz._grid["members"]):
+        if m.size:
+            brute = expr.cell_expression(vz._grid["placed"], list(pc[m])).sum(axis=0)
+            assert np.allclose(P[s_], brute * expr.visium_factor, rtol=1e-9, atol=1e-12)
+            break

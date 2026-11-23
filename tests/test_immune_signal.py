@@ -1,5 +1,6 @@
 """The immune niche field: the immune density of each deme, smoothed over the lattice, drives the
-program it is mapped to (the interferon response of cancer cells near T and NK cells)."""
+program it is mapped to (the interferon response of cancer cells near T and NK cells); a normal cell's
+programs are its type's, so the niche leaves them unchanged."""
 import numpy as np
 
 from conftest import GENOME_PARAMS, SELECTION_PARAMS, CANCER_CELL_PARAMS
@@ -54,6 +55,12 @@ def test_immune_field_drives_only_its_program():
     zon, zoff = on.cell_data["cell_program"], off.cell_data["cell_program"]
     assert zon.index.equals(zoff.index)
     assert zon["interferon_response"].mean() > zoff["interferon_response"].mean()
+    gid = on.cell_data["cell_type"].iloc[:, 0].reindex(zon.index)
+    normal = np.array([not on._is_cancer(g) for g in gid])
+    assert normal.any() and (~normal).any()
+    ifn_on, ifn_off = zon["interferon_response"].to_numpy(), zoff["interferon_response"].to_numpy()
+    assert ifn_on[~normal].mean() > ifn_off[~normal].mean()                  # cancer cells only
+    np.testing.assert_allclose(ifn_on[normal], ifn_off[normal])
     others = [c for c in zon.columns if c != "interferon_response"]
     np.testing.assert_allclose(zon[others].to_numpy(), zoff[others].to_numpy())
 

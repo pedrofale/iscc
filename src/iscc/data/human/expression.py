@@ -8,13 +8,15 @@ the last part, read off each cell's growth-gene expression as
 
 and rebuilds the rest on the human genes:
 
-    exp[c, h] = B[type(c), h] * F[c, cover(h)] * exp(bounded Σ_k z[c, k] L[k, h]).
+    exp[c, h] = B[type(c), h] * F[c, cover(h)] * exp(bounded Σ_k z[c, k] L[k, h]),
 
+with the programme factor on cancer cells only.
 ``B`` is a cell type's composition in the Human Breast Cell Atlas, scaled by its relative RNA content;
 the cancer takes its cell of origin's, so a malignant cell differs from normal epithelium only by
-copy number, SNVs, programmes and niche. ``L`` loads iscc's named programmes on their Hallmark gene
-sets, with the growth dictionary's loading distribution; programmes without a Hallmark counterpart
-load on random human genes. The cell's program activities ``z`` are the growth model's.
+copy number, SNVs, programmes and niche. A normal type's baseline is already the mean of real cells of
+that type, their usual programme activity included, so a normal cell takes no programme factor on top.
+``L`` loads iscc's named programmes on their Hallmark gene sets, with the growth dictionary's loading
+distribution; programmes without a Hallmark counterpart load on random human genes. The cell's program activities ``z`` are the growth model's.
 
 Nothing here builds a cells × human-genes matrix: [`HumanExpression.cell_expression`][iscc.data.human.HumanExpression.cell_expression] works on
 chunks of cells, and [`HumanExpression.pool_spots`][iscc.data.human.HumanExpression.pool_spots] pools a Visium section per cell type on the
@@ -75,6 +77,9 @@ class HumanExpression:
     programme_max_log_fold : float or None, default 5.0
         The bound ``c`` on a programme's log fold on a human gene (fitted with ``programme_scale``);
         None leaves it unbounded.
+    normal_programmes : bool, default False
+        Apply the programme factor to normal cells too. Off by default: a normal type's atlas baseline
+        already holds its usual programme activity, so the factor would count it twice.
     visium_platform : {"default", None} or pandas.Series, default "default"
         Per-gene log factor applied to Visium spots only
         ([`load_visium_platform_factor`][iscc.data.human.load_visium_platform_factor], the sensitivity
@@ -96,9 +101,10 @@ class HumanExpression:
 
     def __init__(self, layer, tumor, baselines=None, programmes=None, seed=None, chunk=512,
                  permute_programmes=None, programme_scale=HUMAN_PROGRAMME_SCALE,
-                 programme_max_log_fold=HUMAN_PROGRAMME_MAX_LOG_FOLD,
+                 programme_max_log_fold=HUMAN_PROGRAMME_MAX_LOG_FOLD, normal_programmes=False,
                  visium_platform="default"):
         self.layer, self.tumor = layer, tumor
+        self.normal_programmes = bool(normal_programmes)
         self.permute = None if permute_programmes is None else int(permute_programmes)
         self._shuffled = {}
         self.genes = layer.lift.genes
@@ -167,6 +173,11 @@ class HumanExpression:
             x = c * np.tanh(x / c)
         return np.exp(x)
 
+    def _programmed(self, types):
+        """Which cells take the programme factor: the cancer cells, or every cell with
+        ``normal_programmes``."""
+        return np.ones(len(types), bool) if self.normal_programmes else types == "cancer"
+
     # -- per-cell factors -----------------------------------------------------------------------
     def _types(self, cell_data, cells):
         """The baseline each cell takes: "cancer", or a normal genotype's id, which is its type or its
@@ -223,7 +234,8 @@ class HumanExpression:
             r = types == t
             out[r] = F[r][:, self.cover] * self.B[t][None, :]
         if Z is not None and self.hp.size:
-            out[:, self.hp] *= self._human_programme(Z)
+            on = self._programmed(types)
+            out[np.ix_(on, self.hp)] *= self._human_programme(Z[on])
         return out
 
     # -- Visium ---------------------------------------------------------------------------------
@@ -261,7 +273,8 @@ class HumanExpression:
                 for t in np.unique(types):
                     X[types == t] *= self.B[t][self.hp][None, :]
                 if Z is not None:
-                    X *= self._human_programme(Z)
+                    on = self._programmed(types)
+                    X[on] *= self._human_programme(Z[on])
                 raw_hp += Mc @ X
         raw_occ = np.zeros((len(occ), len(self.genes)))
         for t, pool in pools.items():

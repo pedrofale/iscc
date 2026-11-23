@@ -259,9 +259,12 @@ xenobiotic metabolism as a proxy), the rest on random human genes, with the grow
 distribution scaled by `programme_scale` (0.5) under the bound `programme_max_log_fold` (5.0). The pair
 is fitted on the cancer cells of 14 tumours of Wu et al. 2021 so that the fold changes of the Hallmark
 genes between the top and bottom deciles of cells scored by each programme match
-(`validation/data/fit_programme_strength.py`; 1.0 and 5.0 doubled them). On the held-out 10x Block A
-section it halves the share of spot UMIs on the programme genes (42% to 22%, against 11% in the real
-section). What the genotype and the niche do to a gene is read off the growth genes. Pass it as `gene_lift` to `scRNA.run` (chunked, sparse counts) and `Visium.run`
+(`validation/data/fit_programme_strength.py`; 1.0 and 5.0 doubled them). The programme factor acts on
+cancer cells only: a normal type's atlas baseline is already the mean of real cells of that type, their
+usual programme activity included (`normal_programmes=True` applies it to normal cells too). On the
+held-out 10x Block A section the two changes take the share of spot UMIs on the programme genes from
+42% to 13%, against 11% in the real section. What the genotype and the niche do to a gene is read off
+the growth genes. Pass it as `gene_lift` to `scRNA.run` (chunked, sparse counts) and `Visium.run`
 (per-type pooling).
 The scRNA presets add no dropout, which suits the human genes: a logistic dropout midpoint is in
 counts per gene, so a midpoint of 1.5 UMIs deletes most of the human genes of a cell (410 genes per
@@ -513,7 +516,7 @@ targeted therapy, the target-expression check that reads it). For the ductal fie
 | `prop_program_regulator` | 2 | 0.0 | 0–0.1 | fraction of genes that shift `z` with **no** fitness change (R12 plasticity). Keep **sparse**: high → every clone is its own expression state |
 | `program_bias_strength` | 2 | 0.5 | 0–2 | how hard a mutated regulator shifts its program (graded by VAF) |
 | `n_programs_per_regulator` | 2 | 1 | 1–3 | how many programs one regulator touches |
-| `niche_program_map` / `niche_program_strength` | 3 | none / 1.0 | field→program names | generalises the microenvironment layer: `{hypoxia: hypoxia}` makes the O₂ field drive the hypoxia **program**. Composes with that layer's own gene-level modifier |
+| `niche_program_map` / `niche_program_strength` | 3 | none / 1.0 | field→program names | generalises the microenvironment layer: `{hypoxia: hypoxia}` makes the O₂ field drive the hypoxia **program** of cancer cells (a normal cell's programs are its type's). Composes with that layer's own gene-level modifier |
 
 #### `dosage_params` — axis A (CNA → expression)
 | Knob | Default | Valid range | Outside the range |
