@@ -12,12 +12,14 @@ Both read the per-task records the registry writes beside each tumour (``<task>.
 shared ``manifest.jsonl``, on which concurrent array tasks can race. Each array task is its own process,
 so peak memory is per tumour.
 
-CPU time is measured on shared nodes, and a node crowded with other jobs inflates it (on v4, up to
-21-fold). A tumour whose wall time exceeds its CPU time by more than 10% ran on such a node; it is
-regrown alone elsewhere, which reproduces it exactly, and its CPU time there is listed in
-``retimed.json`` beside the registry (``{"<run>/<task>": {"cpu_s", "node", "job"}}``).
-``runs_tumours.csv`` keeps the recorded ``cpu_s`` and adds ``cpu_retimed_s``; the CPU columns of
-``runs.csv`` use the re-timed value where there is one, and count those tumours in ``retimed``.
+The paper's registry (v5) was grown on one laptop (Apple M4), two tumours at a time; a tumour whose wall
+time exceeds its CPU time there waited on memory, which leaves its CPU time as measured. On shared
+cluster nodes a node crowded with other jobs inflates CPU time (on v4, up to 21-fold): a tumour whose
+wall time exceeds its CPU time by more than 10% ran on such a node, it is regrown alone elsewhere, which
+reproduces it exactly, and its CPU time there is listed in ``retimed.json`` beside the registry
+(``{"<run>/<task>": {"cpu_s", "node", "job"}}``). ``runs_tumours.csv`` keeps the recorded ``cpu_s`` and
+adds ``cpu_retimed_s``; the CPU columns of ``runs.csv`` use the re-timed value where there is one, and
+count those tumours in ``retimed``.
 Run:  python validation/paper/supp_table.py
 """
 import csv
@@ -36,7 +38,7 @@ from _paths import paper_dir  # noqa: E402
 # What each run changes against the paper regime, and where it is used (kept beside the registry's
 # definitions; a run added there without a row here is reported, not silently dropped).
 ROWS = {
-    "R0": ("Showcase tumour with a metastatic lattice, spatial history every 2 steps",
+    "R0": ("Showcase tumour with immune cells and a metastatic lattice, spatial history every 2 steps",
            "Figs 1, 2a, 2e, 3"),
     "R1": ("Cancer dispersal probability " + ", ".join(f"{d:g}" for d in REG.R1_DISPERSAL),
            "Figs 2f, 4e"),
@@ -46,10 +48,12 @@ ROWS = {
     "R4": ("Copy-number rate 0, 0.05, 0.15, 0.3; SNV burden 0.05, 0.2, 0.5 at copy-number rate 0.05",
            "Fig 2f; supplementary benchmark-difficulty figure"),
     "R5": ("Whole-genome duplication rate " + ", ".join(f"{w:g}" for w in REG.R5_WGD), "Fig 2f"),
-    "R6": ("Six patients sharing one configuration", "S7 Fig"),
+    "R6": ("Six patients with immune cells sharing one configuration", "S8 Fig"),
     "R10": ("Compartment barriers on or off, spatial history every 8 steps",
             "Fig 2b; supplementary cell-state figure"),
-    "R11": ("Arm-homologous growth genome, copy-number events scaled by 39/12", "Fig 4b-d"),
+    "R11": ("Arm-homologous growth genome, copy-number events scaled by 39/12",
+            "Methods (the arm genome against the 12 segments)"),
+    "R14": ("R11 with immune cells", "Figs 3, 4b-d; supplementary SNV figure"),
     "R12": ("Metastatic lattice, twenty seeds", "Fig 2c, 2e"),
     "R13": ("Metastatic lattice with the selection on one trait switched off per arm", "Fig 2c"),
 }

@@ -1,5 +1,5 @@
 """Supplementary figure (SNVs): how well each modality detects a tumour's somatic SNVs, Smart-seq3 against
-10x scRNA, and SNV-based clone assignment with cardelino, on the R11 arm-genome tumours of Fig 4.
+10x scRNA, and SNV-based clone assignment with cardelino, on the R14 arm-genome tumours of Fig 4.
 
 ``run`` (one tumour) samples the tumour exactly as Fig 4c and 4d do (``fig4_chain.sample``: the dissociated
 cells for scRNA, scDNA and bulk DNA, the 50,000-cell section for Visium; the section is materialised with
@@ -37,8 +37,8 @@ Everything a tool reads or writes lives under ``--work`` (node scratch); per tum
 ``figures/paper1/supp_snv.pdf`` and ``.png`` (through ``_paths``: set ``ISCC_PAPER_DIR``) and writes every
 drawn number to ``--out/supp_snv_numbers.json``::
 
-    python validation/paper/supp_snv.py run --run R11 --task seed1 --out OUT --work $SNIC_TMP --fig4-c FIG4/c
-    python validation/paper/supp_snv.py cardelino --run R11 --task seed1 --out OUT --work $SNIC_TMP --fig4-c FIG4/c \
+    python validation/paper/supp_snv.py run --run R14 --task seed1 --out OUT --work $SNIC_TMP --fig4-c FIG4/c
+    python validation/paper/supp_snv.py cardelino --run R14 --task seed1 --out OUT --work $SNIC_TMP --fig4-c FIG4/c \
         --keys true_smartseq3_10xdepth --cardelino-iter 2000,6000
     ISCC_PAPER_DIR=PAPER ISCC_PAPER_TIER=full python validation/paper/supp_snv.py figure --out OUT [--no-numbers]
 
@@ -928,7 +928,7 @@ def make_figure(out_dir, fig4_c=None, write_numbers=True):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("step", choices=("run", "cardelino", "figure"))
-    ap.add_argument("--run", default="R11")
+    ap.add_argument("--run", default="R14")
     ap.add_argument("--task")
     ap.add_argument("--out", required=True)
     ap.add_argument("--work", help="scratch for every tool input and output (a job's $SNIC_TMP)")
