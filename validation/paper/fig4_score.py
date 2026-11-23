@@ -285,7 +285,7 @@ def figure(c, d, path):
         ax.text(0.5, 0.5, "pending", transform=ax.transAxes, ha="center", fontsize=6, color=S.GREY)
     ax.set_ylabel("Per-spot clone-fraction error")
     src = os.environ.get("ISCC_PAPER_OUT", "")
-    fig.text(0.995, 0.004, f"draft; R11 tumours from {os.path.basename(src.rstrip('/')) or 'the registry'}",
+    fig.text(0.995, 0.004, f"draft; {os.environ.get('FIG4_RUN', 'R14')} tumours from {os.path.basename(src.rstrip('/')) or 'the registry'}",
              ha="right", va="bottom", fontsize=4.5, color=S.GREY)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fig.savefig(path + ".pdf")

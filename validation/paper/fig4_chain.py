@@ -34,9 +34,9 @@ The spatial step reads ``OUT/c/<run>_<task>/dna_clones.tsv``, so it runs after `
 (``ISCC_PAPER_OUT`` and ``ISCC_PAPER_TIER`` locate the registry; ``ISCC_TOOLS_DIR``,
 ``ISCC_CLONEALIGN_RSCRIPT`` and ``ISCC_HMMCOPY_RSCRIPT`` the tools)::
 
-    python validation/paper/fig4_chain.py dna-rna --run R11 --task seed1 --out OUT --work $SNIC_TMP
-    python validation/paper/fig4_chain.py spatial --run R11 --task seed1 --out OUT --work $SNIC_TMP
-    python validation/paper/fig4_chain.py info    --run R11 --task seed1 --out OUT --work $SNIC_TMP
+    python validation/paper/fig4_chain.py dna-rna --run R14 --task seed1 --out OUT --work $SNIC_TMP
+    python validation/paper/fig4_chain.py spatial --run R14 --task seed1 --out OUT --work $SNIC_TMP
+    python validation/paper/fig4_chain.py info    --run R14 --task seed1 --out OUT --work $SNIC_TMP
 
 ``oracle-set`` (after dna-rna) runs clonealign on the true profiles of the clones the DNA step found
 (``oracle_set.json``), which splits 4c's gap into missed clones and profile error. ``info`` only writes
@@ -850,7 +850,7 @@ def run_spatial(a):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("step", choices=("dna-rna", "spatial", "info", "oracle-set"))
-    ap.add_argument("--run", default="R11")
+    ap.add_argument("--run", default="R14")
     ap.add_argument("--task", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--work", required=True, help="scratch for every tool input and output (a job's $SNIC_TMP)")

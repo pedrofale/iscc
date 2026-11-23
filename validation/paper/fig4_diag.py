@@ -20,7 +20,7 @@ genes and true profiles) under ``--work`` and writes, to ``--out/<run>_<task>/``
 ``variant_<name>.json`` (with ``--variant``)
     clonealign rerun with ``--max-iter``, ``--n-repeats`` and ``--K``, scored as fig4_chain.py scores it.
 
-    python validation/paper/fig4_diag.py --run R11 --task disp0.9_seed2 --stored .../fig4-v4/c \\
+    python validation/paper/fig4_diag.py --run R14 --task disp0.9_seed2 --stored .../fig4-v4/c \\
         --out .../fig4-v4-diag --work $SNIC_TMP [--variant long --max-iter 1000 --n-repeats 3]
 """
 import argparse
@@ -172,7 +172,7 @@ def _preprocess_genes(inp, work, stored_dir):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--run", default="R11")
+    ap.add_argument("--run", default="R14")
     ap.add_argument("--task", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--work", required=True)

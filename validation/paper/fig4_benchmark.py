@@ -49,7 +49,11 @@ import style as S  # noqa: E402
 OUT = os.environ.get("FIG4_OUT") or P.data_dir("fig4-v4")
 DIAG = os.environ.get("FIG4_DIAG") or P.data_dir("fig4-v4-diag")
 DEV = os.environ.get("FIG4_DEV") or P.data_dir("fig4-dev", "v4")
-TUMOURS = os.environ.get("FIG4_TUMOURS", "seed1,seed2,disp0.1_seed1,disp0.9_seed1,disp0.9_seed2").split(",")
+# The tumours of Fig 4 are R14, R11's design and seeds with the immune variant (the figures about measured
+# data and tools use tumours with immune cells; Pedro, 2026-11-22). Every one of the six reaches its target.
+RUN = os.environ.get("FIG4_RUN", "R14")
+TUMOURS = os.environ.get("FIG4_TUMOURS",
+                         "seed1,seed2,disp0.1_seed1,disp0.1_seed2,disp0.9_seed1,disp0.9_seed2").split(",")
 
 # Half a page at full text width: 165 mm by at most 114 mm, included at its true size, so no text is
 # smaller than SMALL (5.5 pt) and the panel letters are 8 pt.
@@ -211,7 +215,7 @@ def _numbers_b_all(df, nums):
 
 def panel_b(fig, ov, nums):
     S.panel_letter(fig, "b", 0.5, 30.0)
-    files = [os.path.join(DEV, "b", f"R11_{t}", "scores.csv") for t in TUMOURS]
+    files = [os.path.join(DEV, "b", f"{RUN}_{t}", "scores.csv") for t in TUMOURS]
     have = [pd.read_csv(f).assign(tumour=os.path.basename(os.path.dirname(f))) for f in files if os.path.exists(f)]
     df = pd.concat(have, ignore_index=True) if have else pd.DataFrame()
     nums["b"] = {"tumours": sorted(set(df["tumour"])) if len(df) else []}
@@ -271,7 +275,7 @@ def panel_c(fig, ov, c, nums):
     DNA = S.MODALITY["DNA"]
     nums["c"] = {}
     for i, task in enumerate(TUMOURS):
-        r = c[c["tumour"] == f"R11_{task}"]
+        r = c[c["tumour"] == f"{RUN}_{task}"]
         if not len(r):
             continue
         r = r.iloc[0]
