@@ -124,7 +124,11 @@ def _prepare(genotype_counts, genotype_parents):
     # single ancestry edge this equals anc_df.shape[0] + 1, the former hard-coded length; using
     # the identity count directly keeps it correct when roots/dangling edges differ -- e.g. under
     # tau-leaping, where a generation elapses between snapshots.)
-    ids = pop_df["Identity"].unique()
+    # Identities in creation order (genotype ids count up), not in the order of the columns, which
+    # follows string sets and so changes between Python processes: the colours then stay the same
+    # from one run to the next.
+    ids = sorted(pop_df["Identity"].unique(),
+                 key=lambda x: (0, int(x), "") if str(x).isdigit() else (1, 0, str(x)))
     color_by = pd.Series(np.arange(len(ids)), index=ids)
     return pop_df, anc_df, color_by
 

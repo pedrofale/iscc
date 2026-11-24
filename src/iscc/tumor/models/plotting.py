@@ -232,7 +232,8 @@ class PlottingMixin:
                     ("drug_tolerance", "T", "drug tolerance"), ("treatment_resistance", "R", "treatment resistance"),
                     ("is_wgd", "W", "genome doubling"))
 
-    def plot_phylogeny(self, ax=None, min_freq=0.02, figsize=(9, 4), annotate=True, trait_min_freq=0.01):
+    def plot_phylogeny(self, ax=None, min_freq=0.02, figsize=(9, 4), annotate=True, trait_min_freq=0.01,
+                       sites=True):
         """The clone tree of the tumor on the time axis of ``plot_muller``, with the events of its history.
 
         The cancer cells are collapsed to driver clones, and a clone that never reaches ``min_freq``
@@ -248,6 +249,10 @@ class PlottingMixin:
         marked. A triangle marks the first cells of a clone to seed the metastatic site, and dotted
         lines the release of the founding acinus and each resection.
 
+        With ``sites``, a bar at the end of each branch splits the cells of the clone at the end of
+        growth by where they are: in a duct, in the stroma or at the metastatic site, so that the
+        clones that invaded and the clones that seeded the metastasis stand out.
+
         Parameters
         ----------
         ax : matplotlib.axes.Axes, optional
@@ -261,6 +266,9 @@ class PlottingMixin:
         trait_min_freq : float, optional
             Share of the final cancer cells that a lineage must hold for its trait gain to be marked
             (default 0.01).
+        sites : bool, optional
+            End each branch with the sites of the cells of the clone (default True); drawn when the
+            cells are in more than one site.
 
         Returns
         -------
@@ -270,6 +278,7 @@ class PlottingMixin:
         import matplotlib.patheffects as pe
         from collections import defaultdict
         from matplotlib.lines import Line2D
+        from matplotlib.patches import Patch
         from .. import viz
         if ax is None:
             _, ax = plt.subplots(figsize=figsize)
@@ -312,19 +321,20 @@ class PlottingMixin:
             p = pmap.get(c)
             if p in row:
                 ax.plot([t[first[c]]] * 2, [row[p], y], color="0.45", lw=0.8, zorder=1)
+        par = {str(k): str(v) for k, v in dict(self.genotypes_parents).items()}
+
+        def clade(g):                               # the drawn clone a genotype belongs to
+            for _ in range(len(par) + 1):
+                if gmap.get(g) in row:
+                    return gmap[g]
+                if par.get(g, g) == g:
+                    return None
+                g = par[g]
+            return None
+
+        span = (t[-1] - t[0]) or 1.0
         handles = []
         if annotate:
-            par = {str(k): str(v) for k, v in dict(self.genotypes_parents).items()}
-
-            def clade(g):                           # the drawn clone a genotype belongs to
-                for _ in range(len(par) + 1):
-                    if gmap.get(g) in row:
-                        return gmap[g]
-                    if par.get(g, g) == g:
-                        return None
-                    g = par[g]
-                return None
-
             def x_of(time, step):                   # an event on the time axis of the traces
                 if timed:
                     return float(time)
@@ -363,7 +373,6 @@ class PlottingMixin:
                     if level(rep, key) > 0 and (prep is None or level(prep, key) == 0):
                         marks[(c, x)].append(letter)
                         shown[letter] = name
-            span = (t[-1] - t[0]) or 1.0
             for (c, x), letters in marks.items():
                 for i, letter in enumerate(sorted(set(letters))):
                     ax.text(x + i * 0.018 * span, row[c], letter, ha="center", va="center", fontsize=7,
@@ -388,14 +397,45 @@ class PlottingMixin:
                               label=shown[letter]) for letter in order]
             if seeded:
                 handles.append(Line2D([], [], ls="none", marker="v", color="black", label="seeds the metastasis"))
+        site_handles = []
+        if sites:
+            # where the cells of each clone are at the end of growth: a duct, the stroma, the met site
+            gland = getattr(self, "gland_id", None)
+            n_primary = getattr(self, "n_primary_demes", len(self.demes))
+            names = (["in a duct", "in the stroma"] if gland is not None else [None, "in the primary tumor"])
+            names.append("at the metastatic site")
+            site_colors = ["#4b0082", "#d62728", "#2ca02c"]
+            where = defaultdict(lambda: np.zeros(3))
+            for di, deme in enumerate(self.demes):
+                k = 2 if di >= n_primary else (0 if gland is not None and gland[di] >= 0 else 1)
+                for g, n in deme.items():
+                    if self._is_cancer(g):
+                        c = clade(str(g))
+                        if c is not None:
+                            where[c][k] += n
+            used = sorted({k for v in where.values() for k in np.flatnonzero(v)})
+            if len(used) > 1:
+                x0, width = t[-1] + 0.02 * span, 0.06 * span
+                for c, v in where.items():
+                    left = x0
+                    for k in used:
+                        w = width * v[k] / v.sum()
+                        if w > 0:
+                            ax.barh(row[c], w, left=left, height=0.7, color=site_colors[k], lw=0, zorder=3)
+                        left += w
+                ax.text(x0 + width / 2, -0.9, "site", ha="center", va="bottom", fontsize=7, color="0.35")
+                site_handles = [Patch(color=site_colors[k], label=names[k]) for k in used]
         ax.set_ylim(len(row) - 0.5, -1.2)
         ax.set_yticks([])
         ax.set_xlabel("Generation" if timed else "record")
         for side in ("top", "right", "left"):
             ax.spines[side].set_visible(False)
-        if handles:
-            ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.0, 1.0), frameon=False, fontsize=8,
-                      title="gained", title_fontsize=8)
+        # one legend, so that a saved figure keeps all of it: the trait gains, then the sites
+        heading = lambda text: Line2D([], [], ls="none", label=text)
+        entries = ([heading("gained")] + handles if handles else []) + \
+                  ([heading("cells at the end")] + site_handles if site_handles else [])
+        if entries:
+            ax.legend(handles=entries, loc="upper left", bbox_to_anchor=(1.0, 1.0), frameon=False, fontsize=8)
         return ax
 
     def he_image(self, px=6, darkness=0.8, sigma_frac=0.5):

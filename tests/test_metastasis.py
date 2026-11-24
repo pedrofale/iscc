@@ -408,3 +408,15 @@ def test_o2_field_solved_per_lattice():
         perf = np.clip(1.0 - t._emitter_density("cancer")[:n], 0.0, 1.0).reshape(G, G)
         supply = 0.2 * perf if source == "perfused" else 0.2
         np.testing.assert_array_equal(h[:n], t._o2_relax(dens, supply, G, 1.0, 1.0, 500, 1e-5))
+
+
+def test_phylogeny_ends_the_branches_with_the_sites_of_their_cells(met_tumor):
+    """The clones whose cells are at the metastatic site end in its colour, named in the legend."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import to_rgb
+    ax = met_tumor.plot_phylogeny(min_freq=0.03)
+    assert "at the metastatic site" in [x.get_text() for x in ax.get_legend().get_texts()]
+    assert any(np.allclose(p.get_facecolor()[:3], to_rgb("#2ca02c")) for p in ax.patches)
+    plt.close("all")

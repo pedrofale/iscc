@@ -101,3 +101,15 @@ def test_a_population_of_one_clone_has_its_band():
     pop_df, anc_df, _ = viz._prepare(counts.copy(), pd.DataFrame(index=[0]))
     y = pymuller.logic._get_y_values(pop_df, anc_df, 1e-6)
     np.testing.assert_allclose(y.sum(axis=1).to_numpy(), [3.0, 5.0, 8.0, 13.0])
+
+
+def test_clone_colours_follow_creation_order_not_column_order():
+    """The colours of the clones are the same whatever the order of the count columns, which follows
+    string sets and so changes between Python processes."""
+    import pandas as pd
+    from iscc.tumor import viz
+    counts = pd.DataFrame({"1": [5, 4, 3], "12": [0, 2, 3], "3": [0, 1, 1]})
+    parents = pd.DataFrame({"12": ["1"], "3": ["1"]})
+    orders = [["1", "12", "3"], ["3", "1", "12"], ["12", "3", "1"]]
+    colours = [viz._prepare(counts[o].copy(), parents)[2].to_dict() for o in orders]
+    assert colours[0] == colours[1] == colours[2] == {"1": 0, "3": 1, "12": 2}
