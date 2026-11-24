@@ -55,12 +55,14 @@ isccsim --sim-config notebooks/example_config.yaml --steps 320 --random-seed 2 -
 by tau-leaping. It keeps the package default driver effect of 1.1, at which almost every cell reaches
 the maximum division rate during the in-situ phase, so competition between clones is nearly neutral
 afterwards. The settings of the paper are in `validation/paper/regime.py`, and
-`notebooks/tutorial_config.yaml` holds them at the scale of the tutorials. After growth,
+`notebooks/tutorial_config.yaml` holds them at the scale of the tutorials, with immune cells in the
+stroma. After growth,
 `tumor.diagnose()` flags degenerate tumors, such as extinct, monoclonal or well-mixed ones, and names
 the parameter to change.
 
 To generate data without growing a tumor, [`iscc.pregrown`](reference/index.md#pregrown-tumors) loads
-four tumors of 200,000 cancer cells and a cohort of six patients, grown once with the paper's regime:
+five tumors of 200,000 cancer cells and a cohort of six patients, grown once from the paper's regime
+and its variants:
 `iscc.pregrown.ductal()` returns a tumor ready to be resected, sampled and measured.
 
 ## Reproducing the landing animation

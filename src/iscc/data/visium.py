@@ -439,7 +439,9 @@ class Visium(Assay):
         Returns
         -------
         Visium
-            ``self``, with the spot-by-gene UMI matrix in ``spot_counts`` etc. Export with
+            ``self``, with the spot-by-gene UMI matrix in ``spot_counts``, one row per spot in ``obs``
+            (cells, UMIs, library size, capture field and dominant clone), and the ids of the cells
+            of each spot in ``spot_members``, in the order of ``obs``. Export with
             [`to_anndata`][iscc.data.Visium.to_anndata] / ``write``.
         """
         if cell_data is not None or self._grid is None:

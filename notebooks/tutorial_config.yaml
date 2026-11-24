@@ -1,10 +1,12 @@
-# The tutorials' tumor: the paper's regime at its sweep scale (validation/paper/regime.py,
-# config("mid")): a 96 by 96 field of five glands in stroma, demon's crowding law, CINner's driver
-# dosage with effect 1.03, breach-gated invasion and stromal survival with the paper's values, the
-# founding acinus closed for 200 generations, and tau-leaping with binomial deaths and the step of
-# Cao, Gillespie and Petzold (2006). The metastatic lattice is off (met_grid_size 0) and no treatment
-# resistance is set; "Shape the tumor" shows how to switch both on. It is configs/landing_hero.yaml
-# without its treatment schedule, resistance genes and metastasis.
+# The tutorials' tumor: the paper's regime at its sweep scale with its immune variant
+# (validation/paper/regime.py, config("mid") with IMMUNE_SPATIAL, IMMUNE_SELECTION and IMMUNE): a 96 by
+# 96 field of five glands in stroma, demon's crowding law, CINner's driver dosage with effect 1.03,
+# breach-gated invasion and stromal survival with the paper's values, the founding acinus closed for
+# 200 generations, immune cells in the stroma that kill cancer cells, and tau-leaping with binomial
+# deaths and the step of Cao, Gillespie and Petzold (2006). The metastatic lattice is off
+# (met_grid_size 0) and no treatment resistance is set; "Shape the tumor" shows how to switch both on.
+# It is configs/landing_hero.yaml with the immune variant and without its treatment schedule,
+# resistance genes and metastasis.
 mode: genotype
 update_mode: tau
 tau: 0.5
@@ -17,7 +19,9 @@ genome_params:
 selection_params:
   prop_driver: 0.04
   prop_dispersal: 0.0
-  prop_immune_resistance: 0.02
+  # immune resistance at the paper's immune variant (regime.IMMUNE_SELECTION): 0.2% of genes, one hit protects 75%
+  prop_immune_resistance: 0.002
+  immune_resistant_effects: 4.0
   prop_treatment_resistance: 0.0     # as the paper regime; the package default (0.1) pre-seeds resistance
   prop_breach: 0.002
   breach_effects: 1.01
@@ -32,6 +36,9 @@ selection_params:
   prop_met_survival: 0.015
   met_survival_effects: 3.0
 cell_params:
+  # static T and NK cells kill cancer cells at prob_kill x their share of the deme x (1 - immune resistance)
+  immune:
+    prob_kill: 28.0
   cancer:
     division_rate: 0.7
     death_rate: 0.05
@@ -63,6 +70,15 @@ spatial_params:
   K_duct: 60
   K_stroma: 30
   stroma_fill_frac: 0.3
+  # immune cells: 6 per stroma deme, none in the ducts, split into T and NK cells (the only ones that kill),
+  # myeloid cells and B and plasma cells (regime.IMMUNE_SPATIAL)
+  immune_density: 0.2
+  immune_composition:
+    immune: 0.575
+    myeloid: 0.315
+    bplasma: 0.11
+  # a cancer birth that leaves a deme above capacity pushes one immune cell out, so tumour nests lose them
+  immune_displaceable: true
   cross_gland_kappa: 0.06
   cross_gland_lambda: 30
   breach_gated_invasion: true
@@ -95,6 +111,8 @@ expression_params:
     loading_sparsity: 1.0
     program_genomic_scatter: 1.0
     max_log_fold: 5.0
+    # the interferon response of cancer cells near immune cells takes the one background slot
+    seeded_programs: [proliferation, emt, hypoxia, drug_resistance, immune_evasion, interferon_response]
   activity_params:
     n_active_programs_per_cell: 3
     activity_dist: lognormal
@@ -108,7 +126,11 @@ expression_params:
     niche_program_map:
       epithelial: emt
       hypoxia: hypoxia
-    niche_program_strength: 3.0
+      immune: interferon_response
+    niche_program_strength:
+      __default__: 3.0
+      immune: 10.0
+    immune_signal_lengthscale: 1.0
   dosage_params:
     dosage_sensitivity_mean: 0.86
     dosage_sensitivity_sd: 0.61

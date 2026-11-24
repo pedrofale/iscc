@@ -244,8 +244,8 @@ class Resection:
             [`make_cell_data`][iscc.tumor.GenotypeTumor.make_cell_data]. ``None`` builds them all.
         recovery_probs : dict or "default", optional
             Per-biological-type recovery probability (``cancer``, ``epithelial``, ``host``,
-            ``stromal``, ``immune``), merged over
-            ``DEFAULT_RECOVERY``; ``"default"`` (or an empty dict)
+            ``stromal``, and the immune subtypes ``immune`` for T and NK cells, ``myeloid`` and
+            ``bplasma``, each its own key), merged over ``DEFAULT_RECOVERY``; ``"default"`` (or an empty dict)
             uses the defaults as they are. ``None`` (default) recovers every cell, unless a stress
             signature is asked for, in which case every type is recovered with probability 1.
         stress_strength : float, default 0.0

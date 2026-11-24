@@ -3,32 +3,38 @@
   "files": {
     "ductal": {
       "file": "ductal.iscc",
-      "sha256": "ca38d2c617f2aeea85011ce544d041182bed236e0db43d100f8e0c6334bae031",
-      "bytes": 40230469,
+      "sha256": "5008bca2855c164fac77c013f51e8cbcba08c130ca078c4213f0b5e8f229f1e6",
+      "bytes": 40207737,
+      "kind": "GenotypeTumor"
+    },
+    "immune": {
+      "file": "immune.iscc",
+      "sha256": "04353feb459f8ec2950db77742d8bb30bc41184ee8563c0eff2a33337df3a8ef",
+      "bytes": 57479761,
       "kind": "GenotypeTumor"
     },
     "neutral": {
       "file": "neutral.iscc",
-      "sha256": "2f83c2d0267f8f09f003cdd4c67535ef99996dc1a8b96d036fcdb2b5722f6a41",
-      "bytes": 15018265,
+      "sha256": "e2684f4a4c554f69b1d40d1b956c05abd9bb32ae9b1ec5ce40decb8b4b5d645b",
+      "bytes": 15082757,
       "kind": "GenotypeTumor"
     },
     "sweeps": {
       "file": "sweeps.iscc",
-      "sha256": "766b28b0a5a80132fa9f91326f55f9396723226aa05478014d7af878f75b328f",
-      "bytes": 38248669,
+      "sha256": "a2fc295b5c14b190a098c2604d8aff6eefc4a73b0039410d6f0ae2dc31e3f0a3",
+      "bytes": 96367465,
       "kind": "GenotypeTumor"
     },
     "cin": {
       "file": "cin.iscc",
-      "sha256": "0d5d45ee53cacabec188d25ca4bca2c56c72212bb2050bf41f92fa0064b24b87",
-      "bytes": 39646477,
+      "sha256": "0e4b1de8bea9127dc2e0eee6af4513885a9db9c13a91cef9bb555d9f102d19ad",
+      "bytes": 81332669,
       "kind": "GenotypeTumor"
     },
     "cohort": {
       "file": "cohort.iscc",
-      "sha256": "45e0b41a8b8c04eb31398709b619f9b9f32e4d623ebad3e968967904490cda2f",
-      "bytes": 71153010,
+      "sha256": "90dd4883dd7ced66501d24cf82c1f160c98ec314fec5c0b3bf2d707aecda00f1",
+      "bytes": 95537466,
       "kind": "Cohort"
     }
   }

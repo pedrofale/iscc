@@ -12,7 +12,9 @@ calls load the cached file.
 
 The five tumors grow in the ductal field of the paper, at its regime on the arm-level human genome of
 [`arm_genome`][iscc.data.human.arm_genome] (the paper's run R11) with the epithelium as the cell of
-origin, and differ in their evolution or, for the immune tumor, in its tissue. They carry germline variants at the density of a genotyping
+origin, and differ in their evolution. [`ductal`][iscc.pregrown.ductal] grows without immune cells; the
+other four tumors and the cohort grow with the regime's immune cells in the stroma, so that the data
+generated from them hold the immune cells of a breast tumor. They carry germline variants at the density of a genotyping
 array (30% of the neutral genes heterozygous), so that the DNA assays carry the B-allele signal of
 allele-specific callers, and no segment at zero copies. ``scripts/build_pregrown.py`` in the
 repository grows them.
@@ -102,9 +104,10 @@ def neutral():
     """A tumor grown without selection: drivers without effect, no niche traits, and the duct wall
     and the stroma open to every cell.
 
-    200,030 cancer cells on the 1 cm field after 246 generations, in six lesions that are each a
-    mosaic of clones drifting without sweeps. A negative control for methods that look for selection
-    or subclonal structure. About 15 MB.
+    The stroma holds the regime's immune cells, which kill nothing, since immune killing selects
+    resistance. 200,002 cancer cells on the 1 cm field after 247 generations, in six lesions that are
+    each a mosaic of clones drifting without sweeps. A negative control for methods that look for
+    selection or subclonal structure. About 15 MB.
 
     Returns
     -------
@@ -118,8 +121,9 @@ def sweeps():
     """A tumor with fewer and stronger drivers than the paper's regime, so that new drivers sweep
     and a few large, nested clones dominate.
 
-    200,005 cancer cells on the 1 cm field after 242 generations, in three large lesions each
-    dominated by one clone. 33% of the cancer cells have a doubled genome. About 38 MB.
+    Grown with the immune cells of [`immune`][iscc.pregrown.immune]. 200,003 cancer cells on the 1 cm
+    field after 310 generations, mostly in one large lesion through which a late driver clone swept,
+    and 96% of the cancer cells have a doubled genome. About 96 MB.
 
     Returns
     -------
@@ -133,10 +137,9 @@ def cin():
     """A chromosomally unstable tumor: four times the copy-number events and five times the genome
     doubling of the paper's regime, so that its clones differ mostly in copy number.
 
-    200,156 cancer cells on the 1 cm field after 228 generations; every cancer cell has a doubled
-    genome (mean ploidy 3.7), lesions grow from several glands, and nearly every cancer cell has its
-    own arm-level copy-number profile.
-    About 40 MB.
+    Grown with the immune cells of [`immune`][iscc.pregrown.immune]. 200,045 cancer cells on the 1 cm
+    field after 284 generations; 96% of the cancer cells have a doubled genome (mean ploidy 4.0), and
+    lesions grow from several glands. About 81 MB.
 
     Returns
     -------
@@ -153,8 +156,15 @@ def immune():
     which kill nothing.
 
     Grown like [`ductal`][iscc.pregrown.ductal], with six immune cells in every stroma deme, split into
-    the three subtypes with the shares of a breast cancer atlas, and none in the ducts. The immune cells are static, so the tumor grows around them; the
-    human genome layer gives each subtype its baseline from the Human Breast Cell Atlas.
+    the three subtypes with the shares of a breast cancer atlas, and none in the ducts. The immune cells
+    neither divide nor move, and each cancer birth that overfills a deme removes one of them, so they
+    stay in the stroma and at the invasive front and are lost from tumor nests; the human genome layer
+    gives each subtype its baseline from the Human Breast Cell Atlas.
+
+    200,064 cancer cells on the 1 cm field after 538 generations, against 299 for
+    [`ductal`][iscc.pregrown.ductal], since the immune cells kill cancer cells in the stroma. Two
+    large lesions, each dominated by one driver clone, grew from the glands, and every cancer cell has a
+    doubled genome (mean ploidy 4.4). About 57 MB.
 
     Returns
     -------
@@ -170,7 +180,8 @@ def cohort():
     immune cells are the commonest cell state the patients share.
 
     Each patient grows from its own seed to 60,000 cancer cells on the 96 by 96 field, the scale of
-    the paper's seeding runs.
+    the paper's seeding runs. Four patients reached that size after 242 to 299 generations; the other
+    two took 426 and 512, and every cancer cell of these two has a doubled genome. About 96 MB.
 
     Returns
     -------

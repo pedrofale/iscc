@@ -25,7 +25,7 @@ Each tool runs in its own conda environment (`iscc-<tool>`), never in the enviro
 
 ## Configuration
 
-- **`tutorial_config.yaml`**: the configuration the tutorials grow from, the paper's regime at its sweep scale (a 96 by 96 field) without the metastatic site or treatment.
+- **`tutorial_config.yaml`**: the configuration the tutorials grow from, the paper's regime at its sweep scale (a 96 by 96 field) with its immune variant (T and NK, myeloid and B and plasma cells in the stroma, the T and NK cells killing), without the metastatic site or treatment.
 - **`example_config.yaml`**: the base configuration of the paper's regime, which `validation/realistic_regime.py` reads.
 
 `archive/` holds the notebooks of earlier releases, which are no longer published.
