@@ -10,6 +10,7 @@ Every notebook is committed with its outputs; re-execute one with `jupyter nbcon
 - **`02_shape_the_tumor.ipynb`**: what each part of the configuration does to the tumor (selection, mutation, tissue architecture, niche selection, the metastatic site, treatment), shown by contrasting runs.
 - **`03_shape_the_data.ipynb`**: the assays and their technology presets, the measurement biases, fitting the assay parameters to a real data set, and batches.
 - **`04_cohort.ipynb`**: many patients over one configuration, pooled into sequencing batches, with the ground truth across patients.
+- **`05_simulated_next_to_real.ipynb`**: the data of `iscc` next to the real data they stand for, a breast tumor in scRNA-seq (Wu et al. 2021) and a breast cancer section in Visium, by cell type, marker genes, composition and depth.
 
 ## Analysis tools
 

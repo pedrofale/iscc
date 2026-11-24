@@ -118,6 +118,7 @@ nav:
       - Shape the tumor: tutorials/02_shape_the_tumor.ipynb
       - Shape the data: tutorials/03_shape_the_data.ipynb
       - A cohort: tutorials/04_cohort.ipynb
+      - Simulated next to real data: tutorials/05_simulated_next_to_real.ipynb
       - Analysis tools:
           - Purity, copy number and clones from bulk WGS with ASCAT and PyClone-VI: tutorials/tool_ascat_pyclonevi.ipynb
           - Copy number from single-cell DNA with HMMcopy: tutorials/tool_hmmcopy.ipynb
