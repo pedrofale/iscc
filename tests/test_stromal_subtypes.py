@@ -65,6 +65,29 @@ def test_a_grown_tumour_takes_the_split_afterwards():
         t.split_stroma(MIX)
 
 
+def _same_genome(a, b):
+    return all(np.array_equal(x, y) for sa, sb in zip(a.genome, b.genome) for h in ("p", "m")
+               for x, y in zip(sa[h], sb[h]))
+
+
+@pytest.mark.parametrize("when", ["seeding", "afterwards"])
+def test_the_subtypes_carry_the_germline_of_the_fibroblasts(when):
+    germline = {"het_frac": 0.2, "seed": 5}
+    spatial = {**FIELD, "stromal_composition": MIX} if when == "seeding" else dict(FIELD)
+    t = GenotypeTumor(seed=3, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
+                      cancer_cell_params=CANCER_CELL_PARAMS,
+                      deme_params={"carrying_capacity": 20, "initial_cancer_cells": 5},
+                      spatial_params=spatial, germline_params=germline)
+    assert len(t.germline_sites) > 0
+    if when == "afterwards":
+        t.grow(n_steps=2_000, materialize=False)
+        t.split_stroma(MIX)
+    fibroblast = t.genotypes["stromal"]
+    assert any(x.any() for seg in fibroblast.genome for h in ("p", "m") for x in seg[h])   # the germline
+    for g in ("endothelial", "pvl"):
+        assert _same_genome(t.genotypes[g], t.genotypes["stromal"])
+
+
 def test_default_is_all_fibroblasts_and_bad_composition_is_refused():
     t = _tumour(dict(FIELD))
     assert not {"endothelial", "pvl"} & set(t.genotypes)

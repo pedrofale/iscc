@@ -6,6 +6,7 @@ A mixin of [`GenotypeTumor`][iscc.tumor.GenotypeTumor]; it holds no state of its
 import numpy as np
 from ..geometry import bresenham_circumference, get_inside
 from ...constants import LAYOUT_OFFSET_STROMAL_SUBTYPES, RUN_OFFSET_STROMAL_SPLIT, STROMAL_SUBTYPES
+from ..germline import _set_bits
 
 
 class TissueMixin:
@@ -388,9 +389,15 @@ class TissueMixin:
             raise ValueError("the stroma of this tumour is already split into subtypes")
         names = [g for g in STROMAL_SUBTYPES if composition.get(g, 0) > 0]
         shares = np.array([composition[g] for g in names], dtype=float)
+        sites = getattr(self, "germline_sites", None)
         for g in names:
             self._normal_params.setdefault(g, self._normal_params["stromal"])   # a tumour saved before the subtypes
+            new = g not in self.genotypes
             self._normal_genotype(g)
+            # A subtype created after the germline was applied takes it here, so that its genome is
+            # that of the fibroblasts; at seeding the germline is applied after the split.
+            if new and sites is not None and len(sites):
+                _set_bits(self.genotypes[g], self.selection, sites, self.germline_homolog, update_summary=False)
         n_primary = getattr(self, "n_primary_demes", len(self.demes))
         for i in range(n_primary):
             n = self.demes[i].get("stromal", 0)
