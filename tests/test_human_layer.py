@@ -174,6 +174,9 @@ def test_assays_count_human_genes_and_writers_produce_tool_inputs(reference, tum
                                  "pxl_row_in_fullres", "pxl_col_in_fullres"]
     assert len(pos) == len(vz.spot_counts) and pos["in_tissue"].sum() == n_tissue
     assert ((pos["array_row"] + pos["array_col"]) % 2 == 0).all()      # Visium hex parity
+    import scanpy
+    read = scanpy.read_visium(outs, count_file="filtered_feature_bc_matrix.h5", load_images=False)
+    assert read.n_obs == n_tissue                                     # opens as a Space Ranger run
     snp = tmp_path / "vz" / "snp_dir"
     A = sp.load_npz(snp / "cell_snp_Aallele.npz")
     ids = np.load(snp / "unique_snp_ids.npy", allow_pickle=True)

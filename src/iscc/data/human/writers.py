@@ -77,6 +77,9 @@ def write_10x_h5(path, counts, bcs, genes):
     with h5py.File(path, "w") as f:
         f.attrs["filetype"] = "matrix"
         f.attrs["version"] = 2
+        # as Cell Ranger and Space Ranger write them; scanpy.read_visium names the library from it
+        f.attrs["library_ids"] = np.array([b"iscc"])
+        f.attrs["chemistry_description"] = "iscc simulation"
         m = f.create_group("matrix")
         m.create_dataset("barcodes", data=np.array(bcs, dtype="S"))
         m.create_dataset("data", data=X.data.astype(np.int32), compression="gzip")
