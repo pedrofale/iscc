@@ -50,6 +50,17 @@ Installing the package provides the pipeline entry points:
 | `isccdata` | generate DNA/RNA/spatial assay data |
 | `isccfig`, `isccgif` | figures and animations |
 
+## Running the tutorials
+
+The tutorials are notebooks in the `notebooks` folder of the repository, next to
+`tutorial_config.yaml`, the configuration they grow from. Clone the repository, or download a notebook
+and the configuration into one folder, and install the packages that the tutorials use for analysis
+and plots:
+
+```bash
+pip install scanpy squidpy jupyterlab
+```
+
 ## Environments for the analysis-tool tutorials
 
 Each [analysis-tool tutorial](tutorials/tool_ascat_pyclonevi.ipynb) runs its tool from its own conda
