@@ -266,7 +266,7 @@ def panel_d(fig, x, y, levels):
         ax.tick_params(axis="x", labelsize=FS_SMALL)
         ax.axhline(1.5, color=S.BG_CELLS, lw=0.5)             # fitted and shared above the sources
         ax.set_title(title, fontsize=FS_SMALL, pad=2)
-        ax.set_xlabel(xlabel if k == 0 else f"neighbours from the\n{xlabel}", fontsize=FS_SMALL, labelpad=1)
+        ax.set_xlabel(xlabel if k == 0 else f"neighbors from the\n{xlabel}", fontsize=FS_SMALL, labelpad=1)
         ax.set_xlim(-0.03, 1.03)
         ax.set_xticks([0, 0.5, 1])
         ax.set_xticklabels(["0", "0.5", "1"])
@@ -499,7 +499,7 @@ def panel_f(fig, x, y, coll):
         ax.tick_params(axis="y", length=0)
         ax.set_xticks([0, 0.5, 1])
         ax.set_xticklabels(["0", "0.5", "1"], fontsize=FS_SMALL)
-        ax.set_xlabel("share of tumours", fontsize=FS_SMALL, labelpad=1)
+        ax.set_xlabel("share of tumors", fontsize=FS_SMALL, labelpad=1)
     yt = y + 17
     if res is None:
         placeholder(S.ax_mm(fig, x + lab_w, yt, 3 * (w + gap) + wc, h), "trait scores")
