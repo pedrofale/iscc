@@ -14,6 +14,7 @@ tau-leaping.
 | | |
 |---|---|
 | [`iscc.tumor.GenotypeTumor`](GenotypeTumor.md) | The tumor engine: per-deme genotype **counts**, exact or tau-leaping. |
+| [`iscc.tumor.PassengerCatalogue`](PassengerCatalogue.md) | The genome-wide passengers of materialised cells, each at a site of its own, and the clades that carry them. |
 
 ## Cohort
 

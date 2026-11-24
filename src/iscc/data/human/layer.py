@@ -452,6 +452,31 @@ class HumanGenomeLayer:
         return pd.DataFrame(rows, columns=["genotype", "chrom", "start", "end", "arm",
                                            "cn_p", "cn_m", "cn"])
 
+    def passenger_positions(self, passengers):
+        """Where the genome-wide passengers lie on the human genome.
+
+        ``passengers`` is ``bulkDNA.passenger_data`` or ``PassengerCatalogue.sites()``: a passenger
+        at fraction ``x`` along growth segment ``s`` lies at fraction ``x`` along the human stretch
+        of ``s`` (its arm, for an arm-homologous genome). Returns a table with ``chrom`` and ``pos``
+        (0-based) indexed like ``passengers``."""
+        seg = passengers["segment"].to_numpy(np.int64)
+        frac = passengers["position"].to_numpy(float)
+        arms = self.reference.arms
+        chrom = np.empty(len(seg), dtype=object)
+        pos = np.zeros(len(seg), dtype=np.int64)
+        for s, pieces in self.grid.groupby("segment", sort=True):
+            rows = np.flatnonzero(seg == s)
+            if not len(rows):
+                continue
+            pieces = pieces.sort_values("growth_gene")
+            lo, hi, arm = (pieces[c].to_numpy(np.int64) for c in ("lo", "hi", "arm"))
+            cum = np.concatenate([[0], np.cumsum(hi - lo)])
+            at = frac[rows] * cum[-1]
+            k = np.clip(np.searchsorted(cum, at, side="right") - 1, 0, len(lo) - 1)
+            chrom[rows] = arms["chrom"].to_numpy()[arm[k]]
+            pos[rows] = np.minimum(lo[k] + (at - cum[k]).astype(np.int64), hi[k] - 1)
+        return pd.DataFrame({"chrom": chrom, "pos": pos}, index=passengers.index)
+
     def gene_cn(self, gids, tumor):
         """Total copy number of every human gene for each genotype: ``(len(gids), n_genes)`` int16."""
         cn_p, cn_m = self.homolog_cn(list(gids), tumor)
