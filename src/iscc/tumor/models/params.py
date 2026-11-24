@@ -54,6 +54,7 @@ class RunSettings:
     max_cells: Optional[int] = None
     germline_params: Optional[dict] = None
     founder_mutations: Optional[dict] = None
+    genome_passengers: Optional[object] = None
     layout_seed: Optional[int] = None
 
 

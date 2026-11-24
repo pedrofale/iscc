@@ -29,6 +29,7 @@ are produced separately by ``iscc.data.reads``.
 from .assay import Assay
 from .batch import DNABatch, DNABatchHyperParams, DNA_DEPTH_MODELS
 from ..sample.dissociation.dissociation import biological_type
+from ..tumor.models.passengers import FEATURE_SEED as _PASSENGER_FEATURE_SEED
 
 import os
 import zlib
@@ -407,7 +408,8 @@ class bulkDNA(DNA):
 
     After ``run``, ``purity`` holds the pool's TRUE tumour purity (the fraction of pooled
     cells that are cancer cells, ``None`` when the sample carries no cell types) and
-    ``n_cells_pooled`` its size. Purity is what turns an observed VAF into a cancer-cell
+    ``n_cells_pooled`` its size. With the WGS breadth, ``passenger_data`` holds the genome-wide
+    passengers of the pooled cells (see ``run``), each at a site of its own. Purity is what turns an observed VAF into a cancer-cell
     fraction, so it is both an input to that calculation and the ground truth for any method
     that estimates purity from the data.
 
@@ -465,7 +467,12 @@ class bulkDNA(DNA):
         bulkDNA
             ``self``, with the per-locus results in ``observed_data``, the pool's true
             tumour purity in ``purity`` and its size in ``n_cells_pooled``. Call
-            ``to_anndata`` or ``write`` to export.
+            ``to_anndata`` or ``write`` to export. ``passenger_data`` holds the same counts at
+            the genome-wide passenger sites of the cells (``cell_data["cell_lineage"]``, see
+            [`PassengerCatalogue`][iscc.tumor.PassengerCatalogue]) for the WGS breadth,
+            with their segment, position along it, true copy number, true allele fraction and
+            true cancer-cell fraction; ``None`` for WES and panels, which do not capture them,
+            and for cells without the layer.
         """
         snv = cell_data["cell_snv"]
         cells = np.asarray(list(cell_subset)) if cell_subset is not None else np.asarray(snv.index)
@@ -521,7 +528,32 @@ class bulkDNA(DNA):
         )
         if self.germline_mask is not None:
             self.observed_data["is_germline"] = self.germline_mask
+        self.passenger_data = self._passengers(cell_data, cells, batch, weights, N)
         return self
+
+    def _passengers(self, cell_data, cells, batch, weights, N):
+        """Bulk counts at the genome-wide passenger sites of the pooled cells, drawn after the
+        loci of ``observed_data`` (whose draws they leave as they were), with the batch's GC curve
+        and depth model and a read budget in proportion to their share of the pooled copies."""
+        lineage = cell_data.get("cell_lineage")
+        cat = None if lineage is None else lineage.attrs.get("passengers")
+        if cat is None or not len(cat) or self.breadth != "wgs":
+            return None
+        alt_copies, total, carriers, n_cancer = cat.pooled(lineage.loc[cells])
+        true_af = np.divide(alt_copies, total, out=np.zeros(len(cat)), where=total > 0)
+        gc, mapp, _ = genome_features(cat.names, seed=_PASSENGER_FEATURE_SEED)
+        w = total * batch.locus_efficiency(gc, mapp)
+        n_reads = int(round(N * w.sum() / max(float(np.sum(weights)), 1e-12)))
+        coverage = batch.emit_depth(w, n_reads).astype(int)
+        alt = batch.alleles_binomial(coverage, true_af, error=batch.h.error_rate).astype(int)
+        out = cat.sites()
+        out.insert(0, "coverage", coverage)
+        out.insert(1, "alt_counts", alt)
+        out.insert(2, "vaf", np.divide(alt, coverage, out=np.zeros(len(cat)), where=coverage > 0))
+        out.insert(3, "true_cn", total / max(len(cells), 1))
+        out.insert(4, "true_alt_fraction", true_af)
+        out.insert(5, "true_ccf", carriers / n_cancer if n_cancer else np.nan)
+        return out
 
     def to_anndata(self):
         """One 'pseudobulk sample' observation × loci (var) AnnData (X = coverage)."""
@@ -551,6 +583,8 @@ class bulkDNA(DNA):
         os.makedirs(out_path, exist_ok=True)
         # `counts.csv` kept as the stable on-disk contract (CLI/pipeline test).
         self.observed_data.to_csv(os.path.join(out_path, "counts.csv"))
+        if getattr(self, "passenger_data", None) is not None:
+            self.passenger_data.to_csv(os.path.join(out_path, "passengers.csv"))
         if write_h5ad:
             try:
                 self.to_anndata().write_h5ad(os.path.join(out_path, f"{self.batch.label}.h5ad"))

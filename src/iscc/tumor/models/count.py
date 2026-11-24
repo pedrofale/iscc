@@ -39,6 +39,7 @@ from .materialise import (  # noqa: F401  (re-exported: the module-level names t
     _STREAM_DEPTH, _STREAM_SUBSAMPLE)
 from .plotting import PlottingMixin
 from .params import BREAST_SUBTYPES, ModelBlocks, RunSettings, resolve_parameters  # noqa: F401
+from . import passengers
 
 
 CELLTYPES = ["cancer", "epithelial", "stromal", "immune"]
@@ -212,6 +213,12 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         transforming hits) and an optional ``seed``. Off by default; when given, they are
         written into the founder genome before growth, so every cancer cell inherits them and
         the tumour has the clonal peak real sequencing shows.
+    genome_passengers : dict or bool, optional
+        Genome-wide passenger mutations at sites of their own, re-created when cells are
+        materialised and read by bulk WGS (``passenger_data``): ``rate``, passenger SNVs per cell
+        division (default 2.0), and ``truncal``, the passengers the founder carries (default
+        1,000). On by default; ``False`` turns them off. Growth never reads them. See
+        [`PassengerCatalogue`][iscc.tumor.PassengerCatalogue].
     """
 
     # Tau-leaping options (see ``_init_tau``). These class-level values are the scheme that tumours
@@ -238,7 +245,7 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
                  update_mode=None, tau=None, snapshot_every=None, microenv_params=None,
                  layout_seed=None, expression_params=None, coarsen_passengers=None,
                  max_cells=None, germline_params=None, founder_mutations=None,
-                 spatial_snapshot_every=None, spatial_snapshot_budget=None):
+                 spatial_snapshot_every=None, spatial_snapshot_budget=None, genome_passengers=None):
         r, p = resolve_parameters(
             config, genome_mode, genome_spec,
             dict(update_mode=update_mode, tau=tau, snapshot_every=snapshot_every,
@@ -246,7 +253,7 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
                  spatial_snapshot_budget=spatial_snapshot_budget,
                  coarsen_passengers=coarsen_passengers, max_cells=max_cells,
                  germline_params=germline_params, founder_mutations=founder_mutations,
-                 layout_seed=layout_seed),
+                 genome_passengers=genome_passengers, layout_seed=layout_seed),
             ModelBlocks(genome=genome_params, selection=selection_params, cancer=cancer_cell_params,
                         deme=deme_params, spatial=spatial_params,
                         epithelial=epithelial_cell_params, stromal=stromal_cell_params,
@@ -349,6 +356,9 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         # which means NOTHING in the tumour can ever be clonal — the most recent common ancestor of
         # every cancer cell is the founder, so an empty founder genome is an empty clonal layer.
         self.founder_mutations = r.founder_mutations
+        # Genome-wide passengers at infinite sites, re-created at materialisation (passengers.py);
+        # a readout only, so a tumour grows the same with them on or off.
+        self.genome_passengers = passengers.resolve(r.genome_passengers)
 
         self.genome_mode = genome_mode
         self.genome_spec = genome_spec

@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from ...constants import LAYOUT_OFFSET_F8_PROGRAMS
+from . import passengers
 
 
 # Fraction of a clone's realized folded passenger burden (``_pass_load``) that is treated as
@@ -1145,6 +1146,13 @@ class MaterialiseMixin:
                                                   columns=["row", "col"]).astype(int)
         self.cell_data["cell_type"] = pd.DataFrame(types, index=idx, columns=["cell_id"])
         self.cell_data["cell_deme"] = pd.DataFrame(demes_col, index=idx, columns=["deme_id"])
+        # Genome-wide passengers at infinite sites (DNA only): the catalogue rides in the attrs of the
+        # per-cell lineage frame, which every resection, section and dissociation keeps. A tumour
+        # saved before the setting existed takes the defaults.
+        settings = getattr(self, "genome_passengers", passengers.resolve(None))
+        if want_snv and settings is not None and n_cells:
+            prng = self._run_rng(self.seed, passengers.RNG_OFFSET, _STREAM_PASSENGERS)
+            _, self.cell_data["cell_lineage"] = passengers.build(self, types, idx, settings, prng)
         # Allele-resolved neutral SNV layer (the PRIMARY truth of the coalescent passenger overlay):
         # per-homolog VAF frames whose sum is exactly `cell_snv`. Only present when the overlay
         # actually ran (coarsening on + folded burden + neutral sites).
