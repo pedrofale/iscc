@@ -226,93 +226,176 @@ class PlottingMixin:
         ax.set_xticks([]); ax.set_yticks([])
         return ax
 
-    def plot_phylogeny(self, ax=None, min_freq=0.02, figsize=(7, 7), linewidth=1.4):
-        """Radial CLADE phylogeny drawn inline with matplotlib (Cassiopeia-style).
+    #: The heritable traits plot_phylogeny marks where a lineage gained them: key, letter, name.
+    _TREE_TRAITS = (("breach", "B", "breach"), ("stromal_survival", "S", "stromal survival"),
+                    ("immune_resistance", "I", "immune resistance"), ("met_survival", "M", "metastatic survival"),
+                    ("drug_tolerance", "T", "drug tolerance"), ("treatment_resistance", "R", "treatment resistance"),
+                    ("is_wgd", "W", "genome doubling"))
 
-        Rather than subsampling cells, the whole cancer population is COLLAPSED to driver clones — the
-        same functional collapse the by_drivers Muller uses, size-merged at ``min_freq`` — and the tree
-        is the clade genealogy: each surviving clade is one node, placed radially (founder at the centre,
-        depth = clade ancestry), coloured by its driver-clone colour (matching ``plot_muller(by_drivers)``
-        and ``plot_tissue("clone")``) and sized by its cell count.
+    def plot_phylogeny(self, ax=None, min_freq=0.02, figsize=(9, 4), annotate=True, trait_min_freq=0.01):
+        """The clone tree of the tumor on the time axis of ``plot_muller``, with the events of its history.
 
-        Renders straight to ``ax`` (no image file); returns the matplotlib ``Axes``. Primary grid only.
+        The cancer cells are collapsed to driver clones, and a clone that never reaches ``min_freq``
+        of the cancer cells is merged into its parent, as ``plot_muller(by_drivers=True)`` draws them
+        and in the same colours. Each clone is a horizontal branch from the generation it arose to
+        the last generation it had cells, thicker the larger its peak size, and joined to its parent
+        clone where it arose; the descendants of a clone lie below it, the oldest first.
+
+        With ``annotate``, a letter on a branch marks where a lineage of that clone gained a
+        heritable trait: breach (B), stromal survival (S), immune resistance (I), metastatic survival
+        (M), drug tolerance (T), treatment resistance (R) or a doubled genome (W). Only the gains whose
+        descendants hold at least ``trait_min_freq`` of the cancer cells at the end of growth are
+        marked. A triangle marks the first cells of a clone to seed the metastatic site, and dotted
+        lines the release of the founding acinus and each resection.
+
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes, optional
+            The axes to draw on; a new figure of ``figsize`` otherwise.
+        min_freq : float, optional
+            Clones below this share of the cancer cells are merged into their parent (default 0.02).
+        figsize : tuple, optional
+            Size of the new figure (default (9, 4)).
+        annotate : bool, optional
+            Mark the trait gains and the events (default True).
+        trait_min_freq : float, optional
+            Share of the final cancer cells that a lineage must hold for its trait gain to be marked
+            (default 0.01).
+
+        Returns
+        -------
+        matplotlib.axes.Axes
         """
         import matplotlib.pyplot as plt
+        import matplotlib.patheffects as pe
         from collections import defaultdict
+        from matplotlib.lines import Line2D
         from .. import viz
         if ax is None:
             _, ax = plt.subplots(figsize=figsize)
         driver_map = self._driver_signatures()
-        # the SAME display basis the by_drivers Muller draws on: full population collapsed to driver
-        # clones and size-merged at min_freq (no cell subsampling).
-        basis_counts, basis_parents, _gmap, basis_cols = viz._display_basis(
+        counts, parents, gmap, cols = viz._display_basis(
             self.traces, self.genotypes_parents, driver_map=driver_map, min_freq=min_freq)
-        present = [str(c) for c in basis_cols]
-        if not present:
+        clones = [str(c) for c in cols]
+        if not clones:
             raise ValueError("no cancer clones to build a phylogeny")
-        clone_colors = viz.functional_clone_colors(
-            self.traces, self.genotypes_parents, driver_map=driver_map, min_freq=min_freq)
-        default = (0.6, 0.6, 0.6, 1.0)
-        # clade genealogy: each clade -> its parent clade (from the collapsed basis)
-        pmap = ({str(c): str(basis_parents.iloc[0][c]) for c in basis_parents.columns}
-                if basis_parents.shape[1] else {})
-        presset = set(present)
+        # the colours plot_muller draws these clones in (functional_clone_colors, from the basis above)
+        pop_df, anc, color_by = viz._prepare(counts.copy(), parents)
+        band_colors, band_order = viz._get_colormap(pop_df, anc, color_by, "gnuplot")
+        colors = dict(zip([str(b) for b in band_order], band_colors))
+        timed = len(getattr(self, "trace_times", [])) == len(self.traces)
+        t = (np.asarray(self.trace_times, float) if timed else np.arange(len(self.traces), dtype=float))
+        X = counts[clones].to_numpy(float)
+        t = t[:len(X)]
+        alive = X > 0
+        first = {c: int(np.argmax(alive[:, k])) for k, c in enumerate(clones)}
+        last = {c: int(len(X) - 1 - np.argmax(alive[::-1, k])) for k, c in enumerate(clones)}
+        peak = {c: float(X[:, k].max()) for k, c in enumerate(clones)}
+        pmap = ({str(c): str(parents.iloc[0][c]) for c in parents.columns} if parents.shape[1] else {})
+        present = set(clones)
         children, roots = defaultdict(list), []
-        for c in present:
+        for c in clones:
             p = pmap.get(c)
-            (children[p].append(c) if (p in presset and p != c) else roots.append(c))
-        root = roots[0] if len(roots) == 1 else "__root__"
-        if len(roots) != 1:
-            for r in roots:
-                children[root].append(r)
-        nodes = set(present) | {root}
-        peak = {c: float(basis_counts[c].max()) if c in basis_counts else 0.0 for c in present}
-        pmax = max(peak.values()) or 1.0
-        # radial layout: DFS leaf order -> even angles; internal angle = mean of children; radius = depth
-        depth = {root: 0}
-        order, post, stack = [], [], [(root, False)]
+            (children[p] if (p in present and p != c) else roots).append(c)
+        # one row per clone, its descendants below it, the oldest child first
+        row, stack = {}, sorted(roots, key=lambda c: first[c], reverse=True)
         while stack:
-            n, done = stack.pop()
-            if done:
-                post.append(n); continue
-            ch = children.get(n, [])
-            if not ch:
-                order.append(n); post.append(n); continue
-            stack.append((n, True))
-            for c in reversed(ch):
-                depth[c] = depth[n] + 1
-                stack.append((c, False))
-        nleaf = max(len(order), 1)
-        angle = {lf: 2 * np.pi * (i + 0.5) / nleaf for i, lf in enumerate(order)}
-        for n in post:
-            if n not in angle:
-                angle[n] = float(np.mean([angle[c] for c in children[n]]))
-        maxd = max(depth.values()) or 1
-        col = {n: tuple(np.asarray(clone_colors.get(n, default), float).tolist()) for n in nodes}
+            c = stack.pop()
+            row[c] = len(row)
+            stack.extend(sorted(children.get(c, []), key=lambda z: first[z], reverse=True))
+        pmax = max(peak.values()) or 1.0
+        for c, y in row.items():
+            lw = 1.5 + 6.0 * np.sqrt(peak[c] / pmax)
+            ax.plot([t[first[c]], t[last[c]]], [y, y], color=colors.get(c, (0.6, 0.6, 0.6, 1.0)), lw=lw,
+                    solid_capstyle="butt", zorder=2, gid="branch",
+                    path_effects=[pe.Stroke(linewidth=lw + 1.0, foreground="0.3"), pe.Normal()])
+            p = pmap.get(c)
+            if p in row:
+                ax.plot([t[first[c]]] * 2, [row[p], y], color="0.45", lw=0.8, zorder=1)
+        handles = []
+        if annotate:
+            par = {str(k): str(v) for k, v in dict(self.genotypes_parents).items()}
 
-        def r_of(n):                                # founder at the centre, clades on rings by depth
-            return depth[n] / maxd
-        # arc at each clade's radius spanning its children, radial spokes out to each child clade
-        for n in nodes:
-            ch = children.get(n, [])
-            if not ch:
-                continue
-            rn = r_of(n)
-            cangs = [angle[c] for c in ch]
-            a0, a1 = min(cangs), max(cangs)
-            arc = np.linspace(a0, a1, max(2, int(np.ceil((a1 - a0) / 0.02)) + 1))
-            ax.plot(rn * np.cos(arc), rn * np.sin(arc), color=col[n], lw=linewidth, solid_capstyle="round")
-            for c in ch:
-                ac, rc = angle[c], r_of(c)
-                ax.plot([rn * np.cos(ac), rc * np.cos(ac)], [rn * np.sin(ac), rc * np.sin(ac)],
-                        color=col[c], lw=linewidth, solid_capstyle="round")
-        # one marker per clade, sized by its cell count
-        for c in present:
-            s = 40 + 360 * np.sqrt(peak.get(c, 0) / pmax)
-            ax.scatter([r_of(c) * np.cos(angle[c])], [r_of(c) * np.sin(angle[c])], s=s,
-                       color=col[c], edgecolors="black", linewidth=0.4, zorder=3)
-        ax.set_aspect("equal"); ax.axis("off")
-        ax.set_xlim(-1.12, 1.12); ax.set_ylim(-1.12, 1.12)
+            def clade(g):                           # the drawn clone a genotype belongs to
+                for _ in range(len(par) + 1):
+                    if gmap.get(g) in row:
+                        return gmap[g]
+                    if par.get(g, g) == g:
+                        return None
+                    g = par[g]
+                return None
+
+            def x_of(time, step):                   # an event on the time axis of the traces
+                if timed:
+                    return float(time)
+                every = max(int(getattr(self, "snapshot_every", 1) or 1), 1)
+                return float(step) / every
+
+            def level(rep, key):
+                return float(getattr(rep, "is_wgd", False)) if key == "is_wgd" else \
+                    float(rep.evolutionary_parameters.get(key, 0.0))
+
+            # cancer cells at the end of growth descending from each genotype, children before parents
+            final = {str(g): int(n) for g, n in self.genotypes_counts.items()
+                     if g in self.genotypes and self._is_cancer(g)}
+            total = sum(final.values()) or 1
+            sub = defaultdict(int)
+            ordinal = {str(g): getattr(r, "ord", 0) for g, r in self.genotypes.items()}
+            for g in sorted(set(par) | set(final), key=lambda g: ordinal.get(g, 0), reverse=True):
+                sub[g] += final.get(g, 0)
+                p = par.get(g)
+                if p is not None and p != g:
+                    sub[p] += sub[g]
+            marks, shown = defaultdict(list), {}
+            for g, rep in self.genotypes.items():
+                g = str(g)
+                if rep.type != "cancer" or sub.get(g, 0) < trait_min_freq * total:
+                    continue
+                prep = self.genotypes.get(par.get(g))
+                prep = prep if (prep is not None and prep.type == "cancer" and par.get(g) != g) else None
+                c = clade(g)
+                if c is None:
+                    continue
+                born = getattr(rep, "birth_time", float("nan"))
+                x = float(born) if (timed and np.isfinite(born)) else \
+                    float(t[min(int(getattr(rep, "birth_trace", 0)), len(t) - 1)])
+                for key, letter, name in self._TREE_TRAITS:
+                    if level(rep, key) > 0 and (prep is None or level(prep, key) == 0):
+                        marks[(c, x)].append(letter)
+                        shown[letter] = name
+            span = (t[-1] - t[0]) or 1.0
+            for (c, x), letters in marks.items():
+                for i, letter in enumerate(sorted(set(letters))):
+                    ax.text(x + i * 0.018 * span, row[c], letter, ha="center", va="center", fontsize=7,
+                            fontweight="bold", zorder=5,
+                            bbox=dict(boxstyle="circle,pad=0.18", fc="white", ec="0.2", lw=0.6))
+            seeded = {}
+            for e in self.events:
+                if e.get("event") == "seeding":
+                    c = clade(str(e.get("genotype")))
+                    if c is not None:
+                        seeded[c] = min(seeded.get(c, np.inf), x_of(e.get("time", 0), e.get("step", 0)))
+            for c, x in seeded.items():
+                ax.scatter([x], [row[c] - 0.35], marker="v", s=40, color="black", zorder=6)
+            for e in self.events:
+                name = {"origin_release": "acinus opens", "resection": "resection"}.get(e.get("event"))
+                if name:
+                    x = x_of(e.get("time", 0), e.get("step", 0))
+                    ax.axvline(x, color="0.5", ls=":", lw=0.9, zorder=0)
+                    ax.text(x, -0.9, f" {name}", fontsize=7, color="0.35", va="bottom")
+            order = [letter for _, letter, _ in self._TREE_TRAITS if letter in shown]
+            handles = [Line2D([], [], ls="none", marker=f"${letter}$", color="0.1", markersize=7,
+                              label=shown[letter]) for letter in order]
+            if seeded:
+                handles.append(Line2D([], [], ls="none", marker="v", color="black", label="seeds the metastasis"))
+        ax.set_ylim(len(row) - 0.5, -1.2)
+        ax.set_yticks([])
+        ax.set_xlabel("Generation" if timed else "record")
+        for side in ("top", "right", "left"):
+            ax.spines[side].set_visible(False)
+        if handles:
+            ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.0, 1.0), frameon=False, fontsize=8,
+                      title="gained", title_fontsize=8)
         return ax
 
     def he_image(self, px=6, darkness=0.8, sigma_frac=0.5):
