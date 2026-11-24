@@ -76,7 +76,7 @@ import style as S  # noqa: E402
 
 CACHE = os.path.join(C.DERIVED, "fig1")
 SHOWCASE = ("R0", "seed1")
-AXIS, DISSOCIATE = "x", "remainder"      # bisect at mid-width; the right half (the remainder) is dissociated
+AXIS, DISSOCIATE = "x", "remainder"      # bisect through the largest clone; the right half (the remainder) is dissociated
 MIN_FRAC = 0.04                          # the clone threshold of common.Clones, applied within each half
 N_SCDNA, BIN = 400, 50                   # scDNA cells (cancer, after recovery); loci per heatmap bin
 SECTION_MAX = 50_000                     # cells kept in the Visium section (a binomial subsample per deme)
@@ -100,31 +100,9 @@ def _parent(par, g):
 
 
 def _blocks(t, k=N_BLOCKS, half=BLOCK_HALF):
-    """``k`` square blocks over cancer-dense demes, as far apart as farthest-point sampling allows.
-
-    Copied from validation/paper/fig3_biases.py:_blocks, so that Fig 1a
-    and Fig 3a cut the same four blocks."""
-    G = t.grid_size
-    dens = np.zeros(G * G)
-    for di, deme in enumerate(t.demes[:G * G]):
-        tot = sum(deme.values())
-        if tot:
-            dens[di] = sum(c for g, c in deme.items() if t._is_cancer(g)) / tot
-    cand = np.where(dens >= 0.5)[0]
-    rc = np.array([t.deme_coords[d] for d in cand], float)
-    # keep candidates whose block fits on the grid
-    ok = (rc.min(1) >= half) & (rc.max(1) < G - half)
-    cand, rc = cand[ok], rc[ok]
-    centres = [int(np.argmax(dens[cand] + 1e-6 * np.arange(len(cand))))]
-    for _ in range(k - 1):
-        d = np.min([np.abs(rc - rc[c]).max(1) for c in centres], axis=0)
-        centres.append(int(np.argmax(d)))
-    blocks, out_rc = [], []
-    for c in centres:
-        r0, c0 = (int(v) for v in rc[c])
-        blocks.append([r * G + cc for r in range(r0 - half, r0 + half + 1) for cc in range(c0 - half, c0 + half + 1)])
-        out_rc.append([r0, c0])
-    return blocks, out_rc
+    """The four blocks of Fig 3A (``fig3_biases._blocks``), so that both figures cut the same ones."""
+    from fig3_biases import _blocks as blocks
+    return blocks(t, k=k, half=half)
 
 
 def clone_tree(t, cl):
@@ -250,9 +228,26 @@ def _read_npz(name):
 
 
 def _halves(t):
-    """(dissociated demes, sectioned demes) of the resected primary."""
+    """(dissociated demes, sectioned demes) of the resected primary, cut along ``AXIS`` through the
+    centre of the largest clone of the primary, so that one clone lies in both halves and can be
+    followed through every modality."""
     import realistic_regime as RR
-    part, rest = RR.resect(t).bisect(frac=0.5, axis=AXIS)
+    cl = C.Clones(t)
+    G = t.grid_size
+    n, col = Counter(), Counter()
+    for di, deme in enumerate(t.demes[:G * G]):
+        c0 = t.deme_coords[di][1] if AXIS == "x" else t.deme_coords[di][0]
+        for g, c in deme.items():
+            if c > 0 and t._is_cancer(g):
+                lab = cl.of(g)
+                if lab != C.ANCESTRAL:
+                    n[lab] += c
+                    col[lab] += c * c0
+    frac = 0.5
+    if n:
+        big = max(sorted(n), key=lambda lab: n[lab])
+        frac = (col[big] / n[big] + 0.5) / G
+    part, rest = RR.resect(t).bisect(frac=frac, axis=AXIS)
     return (rest, part) if DISSOCIATE == "remainder" else (part, rest)
 
 

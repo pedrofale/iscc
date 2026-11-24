@@ -37,6 +37,7 @@ import subprocess
 import sys
 
 import numpy as np
+import pandas as pd
 import scipy.sparse as sp
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -82,25 +83,31 @@ N_BLOCKS, BLOCK_HALF = 4, 8          # multi-region blocks: 17 x 17 demes (about
 
 
 def _blocks(t, k=N_BLOCKS, half=BLOCK_HALF):
-    """``k`` square blocks over cancer-dense demes, as far apart as farthest-point sampling allows."""
+    """``k`` square blocks over the cancer mass of the primary, as a multi-region study cuts a tumour
+    into regions: the cancer-dense demes (at least half cancer cells) whose block fits on the grid are
+    split into ``k`` parts by k-means of their positions, weighted by their cancer cells, and each block
+    is centred on the deme of its part nearest the centre of the part, numbered from left to right.
+    The blocks therefore sample where most cancer cells are, rather than the densest demes, which are
+    the glands."""
+    from sklearn.cluster import KMeans
     G = t.grid_size
-    dens = np.zeros(G * G)
+    dens, cnt = np.zeros(G * G), np.zeros(G * G)
     for di, deme in enumerate(t.demes[:G * G]):
         tot = sum(deme.values())
         if tot:
-            dens[di] = sum(c for g, c in deme.items() if t._is_cancer(g)) / tot
+            cnt[di] = sum(c for g, c in deme.items() if t._is_cancer(g))
+            dens[di] = cnt[di] / tot
     cand = np.where(dens >= 0.5)[0]
     rc = np.array([t.deme_coords[d] for d in cand], float)
     # keep candidates whose block fits on the grid
     ok = (rc.min(1) >= half) & (rc.max(1) < G - half)
     cand, rc = cand[ok], rc[ok]
-    centres = [int(np.argmax(dens[cand] + 1e-6 * np.arange(len(cand))))]
-    for _ in range(k - 1):
-        d = np.min([np.abs(rc - rc[c]).max(1) for c in centres], axis=0)
-        centres.append(int(np.argmax(d)))
+    km = KMeans(n_clusters=k, n_init=10, random_state=0).fit(rc, sample_weight=cnt[cand])
     blocks, out_rc = [], []
-    for c in centres:
-        r0, c0 = (int(v) for v in rc[c])
+    for j in np.argsort(km.cluster_centers_[:, 1], kind="stable"):
+        members = np.flatnonzero(km.labels_ == j)
+        m = members[np.argmin(((rc[members] - km.cluster_centers_[j]) ** 2).sum(1))]
+        r0, c0 = (int(v) for v in rc[m])
         blocks.append([r * G + cc for r in range(r0 - half, r0 + half + 1) for cc in range(c0 - half, c0 + half + 1)])
         out_rc.append([r0, c0])
     return blocks, out_rc
@@ -114,7 +121,7 @@ def _clone_frac(labels, order):
 
 def compute_a():
     from iscc.data import scRNA
-    from iscc.sample.dissociation import Dissociation, biological_type
+    from iscc.sample.dissociation import Dissociation
     t = _load()
     clones = C.Clones(t)
     order = clones.labels + [C.ANCESTRAL]
@@ -149,7 +156,9 @@ def compute_a():
     diss = spec.dissociate(max_cells=4000, layers="scrna")
     fr["dissociated"] = _clone_frac(cancer_labels(diss), order)
 
-    bio = diss["cell_type"]["cell_id"].astype(str).map(biological_type)
+    # coarse types: the stromal and immune subtypes count as stroma and immune
+    from iscc.integrations import biological_types
+    bio = pd.Series(biological_types(diss["cell_type"]["cell_id"].astype(str)), index=diss["cell_type"].index)
     types = ["cancer", "epithelial", "host", "stromal", "immune"]
     comp = {"tissue": [float((bio == k).mean()) for k in types]}
     for name, probs in RECOVERY.items():
