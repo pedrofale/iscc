@@ -1,8 +1,9 @@
 """Fig 5: one atlas-sized cohort of 50 patients, and what tools read from it.
 
-Draws ``figures/paper1/fig5_cohort.pdf`` (through ``validation/_paths.py``; ``ISCC_PAPER_DIR`` picks
-the paper checkout) from summaries only, to match the caption of ``fig:cohort`` in the paper
-(panels A-F):
+Draws ``figures/paper1/fig5_cohort.pdf`` at the text width (panels A, D, E and F below, lettered A to D
+in the paper), and the two panels the half-page layout moved out, ``supp_batch_validation.pdf`` (B, S13
+Fig) and ``supp_cohort_embeddings.pdf`` (C, S14 Fig), through ``validation/_paths.py``
+(``ISCC_PAPER_DIR`` picks the paper checkout), from summaries only:
 
 * ``collect_summary.json`` (``fig5_atlas.py collect``; panels A, E, F) and
   ``integrate/level_<L>.json`` (``batch_cohort.py integrate``; panels C, D) under ``$ISCC_FIG5_OUT``
@@ -115,8 +116,8 @@ def heading(fig, letter, title, x, y):
 
 
 # ------------------------------------------------------------------ A: the cohort and the network
-def panel_a(fig, x, y, coll):
-    w, h = 176, 31
+def panel_a(fig, x, y, coll, w=176):
+    h = 31
     ax = S.ax_mm(fig, x, y, w, h)
     ax.set_xlim(0, w)
     ax.set_ylim(h, 0)
@@ -147,12 +148,12 @@ def panel_a(fig, x, y, coll):
                                     fc=pal[p], ec="none"))
         ax.text(49.6, y0 + 3.4, "…", fontsize=FS, va="center")
         ax.text(53.5, y0 + 3.4, "50 batches", fontsize=FS_SMALL, color=S.GREY, va="center")
-    # the planted network
-    x0 = 77
+    # the planted network, right-aligned in the panel so that E6 stays inside it
+    x0 = w - 89
     cohort = (coll or {}).get("cohort", {})
     sizes = cohort.get("sizes")
     freq = (cohort.get("frequency") or {}).get("0.05")
-    pos = {0: x0 + 13, 1: x0 + 29, 2: x0 + 42, 3: x0 + 58, 4: x0 + 71, 5: x0 + 86, 6: x0 + 99}
+    pos = {0: x0 + 12, 1: x0 + 26, 2: x0 + 37, 3: x0 + 51, 4: x0 + 62, 5: x0 + 75, 6: x0 + 86}
     yc = 10.5
     for name, evs in (("control", [0]), ("synergy", [1, 2]), ("redundancy", [3, 4]), ("order", [5, 6])):
         ax.text(np.mean([pos[e] for e in evs]), 3.2, name, fontsize=FS, ha="center", va="top")
@@ -468,7 +469,7 @@ def _f_cbn_rows(sc):
 
 def panel_f(fig, x, y, coll):
     tools = ("cooc", "mhn", "treemhn")
-    lab_w, w, gap, h, wc = 31, 11.8, 2.4, 21, 8
+    lab_w, w, gap, h, wc = 29, 11.8, 2.4, 21, 8
     res = None
     if coll:
         res = next((r for r in coll["results"] if r["panel"] == "e" and r["threshold"] == A.DETECTION), None)
@@ -519,6 +520,9 @@ def panel_f(fig, x, y, coll):
 
 
 def main():
+    """Fig 5 at the text width (A cohort, B integration, C planted network, D architecture), and the two
+    panels the half-page layout moved out: S13 Fig (the batch effect against real data) and S14 Fig
+    (the embeddings at the fitted level)."""
     import argparse
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--out", default=None, help="summary directory (as fig5_atlas.py)")
@@ -528,22 +532,25 @@ def main():
     out = args.out or os.environ.get("ISCC_FIG5_OUT") or os.path.join(A.REG.OUT, "fig5-atlas")
     data = load(out, args.batchval)
     S.setup()
-    fig = S.figure("double", 190)
+    fig = S.figure(165, 136)
     heading(fig, "A", "Cohort and planted network", 2, 2)
-    panel_a(fig, 6, 8, data["collect"])
-    heading(fig, "B", "Batch effect against real data", 2, 43)
-    panel_b(fig, 4, 49, data["batchval"])
-    heading(fig, "C", "Embeddings", 2, 89)
-    panel_c(fig, 9, 101, data["levels"])
-    heading(fig, "D", "Integration", 93, 89)
-    panel_d(fig, 95, 98, data["levels"])
-    heading(fig, "E", "Planted network", 2, 145)
-    panel_e(fig, 4, 155, data["collect"])
-    heading(fig, "F", "Architecture", 96, 145)
-    panel_f(fig, 96, 151, data["collect"])
+    panel_a(fig, 4, 8, data["collect"], w=158)
+    heading(fig, "B", "Integration", 2, 43)
+    panel_d(fig, 4, 52, data["levels"])
+    heading(fig, "D", "Architecture", 84, 43)
+    panel_f(fig, 84, 51, data["collect"])
+    heading(fig, "C", "Planted network", 2, 98)
+    panel_e(fig, 4, 107, data["collect"])
     path = S.save(fig, args.name)
-    print(f"[fig5] {path} (levels: {sorted(data['levels'])}, collect: {data['collect'] is not None}, "
-          f"batch validation: {data['batchval'] is not None} from {data['batchval_path']})")
+    fig13 = S.figure("double", 34)
+    panel_b(fig13, 4, 4, data["batchval"])
+    path13 = S.save(fig13, "supp_batch_validation")
+    fig14 = S.figure(92, 36)
+    panel_c(fig14, 6, 8, data["levels"])
+    path14 = S.save(fig14, "supp_cohort_embeddings")
+    print(f"[fig5] {path}, {path13}, {path14} (levels: {sorted(data['levels'])}, collect: "
+          f"{data['collect'] is not None}, batch validation: {data['batchval'] is not None} from "
+          f"{data['batchval_path']})")
 
 
 if __name__ == "__main__":
