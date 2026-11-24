@@ -1,4 +1,4 @@
-"""Tests for the tau-leaping update mode on GenotypeTumor (DESIGN_scalability §7).
+"""Tests for the tau-leaping update mode on GenotypeTumor.
 
 Tau-leaping advances ALL clones once per discrete generation (Poisson births/deaths per
 (deme, genotype)) instead of one event per update. These tests check it: builds/grows/
@@ -19,8 +19,8 @@ LOW_DEATH = {**CANCER_CELL_PARAMS, "death_rate": 0.05}
 
 
 # carrying_capacity=None -> well-mixed (no crowding ceiling): these engine-mechanics checks want
-# unbounded growth in a deme, the role the old carrying_capacity=1 "no ceiling" hack used to play
-# (K=1 now caps a deme at ~1 cell). test_carrying_capacity_bounds_growth passes a finite K explicitly.
+# unbounded growth in a deme (K=1 would cap a deme at ~1 cell). test_carrying_capacity_bounds_growth
+# passes a finite K explicitly.
 def _tau(seed, gens, cancer=LOW_DEATH, deme=None, tau=1.0, snapshot_every=1):
     t = GenotypeTumor(seed=seed, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
                       cancer_cell_params=cancer, deme_params=deme or {"carrying_capacity": None},
@@ -46,7 +46,7 @@ def _grow_to(mode, seed, target=1500, cap=100000, cancer=LOW_DEATH):
 
 
 def test_builds_grows_and_materialises_schema():
-    t = _tau(seed=1, gens=12)
+    t = _tau(seed=1, gens=12, deme={"carrying_capacity": None, "initial_cancer_cells": 5})
     cd = t.cell_data
     assert {"cell_snv", "cell_cnv", "cell_exp", "cell_crd", "cell_type", "cell_deme", "cell_evo"} <= set(cd)
     n = t.get_tumor_size()
@@ -137,7 +137,7 @@ def test_muller_min_freq_and_by_drivers():
 
 
 def test_carrying_capacity_bounds_growth():
-    # Density-dependent crowding (DESIGN_crowding.md, Option A) holds a deme NEAR its carrying
+    # Density-dependent crowding holds a deme NEAR its carrying
     # capacity instead of growing unboundedly: death rises RELATIVE to the clone's own division
     # rate, so at occupancy K/(1+margin) death == division (a restoring fixed point) even for a
     # clone whose division has evolved up to max_birth_rate. tau-leaping must track that fixed
@@ -158,7 +158,7 @@ def test_carrying_capacity_bounds_growth():
 
 
 def test_exact_mode_untouched():
-    # default mode is still "exact"; the new params don't change it.
+    # the default mode is "exact"; the tau params don't change it.
     t = GenotypeTumor(seed=1, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
                       cancer_cell_params=LOW_DEATH, deme_params={"carrying_capacity": None},
                       spatial_params=SPATIAL)

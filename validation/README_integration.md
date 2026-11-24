@@ -202,7 +202,7 @@ it emits each tool's input shape and scores any tool's output.
 |---|---|---|---|
 | **MHN** (Schill et al. 2020) ✅ | `iscc-mhn` | `to_mhn_matrix(tumors, min_freq=…)` — patients × events binary | `score_edges` vs the planted `E` |
 | **TreeMHN** (Luo et al. 2023) ✅ | `iscc-treemhn` | `to_treemhn_trees(tumors)` — per-patient mutation trees | `score_edges` + `score_order` |
-| CBN / H-CBN ⬜ | `iscc-cbn` | `to_cbn_poset(tumors)` | `score_order` (the conjunction) |
+| CBN / H-CBN ⬜ | `iscc-cbn` | `to_cbn_poset(tumors, min_freq=…)` | `score_order` (the conjunction) |
 | REVOLVER ⬜ | `iscc-revolver` | `to_treemhn_trees(tumors)` | `score_edges` + `score_order` |
 
 The built-in co-occurrence log-odds (`cooccurrence_scores`, the DISCOVER/MEGSA statistic) is kept as

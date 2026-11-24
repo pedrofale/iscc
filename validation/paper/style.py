@@ -1,7 +1,7 @@
 """House style for the paper-1 figures: one place for sizes, fonts, colours and export.
 
 The spec is measured from Pe'er-lab Nature Biotechnology figures (Spectra, SEACells, ENVI) and the
-LN's t-test Figure 1; the reasoning is in the research vault's ``roadmap/paper1-style-guide``. Every
+LN's t-test Figure 1. Every
 ``fig*.py`` script calls :func:`setup` first and saves through :func:`save`, so a style change is
 made here once and every figure follows.
 
@@ -52,6 +52,9 @@ TOOL = {
     "cNMF": "#937860", "HMMcopy": "#DA8BC3", "SCITE": "#CCB974", "neighbour-joining": "#8C8C8C",
     "MEDICC2": "#64B5CD", "Harmony": "#2F6D3A", "scVI": "#B07AA1", "MHN": "#A6761D",
     "TreeMHN": "#E7298A", "RCTD": "#1B9E77", "cell2location": "#7570B3", "PyClone-VI": "#66A61E",
+    # the other data simulators (supp_datasim)
+    "VISOR": "#D95F02", "CNAsim": "#E6AB02", "Splatter": "#A50026", "scDesign3": "#7B3294",
+    "SRTsim": "#01665E",
 }
 
 # Clone colours: one hue family per founding lineage, subclones from dark to light.
@@ -119,9 +122,9 @@ def ax_mm(fig, x, y, w, h, **kw):
 
 
 def panel_letter(fig, letter, x_mm, y_mm, size=8):
-    """A bold lowercase panel letter; reuse one x per column and one y per row."""
+    """A bold uppercase panel letter (given as "a" or "A"); reuse one x per column and one y per row."""
     W, H = fig.get_size_inches() / MM
-    fig.text(x_mm / W, 1 - y_mm / H, letter, fontsize=size, fontweight="bold",
+    fig.text(x_mm / W, 1 - y_mm / H, letter.upper(), fontsize=size, fontweight="bold",
              ha="left", va="top", color=INK)
 
 

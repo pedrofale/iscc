@@ -1,0 +1,4 @@
+#!/bin/bash
+# Rscript of the clonealign image (R + TensorFlow).
+# Point the matching ISCC_*_RSCRIPT / ISCC_*_PYTHON variable at this file; ISCC_TOOLS_DIR holds the images.
+exec apptainer exec --cleanenv -B /nobackup --env RETICULATE_PYTHON=/opt/conda/bin/python --env TF_CPP_MIN_LOG_LEVEL=3 "${ISCC_TOOLS_DIR:?set ISCC_TOOLS_DIR to the directory of the tool images}/clonealign.sif" /opt/conda/bin/Rscript "$@"

@@ -13,7 +13,7 @@ This module reproduces that decomposition self-contained on an iscc tumour: for 
   * ``I_spatial`` — Moran's I with a **spatial** weight ``w_ij = exp(-d_ij^2 / 2L^2)`` on the cells'
     (jittered) coordinates.
 
-Unlike real PEtracer data, iscc *knows the true category* of every gene (F8 hypoxia/CCI genes are
+Unlike real PEtracer data, iscc *knows the true category* of every gene (hypoxia/CCI genes are
 extrinsic by construction; clone-driven genes are intrinsic), which is what makes the **lineage–space
 confound** measurable: under clonal territories a purely extrinsic (hypoxia) signal acquires lineage
 autocorrelation and a tree-based method mis-labels it as heritable. See
@@ -109,8 +109,8 @@ def decompose_lineage_spatial(tumor, expression=None, lineage_lengthscale=2.0,
     tumor : GenotypeTumor
         A grown tumour; uses ``tumor.cell_data`` (materialised if needed).
     expression : pandas.DataFrame, optional
-        Override the expression matrix (cells x genes), e.g. F9 *observed* counts. Defaults to the
-        true ``cell_exp``. Rows are aligned to the analysed cancer cells by id.
+        Override the expression matrix (cells x genes), e.g. imaging-assay *observed* counts.
+        Defaults to the true ``cell_exp``. Rows are aligned to the analysed cancer cells by id.
     lineage_lengthscale, spatial_lengthscale : float
         Kernel lengthscales for the lineage (tree-distance) and spatial (Euclidean) weights.
     coord_jitter : float

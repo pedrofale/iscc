@@ -65,6 +65,7 @@ def job_clonealign(task):
         probs = IC.run_clonealign(inp["Y"], inp["L"], os.path.join(work, "main"), max_iter=200,
                                   n_repeats=2)
         rec["score"] = _scalars(IC.score_assignment(inp["labels"], probs))
+        rec["run"] = probs.attrs.get("clonealign_run")
         if task.endswith("_seed1"):
             rng = np.random.default_rng(0)
             dial = []
@@ -74,7 +75,8 @@ def job_clonealign(task):
                     continue
                 p = IC.run_clonealign(Ys, Ls, os.path.join(work, f"f{f}"), max_iter=200, n_repeats=2)
                 s = IC.score_assignment(inp["labels"], p)
-                dial.append(dict(frac=float(frac), acc=float(s["accuracy"]), auc=float(s["mean_auc"])))
+                dial.append(dict(frac=float(frac), acc=float(s["accuracy"]), auc=float(s["mean_auc"]),
+                                 run=p.attrs.get("clonealign_run")))
             rec["dial"] = dial
     return rec
 
@@ -116,9 +118,28 @@ def job_programs(task):
     return rec
 
 
+def _cna_tasks():
+    """Fig 5c's tumours, all of them in the registry's R5: the control without doubling (rate 0, seed
+    1) and, at each of the two highest R5 rates, the lowest seed whose cancer cells are mostly doubled
+    (``wgd_frac`` above 0.5 in the summaries), since the panel reads the allelic state after a
+    doubling and a seed with a few doubled cells says nothing about it."""
+    import summaries as SM
+    rates = sorted(getattr(REG, "R5_WGD", (0.0, 0.05, 0.1)))
+    rows = {r["task"]: r for r in SM.load("R5")}
+    tasks = [f"wgd{rates[0]}_seed1"]
+    for w in rates[-2:]:
+        seeds = sorted(int(k.split("_seed")[1]) for k, r in rows.items()
+                       if k.split("_seed")[0] == f"wgd{w}" and (r.get("wgd_frac") or 0) > 0.5)
+        if seeds:
+            tasks.append(f"wgd{w}_seed{seeds[0]}")
+        else:
+            print(f"!! no R5 tumour at rate {w:g} is mostly doubled; Fig 5c has no tumour at that rate")
+    return tasks
+
+
 JOBS = {
     "clonealign": (job_clonealign, [f"cnv{c}_seed{s}" for c in (0.05, 0.15, 0.3) for s in (1, 2)]),
-    "cna": (job_cna, ["wgd0.0_seed1", "wgd0.05_seed1", "wgd0.1_seed1"]),
+    "cna": (job_cna, None),                     # chosen from the summaries: see _cna_tasks
     "programs": (job_programs, ["cnv0.0_seed1", "cnv0.15_seed1", "cnv0.3_seed1",
                                 "snv0.05_seed1", "snv0.5_seed1"]),
 }
@@ -142,7 +163,7 @@ def _run(job):
 
 def compute(kinds, jobs):
     run_of = {"clonealign": "R4", "cna": "R5", "programs": "R4"}
-    todo = [(k, task) for k in kinds for task in JOBS[k][1]
+    todo = [(k, task) for k in kinds for task in (_cna_tasks() if k == "cna" else JOBS[k][1])
             if os.path.exists(REG.task_path(run_of[k], task))
             and not os.path.exists(os.path.join(CACHE, k, f"{task}.json"))]
     print(f"{len(todo)} tool runs to compute", flush=True)

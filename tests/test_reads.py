@@ -1,4 +1,4 @@
-"""F7 read-emission tests (DESIGN_features §C C2/C3).
+"""DNA read-emission tests.
 
 CI stays light: DWGSIM / ART / bwa / samtools are OPTIONAL binaries, so the shell-out is
 skipped gracefully when absent and the bespoke layers are asserted instead:
@@ -6,7 +6,7 @@ skipped gracefully when absent and the bespoke layers are asserted instead:
     error floor) — the reusable piece, tested hardest;
   * per-cell FASTA reflects CNAs (amplified repeated / deletion removed) and SNVs (correct
     base substituted at the right loci);
-  * coverage allocation ∝ copy number (the C1 reuse);
+  * coverage allocation ∝ copy number (the count model's coverage rule, reused);
   * the simulator adapters build the right command + wire FASTQ paths, skipping if absent;
   * the synthetic reference is deterministic in seed and the real-genome seam is present.
 """

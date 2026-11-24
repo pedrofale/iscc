@@ -1,7 +1,7 @@
 """``Surgery(region=..., margin=...)`` — a partial resection with ground-truth margins.
 
 ``Surgery(site)`` with no region removes every cell of the compartment, so a resected primary is
-cured by construction; that stays the default and must stay byte-identical. With a ``region`` only
+cured by construction; that is the default, pinned by golden digests. With a ``region`` only
 those demes are cleared (cancer and normal residents), everything outside keeps growing, and the
 tumour records the ground truth of the cut: the cancer cells removed, the cancer cells in the rim
 of ``margin`` demes just inside the cut (the true margin status), and the cancer cells left behind,
@@ -17,11 +17,14 @@ from iscc.tumor.components.cell import Cell
 from iscc.tumor.models import GenotypeTumor
 from iscc.treatment import Surgery
 
-DEME = {"carrying_capacity": 10, "initial_cancer_cells": 5}
+# The pinned digests below were recorded under the earlier tau-leaping scheme, which is set here so
+# that these tests check the treatment and resection code rather than the default scheme.
+DEME = {"carrying_capacity": 10, "initial_cancer_cells": 5, "tau_deaths": "poisson", "tau_step": "fixed"}
 SPATIAL = {"grid_size": 24, "n_structures": 1, "structure_radius": 0}
 # The metastasis tests' structured field + deposit: the only setting where a whole-primary
 # resection leaves something to keep growing.
-MET_DEME = {"carrying_capacity": 16, "initial_cancer_cells": 6, "resident_pressure_ref": 0.2}
+MET_DEME = {"carrying_capacity": 16, "initial_cancer_cells": 6, "resident_pressure_ref": 0.2,
+            "tau_deaths": "poisson", "tau_step": "fixed"}
 MET_SPATIAL = {"grid_size": 16, "structure_radius": 3, "n_glands": 3, "gland_radius": 3,
                "min_gland_sep": 8, "K_duct": 28, "K_stroma": 18, "stroma_fill_frac": 0.3,
                "cross_gland_kappa": 0.05, "epithelial_barrier": 1.2, "stromal_hazard": 0.7,
@@ -35,7 +38,10 @@ MET_SEL = {**SELECTION_PARAMS, "prop_breach": 0.2, "prop_stromal_survival": 0.2,
 def _build(seed=3, mode="tau", spatial=SPATIAL, deme=DEME, selection=SELECTION_PARAMS, **kw):
     # Genotype ids come from a process-wide counter and the digests include them.
     Cell._genotype_counter = 2_000_000
-    return GenotypeTumor(seed=seed, genome_params=GENOME_PARAMS, selection_params=selection,
+    # The pinned digests were recorded with two nullisomic segments allowed (max_nullisomy 2, the
+    # default until 2026-11-21); these tests check resection, not the viability rule.
+    return GenotypeTumor(seed=seed, genome_params=GENOME_PARAMS,
+                         selection_params={"max_nullisomy": 2, **selection},
                          cancer_cell_params=CANCER_CELL_PARAMS, deme_params=deme,
                          spatial_params=spatial, update_mode=mode, **kw)
 
@@ -86,18 +92,20 @@ def _whole_primary_exact():
 WHOLE_SCENARIOS = {"primary_with_met": _whole_primary_met, "met": _whole_met,
                    "primary_tau": _whole_primary_tau, "primary_exact": _whole_primary_exact}
 
-# Recorded on the code BEFORE partial resection existed (feat/mechanistic-drug + perf/materialize-opt-in).
+# Golden digests of whole-compartment resection: the partial-resection path must not move them.
 WHOLE_DIGESTS = {
-    "primary_with_met": "d0263fdab083025d2aaa924809ff79c1",
-    "met": "fa9f77542abc9ef32e33dad285602c7c",
-    "primary_tau": "abe717192f39eb1a683300438deae286",
-    "primary_exact": "b6af752cf0468c33f912ee5f3e68ef23",
+    "met": "c11baa4d4b0f94234ec14e6c94f735a8",
+    # The exact engine keeps Gillespie's clock, so the times in t.events are real; the event
+    # sequence is unchanged.
+    "primary_exact": "aedb26d9cb98ed0c863e8f3be6c6107a",
+    "primary_tau": "f97843d34d5c1f25118f770264e7e494",
+    "primary_with_met": "bd4fb0858aa7b03857864b1af9a71305",
 }
 
 
 @pytest.mark.parametrize("name", sorted(WHOLE_SCENARIOS))
 def test_whole_compartment_resection_is_byte_identical(name):
-    """(a) region=None removes the whole compartment exactly as before."""
+    """(a) region=None removes the whole compartment, reproducing the golden digests."""
     assert _digest(WHOLE_SCENARIOS[name]()) == WHOLE_DIGESTS[name]
 
 
@@ -110,7 +118,8 @@ LESION_CANCER = {"division_rate": 0.6, "death_rate": 0.05, "max_birth_rate": 1.0
 def _lesion(target=800, mode="tau", **kw):
     Cell._genotype_counter = 2_000_000
     t = GenotypeTumor(seed=3, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
-                      cancer_cell_params=LESION_CANCER, deme_params=DEME, spatial_params=SPATIAL,
+                      cancer_cell_params=LESION_CANCER,
+                      deme_params={**DEME, "maximum_death_rate": 2.0}, spatial_params=SPATIAL,
                       update_mode=mode, **kw)
     steps = 2 if mode == "tau" else 200
     for _ in range(60):

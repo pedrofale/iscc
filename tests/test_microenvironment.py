@@ -1,7 +1,7 @@
-"""F8 microenvironment-driven expression tests (DESIGN_features §H).
+"""Microenvironment-driven expression tests.
 
 Validates the invariants and the mechanism:
-  * OFF (no microenv_params) is reproducible, and enabling F8 does NOT change growth — F8
+  * OFF (no microenv_params) is reproducible, and enabling the layer does NOT change growth — it
     modulates the expression READOUT only, so the tumour (cell_snv/cnv/type) is byte-identical
     on/off at a seed (the modifier draws from a dedicated rng);
   * control (non-program) genes are exactly unmodified;
@@ -21,17 +21,17 @@ SPATIAL = {"grid_size": 18, "structure_radius": 0}
 NO_DEATH = {**CANCER_CELL_PARAMS, "death_rate": 0.0}     # deterministic fill for a density gradient
 # The conftest genome has 40 genes. Keep the hypoxia and CCI target sets SMALL and (mostly) disjoint
 # so there is a non-empty pool left for the L-R database — which also makes the control / hyp_only /
-# cci_only gene sets below non-empty, so the ratio and control tests actually bite (with a 40-gene
-# hypoxia + 40-gene CCI set they covered every gene and were vacuous).
+# cci_only gene sets below non-empty, so the ratio and control tests actually bite (a 40-gene
+# hypoxia + 40-gene CCI set would cover every gene and make them vacuous).
 MP = {
     "hypoxia": {"strength": 0.8, "n_genes": 10, "o2_consumption": 1.5, "o2_supply": 0.3},
-    # `n_candidate_pairs` is the ONE new W0 parameter: a database of 8 L-R pairs, of which row 0 is the
-    # wired channel and the other 7 are unwired decoys. The receptor-dependence (W3) is driven by the
-    # wired pair's ligand/receptor genes.
+    # `n_candidate_pairs`: a database of 8 L-R pairs, of which row 0 is the wired channel and the
+    # other 7 are unwired decoys. The receptor-dependence is driven by the wired pair's
+    # ligand/receptor genes.
     "cci": {"strength": 0.6, "n_target_genes": 10, "emitter_type": "cancer", "lengthscale": 2.5,
             "n_candidate_pairs": 8},
 }
-# Real per-deme crowding (DESIGN_crowding.md) caps demes near K and makes a NO_DEATH tumour spread
+# Per-deme crowding caps demes near K and makes a NO_DEATH tumour spread
 # by dispersal rather than pile up, so it needs more steps to occupy enough demes for the hypoxia
 # FIELD to develop a stable spatial gradient (core–rim contrast + spatial autocorrelation).
 STEPS = 400
@@ -40,8 +40,8 @@ STEPS = 400
 def _grow(microenv_params=None, seed=3):
     # Pin layout_seed to the evolution seed so this fixture reproduces the exact tumour it was
     # calibrated against (the driver/dispersal-gene layout that yields a solid hypoxic-core mass).
-    # After the layout/evolution seed decoupling (DESIGN_cohort.md §1) the layout defaults to a shared
-    # constant; here we want THIS seed's original layout so the spatial-gradient assertions hold.
+    # The layout otherwise defaults to a shared constant; here we want THIS seed's layout so the
+    # spatial-gradient assertions hold.
     t = GenotypeTumor(seed=seed, layout_seed=seed, genome_params=GENOME_PARAMS,
                       selection_params=SELECTION_PARAMS, cancer_cell_params=NO_DEATH,
                       deme_params=DEME_PARAMS, spatial_params=SPATIAL, microenv_params=microenv_params)
@@ -71,7 +71,7 @@ class TestInvariants:
         assert np.array_equal(a.cell_data["cell_exp"].values, b.cell_data["cell_exp"].values)
 
     def test_growth_unchanged_on_off(self, on, off):
-        # F8 touches only the expression readout: the tumour (genome + spatial layout) is identical
+        # the layer touches only the expression readout: the tumour (genome + spatial layout) is identical
         # per cell. (Genotype-id *labels* are a session-global counter, so we compare genome/position,
         # not the arbitrary label.)
         assert on.get_tumor_size() == off.get_tumor_size()
@@ -176,13 +176,13 @@ class TestGroundTruth:
         assert np.allclose(sub[~np.isnan(sub)], 1.0, atol=1e-9)      # CCI off -> no change
 
 
-# ------------------------------------------------------------- W3 receptor-dependence ----------
+# ------------------------------------------------------------- receptor-dependence -------------
 class TestReceptorDependence:
-    """W3 (DESIGN_cci_spatial.md): the CCI effect is `strength · ligand_avail[deme] · receptor[cell]`.
+    """The CCI effect is `strength · ligand_avail[deme] · receptor[cell]`.
 
     So the per-cell received signal (`cci_level`) is the ligand availability at the cell's deme times
     the cell's OWN receptor level — it decomposes exactly that way, and it varies cell-to-cell by
-    clone WITHIN a deme (the per-cell heterogeneity that makes W2 unnecessary at Visium)."""
+    clone WITHIN a deme (per-cell heterogeneity that a deme-constant field cannot give)."""
 
     def test_cci_level_decomposes_into_ligand_avail_times_receptor(self, on):
         t = on.microenv_truth
@@ -223,9 +223,9 @@ class TestReceptorDependence:
         assert 0.5 < vals.mean() < 1.5
 
 
-# ------------------------------------------------------------- W0 the L-R database --------------
+# ------------------------------------------------------------- the L-R database -----------------
 class TestDatabase:
-    """W0 (DESIGN_cci_spatial.md): iscc emits its own candidate ligand-receptor database over its own
+    """iscc emits its own candidate ligand-receptor database over its own
     abstract gene ids. One wired pair, the rest unwired decoys; the whitelist is complete."""
 
     def test_database_has_n_candidate_pairs(self, on):
@@ -250,8 +250,8 @@ class TestDatabase:
         # expression, so the channel must mark those two genes as a BETWEEN-GROUP contrast. What
         # matters is the ORDERING, not a particular ratio: the sender must be the ligand-high group
         # and the receiver population the receptor-high one. Asserting a fixed multiple instead would
-        # pass while the "marker" sat below another cell type's baseline — which is exactly what a
-        # plain multiplicative boost did before the sender was lifted above the AMBIENT level.
+        # pass while the "marker" sat below another cell type's baseline — which a plain
+        # multiplicative boost allows unless the sender is lifted above the AMBIENT level.
         t = on.microenv_truth
         e = on.cell_data["cell_exp"].values
         gids = on.cell_data["cell_type"].iloc[:, 0].values

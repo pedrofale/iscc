@@ -2,12 +2,11 @@ import numpy as np
 import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
-from ast import literal_eval
 
 import pymuller
 import packcircles as pc
 import networkx as nx
-from networkx.drawing.nx_agraph import write_dot, graphviz_layout
+from networkx.drawing.nx_agraph import graphviz_layout
 
 
 def prepare_plots(genotype_counts, genotype_parents):

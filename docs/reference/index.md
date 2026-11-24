@@ -1,21 +1,47 @@
 # API Reference
 
-`iscc`'s Python API mirrors the CLI pipeline — **grow → sample → assay**, with **treatment**
-applied during growth and optional **inference** of parameters from real data. Import the package
-as `import iscc`; see the [Overview](../overview.md) for how the stages connect.
+The Python API follows the stages of the CLI pipeline, **grow → sample → assay**, with
+**treatment** applied during growth and the **estimation** of parameters from real data. Import the
+package as `import iscc`, and see the [Overview](../overview.md) for how the stages connect.
 
 ## Tumor
 
 Grow a selection-driven tumor on a grid of **demes** — small tissue patches, each holding up to a
-carrying capacity of cells. Both engines are spatially explicit at the deme level and simulate the
-same process (birth, death, mutation, and dispersal under a CINner fitness model); they differ only
-in how the cell population is represented.
+carrying capacity of cells. Each deme is held as genotype counts, and the process (birth, death,
+mutation and dispersal under a CINner fitness model) runs either event by event (exact) or by
+tau-leaping.
 
 | | |
 |---|---|
-| [`iscc.tumor.GenotypeTumor`](GenotypeTumor.md) | Represents each deme as genotype **counts**. Fast and scalable — the default. |
-| [`iscc.tumor.GlandularTumor`](GlandularTumor.md) | Represents each cell as its own **object**. Exact, but does not scale to large tumors. |
-| [`iscc.tumor.Tumor`](Tumor.md) | Shared base of the two engines — the common construction parameters. |
+| [`iscc.tumor.GenotypeTumor`](GenotypeTumor.md) | The tumor engine: per-deme genotype **counts**, exact or tau-leaping. |
+
+## Cohort
+
+Grow several patients over one shared gene layout, so that they share their driver genes, baseline
+expression and programs and differ in their evolution.
+
+| | |
+|---|---|
+| [`iscc.cohort.Cohort`](Cohort.md) | A cohort of patient tumors grown over one shared gene layout. |
+| [`iscc.cohort.grow_tumor`](grow_tumor.md) | Grow one patient tumor for a fixed number of steps. |
+| [`iscc.cohort.assign_batches`](assign_batches.md) | Assign the patients of a cohort to sequencing batches. |
+| [`iscc.cohort.pool_cell_data`](pool_cell_data.md) | Pool the cells of several patients into the per-cell tables of one batch. |
+| [`iscc.cohort.run_cohort_batches`](run_cohort_batches.md) | Measure a cohort by scRNA in sequencing batches. |
+| [`iscc.cohort.concat_cohort_batches`](concat_cohort_batches.md) | The batches of a cohort as one AnnData. |
+
+## Pregrown tumors
+
+Tumors and a cohort grown once with the paper's regime, to generate data from without growing; each
+is downloaded on first use, checked and cached.
+
+| | |
+|---|---|
+| [`iscc.pregrown.ductal`](pregrown_ductal.md) | The tumor of the paper's regime: growth in the glands, breach and invasion of the stroma. |
+| [`iscc.pregrown.neutral`](pregrown_neutral.md) | A tumor grown without selection, whose clones branch without sweeps. |
+| [`iscc.pregrown.sweeps`](pregrown_sweeps.md) | A tumor with few, strong drivers, whose clones sweep in turn. |
+| [`iscc.pregrown.cin`](pregrown_cin.md) | A tumor with frequent copy-number events and genome doubling. |
+| [`iscc.pregrown.immune`](pregrown_immune.md) | The paper's tumor with immune cells in the stroma, of which the T and NK cells kill cancer cells and induce an interferon response. |
+| [`iscc.pregrown.cohort`](pregrown_cohort.md) | Six patients grown over one configuration of the paper's regime, with immune cells. |
 
 ## Treatment
 
@@ -52,9 +78,14 @@ Generate single-cell and bulk molecular data from the sampled cells.
 | [`iscc.data.scRNA`](scRNA.md) | Single-cell RNA expression. |
 | [`iscc.data.Visium`](Visium.md) | 10x Visium spatial transcriptomics. |
 | [`iscc.data.DNA`](DNA.md) | Shared base of the DNA assays — breadth + coverage core. |
+| [`iscc.data.run_dna_batches`](run_dna_batches.md) | DNA batches of one sample that share biology and differ technically. |
+| [`iscc.data.run_scrna_batches`](run_scrna_batches.md) | scRNA batches of one sample that share biology and differ technically. |
+| [`iscc.data.atlas_scrna_batches`](atlas_scrna_batches.md) | Batch settings fitted to the tumours of a real scRNA atlas. |
+| [`iscc.data.concat_batches`](concat_batches.md) | The scRNA batches as one labelled AnnData. |
+| [`iscc.data.morans_i`](morans_i.md) | Moran's I, the spatial autocorrelation of a value over spots. |
 
 Each assay page also lists **technology presets** — the parameter settings that approximate named
-platforms (MALBAC / DLP / Tapestri for scDNA, WGS / WES / panel for bulk DNA, and 10x / Smart-seq3
+platforms (DLP+ / Tapestri for scDNA, WGS / WES / panel for bulk DNA, and 10x / Smart-seq3
 for scRNA). The assays' technical defaults live in these hyper-parameter containers (the targets of the
 [Calibration](#calibration) estimators, overridable per assay):
 
@@ -63,12 +94,37 @@ for scRNA). The assays' technical defaults live in these hyper-parameter contain
 | [`iscc.data.DNABatchHyperParams`](DNABatchHyperParams.md) | DNA technical parameters. |
 | [`iscc.data.RNABatchHyperParams`](RNABatchHyperParams.md) | scRNA technical parameters. |
 | [`iscc.data.VisiumBatchHyperParams`](VisiumBatchHyperParams.md) | Visium technical parameters. |
+| [`iscc.data.visium_background.bleed`](visium_bleed.md) | Visium spot swapping: counts bleeding between spots, as SpotClean models it. |
+
+## Human genome layer
+
+Lift the coarse growth genome onto the human genome when cells are measured: real GRCh38 genes, a
+germline of real heterozygous SNPs, haplotype allele counts, and the input files of copy-number
+tools (CopyKAT, CalicoST, Clonalscope, Cancer-Finder). Growth never reads it.
+
+| | |
+|---|---|
+| [`iscc.data.human.arm_genome`](arm_genome.md) | A growth genome with one segment per chromosome arm, at any resolution. |
+| [`iscc.data.human.HumanGenomeLayer`](HumanGenomeLayer.md) | The gene map, the germline, and the allele counts of an assay. |
+| [`iscc.data.human.HumanExpression`](HumanExpression.md) | Human-gene expression from atlas baselines per cell type and Hallmark programmes, for the assays' `gene_lift`. |
+| [`iscc.data.human.GeneLift`](GeneLift.md) | The map from growth genes to human genes that the assays take as `gene_lift`. |
+| [`iscc.data.human.AlleleCounts`](AlleleCounts.md) | Per-haplotype UMI counts at heterozygous SNPs. |
+| [`iscc.data.human.write_visium`](write_visium.md) | Write a Visium assay as Space Ranger output, CalicoST's `snp_dir` and the truth. |
+| [`iscc.data.human.write_scrna`](write_scrna.md) | Write an scRNA assay as Cell Ranger output and the truth. |
+| [`iscc.data.human.check_tool_ready`](check_tool_ready.md) | Test a dataset against each tool's input thresholds. |
+| [`iscc.data.human.HumanReference`](HumanReference.md) | The genes, arms and SNPs of the human reference. |
+| [`iscc.data.human.load_reference`](load_reference.md) | Load the packaged reference (and the SNPs, if prepared). |
+| [`iscc.data.human.fetch_snps`](fetch_snps.md) | Download and prepare the 1000 Genomes common SNPs. |
+| [`iscc.data.human.load_atlas_baselines`](load_atlas_baselines.md) | The packaged per-cell-type baselines from the Human Breast Cell Atlas. |
+| [`iscc.data.human.load_hallmark_programs`](load_hallmark_programs.md) | The packaged Hallmark gene sets that seed the named programmes. |
+| [`iscc.data.human.load_visium_platform_factor`](load_visium_platform_factor.md) | The packaged per-gene sensitivity of Visium relative to droplet scRNA-seq. |
 
 ## Reads
 
 Generate sequencing reads (FASTQ, optionally aligned BAM) from the assayed counts. DNA reads
-use DWGSIM/ART; RNA reads use a synthetic 10x transcriptome or the scReadSim template. These
-call external read simulators, so the corresponding binaries must be installed.
+use DWGSIM/ART, and RNA reads use a synthetic 10x transcriptome or the scReadSim template. These
+call external read simulators, so the corresponding binaries must be installed. The paper describes
+only the synthetic references, and the real-reference and scReadSim paths are not part of it.
 
 | | |
 |---|---|
@@ -76,10 +132,23 @@ call external read simulators, so the corresponding binaries must be installed.
 | [`iscc.data.reads.emit_scrna_reads`](emit_scrna_reads.md) | Mutation-aware single-cell RNA reads. |
 | [`iscc.data.reads.emit_visium_reads`](emit_visium_reads.md) | Spatial (Visium) reads. |
 
+## Integrations
+
+Hand the ground truth over in the forms that other tools read.
+
+| | |
+|---|---|
+| [`iscc.integrations.clones_from_clades`](clones_from_clades.md) | Clone labels of sampled cells, as clades of the true genealogy with enough sampled cells. |
+| [`iscc.integrations.clone_summary`](clone_summary.md) | One row per clone: its size, representative genotype and mutations. |
+| [`iscc.integrations.to_anndata`](to_anndata.md) | A tumor or a sample as one AnnData, with coordinates and ground truth. |
+| [`iscc.integrations.biological_types`](biological_types.md) | The coarse cell type (cancer, epithelial, stromal, immune, host) of each cell. |
+| [`iscc.integrations.cell_subtypes`](cell_subtypes.md) | The cell type of each cell with immune cells by subtype (T_NK, myeloid, B_plasma). |
+
 ## Inference
 
-Fit the **tumor's evolutionary parameters** (division / mutation / dispersal / selection rates)
-to real data by Approximate Bayesian Computation over the growth simulator.
+Estimate the **evolutionary parameters of the tumor** (division, mutation, dispersal and selection
+rates) from real data by approximate Bayesian computation over the growth simulator. The paper does
+not use this module.
 
 | | |
 |---|---|
@@ -89,8 +158,9 @@ to real data by Approximate Bayesian Computation over the growth simulator.
 
 ## Calibration
 
-Fit each **assay's technical parameters** (library size, dispersion, dropout, capture field, …)
-to a real reference dataset, so simulated data matches a target platform.
+Estimate the **technical parameters of each assay** (library size, dispersion, capture field, …)
+from a real reference dataset, so that simulated data match a target platform. The scRNA dropout
+curve is fitted only on request (`fit_dropout=True`).
 
 | | |
 |---|---|

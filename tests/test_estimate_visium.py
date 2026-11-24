@@ -1,4 +1,4 @@
-"""F6 / M4 Visium-half estimate tests (DESIGN_inference §C.2).
+"""Visium estimate tests.
 
 Recovery + honesty, mirroring test_estimate_dna:
   * simulate a Visium AnnData with KNOWN hypers -> estimate_visium -> recover mu_counts /

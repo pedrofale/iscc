@@ -20,12 +20,10 @@ isccdata ──>  <data>/         (sequencing / spatial assay: observed data)
 isccsim --sim-config CONFIG.yaml -s STEPS -o <tumor>
 ```
 
-The sim-config selects a `mode` — one of `TUMOR_MODELS = {genotype, glandular, mixed}`. `genotype`
-(the **default**, used by `notebooks/example_config.yaml` and `configs/landing.yaml`) is the fast
-count-based engine; `glandular` is the exact cell-level engine; `mixed` is reserved and currently
-raises `NotImplementedError`. The config also carries `spatial_params`, `genome_params`,
+The sim-config's `mode` is `genotype` (the only engine, `GenotypeTumor`; `update_mode` picks the
+exact or the tau-leaping algorithm). The config also carries `spatial_params`, `genome_params`,
 `selection_params`, `deme_params`, and per-type `cell_params` (cancer / epithelial / stromal /
-immune). See `src/iscc/tumor/tumorconfigs/glandular.yaml`.
+immune). See `src/iscc/tumor/tumorconfigs/genotype.yaml`.
 
 **Output `<tumor>/`:**
 
@@ -35,8 +33,6 @@ immune). See `src/iscc/tumor/tumorconfigs/glandular.yaml`.
 | `parents.csv` | genotype → parent genotype |
 | `genotype_births.csv` | genotype engine: when and where every cancer genotype arose — `parent`, `ord` (creation ordinal), `birth_trace` (first `trace_counts` row that can contain it), `birth_step` (exact-engine event or tau generation), `birth_time` (generations; empty under the exact engine), `birth_deme`, `compartment`, `row`, `col` (`-1` if never placed) |
 | `genotypes.csv` | genotype list |
-| `grid.csv` | most-frequent genotype per deme (spatial models) |
-| `genotype_counts_demes.csv` | per-deme genotype counts (spatial models) |
 | `gene_data/*.csv` | ground-truth gene annotations: `driver_types`, `dispersal_types`, `treatment_resistance_types`, `immune_resistance_types` |
 | `cell_data/*.csv` | **per-cell ground truth** (the substrate for sampling + assays) |
 

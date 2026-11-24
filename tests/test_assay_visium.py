@@ -1,6 +1,6 @@
-"""F6 spatial (Visium) assay tests (DESIGN_features §D "spatial" row).
+"""Spatial (Visium) assay tests.
 
-Internal-validation targets from the F6 spec:
+Internal-validation targets:
   * spot->cell aggregation: a spot's counts track the pooled expression of its member cells;
     n_cells sits in a sensible range for the radius; off-tissue (empty) spots emit nothing;
   * the HEADLINE piece — the capture-efficiency field is spatially autocorrelated: Moran's I > 0

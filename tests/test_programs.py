@@ -1,14 +1,14 @@
-"""R13 — gene-program expression backbone + dosage/ASE/SNV overlays (DESIGN_expression.md).
+"""Gene-program expression backbone + dosage/ASE/SNV overlays.
 
 The properties that matter here, in order of how much they would hurt if they broke:
 
-1. **Off => unchanged.** `expression_params=None` (the default) leaves the engine on its legacy
-   expression path, and growth NEVER reads the program layer, so a tumour is byte-identical with
-   programs on or off at a given seed (the F8 discipline: programs are a READOUT).
+1. **Off => program-free.** `expression_params=None` (the default) leaves the engine on its
+   program-free expression path, and growth NEVER reads the program layer, so a tumour is
+   byte-identical with programs on or off at a given seed (programs are a READOUT).
 2. **Comparability.** The program landscape is a property of the GENOME, so two patients sharing a
-   config share their programs exactly as they already share their oncogenes — and the sub-streams
-   are independent, so changing `n_programs` cannot reshuffle the gene roles or `s_g`.
-3. **The coupling routes** do what §3.1 says, and stay sparse.
+   config share their programs exactly as they share their oncogenes — and the sub-streams are
+   independent, so changing `n_programs` cannot reshuffle the gene roles or `s_g`.
+3. **The coupling routes** (genotype state -> program activity) do what they claim, and stay sparse.
 4. **Alleles split**, so a BAF exists in RNA.
 """
 import numpy as np
@@ -52,7 +52,7 @@ def cancer_mask(t):
     return np.array([t.genotypes[g].type == "cancer" for g in ct])
 
 
-# --------------------------------------------------------------- 1. off => unchanged
+# --------------------------------------------------------------- 1. off => program-free
 def test_off_by_default_keeps_base_schema():
     t = build(steps=3000)
     assert t.programs is None
@@ -85,14 +85,14 @@ def test_materialisation_is_reproducible():
 # --------------------------------------------------------------- 2. comparability (mirrors cohort)
 def test_program_landscape_is_shared_across_evolution_seeds():
     """Two 'patients' (same config, DIFFERENT evolution seed) must get the SAME programs — the same
-    requirement the shared driver landscape already meets."""
+    requirement the shared driver landscape meets."""
     a = build(seed=1, expression_params=EXPRESSION_PARAMS)
     b = build(seed=999, expression_params=EXPRESSION_PARAMS)
     np.testing.assert_allclose(a.programs.dictionary.loading, b.programs.dictionary.loading)
     np.testing.assert_allclose(a.programs.dosage_sensitivity, b.programs.dosage_sensitivity)
     assert a.programs.dictionary.gene_program_map() == b.programs.dictionary.gene_program_map()
     assert a.programs.regulator_genes == b.programs.regulator_genes
-    # and (already covered elsewhere, asserted here as the sibling property) the gene roles too
+    # and (covered elsewhere, asserted here as the sibling property) the gene roles too
     np.testing.assert_array_equal(a.selection.get_oncogenes(), b.selection.get_oncogenes())
 
 
@@ -121,8 +121,8 @@ def test_n_programs_does_not_reshuffle_gene_roles_or_sg():
 
 
 def test_f8_niche_programs_are_layout_seeded():
-    """F8's hypoxia/CCI gene sets used to draw from the RUN seed, so every patient in a cohort got a
-    different hypoxia programme. They are part of the genome, so they follow the layout stream."""
+    """The microenvironment's hypoxia/CCI gene sets are part of the genome, so they follow the layout
+    stream, not the RUN seed: every patient in a cohort gets the same hypoxia programme."""
     mp = {"hypoxia": {"n_genes": 10, "strength": 0.5}, "cci": {"n_target_genes": 5, "strength": 0.5}}
     a, b = build(seed=1, microenv_params=mp), build(seed=999, microenv_params=mp)
     np.testing.assert_array_equal(a._hypoxia_genes, b._hypoxia_genes)
@@ -131,7 +131,7 @@ def test_f8_niche_programs_are_layout_seeded():
     assert not np.array_equal(a._hypoxia_genes, c._hypoxia_genes)
 
 
-# --------------------------------------------------------------- 3. the coupling routes (§3.1)
+# --------------------------------------------------------------- 3. the coupling routes
 def _model(**coupling):
     ep = {"program_params": {"n_programs": 6, "n_genes_per_program": 10},
           "coupling_params": coupling}
@@ -250,7 +250,7 @@ def test_snv_classes_are_drawn_and_separate_from_fitness():
     np.testing.assert_allclose(P.snv_exp_effect[P.snv_class == 1], 1.0)   # missense
     np.testing.assert_allclose(P.snv_exp_effect[P.snv_class == 2], 0.5)   # splice
     np.testing.assert_allclose(P.snv_exp_effect[P.snv_class == 3], 0.2)   # lof -> NMD
-    # the expression effect is NOT the fitness effect (they were one knob before R13)
+    # the expression effect is NOT the fitness effect (two separate knobs)
     flat_fitness = np.concatenate(t.selection.mut_effects)
     assert not np.allclose(P.snv_exp_effect, flat_fitness)
 
@@ -277,12 +277,14 @@ def test_dosage_sensitivity_is_bounded():
     assert s.min() >= 0.0 and s.max() <= 1.0
 
 
-# --------------------------------------------------------------- 5b. the COHORT layer (§4.3)
+# --------------------------------------------------------------- 5b. the COHORT layer
 def _cohort(n=3, steps=3000, **kw):
-    from iscc.cohort import Cohort
-    return Cohort(patient_seeds=list(range(1, n + 1)), genome_params=GENOME,
-                  selection_params=SELECTION, cancer_cell_params=CANCER, deme_params=DEME,
-                  spatial_params=SPATIAL, grow_steps=steps, **kw).run()
+    import functools
+    from iscc.cohort import Cohort, grow_tumor
+    grow = functools.partial(grow_tumor, genome_params=GENOME, selection_params=SELECTION,
+                             cancer_cell_params=CANCER, deme_params=DEME, spatial_params=SPATIAL,
+                             grow_steps=steps, **kw)
+    return Cohort(grow, patient_seeds=list(range(1, n + 1))).run()
 
 
 def test_cohort_forwards_expression_params():
@@ -300,7 +302,7 @@ def test_cohort_without_expression_params_is_unchanged():
 
 
 def test_cohort_shares_programs_but_not_cnas():
-    """The ground truth the cohort program benchmark rests on (DESIGN_expression.md §4.3): patients
+    """The ground truth the cohort program benchmark rests on: patients
     SHARE the program dictionary (it is a property of the genome, drawn from the layout stream) while
     their CNA landscapes are PRIVATE (private evolution) — so 'shared program' vs 'patient-specific
     biology' is a known split, not an assumption."""
@@ -317,12 +319,12 @@ def test_cohort_shares_programs_but_not_cnas():
 
 
 def test_cohort_forwards_microenv_params():
-    """Sibling gap closed at the same time: F8 was never reachable through the cohort layer either."""
+    """The cohort layer forwards microenv_params to every patient."""
     mp = {"hypoxia": {"n_genes": 8, "strength": 0.5}}
     co = _cohort(n=2, expression_params=None, microenv_params=mp)
     for pr in co.patients:
         assert len(pr.tumor._hypoxia_genes) > 0
-    # and the niche programme is SHARED across patients (the layout stream), as F8's fix requires
+    # and the niche programme is SHARED across patients (the layout stream)
     np.testing.assert_array_equal(co.patients[0].tumor._hypoxia_genes,
                                   co.patients[1].tumor._hypoxia_genes)
 

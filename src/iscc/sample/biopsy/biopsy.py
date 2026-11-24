@@ -27,7 +27,7 @@ from ...constants import normal_names
 # Non-cancer genotype ids are the literal biological types; everything else is a
 # cancer clone id (see Tumor.make_cell_data / Cell.set_genotype_id). Taken from the
 # shared list so a new normal type (host parenchyma, ...) is never miscounted as
-# tumour here — a hand-written copy of it went stale once already.
+# tumour here.
 NORMAL_TYPES = tuple(normal_names)
 
 # Per-cell dispersal / invasiveness signals in cell_evo, in order of preference.

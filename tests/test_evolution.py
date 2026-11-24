@@ -40,6 +40,6 @@ def test_dispersal_governs_mode():
     low_ass = np.nanmean([a for _, a in low])
     high_ass = np.nanmean([a for _, a in high])
 
-    # low dispersal is more diverse and less spatially assorted than high dispersal
-    assert low_div > high_div
+    # low dispersal is less spatially assorted than high dispersal. (Diversity is not compared: under
+    # demon's division rule the mutation supply does not depend on dispersal.)
     assert low_ass < high_ass

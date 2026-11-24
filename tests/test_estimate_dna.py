@@ -1,8 +1,8 @@
-"""Tests for the DNA `estimate_dna()` (DESIGN_inference §C.1 / milestone M4 DNA half).
+"""Tests for the DNA `estimate_dna()`.
 
 The DNA analogue of `tests/test_estimate_scrna.py`, with the same two pillars:
-  * **Estimation recovery** — simulate DNA with known ``DNABatchHyperParams`` via the F4/F5
-    generative path -> ``estimate_dna()`` -> recover them within tolerance. Covered for bulk-WGS
+  * **Estimation recovery** — simulate DNA with known ``DNABatchHyperParams`` via the bulk /
+    single-cell DNA generative path -> ``estimate_dna()`` -> recover them within tolerance. Covered for bulk-WGS
     and single-cell-WGS (the required cases) plus bulk-panel (capture) and an NB-depth case.
   * **Modality / breadth awareness + honest flags** — single-cell-only fields (``ado_rate`` /
     ``beta_binom_conc``) are fit only from single-cell data and flagged not-fit on bulk;
@@ -11,11 +11,13 @@ The DNA analogue of `tests/test_estimate_scrna.py`, with the same two pillars:
 Recovery is method-of-moments on marginal summary statistics (no simulation loop). The CN passed to
 ``estimate_dna`` is the *true* CN — the perfect-caller stand-in for the two-pass conditioning.
 
-Note on ``depth_batch_sigma``: the F4/F5 generator computes a per-batch depth shift but bulk
+Note on ``depth_batch_sigma``: the DNA generator computes a per-batch depth shift but bulk
 coverage uses ``N = mu_depth * n_loci`` (the knob is currently dormant), so multi-batch *simulated*
 coverage carries no depth spread. We therefore test the estimator directly by injecting explicit
 per-batch mean depths and recovering their log-sd.
 """
+import os
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -36,8 +38,8 @@ HET_SEGS = (0, 3, 7)                       # seg 3 is the amplified segment (mix
 def make_cell_data(n_cells=60, amp_seg=3, amp_cn=6.0, seed=0):
     """cell_data with one amplified segment and several het (VAF=0.5) loci per het segment.
 
-    Cell-constant CN/VAF isolates the *technical* layer (the analogue of M2's cell-constant
-    biology), so the residual coverage dispersion measures the amplification regime, not biology.
+    Cell-constant CN/VAF isolates the *technical* layer (as the cell-constant biology does in
+    test_estimate_scrna), so the residual coverage dispersion measures the amplification regime, not biology.
     """
     cells = [f"C{i}" for i in range(n_cells)]
     cnv = np.full((n_cells, N_GENES), 2.0)
@@ -77,13 +79,13 @@ class TestBulkWGSRecovery:
         assert est.hypers.mu_depth == pytest.approx(30.0, rel=0.05)   # wgs preset mean depth
 
     def test_kappa_recovered(self, fit):
-        """CN-conditioned coverage overdispersion -> DM concentration (the §C.1 crux)."""
+        """CN-conditioned coverage overdispersion -> DM concentration (the crux of the DNA fit)."""
         est, _ = fit
         assert "kappa" in est.fitted
         assert est.hypers.kappa == pytest.approx(self.KAPPA, rel=0.25)
 
     def test_gc_curve_tracks_realized_bias(self, fit):
-        """gc_curve_sigma recovers the batch's realized GC-curve strength (cf. M2 depth spread)."""
+        """gc_curve_sigma recovers the batch's realized GC-curve strength (cf. the scRNA depth spread)."""
         est, assay = fit
         assert "gc_curve_sigma" in est.fitted
         assert est.hypers.gc_curve_sigma == pytest.approx(_realized_gc_sigma(assay), abs=0.04)
@@ -153,7 +155,11 @@ class TestBreadthAndModelVariants:
     def test_bulk_panel_capture_sigma_recovered(self):
         """Deep panel: per-amplicon capture dominates -> recovers the realized LogNormal spread."""
         cd = make_cell_data()
-        assay = bulkDNA(breadth="panel", seed=3, capture_sigma=0.45, error_rate=0.005).run(cd)
+        # kappa 2000 as given (the old bulk default): low residual depth noise, so one bulk sample
+        # separates capture from depth noise. At the HG002 default dispersion it cannot without a
+        # panel of normals (see `_fit_capture_sigma`), which is not what this test is about.
+        assay = bulkDNA(breadth="panel", seed=3, capture_sigma=0.45, error_rate=0.005,
+                        kappa=2000.0).run(cd)
         est = estimate_dna_from_assay(assay)
         realized = float(np.std(np.log(assay.batch.capture_eff)))
         assert "capture_sigma" in est.fitted
@@ -161,7 +167,7 @@ class TestBreadthAndModelVariants:
 
     def test_sc_panel_capture_not_counted_twice(self):
         """Single-cell panel: the per-cell dispersion is fit around each amplicon's capture, so
-        re-simulating the fit reproduces the coverage spread (the capture spread used to be absorbed
+        re-simulating the fit reproduces the coverage spread (the capture spread must not be absorbed
         by kappa and then added again through capture_sigma)."""
         cd = make_cell_data(n_cells=80)
         kw = dict(breadth="panel", target_genes=0.3, capture_sigma=0.4, kappa=3000.0, mu_depth=60.0)
@@ -269,10 +275,16 @@ class TestKappaLoci:
         cvs = [c.std() / c.mean() for c in (_dna_depth_dm(rng, w, depth * n_loci, h) for _ in range(reps))]
         return float(np.mean(cvs))
 
-    def test_default_leaves_kappa_as_given(self):
-        assert DNABatchHyperParams().kappa_loci is None
+    def test_none_leaves_kappa_as_given(self):
         # without kappa_loci the spread depends on the locus count (the reason for the field)
         assert self._cv(4000, 2000.0, None) > 1.5 * self._cv(1000, 2000.0, None)
+
+    def test_default_kappa_carries_its_locus_count(self):
+        h = DNABatchHyperParams()
+        assert h.kappa_loci == 20_000           # the HG002 sites the default kappa was fitted on
+        a = self._cv(1000, h.kappa, h.kappa_loci, depth=30.0)
+        b = self._cv(6000, h.kappa, h.kappa_loci, depth=30.0)
+        assert b == pytest.approx(a, rel=0.1)
 
     def test_rescaled_spread_is_invariant_to_locus_count(self):
         a = self._cv(1000, 2000.0, 1000)
@@ -284,3 +296,65 @@ class TestKappaLoci:
         est = estimate_dna_from_assay(bulkDNA(breadth="wgs", seed=1).run(cd))
         assert est.hypers.kappa_loci == est.n_loci == N_GENES
         assert est.dna_kwargs()["kappa_loci"] == N_GENES
+
+
+# --------------------------------------------------------------------------------------
+# The shipped defaults and platform presets are the fits on the shipped real references
+# --------------------------------------------------------------------------------------
+class TestDefaultsAreFits:
+    """Each depth-dispersion default must be what ``estimate_dna`` fits on its reference in
+    validation/data, so a default cannot drift from the data it claims to come from."""
+
+    REF = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "validation", "data")
+
+    def _fit(self, name, depth_model="dm"):
+        path = os.path.join(self.REF, name)
+        if not os.path.exists(path):
+            pytest.skip(f"{name} not present")
+        z = np.load(path, allow_pickle=False)
+        kw = dict(modality=str(z["modality"]), breadth=str(z["breadth"]), depth_model=depth_model)
+        for k in ("het_mask", "variant_mask"):
+            if k in z.files:
+                kw[k] = z[k]
+        return estimate_dna(z["coverage"], z["alt"], z["cn"], **kw).hypers
+
+    def _check(self, got, fit, fields):
+        for f in fields:
+            want = getattr(fit, f)
+            if f == "kappa_loci":
+                assert got[f] == want, f
+            else:
+                assert got[f] == pytest.approx(want, rel=0.01), f
+
+    def test_bulk_default_is_the_hg002_fit(self):
+        from iscc.data.dna import DNA_MODE_DEFAULTS
+        self._check(DNA_MODE_DEFAULTS["bulk"], self._fit("dna_ref_hg002_bulk_wgs.npz"),
+                    ("kappa", "kappa_loci"))
+        self._check(DNA_MODE_DEFAULTS["bulk"], self._fit("dna_ref_hg002_bulk_wgs.npz", "nb"),
+                    ("nb_dispersion",))
+        assert bulkDNA().hypers.kappa == DNA_MODE_DEFAULTS["bulk"]["kappa"]
+
+    def test_sc_default_and_dlp_preset_are_the_dlp_fit(self):
+        from iscc.data.dna import DNA_MODE_DEFAULTS, SCDNA_PLATFORM_PRESETS
+        fit = self._fit("dna_ref_dlp_sc_wgs.npz")
+        self._check(DNA_MODE_DEFAULTS["sc"], fit, ("kappa", "kappa_loci"))
+        self._check(SCDNA_PLATFORM_PRESETS["dlp"], fit, ("mu_depth", "kappa", "kappa_loci"))
+        nb = self._fit("dna_ref_dlp_sc_wgs.npz", "nb")
+        self._check(DNA_MODE_DEFAULTS["sc"], nb, ("nb_dispersion",))
+        self._check(SCDNA_PLATFORM_PRESETS["dlp"], nb, ("nb_dispersion",))
+
+    def test_tapestri_preset_is_the_tapestri_fit(self):
+        from iscc.data.dna import SCDNA_PLATFORM_PRESETS
+        p = SCDNA_PLATFORM_PRESETS["tapestri"]
+        self._check(p, self._fit("dna_ref_tapestri_sc_panel.npz"),
+                    ("mu_depth", "kappa", "kappa_loci", "capture_sigma", "ado_rate",
+                     "beta_binom_conc"))
+        self._check(p, self._fit("dna_ref_tapestri_sc_panel.npz", "nb"), ("nb_dispersion",))
+
+    def test_estimator_preset_is_the_assay_default(self):
+        """Unfitted fields are carried from exactly what bulkDNA / scDNA build."""
+        from iscc.data.estimate_dna import _preset_hypers
+        for breadth in ("wgs", "wes", "panel"):
+            assert _preset_hypers("bulk", breadth, "dm") == bulkDNA(breadth=breadth).hypers
+            assert _preset_hypers("sc", breadth, "dm") == scDNA(breadth=breadth).hypers

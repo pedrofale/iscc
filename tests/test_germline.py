@@ -6,11 +6,10 @@ readable variant-allele-fraction spectrum:
   * GERMLINE — an inherited background carried by EVERY cell of the patient, tumour and normal alike.
     Heterozygous sites read at 0.5 and homozygous ones at 1.0 in unaltered tissue, which is the anchor
     a purity / cancer-cell-fraction analysis calibrates against. Off by default, and provably inert:
-    with ``germline_params=None`` the engine is indistinguishable from one built before the layer
-    existed.
-  * TRUNCAL passengers — the clade containing every sampled cancer cell now gets its own marker
-    budget, so a share of loci is carried by ALL of them. Without it no locus reached a cancer-cell
-    fraction above ~0.34 and a bulk histogram had no clonal peak at all.
+    with ``germline_params=None`` the engine is indistinguishable from one without the layer.
+  * TRUNCAL passengers — the clade containing every sampled cancer cell gets its own marker
+    budget, so a share of loci is carried by ALL of them. Without it no locus would reach a
+    cancer-cell fraction near 1 and a bulk histogram would have no clonal peak.
 """
 import os
 import sys
@@ -254,9 +253,9 @@ def _cancer_frames(t):
 
 
 def test_truncal_layer_gives_a_clonal_ccf_mode(clonal_tumor):
-    """Cancer-cell fraction (VAF x copy number / purity, purity 1 on a cancer-only sample) now reaches
-    ~1.0 at a whole set of loci — the clonal peak. Before the truncal layer the maximum over all loci
-    was ~0.05 at this scale and ~0.34 at a larger one: no locus was carried by every cancer cell."""
+    """Cancer-cell fraction (VAF x copy number / purity, purity 1 on a cancer-only sample) reaches
+    ~1.0 at a whole set of loci — the clonal peak. Without the truncal layer no locus is carried by
+    every cancer cell."""
     snv, cnv = _cancer_frames(clonal_tumor)
     vaf = (snv * cnv).sum(0) / np.maximum(cnv.sum(0), 1e-9)
     ccf = vaf * cnv.mean(0)
@@ -279,7 +278,7 @@ def test_truncal_layer_keeps_the_subclonal_tail(clonal_tumor):
 
 
 def test_allele_invariant_holds_with_the_truncal_layer(clonal_tumor):
-    """The overlay's contract is unchanged: the two homolog frames sum EXACTLY to the collapsed one
+    """The overlay's contract holds with the truncal layer: the two homolog frames sum EXACTLY to the collapsed one
     and no variant allele fraction exceeds 1."""
     cd = clonal_tumor.cell_data
     p, m, s = cd["cell_snv_p"].values, cd["cell_snv_m"].values, cd["cell_snv"].values

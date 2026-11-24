@@ -1,0 +1,161 @@
+# The tutorials' tumor: the paper's regime at its sweep scale with its immune variant
+# (validation/paper/regime.py, config("mid") with IMMUNE_SPATIAL, IMMUNE_SELECTION and IMMUNE): a 96 by
+# 96 field of five glands in stroma, demon's crowding law, CINner's driver dosage with effect 1.03,
+# breach-gated invasion and stromal survival with the paper's values, the founding acinus closed for
+# 200 generations, immune cells in the stroma that kill cancer cells, and tau-leaping with binomial
+# deaths and the step of Cao, Gillespie and Petzold (2006). The metastatic lattice is off
+# (met_grid_size 0) and no treatment resistance is set; "Shape the tumor" shows how to switch both on.
+# It is configs/landing_hero.yaml with the immune variant and without its treatment schedule,
+# resistance genes and metastasis.
+mode: genotype
+update_mode: tau
+tau: 0.5
+snapshot_every: 3
+coarsen_passengers: true
+max_cells: 8000
+genome_params:
+  n_segments: 12
+  segment_size: 500
+selection_params:
+  prop_driver: 0.04
+  prop_dispersal: 0.0
+  # immune resistance at the paper's immune variant (regime.IMMUNE_SELECTION): 0.2% of genes, one hit protects 75%
+  prop_immune_resistance: 0.002
+  immune_resistant_effects: 4.0
+  prop_treatment_resistance: 0.0     # as the paper regime; the package default (0.1) pre-seeds resistance
+  prop_breach: 0.002
+  breach_effects: 1.01
+  prop_stromal_survival: 0.002
+  stromal_survival_effects: 4.0
+  breach_cost: 0.6
+  stromal_survival_cost: 0.05
+  met_survival_cost: 0.15
+  max_mut_drivers: 12
+  driver_effects: 1.03
+  trait_source: mutation
+  prop_met_survival: 0.015
+  met_survival_effects: 3.0
+cell_params:
+  # static T and NK cells kill cancer cells at prob_kill x their share of the deme x (1 - immune resistance)
+  immune:
+    prob_kill: 28.0
+  cancer:
+    division_rate: 0.7
+    death_rate: 0.05
+    max_birth_rate: 2.0
+    n_snvs_per_allele: 0.1
+    dispersal_rate: 0.9
+    subtype: ER+
+    mutation_rate: 0.15
+    wgd_rate: 0.01
+germline_params:
+  het_frac: 0.005
+  hom_frac: 0.33
+deme_params:
+  carrying_capacity: 30
+  initial_cancer_cells: 20
+  resident_pressure_ref: 0.2
+  maximum_death_rate: 5.0
+  crowding_overfill: 1.5
+  crowding_d1: 5.0
+  tau_deaths: binomial
+  tau_step: cgp
+  tau_epsilon: 0.01
+spatial_params:
+  grid_size: 96
+  structure_radius: 4
+  n_glands: 5
+  gland_radius: 4
+  min_gland_sep: 13
+  K_duct: 60
+  K_stroma: 30
+  stroma_fill_frac: 0.3
+  # the stromal cells split into fibroblasts, endothelial cells and perivascular cells, with the shares of
+  # the stroma of a breast cancer atlas (regime.STROMAL_COMPOSITION)
+  stromal_composition:
+    stromal: 0.335
+    endothelial: 0.388
+    pvl: 0.277
+  # immune cells: 6 per stroma deme, none in the ducts, split into T and NK cells (the only ones that kill),
+  # myeloid cells and B and plasma cells (regime.IMMUNE_SPATIAL)
+  immune_density: 0.2
+  immune_composition:
+    immune: 0.575
+    myeloid: 0.315
+    bplasma: 0.11
+  # a cancer birth that leaves a deme above capacity pushes one immune cell out, so tumour nests lose them
+  immune_displaceable: true
+  cross_gland_kappa: 0.06
+  cross_gland_lambda: 30
+  breach_gated_invasion: true
+  epithelial_barrier: 0.0
+  stromal_hazard: 0.9
+  origin_confinement:
+    dispersal_factor: 0.0
+    established_at: 0.5
+    generations: 200
+    clock: generations
+  met_grid_size: 0
+  K_met: 60
+  host_fill_frac: 0.5
+  met_seed_kappa: 0.03
+  met_hazard: 3.5
+  met_transit_floor: 0.001
+
+# The expression and microenvironment layers of the paper's regime (validation/paper/regime.py:
+# expression() and MICROENV): gene programs coupled to the niche, the total dosage law fitted to
+# TCGA breast tumours with allele-specific expression, the epithelium as the cell of origin, and the
+# hypoxia field. Readout only: they change no growth, only the expression the assays read.
+expression_params:
+  program_params:
+    n_programs: 6
+    n_genes_per_program: 25
+    program_overlap: 0.1
+    loading_strength:
+      mean: 1.0
+      sd: 0.3
+    loading_sparsity: 1.0
+    program_genomic_scatter: 1.0
+    max_log_fold: 5.0
+    # the interferon response of cancer cells near immune cells takes the one background slot
+    seeded_programs: [proliferation, emt, hypoxia, drug_resistance, immune_evasion, interferon_response]
+  activity_params:
+    n_active_programs_per_cell: 3
+    activity_dist: lognormal
+    activity_mean: 1.0
+    activity_sd: 0.5
+    activity_noise: 0.2
+  coupling_params:
+    phenotype_program_strength:
+      breach: 1.0
+      __default__: 0.5
+    niche_program_map:
+      epithelial: emt
+      hypoxia: hypoxia
+      immune: interferon_response
+    niche_program_strength:
+      __default__: 3.0
+      immune: 10.0
+    immune_signal_lengthscale: 1.0
+  dosage_params:
+    dosage_sensitivity_mean: 0.86
+    dosage_sensitivity_sd: 0.61
+    dosage_saturation: 8
+    allele_specific: true
+    dosage_law: total
+  snv_effect_params:
+    p_lof: 0.1
+    p_missense: 0.3
+    p_splice: 0.05
+    p_silent: 0.55
+    nmd_strength: 0.2
+    snv_expression_effect: 0.5
+  cell_of_origin: epithelial
+microenv_params:
+  hypoxia:
+    strength: 0.9
+    n_genes: 40
+    o2_consumption: 1.0
+    o2_supply: 10.0
+    o2_source: perfused
+    o2_diffusion: 4.0

@@ -1,6 +1,6 @@
 """Method-of-moments / 1-D MLE ``estimate_dna()`` for the DNA assay.
 
-The DNA analogue of the scRNA ``estimate()``: fits the technical
+The DNA analogue of the scRNA ``estimate_rna()``: fits the technical
 hyper-parameters of the DNA batch model (``DNABatchHyperParams`` in
 ``batch.py``) from a real DNA-seq dataset reduced to **counts-level summary statistics** —
 per-locus coverage, alt/ref counts, and a **per-locus called copy number** — so realistic
@@ -35,11 +35,12 @@ What is fit (and from what), per modality:
     doublet_rate      NOT identifiable from counts -> prior-only (flagged)  (carried from preset)
     breadth, depth_model  chosen, not estimated (you know the assay)
 
-The ``_PRIOR_ONLY`` escape that the scRNA ``estimate()`` uses (ambient/doublet) carries the genuinely
-unidentifiable fields honestly instead of pretending to fit them. ``ado_rate`` /
+The ``_PRIOR_ONLY`` escape that ``estimate_rna()`` uses (ambient/doublet) carries the
+unidentifiable fields from the preset instead of fitting them. ``ado_rate`` /
 ``beta_binom_conc`` are the per-cell amplification/dropout layer — fittable only from single-cell
-data; they are flagged not-fit (and carried from the preset) on bulk data, and ``kappa`` means
-different things per modality (large from pooled bulk, small from lumpy MDA/MALBAC single-cell).
+data; they are flagged not-fit (and carried from the preset) on bulk data. ``kappa`` is stored with the
+number of loci it was fitted on (``kappa_loci``), so the fitted coverage spread transfers to a
+genome of any size.
 
 numpy / scipy only (no JAX / R); stateless and config-driven.
 """
@@ -48,21 +49,17 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .batch import DNABatchHyperParams
-from .dna import DNA_BREADTH_PRESETS
+from .dna import DNA_BREADTH_PRESETS, DNA_MODE_DEFAULTS, scDNA
 
-# Single-cell depth_scale (scDNA.depth_scale): single-cell coverage is shallower than bulk.
-_SC_DEPTH_SCALE = 0.3
+# Single-cell depth_scale: single-cell coverage is shallower than bulk.
+_SC_DEPTH_SCALE = scDNA.depth_scale
 
-# Amplification-regime / per-cell-layer defaults, mirroring bulkDNA/scDNA.mode_defaults().
-_MODE_DEFAULTS = {
-    "bulk": dict(kappa=2000.0, nb_dispersion=0.1, ado_rate=0.0,
-                 beta_binom_conc=200.0, doublet_rate=0.0),
-    "sc":   dict(kappa=5.0, nb_dispersion=0.5, ado_rate=0.20,
-                 beta_binom_conc=30.0, doublet_rate=0.02),
-}
+# Amplification-regime / per-cell-layer defaults: the same dicts bulkDNA/scDNA.mode_defaults()
+# return, so a field this data cannot inform is carried from exactly what the generator uses.
+_MODE_DEFAULTS = DNA_MODE_DEFAULTS
 
 # Fields a counts-only estimate cannot identify even with CN (need demultiplexing); carried from
-# the preset, never claimed as "fit" — the DNA analogue of estimate()'s ambient/doublet escape.
+# the preset, never claimed as "fit" — the DNA analogue of estimate_rna()'s ambient/doublet escape.
 _PRIOR_ONLY = ("doublet_rate",)
 
 _HYPER_KEYS = set(DNABatchHyperParams().to_dict().keys())
@@ -73,7 +70,7 @@ def _preset_hypers(modality, breadth, depth_model):
 
     Reconstructs exactly what ``bulkDNA`` / ``scDNA`` would build from the breadth preset +
     ``mode_defaults`` (incl. the single-cell ``depth_scale``), so prior-only / not-fit fields are
-    carried honestly from the same place the generator uses.
+    carried from the same place the generator uses.
     """
     if modality not in _MODE_DEFAULTS:
         raise ValueError(f"modality must be 'bulk' or 'sc', got {modality!r}")
@@ -96,7 +93,7 @@ class DNAEstimate:
     the hyper fields (minus ``breadth`` / ``depth_model``, which are explicit assay constructor
     args) as a kwargs dict, so the fit splats straight back into the assay without redefinition.
     ``fitted`` lists the fields actually learned from this data; everything else is carried from
-    the (modality, breadth) preset and flagged honestly. ``diagnostics`` keeps realized intermediate
+    the (modality, breadth) preset and flagged as such. ``diagnostics`` keeps realized intermediate
     quantities (per-sample kappa, realized GC/capture spread, het-BAF variance) for reporting.
     """
     hypers: DNABatchHyperParams
@@ -177,18 +174,19 @@ def _fit_gc_curve(percopy, gc, mappability):
 def _fit_depth_dispersion(coverage, cn, gc_fit, mappability, depth_model):
     """CN-conditioned coverage overdispersion -> ``kappa`` (DM) or ``nb_dispersion`` (NB).
 
-    The crux of §C.1. Build the systematic expected per-locus coverage ``mu`` from the called CN x
-    the fitted efficiency shape (GC curve x mappability), normalized to the *observed* total per
+    The crux of the DNA estimator. Build the systematic expected per-locus coverage ``mu`` from
+    the called CN x the fitted efficiency shape (GC curve x mappability), normalized to the *observed* total per
     sample (bulk: 1 sample of loci; single-cell: each cell is a sample). The residual of the
     observed coverage about ``mu`` is then pure technical overdispersion:
 
       * DM: the index of dispersion ``D = <(X-mu)^2/mu>`` estimates ``(1-1/n)*(N+kappa)/(kappa+1)``
         (Dirichlet-Multinomial), inverted for ``kappa = (N - R)/(R - 1)`` with ``R = D/(1-1/n)``.
-        Large kappa (pooled bulk) ~ multinomial/Poisson; small kappa (lumpy single-cell MDA/MALBAC).
+        Large kappa ~ multinomial/Poisson; small kappa ~ lumpy (whole-genome amplification).
       * NB: ``phi = median_l ((X-mu)^2 - mu)/mu^2`` (the standard NB method-of-moments residual).
 
-    This is the DNA analogue of M2's library-size de-biasing of the NB dispersion: divide out the
-    part that is really CN (biology) before reading the technical dispersion.
+    This is the DNA analogue of the scRNA estimator's library-size de-biasing of the NB
+    dispersion: divide out the part that is really CN (biology) before reading the technical
+    dispersion.
     """
     eff_shape = np.exp(gc_fit)
     if mappability is not None:
@@ -248,7 +246,7 @@ def _fit_capture_sigma(coverage, cn, gc_fit, mappability):
     floor is the delta-method log-variance of a count with the *measured* index of dispersion
     ``d_index`` (Var(log X) ~ d_index/mu): at the DM overdispersion these data carry, the floor is
     far above the naive Poisson ``1/mu``. Deep panels make it negligible; for WES it is a genuine
-    (M2-style) de-biasing. A panel-of-normals would pin it exactly; without one this is the honest
+    de-biasing. A panel-of-normals would pin it exactly; without one this is the honest
     counts-only estimate.
     """
     locus_mean = _locus_capture(coverage, cn, gc_fit, mappability)
@@ -315,7 +313,8 @@ def _fit_ado_and_conc(coverage, alt, het_mask, min_cov=8, extreme=0.05):
 
     The raw fraction of extreme het BAFs over-counts ADO: at low coverage the Beta-Binomial alone
     lands in the extremes. We **de-bias** with the coverage-aware Beta-Binomial extreme probability
-    ``q`` at the fitted concentration (the analogue of M2 subtracting the Binomial/library floor):
+    ``q`` at the fitted concentration (the analogue of the scRNA estimator subtracting the
+    library floor):
 
         frac_extreme = ado + (1-ado)*q   =>   ado = (frac_extreme - q) / (1 - q)
 
@@ -396,7 +395,7 @@ def estimate_dna(coverage, alt_counts, called_cn, *, modality="bulk", breadth="w
     modality : {"bulk", "sc"}
         Bulk vs single-cell. ``ado_rate`` / ``beta_binom_conc`` are fit only for ``"sc"``; on bulk
         they are flagged not-fit and carried from the preset (and vice-versa is moot — they don't
-        exist for bulk). ``kappa`` means different regimes per modality.
+        exist for bulk). Unfitted fields carry the modality defaults of ``bulkDNA`` / ``scDNA``.
     breadth : {"wgs", "wes", "panel"}
         Capture breadth (chosen, not estimated). ``capture_sigma`` is fit only for WES/panel.
     depth_model : {"dm", "nb"}
@@ -526,7 +525,7 @@ def estimate_dna_from_assay(assay, *, batch_depths=None, het_atol=0.15):
 
     Pulls coverage / alt / **true CN** (the perfect-caller stand-in: in synthetic recovery the CN
     is exact, exactly the two-pass conditioning) / GC / mappability / C-site / variant + het masks
-    from the assay's surfaced ground truth, then defers to :func:`estimate_dna`. Modality and
+    from the assay's surfaced ground truth, then defers to [`estimate_dna`][iscc.data.estimate_dna.estimate_dna]. Modality and
     breadth are read off the assay. ``het_mask`` is loci whose true alt fraction is ~0.5.
     """
     from .dna import bulkDNA, scDNA, genome_features

@@ -1,9 +1,8 @@
-"""Tests for the genotype-level (count-based) engine, GenotypeTumor (DESIGN phase 3b).
+"""Tests for the genotype-level (count-based) engine, GenotypeTumor.
 
 Validates: builds/grows/materialises the standard schema, is reproducible (seed -> identical
-matrices), and is *statistically equivalent* to the cell-level GlandularTumor (it is NOT
-byte-identical — it draws different random variables — so we check survival and survivor-size
-distributions match, not exact values).
+matrices), caps demes, enforces the viability limits, and that the exact engine and tau-leaping
+realise the same process (compared by distribution, since they draw different random variables).
 """
 import hashlib
 
@@ -11,10 +10,9 @@ import numpy as np
 import pytest
 
 from conftest import (
-    GENOME_PARAMS, SELECTION_PARAMS, CANCER_CELL_PARAMS, N_SEGMENTS, SEGMENT_SIZE,
-    EPITHELIAL_CELL_PARAMS, STROMAL_CELL_PARAMS, IMMUNE_CELL_PARAMS, DEME_PARAMS,
+    GENOME_PARAMS, SELECTION_PARAMS, CANCER_CELL_PARAMS, N_SEGMENTS, SEGMENT_SIZE, DEME_PARAMS,
 )
-from iscc.tumor.models import GenotypeTumor, GlandularTumor
+from iscc.tumor.models import GenotypeTumor
 
 SPATIAL = {"grid_size": 15, "n_structures": 1, "structure_radius": 0}
 # death_rate 0 -> the founder can never stochastically die out, so schema/reproducibility
@@ -23,21 +21,10 @@ NO_DEATH = {**CANCER_CELL_PARAMS, "death_rate": 0.0}
 LOW_DEATH = {**CANCER_CELL_PARAMS, "death_rate": 0.05}
 
 
-def _count(seed, steps, cancer=NO_DEATH):
+def _count(seed, steps, cancer=NO_DEATH, **kw):
     t = GenotypeTumor(
         seed=seed, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
-        cancer_cell_params=cancer, deme_params=DEME_PARAMS, spatial_params=SPATIAL,
-    )
-    t.grow(n_steps=steps, seed=seed)
-    return t
-
-
-def _cell(seed, steps, cancer=NO_DEATH):
-    t = GlandularTumor(
-        seed=seed, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
-        cancer_cell_params=cancer, epithelial_cell_params=EPITHELIAL_CELL_PARAMS,
-        stromal_cell_params=STROMAL_CELL_PARAMS, immune_cell_params=IMMUNE_CELL_PARAMS,
-        deme_params=DEME_PARAMS, grid_size=SPATIAL["grid_size"], structure_radius=0,
+        cancer_cell_params=cancer, deme_params=DEME_PARAMS, spatial_params=SPATIAL, **kw,
     )
     t.grow(n_steps=steps, seed=seed)
     return t
@@ -90,7 +77,8 @@ def test_well_mixed_disables_crowding():
     # unbounded (the role the old carrying_capacity=1 hack played; K=1 now caps at ~1 cell).
     cancer = {**LOW_DEATH, "dispersal_rate": 0.0, "mutation_rate": 0.0}
     t = GenotypeTumor(seed=1, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
-                      cancer_cell_params=cancer, deme_params={"carrying_capacity": None},
+                      cancer_cell_params=cancer,
+                      deme_params={"carrying_capacity": None, "initial_cancer_cells": 5},
                       spatial_params={"grid_size": 1, "structure_radius": 0},
                       update_mode="tau", tau=1.0)
     assert t._crowding is False
@@ -101,67 +89,35 @@ def test_well_mixed_disables_crowding():
     assert t.get_cancer_size() > 500
 
 
-def test_engines_agree_on_crowding_death():
-    # The count engine's _death_rate and the cell engine's Deme.get_cancer_death_rate implement the
-    # SAME density-dependent crowding formula (DESIGN_crowding.md), so they must return identical
-    # crowding death for a matched (occupancy, K, division, death, margin) state.
-    from iscc.tumor.components.deme import Deme
-    from iscc.tumor.components.cell import CancerCell
-    K, margin, maxd, div, death = 8, 0.1, 1.0, 0.6, 0.03
+def test_exact_and_tau_agree_on_survival_and_size():
+    """Exact and tau-leaping growth of the same tumour over the same time: the same low extinction
+    probability (death/birth = 0.1) and survivor sizes in the same range. The exact engine fires
+    one event per update, so it runs until its clock reaches the tau run's elapsed time."""
+    seeds, gens = range(10), 15
+    tau = [_count(s, gens, cancer=LOW_DEATH, update_mode="tau", tau=1.0).get_tumor_size()
+           for s in seeds]
+    exact = []
+    for s in seeds:
+        t = GenotypeTumor(seed=s, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
+                          cancer_cell_params=LOW_DEATH, deme_params=DEME_PARAMS,
+                          spatial_params=SPATIAL)
+        rng = np.random.default_rng(s)
+        elapsed = 0.0
+        while elapsed < gens and not t.is_extinct():
+            rate = t.deme_rates.sum()
+            elapsed += rng.exponential(1.0 / rate)
+            t.update(rng)
+        exact.append(t.get_tumor_size())
 
-    t = GenotypeTumor(seed=1, genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
-                      cancer_cell_params={"division_rate": div, "death_rate": death,
-                                          "max_birth_rate": 0.9},
-                      deme_params={"carrying_capacity": K, "maximum_death_rate": maxd,
-                                   "crowding_margin": margin, "initial_cancer_cells": 1},
-                      spatial_params={"grid_size": 1, "structure_radius": 0})
-    fid = t.founder_id
-    # pin the founder's rates so both engines see identical inputs
-    t.genotypes[fid].evolutionary_parameters["division_rate"] = div
-    t.genotypes[fid].evolutionary_parameters["death_rate"] = death
-
-    def cell_deme(n):
-        first = CancerCell(n_segments=N_SEGMENTS, segment_size=SEGMENT_SIZE)
-        first.evolutionary_parameters["division_rate"] = div
-        first.evolutionary_parameters["death_rate"] = death
-        d = Deme(cell=first, carrying_capacity=K, maximum_death_rate=maxd, crowding_margin=margin)
-        for _ in range(n - 1):
-            c = CancerCell(n_segments=N_SEGMENTS, segment_size=SEGMENT_SIZE)
-            c.evolutionary_parameters["division_rate"] = div
-            c.evolutionary_parameters["death_rate"] = death
-            d.add_cell(c)
-        return d
-
-    for n in (1, 4, 8, 16, 24):
-        d_count = t._death_rate(fid, 0, total=n)
-        d_cell = cell_deme(n).get_cancer_death_rate(death, division_rate=div,
-                                                    immune_cell_fraction=0.0, immune_resistance=0.0)
-        assert d_count == pytest.approx(d_cell)
-    # and the shared fixed point: death == division at occupancy K/(1+margin)
-    assert t._death_rate(fid, 0, total=K / (1 + margin)) == pytest.approx(div)
-
-
-def test_statistically_equivalent_to_cell_engine():
-    seeds, steps = range(10), 150
-    cnt = [_count(s, steps, cancer=LOW_DEATH).get_tumor_size() for s in seeds]
-    cell = [_cell(s, steps, cancer=LOW_DEATH).get_tumor_size() for s in seeds]
-
-    # both engines have the same low extinction probability (death/birth = 0.1)
-    assert sum(s > 0 for s in cnt) >= 6
-    assert sum(s > 0 for s in cell) >= 6
-
-    # survivor sizes in the same ballpark (net birth-death drift per step is identical)
-    cnt_mean = np.mean([s for s in cnt if s > 0])
-    cell_mean = np.mean([s for s in cell if s > 0])
-    assert 0.5 < cnt_mean / cell_mean < 2.0
+    assert sum(s > 0 for s in tau) >= 6
+    assert sum(s > 0 for s in exact) >= 6
+    tau_mean = np.mean([s for s in tau if s > 0])
+    exact_mean = np.mean([s for s in exact if s > 0])
+    assert 0.6 < tau_mean / exact_mean < 1.6, (tau, exact)
 
 
 # --- viability limits (CINner max_ploidy / max_cn / max_nullisomy / max_mut_drivers) ---------
-# These were enforced ONLY in the cell-level engine (Deme.sample_event) and were never ported to
-# this one, so they were silently inert here: genotypes breaching them stayed alive and dividing.
-# See GenotypeTumor._is_viable for the reject-at-birth semantics. Both engines now use that rule
-# (the cell engine's counterpart is exercised further down, under "the CELL engine enforces the
-# same limits, the same way").
+# A daughter that breaches a limit is rejected at birth (GenotypeTumor._is_viable).
 
 # A genome that mutates hard and amplifies/deletes aggressively, so the limits are actually
 # REACHED within a short run (the shipped defaults never get near them -- see
@@ -340,14 +296,10 @@ def test_reproducer_tight_ploidy_actually_binds():
     assert all(t.selection.update_viability(gs) == 1 for gs in living)
 
 
-def test_default_limits_are_a_noop_for_the_exact_engine():
-    """At the shipped defaults the limits (ploidy 6 / cn 12 / nullisomy 2 / drivers 1000) are far
-    out of reach for the exact engine, so the gate never fires and no existing baseline can move.
-
-    This does NOT hold for tau-leaping, which reaches ~3x the size in the same number of steps and
-    does occasionally delete >2 of the 5 default segments outright -- see
-    test_default_nullisomy_can_bind_under_tau.
-    """
+def test_default_limits_reject_only_daughters_without_a_copy_of_a_segment():
+    """At the shipped defaults the ploidy, copy-number and driver limits (6 / 12 / 1000) are out of
+    reach for the exact engine, so the only daughters the gate rejects are those that lost the last
+    copy of a segment (max_nullisomy 0, as CINner's bound_homozygosity)."""
     rejected = []
     real = GenotypeTumor._is_viable
 
@@ -368,183 +320,5 @@ def test_default_limits_are_a_noop_for_the_exact_engine():
             assert t.get_cancer_size() > 0
     finally:
         GenotypeTumor._is_viable = real
-    assert rejected == [], f"viability gate fired at shipped defaults: {rejected}"
-
-
-def test_default_nullisomy_can_bind_under_tau():
-    """The limits are NOT unreachable at the shipped defaults under tau-leaping.
-
-    Pins a finding from the viability fix: tau reaches ~3x the exact engine's size in the same
-    step budget, and with the default 5-segment genome it occasionally produces a daughter that
-    has deleted >2 segments outright (max_nullisomy=2) -- e.g. seg_cns [0, 2, 0, 1, 0]. Such a
-    genotype used to survive and keep dividing with 3/5 of its genome gone. So default-config TAU
-    trajectories may shift slightly; default-config EXACT trajectories cannot
-    (test_default_limits_are_a_noop_for_the_exact_engine).
-    """
-    rejected = []
-    real = GenotypeTumor._is_viable
-
-    def spy(self, rep):
-        ok = real(self, rep)
-        if not ok:
-            rejected.append(dict(rep.genome_summary))
-        return ok
-
-    GenotypeTumor._is_viable = spy
-    try:
-        for seed in range(5):
-            t = GenotypeTumor(seed=seed, genome_params={"n_segments": 5, "segment_size": 200},
-                              selection_params={}, cancer_cell_params={},
-                              deme_params={"carrying_capacity": 8, "initial_cancer_cells": 5},
-                              spatial_params={"grid_size": 15, "structure_radius": 0},
-                              update_mode="tau")
-            t.grow(n_steps=60, seed=seed)
-    finally:
-        GenotypeTumor._is_viable = real
-
-    assert rejected, "expected the default max_nullisomy to bind under tau"
-    # every rejection is a nullisomy breach (ploidy/cn stay far from 6/12 at defaults)
-    assert all(gs["nullisomy_count"] > 2 for gs in rejected)
-    assert all(gs["ploidy"] <= 6 and gs["highest_cn"] <= 12 for gs in rejected)
-
-
-# --- the CELL engine enforces the same limits, the same way -----------------------------------
-# GlandularTumor used to check viability LAZILY, in Deme.sample_event: a non-viable daughter was
-# added to the deme and only died when it was next *sampled* for an event. While it waited it held
-# a carrying-capacity slot, counted towards get_tumor_size, and could be sampled into cell_data --
-# so genomes breaching the configured limits leaked into the emitted assay data. It now rejects at
-# birth like the count engine (see Deme.apply_event / GenotypeTumor._is_viable), which makes the
-# limits a real invariant in BOTH engines. The lazy check remains as a backstop only.
-
-
-def _grow_cell_counting_rejections(selection_params, seed=1, steps=400, cancer=None):
-    """Grow a CELL-level tumour and report how many daughters the viability gate rejected.
-
-    The cell engine has no ``_is_viable`` seam to spy on -- its gate reads the ``viability`` that
-    ``Cell.mutate`` already computed. ``Selection.update_viability`` is called only from
-    ``update_evolutionary_parameters``, which in turn runs only inside ``Cell.mutate``, so a 0
-    verdict during growth is exactly one rejected daughter.
-    """
-    from iscc.tumor.components.selection import Selection
-
-    rejected = []
-    real = Selection.update_viability
-
-    def spy(self, genome_summary, **kwargs):
-        v = real(self, genome_summary, **kwargs)
-        if v == 0:
-            rejected.append(dict(genome_summary))
-        return v
-
-    Selection.update_viability = spy
-    try:
-        t = GlandularTumor(seed=seed, genome_params=VIAB_GENOME, selection_params=selection_params,
-                           cancer_cell_params=cancer or VIAB_CANCER,
-                           epithelial_cell_params=EPITHELIAL_CELL_PARAMS,
-                           stromal_cell_params=STROMAL_CELL_PARAMS,
-                           immune_cell_params=IMMUNE_CELL_PARAMS,
-                           deme_params=VIAB_DEME, grid_size=VIAB_SPATIAL["grid_size"],
-                           structure_radius=0)
-        t.grow(n_steps=steps, seed=seed)
-    finally:
-        Selection.update_viability = real
-    return t, rejected
-
-
-def _living_cancer_cells(t):
-    return [c for deme in t.deme_list for c in deme.cells if c.type == "cancer"]
-
-
-def test_cell_engine_rejects_non_viable_daughters_at_birth():
-    """The reported reproducer. Before the fix this ended with worst ploidy 2.75 (limit 2.5),
-    worst highest_cn 4 (limit 3) and 72 non-viable cells still alive in the demes."""
-    limits = {"prop_driver": 0.1, "driver_effects": 1.2,
-              "max_ploidy": 2.5, "max_cn": 3, "max_nullisomy": 0}
-    t, rejected = _grow_cell_counting_rejections(limits)
-    assert rejected, "limits never reached -- the test config no longer exercises them"
-    living = _living_cancer_cells(t)
-    assert living, "tumour died out -- the reproducer no longer exercises the limits"
-
-    # the invariant: no living cell breaches any limit, and none is merely awaiting its lazy death
-    assert max(c.genome_summary["ploidy"] for c in living) <= 2.5
-    assert max(c.genome_summary["highest_cn"] for c in living) <= 3
-    assert max(c.genome_summary["nullisomy_count"] for c in living) == 0
-    assert all(c.evolutionary_parameters["viability"] == 1 for c in living)
-    assert all(t.selection.update_viability(c.genome_summary) == 1 for c in living)
-
-
-def test_cell_engine_never_emits_a_breaching_cell():
-    """The point of rejecting at birth: breaching genomes cannot reach the assay data.
-
-    Under the lazy rule a doomed cell was sampled into cell_data for as long as it happened to
-    dwell in the deme, so make_cell_data could emit genomes that breach the configured limits.
-    """
-    limits = {"prop_driver": 0.1, "driver_effects": 1.2,
-              "max_ploidy": 2.5, "max_cn": 3, "max_nullisomy": 0}
-    t, rejected = _grow_cell_counting_rejections(limits)
-    assert rejected, "limits never reached -- the test config no longer exercises them"
-    t.make_cell_data()
-    evo = t.cell_data["cell_evo"]
-    assert len(evo), "no cells emitted -- the test no longer exercises the emitted data"
-    assert (evo["viability"] == 1).all()
-
-
-def test_cell_engine_gate_fires_on_every_limit():
-    """The gate must reject on ALL FOUR limits, not just the ones a run happens to reach.
-
-    The cell engine's gate is the `viability` that Selection.update_viability wrote during
-    mutate(), so this pins the same four-limit coverage the count engine's gate has.
-    """
-    t = GlandularTumor(seed=1, genome_params=VIAB_GENOME,
-                       selection_params={"max_ploidy": 6, "max_cn": 12, "max_nullisomy": 2,
-                                         "max_mut_drivers": 1000},
-                       cancer_cell_params=VIAB_CANCER,
-                       epithelial_cell_params=EPITHELIAL_CELL_PARAMS,
-                       stromal_cell_params=STROMAL_CELL_PARAMS,
-                       immune_cell_params=IMMUNE_CELL_PARAMS,
-                       deme_params=VIAB_DEME, grid_size=VIAB_SPATIAL["grid_size"],
-                       structure_radius=0)
-    founder = _living_cancer_cells(t)[0]
-    assert t.selection.update_viability(founder.genome_summary) == 1  # diploid founder is viable
-
-    for key, breach in (("ploidy", 6.5), ("highest_cn", 13),
-                        ("nullisomy_count", 3), ("n_mutated_drivers", 1001)):
-        gs = dict(founder.genome_summary)
-        gs[key] = breach
-        assert t.selection.update_viability(gs) == 0, f"gate ignores a {key} breach"
-
-
-def test_cell_engine_default_limits_are_a_noop():
-    """At the shipped defaults (ploidy 6 / cn 12 / nullisomy 2 / drivers 1000) the cell engine never
-    reaches a limit, so the birth gate never fires and no cell-level baseline can move.
-
-    This is the guarantee that makes the change safe to land: the gate only READS a value that
-    mutate() already computed and draws no randomness, so a gate that never fires leaves the
-    trajectory bit-identical. Configs where the limits DO bind shift on purpose -- that is the fix.
-    """
-    from iscc.tumor.components.selection import Selection
-
-    rejected = []
-    real = Selection.update_viability
-
-    def spy(self, genome_summary, **kwargs):
-        v = real(self, genome_summary, **kwargs)
-        if v == 0:
-            rejected.append(dict(genome_summary))
-        return v
-
-    Selection.update_viability = spy
-    try:
-        for seed in range(3):
-            t = GlandularTumor(seed=seed, genome_params={"n_segments": 5, "segment_size": 200},
-                               selection_params={}, cancer_cell_params={},
-                               epithelial_cell_params=EPITHELIAL_CELL_PARAMS,
-                               stromal_cell_params=STROMAL_CELL_PARAMS,
-                               immune_cell_params=IMMUNE_CELL_PARAMS,
-                               deme_params={"carrying_capacity": 8, "initial_cancer_cells": 5},
-                               grid_size=15, structure_radius=0)
-            t.grow(n_steps=400, seed=seed)
-            assert t.get_tumor_size() > 0
-    finally:
-        Selection.update_viability = real
-    assert rejected == [], f"viability gate fired at shipped defaults: {rejected}"
+    assert all(gs["nullisomy_count"] > 0 for gs in rejected), (
+        f"a limit other than nullisomy fired at shipped defaults: {rejected}")

@@ -3,11 +3,15 @@
 A realistic, **copy-number-scaled** coverage model shared by both modalities. The two assays differ only
 in the *regime* of the same shared core (see `batch.DNABatch`):
 
-    BULK        — pool the sampled cells, one high read budget, large-kappa (≈ multinomial/
-                  Poisson) compositional depth, Binomial allele layer.
-    SINGLE-CELL — per-cell low read budget, small-kappa (lumpy MDA/MALBAC amplification)
-                  compositional depth nested in the run batch, Beta-Binomial allele layer
-                  with explicit ADO, and doublets.
+    BULK        — pool the sampled cells, one high read budget, compositional depth at the
+                  dispersion of GIAB HG002 WGS, Binomial allele layer.
+    SINGLE-CELL — per-cell low read budget, compositional depth nested in the run batch at
+                  the dispersion of DLP+ single-cell WGS (or a fitted platform preset),
+                  Beta-Binomial allele layer with explicit ADO, and doublets.
+
+The depth dispersion defaults are `estimate_dna` fits on the real references in
+``validation/data`` (``dna_reference_PROVENANCE.md``), each stored with the number of loci it
+was fitted on so that it transfers to any genome size (see `DNABatchHyperParams.kappa_loci`).
 
 Orthogonal to bulk-vs-single-cell is **capture breadth** ∈ {wgs, wes, panel}, which sets
 (i) the observed locus set, (ii) the depth regime (wgs low / wes moderate / panel very high),
@@ -33,7 +37,7 @@ import numpy as np
 import pandas as pd
 
 
-# Capture-breadth presets (DESIGN_features §D): observed-locus regime + depth regime +
+# Capture-breadth presets: observed-locus regime + depth regime +
 # dominant capture bias. `locus_frac` / `panel_size` drive locus selection; the rest are
 # DNABatchHyperParams. Single-cell scales the depth down (see `scDNA.depth_scale`).
 DNA_BREADTH_PRESETS = {
@@ -48,6 +52,52 @@ DNA_BREADTH_PRESETS = {
                   locus_frac=None, panel_size=30),
 }
 _HYPER_KEYS = set(DNABatchHyperParams().to_dict().keys())
+
+# Amplification-regime defaults of each modality. `kappa` / `kappa_loci` and `nb_dispersion` are
+# `estimate_dna` fits on the references in validation/data: bulk on GIAB HG002 WGS (20,000 sites,
+# coverage CV 0.41 at two copies), single-cell on DLP+ OV2295 (5,787 bins of 500 kb, 40 cells).
+# The DM's excess per-locus variance is about n_loci / kappa, so a kappa is only meaningful with
+# the locus count it was fitted on: the depth draw rescales it to the genome it is drawn on.
+# `ado_rate`, `beta_binom_conc` and `doublet_rate` are priors (DLP+ has no allele counts).
+DNA_MODE_DEFAULTS = {
+    "bulk": dict(kappa=121_241.0, kappa_loci=20_000, nb_dispersion=0.165, ado_rate=0.0,
+                 beta_binom_conc=200.0, doublet_rate=0.0),
+    "sc":   dict(kappa=202_799.0, kappa_loci=5_787, nb_dispersion=0.032, ado_rate=0.20,
+                 beta_binom_conc=30.0, doublet_rate=0.02),
+}
+
+# Single-cell platform presets: the full `estimate_dna` fit on a real reference of the platform,
+# with what the reference cannot inform left at the single-cell defaults above. `mu_depth` is the
+# platform's own depth per locus, not the breadth depth regime.
+SCDNA_PLATFORM_PRESETS = {
+    # DLP+ (Laks et al. 2019, OV2295): reads per 500 kb bin, about one bin per locus of the
+    # 6,000-locus genome. No per-bin allele counts, so the allele layer keeps the priors.
+    "dlp": dict(breadth="wgs", mu_depth=830.1, kappa=202_799.0, kappa_loci=5_787,
+                nb_dispersion=0.032),
+    # Mission Bio Tapestri (Mays et al. 2024, KaryoTap experiment 1): reads per amplicon per
+    # cell, with capture spread, allelic dropout and allele overdispersion fitted at germline
+    # heterozygous sites.
+    # target_genes: the 584 amplicons of the fitted panel, where the panel breadth alone reads 30.
+    "tapestri": dict(breadth="panel", target_genes=584, mu_depth=42.7, kappa=4_679.0,
+                     kappa_loci=584, nb_dispersion=0.157, capture_sigma=0.389, ado_rate=0.325,
+                     beta_binom_conc=4.51),
+}
+_PLATFORM_ALIASES = {
+    "dlp": "dlp", "dlp+": "dlp", "dlpplus": "dlp",
+    "tapestri": "tapestri", "missionbio": "tapestri",
+}
+
+
+def resolve_platform(platform):
+    """Canonical single-cell DNA platform name (``None`` stays ``None``)."""
+    if platform is None:
+        return None
+    key = _PLATFORM_ALIASES.get(str(platform).lower().replace(" ", "").replace("_", ""))
+    if key is None:
+        raise ValueError(
+            f"unknown platform {platform!r}; choose from {sorted(set(_PLATFORM_ALIASES))}"
+        )
+    return key
 
 
 def genome_features(genes, seed=20240601):
@@ -103,7 +153,7 @@ def genome_bases(genes, seed=20240601, ti_tv=2.0):
     per-run / per-batch seed): the ref/alt alleles are properties of the genome, the SAME across
     runs, batches, breadths AND modalities (DNA, RNA, Visium). Sharing this map is exactly what
     makes a somatic SNV emit the SAME ref/alt in every modality's reads — the multi-modal
-    "one tumour -> shared ground truth" promise, now honoured at the read/allele level.
+    "one tumour -> shared ground truth" promise, honoured at the read/allele level.
 
     Each locus is drawn from its OWN gene-name-seeded RNG (see `_gene_base_seed`), so a gene's
     (ref, alt) is independent of its position in `genes` or of which other genes are present — two
@@ -181,7 +231,8 @@ class DNA(Assay):
     Holds the breadth / locus-selection logic and assembles the per-locus ground truth
     (copy number + true alt fraction) that the bulk / single-cell subclasses pass through
     the shared depth + allele layers. Subclasses set the amplification regime via
-    `mode_defaults` (large-kappa Binomial for bulk; small-kappa Beta-Binomial + ADO for sc).
+    `mode_defaults` (HG002-fitted depth and a Binomial allele layer for bulk; DLP+-fitted
+    depth and a Beta-Binomial allele layer with ADO for single-cell).
 
     The canonical home for the shared constructor parameters below: both
     [`bulkDNA`][iscc.data.bulkDNA] and [`scDNA`][iscc.data.scDNA] forward them here.
@@ -193,10 +244,11 @@ class DNA(Assay):
         set, the depth regime (mean per-locus coverage: wgs ~30x / wes ~120x / panel ~1500x;
         single-cell scales this down), and the dominant capture bias (wgs GC; wes per-target;
         panel per-amplicon).
-    target_genes : {"all"} or list or float, default "all"
+    target_genes : {"all"} or list or float or int, default "all"
         Overrides the breadth's default locus set. A list/array selects exactly those loci; a
-        float in (0, 1] a random fraction of loci; ``"all"`` defers to the breadth regime
-        (wgs = all loci, wes ~30%, panel = 30 drivers). Seeded, so stable across batches.
+        float in (0, 1] a random fraction of loci; an int that number of random loci; ``"all"``
+        defers to the breadth regime (wgs = all loci, wes ~30%, panel = 30 drivers). Seeded, so
+        stable across batches.
     data_mode : str, default "counts"
         Output mode. ``"counts"`` emits count-level results (coverage / alt-count / VAF /
         log2 ratio); ``"binary"`` additionally produces a post-ADO genotype call (single-cell
@@ -216,17 +268,18 @@ class DNA(Assay):
     batch_label : str, optional
         Batch/library/chip label; defaults to ``f"dnabatch{seed}"``.
     fpr : float, optional
-        Legacy alias mapped to ``error_rate`` (per-base sequencing error) when ``error_rate``
+        Alias mapped to ``error_rate`` (per-base sequencing error) when ``error_rate``
         is not otherwise supplied.
     fnr : float, optional
-        Legacy parameter; accepted for signature parity but unused by the current model.
+        Accepted for signature parity; unused by the model.
     **hyper_overrides : float, optional
         Any [`DNABatchHyperParams`][iscc.data.DNABatchHyperParams] field may be overridden
-        explicitly (e.g. ``mu_depth``, ``kappa``, ``ado_rate``, ``beta_binom_conc``,
-        ``doublet_rate``, ``gc_curve_sigma``, ``capture_sigma``, ``nb_dispersion``,
-        ``error_rate``, ``depth_batch_sigma``, ``ffpe_ct_rate``). The breadth preset and the
-        modality's ``mode_defaults`` set the starting values; see the subclasses for the
-        bulk / single-cell defaults.
+        explicitly (e.g. ``mu_depth``, ``kappa``, ``kappa_loci``, ``ado_rate``,
+        ``beta_binom_conc``, ``doublet_rate``, ``gc_curve_sigma``, ``capture_sigma``,
+        ``nb_dispersion``, ``error_rate``, ``depth_batch_sigma``, ``ffpe_ct_rate``). The breadth
+        preset and the modality's ``mode_defaults`` set the starting values; see the subclasses
+        for the bulk / single-cell defaults. A ``kappa`` passed without ``kappa_loci`` is used as
+        given: the default ``kappa_loci`` belongs to the default ``kappa``, so it is dropped.
     """
 
     mode = "bulk"
@@ -250,8 +303,8 @@ class DNA(Assay):
         self.depth_model = depth_model
         self.n_reads = n_reads
         self.batch_label = batch_label
-        self.fnr = fnr  # accepted for back-compat; the realistic model uses error_rate
-        # back-compat: fpr -> sequencing error rate
+        self.fnr = fnr  # unused; the model uses error_rate
+        # fpr -> sequencing error rate
         if fpr is not None and "error_rate" not in hyper_overrides:
             hyper_overrides["error_rate"] = float(fpr)
         self.hypers = self._build_hypers(breadth, depth_model, hyper_overrides)
@@ -264,21 +317,26 @@ class DNA(Assay):
     def _build_hypers(self, breadth, depth_model, overrides):
         preset = DNA_BREADTH_PRESETS[breadth]
         params = {k: v for k, v in preset.items() if k in _HYPER_KEYS}
-        params.update(self.mode_defaults())
+        params["mu_depth"] = float(params.get("mu_depth", 30.0)) * self.depth_scale
+        params.update(self.mode_defaults())     # a platform preset may set its own mu_depth
         params["breadth"] = breadth
         params["depth_model"] = depth_model
-        params["mu_depth"] = float(params.get("mu_depth", 30.0)) * self.depth_scale
         for k, v in overrides.items():
             if k not in _HYPER_KEYS:
                 raise TypeError(f"unknown DNA hyper-parameter {k!r}")
-            if k not in ("breadth", "depth_model"):
+            if k == "kappa_loci":
+                v = None if v is None else int(v)
+            elif k not in ("breadth", "depth_model"):
                 v = float(v)
             params[k] = v
+        if "kappa" in overrides and "kappa_loci" not in overrides:
+            # the default kappa_loci is the locus count of the default kappa, not of this one
+            params["kappa_loci"] = None
         return DNABatchHyperParams(**params)
 
     # -- locus selection (breadth + target_genes) --------------------------------------
     def _select_loci(self, genes):
-        """Observed-locus positions for this breadth (DESIGN_features §D).
+        """Observed-locus positions for this breadth.
 
         `target_genes` overrides the breadth default: a list selects exactly those loci, a
         float a random fraction; 'all' defers to the breadth regime (wgs=all, wes=fraction,
@@ -294,6 +352,8 @@ class DNA(Assay):
         elif isinstance(tg, float):
             k = max(1, int(round(tg * n)))
             idx = sorted(rng.choice(n, size=k, replace=False))
+        elif isinstance(tg, (int, np.integer)) and not isinstance(tg, bool):
+            idx = sorted(rng.choice(n, size=min(int(tg), n), replace=False))
         else:  # 'all' -> breadth regime
             preset = DNA_BREADTH_PRESETS[self.breadth]
             if preset["locus_frac"] is not None and preset["locus_frac"] >= 1.0:
@@ -330,8 +390,8 @@ class DNA(Assay):
 
 
 class bulkDNA(DNA):
-    """Bulk DNA-seq: pool the sampled cells, high read budget, large-kappa compositional
-    depth, Binomial allele layer.
+    """Bulk DNA-seq: pool the sampled cells, high read budget, compositional depth at the
+    dispersion of real WGS, Binomial allele layer.
 
     Coverage at a locus ∝ the POOLED total copy number (Σ_c CN_cl) × per-locus efficiency,
     so amplified segments draw proportionally more reads, and at a fixed budget compositionally
@@ -339,14 +399,16 @@ class bulkDNA(DNA):
     copy-number-weighted mean of the per-cell VAFs.
 
     Takes no constructor parameters of its own: it pools every sampled cell (there is no
-    ``n_cells``). The bulk ``mode_defaults`` set a large-kappa amplification regime
-    (``kappa=2000`` ≈ un-amplified multinomial/Poisson) and leave the single-cell allele
-    knobs inert (``ado_rate=0``, ``doublet_rate=0``).
+    ``n_cells``). The bulk ``mode_defaults`` set the depth dispersion fitted by
+    [`estimate_dna`][iscc.data.estimate_dna.estimate_dna] on GIAB HG002 WGS (``kappa=121241``
+    fitted on ``kappa_loci=20000`` sites, ``nb_dispersion=0.165``), which gives a coverage CV of
+    about 0.48 at two copies and 30x on any genome size (HG002: 0.41), and leave the single-cell
+    allele knobs inert (``ado_rate=0``, ``doublet_rate=0``).
 
     After ``run``, ``purity`` holds the pool's TRUE tumour purity (the fraction of pooled
     cells that are cancer cells, ``None`` when the sample carries no cell types) and
     ``n_cells_pooled`` its size. Purity is what turns an observed VAF into a cancer-cell
-    fraction, so it is both an input to that calculation and the answer key for any method
+    fraction, so it is both an input to that calculation and the ground truth for any method
     that estimates purity from the data.
 
     See [`DNA`][iscc.data.DNA] for the constructor parameters.
@@ -356,9 +418,8 @@ class bulkDNA(DNA):
     depth_scale = 1.0
 
     def mode_defaults(self):
-        # large kappa ≈ multinomial/Poisson (un-amplified bulk); deep beta-binom conc unused.
-        return dict(kappa=2000.0, nb_dispersion=0.1, ado_rate=0.0,
-                    beta_binom_conc=200.0, doublet_rate=0.0)
+        # HG002-fitted depth dispersion; the beta-binomial concentration is unused in bulk.
+        return dict(DNA_MODE_DEFAULTS["bulk"])
 
     @staticmethod
     def _pool_purity(cell_data, cells):
@@ -497,29 +558,32 @@ class bulkDNA(DNA):
                 pass
 
 
-class cfDNA(DNA):
-    """Cell-free DNA (liquid biopsy) — placeholder (DESIGN_features §A liquid biopsy / F2)."""
-
-    def run(self, cell_data, **kwargs):
-        raise NotImplementedError("cfDNA (liquid biopsy) is not implemented yet (see §A).")
-
-
 class scDNA(DNA):
-    """Single-cell DNA-seq: per-cell low budget, small-kappa (lumpy amplification) depth
-    nested in the run batch, Beta-Binomial alleles + explicit ADO + doublets.
+    """Single-cell DNA-seq: per-cell low budget, per-cell amplification depth nested in the
+    run batch, Beta-Binomial alleles + explicit ADO + doublets.
 
     Each cell gets its own DM draw (the per-cell amplification profile, the dominant
     single-cell noise) on weights ∝ that cell's copy number. ADO (one allele lost at a het
     locus) is a separate Bernoulli layer — the dominant single-cell allele artifact — applied
-    before the Beta-Binomial alt-count draw. The single-cell ``mode_defaults`` set a small-kappa
-    amplification regime (``kappa=5`` lumpy MDA/MALBAC) plus ``ado_rate=0.20``,
-    ``beta_binom_conc=30``, ``doublet_rate=0.02``, and coverage is scaled ~0.3x the bulk depth.
+    before the Beta-Binomial alt-count draw. The single-cell ``mode_defaults`` take the depth
+    dispersion fitted by [`estimate_dna`][iscc.data.estimate_dna.estimate_dna] on DLP+
+    single-cell WGS (``kappa=202799`` fitted on ``kappa_loci=5787`` bins,
+    ``nb_dispersion=0.032``) and set the prior allele layer ``ado_rate=0.20``,
+    ``beta_binom_conc=30``, ``doublet_rate=0.02``. Coverage is ~0.3x the bulk depth of the
+    breadth (9 reads per locus at WGS), unless a ``platform`` sets its own.
 
     Parameters
     ----------
     n_cells : int, default 100
         Number of cells to sample and assay, capped at the number available. Ignored when
         ``cell_subset`` is passed to ``run``.
+    platform : str, optional
+        A fitted platform preset: ``"dlp"`` (DLP+ whole-genome, Laks et al. 2019) or
+        ``"tapestri"`` (Mission Bio Tapestri amplicon panel, Mays et al. 2024). Sets the breadth
+        and every hyper-parameter fitted on the reference of the platform, including its depth
+        per locus: DLP+ counts 830 reads per locus, the reads of a whole 500 kb bin, not the reads
+        over the variant site of the locus. Explicit keyword arguments override the preset.
+        ``None`` (the default) keeps the breadth depth regime with the DLP+ dispersion.
     **dna_kwargs
         Forwarded to the [`DNA`][iscc.data.DNA] base. See [`DNA`][iscc.data.DNA] for the shared
         ``breadth`` / ``data_mode`` / depth / hyper-parameters.
@@ -528,14 +592,25 @@ class scDNA(DNA):
     mode = "sc"
     depth_scale = 0.3  # single-cell coverage is far shallower than bulk for the same breadth
 
-    def __init__(self, n_cells=100, **dna_kwargs):
+    def __init__(self, n_cells=100, platform=None, **dna_kwargs):
+        self.platform = resolve_platform(platform)
+        if self.platform is not None:
+            preset = SCDNA_PLATFORM_PRESETS[self.platform]
+            # The fitted loci belong to the platform's breadth: an explicit other breadth reads its own.
+            if dna_kwargs.setdefault("breadth", preset["breadth"]) == preset["breadth"] \
+                    and "target_genes" in preset:
+                dna_kwargs.setdefault("target_genes", preset["target_genes"])
         super(scDNA, self).__init__(**dna_kwargs)
         self.n_cells = int(n_cells)
 
     def mode_defaults(self):
-        # small kappa = lumpy MDA/MALBAC amplification; beta-binom alleles + ADO + doublets.
-        return dict(kappa=5.0, nb_dispersion=0.5, ado_rate=0.20,
-                    beta_binom_conc=30.0, doublet_rate=0.02)
+        # DLP+-fitted depth dispersion; prior beta-binomial alleles + ADO + doublets; then the
+        # platform preset, if any.
+        d = dict(DNA_MODE_DEFAULTS["sc"])
+        if self.platform is not None:
+            d.update({k: v for k, v in SCDNA_PLATFORM_PRESETS[self.platform].items()
+                      if k not in ("breadth", "target_genes")})
+        return d
 
     def _select_cells(self, cells_index, cell_subset):
         if cell_subset is not None:
@@ -697,17 +772,41 @@ class scDNA(DNA):
 
 
 # --------------------------------------------------------------------------------------
-# Multi-batch DNA (DESIGN_features §B.3 / §D): same biology, different technical signature.
+# Multi-batch DNA: same biology, different technical signature.
 # --------------------------------------------------------------------------------------
 def run_dna_batches(cell_data, mode="bulk", n_batches=2, base_seed=42, design="shared",
-                    breadth="wgs", n_cells=100, **dna_kwargs):
+                    breadth=None, n_cells=100, **dna_kwargs):
     """Generate `n_batches` DNA batches that share biology but differ technically.
 
     `mode` ∈ {"bulk", "sc"}. designs mirror scRNA (`run_scrna_batches`):
       * "shared" — every batch measures the SAME cells (replicate concordance).
       * "split"  — the sampled cells are partitioned across batches (single-cell only;
                    bulk pools all cells so "split" falls back to "shared").
-    Returns the list of run assay instances (each with `.batch.label` and `.to_anndata()`).
+    `breadth` defaults to the assay's own ("wgs", or the breadth of a single-cell `platform`).
+
+    Parameters
+    ----------
+    cell_data : dict
+        The per-cell tables of a sample.
+    mode : {"bulk", "sc"}, default "bulk"
+        [`bulkDNA`][iscc.data.bulkDNA] or [`scDNA`][iscc.data.scDNA].
+    n_batches : int, default 2
+        Number of batches.
+    base_seed : int, default 42
+        Seed of the cell selection; batch ``i`` draws its technical noise from ``base_seed + 1 + i``.
+    design : {"shared", "split"}, default "shared"
+        Whether every batch measures the same cells or a share of them, as above.
+    breadth : {"wgs", "wes", "panel"}, optional
+        Capture breadth of every batch. Default None keeps the assay's own.
+    n_cells : int, default 100
+        Cells per batch (single-cell only).
+    **dna_kwargs
+        Further keywords of the assay, shared by every batch.
+
+    Returns
+    -------
+    list of DNA
+        One run assay per batch, each with ``batch.label`` and ``to_anndata()``.
     """
     cls = {"bulk": bulkDNA, "sc": scDNA}[mode]
     snv = cell_data["cell_snv"]
@@ -731,7 +830,9 @@ def run_dna_batches(cell_data, mode="bulk", n_batches=2, base_seed=42, design="s
         kw = dict(dna_kwargs)
         if mode == "sc":
             kw["n_cells"] = len(subset)
-        assay = cls(breadth=breadth, seed=base_seed + 1 + i, batch_label=f"batch{i}", **kw)
+        if breadth is not None:
+            kw["breadth"] = breadth
+        assay = cls(seed=base_seed + 1 + i, batch_label=f"batch{i}", **kw)
         assay.run(cell_data, cell_subset=subset)
         assays.append(assay)
     return assays

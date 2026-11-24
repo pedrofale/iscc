@@ -1,10 +1,10 @@
-"""Landing clinical-arc feature (metastasis module, R9): the config-driven timed treatment SCHEDULE
+"""Landing clinical-arc feature (metastasis module): the config-driven timed treatment SCHEDULE
 that grows a primary+metastasis through grow -> surgery/resection -> chemotherapy -> relapse and
 captures a compartment TRAJECTORY, plus the `isccgif --compartment` composite renderer.
 
 Reproduces the docs landing hero from the ordinary CLI:
-    isccsim --sim-config configs/landing.yaml -o out
-    isccgif out --compartment --splash -o docs/assets/landing_hero.gif
+    isccsim --sim-config configs/landing_hero.yaml -o out --no-tables
+    isccgif out --compartment --splash --skip-confinement --scale 0.55 -o docs/assets/landing_hero.gif
 """
 import os
 from types import SimpleNamespace
@@ -138,12 +138,12 @@ def test_drug_escape_stage_matches_engine_protection(tr, dt, expect):
 
 def test_drug_escape_stage_ranks_above_the_cascade_and_tolerates_missing_key():
     """Drug escape outranks the metastatic cascade (it is the last sweep of the arc), a clone with
-    neither drug trait still reads its cascade stage, and a genotype minted before the tolerance axis
-    existed (no ``drug_tolerance`` key at all) behaves exactly as it always did."""
+    neither drug trait still reads its cascade stage, and a genotype with no ``drug_tolerance`` key
+    at all is staged on its other traits."""
     assert arc.stage_of(_rep(treatment_resistance=0.0, drug_tolerance=0.8,
                              met_survival=0.5, stromal_survival=0.3)) == "tolerance"
     assert arc.stage_of(_rep(treatment_resistance=0.0, drug_tolerance=0.0, met_survival=0.5)) == "met"
-    assert arc.stage_of(_rep(treatment_resistance=0.5)) == "resistance"        # legacy rep, no dt key
+    assert arc.stage_of(_rep(treatment_resistance=0.5)) == "resistance"        # no dt key
     assert arc.stage_of(_rep(breach=0.2)) == "breach"
 
 
@@ -226,6 +226,64 @@ def test_compartment_render_produces_valid_gif(tmp_path, arc_run, splash):
     assert im.size == ((1890, 1065) if splash else (2142, 1207))
 
 
+def test_splash_gif_keeps_a_tiny_clone_in_its_stage_colour(tmp_path, arc_run):
+    """The splash GIF has one small global palette fitted to a few frames, so a clone too small to win
+    an adaptive entry (a just-seeded deposit, a few stromal-survival cells) used to be drawn in the
+    nearest bulk colour. The stage colours are reserved in the palette, so its pixels keep the exact
+    stage colour."""
+    import copy
+    import matplotlib.pyplot as plt
+    from PIL import Image
+    t, frames, marks, traj = arc_run
+    traj = copy.deepcopy(traj)
+    n_prim = traj["n_primary_demes"]
+    cancer = [g for g in traj["colors"] if g not in normal_names]
+    gid = cancer[0]
+    # every other clone gets its own hue, so the adaptive palette has more colours to fit than entries
+    hues = plt.get_cmap("hsv")(np.linspace(0, 0.9, len(cancer)))
+    for g, c in zip(cancer[1:], hues[1:]):
+        traj["colors"][g] = traj["colors_primary"][g] = tuple(float(x) for x in c)
+    traj["colors"][gid] = arc.STAGE_COL["met"]
+    # the met holds one clone in one deme, a few cells against a grid of host tissue
+    traj["frames"] = traj["frames"][-3:]
+    for f in traj["frames"]:
+        f["demes"] = [d if i < n_prim else {g: c for g, c in d.items() if g in normal_names}
+                      for i, d in enumerate(f["demes"])]
+        f["demes"][n_prim] = dict(f["demes"][n_prim], **{gid: 6})
+    out = str(tmp_path / "tiny.gif")
+    comp.render_animation(traj, out, splash=True, poster=False, scale=0.4)
+    purple = np.array([int(round(255 * v)) for v in arc.STAGE_COL["met"][:3]])
+    im = Image.open(out)
+    for k in range(im.n_frames):
+        im.seek(k)
+        assert (np.asarray(im.convert("RGB")) == purple).all(axis=-1).any(), f"frame {k} lost the purple"
+
+
+def test_splash_gif_keeps_a_cell_blended_with_the_page_in_its_hue(tmp_path):
+    """A cell smaller than a pixel renders as a blend of its stage colour with the page. The blend of
+    the met purple used to map to a chrome grey, so the hero's metastasis read grey; it keeps its hue."""
+    import matplotlib.pyplot as plt
+    from PIL import Image
+    page = np.array(comp._BG_RGB, dtype=float)
+    # most of the frame is a smooth ramp of many colours, which takes every adaptive entry, as the
+    # Mullers and the primary grid do in the hero; the blended cells are a few pixels each
+    frame = np.tile(page, (120, 400, 1))
+    ramp = plt.get_cmap("viridis")(np.linspace(0, 1, 360))[:, :3] * 255
+    frame[:, 40:] = ramp[None, :, :] * np.linspace(0.2, 1, 120)[:, None, None]
+    for k, stage in enumerate(["met", "stromal", "breach", "resistance"]):
+        col = np.array(arc.STAGE_COL[stage][:3]) * 255
+        for j, a in enumerate((0.3, 0.5, 0.8)):
+            frame[6 * k:6 * k + 2, 6 * j:6 * j + 2] = a * col + (1 - a) * page
+    img = frame.round().astype(np.uint8)
+    out = str(tmp_path / "blend.gif")
+    comp._save_gif_pillow(out, [img, img], [100, 100])
+    got = np.asarray(Image.open(out).convert("RGB")).astype(int)
+    for k in range(4):
+        for j in range(3):
+            r, g, b = got[6 * k, 6 * j]
+            assert max(r, g, b) - min(r, g, b) > 30, f"stage {k} at blend {j} quantised to grey {(r, g, b)}"
+
+
 # --- CLI: isccsim schedule -> trajectory, then isccgif --compartment --------------------------
 @pytest.fixture(scope="module")
 def landing_cfg_path(tmp_path_factory):
@@ -302,15 +360,14 @@ def test_isccgif_compartment_cli(tmp_path, sim_out, splash):
 
 
 def test_default_animate_still_requires_count_args(sim_out):
-    """The historical single-grid mode is unchanged: without --compartment it still needs the
-    genotype-count/parent arguments (additive, non-breaking)."""
+    """The single-grid mode: without --compartment it needs the genotype-count/parent arguments."""
     r = CliRunner().invoke(gif_main, [sim_out], catch_exceptions=False)
     assert r.exit_code != 0
     assert "GENOTYPE_COUNTS" in r.output or "compartment" in r.output
 
 
 def test_r15_proliferation_cost_and_driver_load():
-    """R15 compartment-context fitness. (a) proliferation_cost: each *_cost lowers a trait-carrying
+    """Compartment-context fitness. (a) proliferation_cost: each *_cost lowers a trait-carrying
     clone's division as a multiplicative penalty, and is exactly 1.0 (byte-identical) when all costs are
     0. (b) the driver LOAD counts the dissemination traits toward max_mut_drivers, so a clone that has
     activated every trait is non-viable under a realistic ceiling."""
@@ -366,7 +423,7 @@ def test_landing_config_is_valid_and_schedule_shaped():
     assert cfg["selection_params"]["prop_breach"] == tut["selection_params"]["prop_breach"] == 0.02
     assert cfg["spatial_params"]["breach_gated_invasion"] is tut["spatial_params"]["breach_gated_invasion"] is True
     assert cfg["cell_params"]["cancer"] == tut["cell_params"]["cancer"]
-    # R15 go-or-grow: the invasion costs + the driver-load ceiling are shared with the tutorial
+    # go-or-grow: the invasion costs + the driver-load ceiling are shared with the tutorial
     for k in ("breach_cost", "stromal_survival_cost", "max_mut_drivers"):
         assert cfg["selection_params"][k] == tut["selection_params"][k]
     # the landing-only ADDITIONS: metastasis + treatment (off in the tutorial) + the met compartment,
@@ -374,3 +431,16 @@ def test_landing_config_is_valid_and_schedule_shaped():
     assert cfg["selection_params"]["prop_met_survival"] > 0 > -cfg["selection_params"]["prop_treatment_resistance"]
     assert 0 < cfg["selection_params"]["met_survival_cost"] < cfg["selection_params"]["treatment_resistance_cost"]
     assert cfg["spatial_params"]["met_hazard"] == 3.5 and cfg["spatial_params"]["met_grid_size"]
+
+
+def test_even_pace_keeps_one_frame_per_stretch_of_the_trace():
+    """The schedule captures phases at different cadences; even_pace keeps a frame every `every`
+    snapshots, so each kept frame advances the tumour by about the same time."""
+    cursors = [0, 8, 16, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 40]     # sparse growth, then every step
+    traj = {"frames": [{"cursor": c, "phase": "p"} for c in cursors], "traces": list(range(41))}
+    kept = [f["cursor"] for f in arc.even_pace(traj, 2)["frames"]]
+    assert kept[0] == 0 and kept[-1] == 40
+    gaps = np.diff(kept[:-1])
+    assert (gaps >= 2).all() and kept[:4] == [0, 8, 16, 24]   # a phase sparser than `every` keeps every frame
+    assert kept[4:-1] == [26, 28, 30, 32, 34]
+    assert arc.even_pace(traj, 1) is traj and arc.even_pace(traj, 0) is traj

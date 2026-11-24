@@ -1,11 +1,11 @@
-"""Read emission (DESIGN_features §C C2/C3, F7): count/coverage matrices -> FASTQ / BAM.
+"""Read emission: count/coverage matrices -> FASTQ / BAM.
 
 Per-modality read-realism ADAPTERS over shared seams:
   * `base`     — the `ReadEmitter` protocol + `run_binary` (PATH detect / skip-if-absent).
   * `variants` — the modality-agnostic variant-injection seam (`inject`, total-preserving).
-  * `dna`      — DWGSIM(default)/ART: Reference{synthetic|real} -> per-cell FASTA -> C1
-                 coverage -> variants.inject -> reads -> bwa/samtools BAM.
-  * `rna`      — mutation-aware scRNA (F7b): F3 count matrix (UMI totals conserved) ->
+  * `dna`      — DWGSIM(default)/ART: Reference{synthetic|real} -> per-cell FASTA ->
+                 copy-number-scaled coverage -> variants.inject -> reads -> bwa/samtools BAM.
+  * `rna`      — mutation-aware scRNA: scRNA count matrix (UMI totals conserved) ->
                  variants.inject(observed RNA-VAF) -> alt/ref UMIs -> self-contained 10x-style
                  FASTQ (synthetic transcriptome) or the scReadSim seam (real template).
 """
@@ -19,7 +19,7 @@ from .dna import (
 from .rna import (
     distort_vaf, observed_allele_counts, emit_scrna_reads, ScReadSimAdapter,
     ScrnaAlleleCounts, SyntheticTranscriptome, write_scrna_fastq,
-    emit_visium_reads, spot_clone_mixture_vaf,
+    emit_visium_reads, spot_clone_mixture_vaf, site_geometry, site_coverage,
 )
 
 __all__ = [
@@ -30,5 +30,5 @@ __all__ = [
     "DNAReadEmitter", "DwgsimAdapter", "ArtAdapter", "SIMULATORS", "align_to_bam",
     "distort_vaf", "observed_allele_counts", "emit_scrna_reads", "ScReadSimAdapter",
     "ScrnaAlleleCounts", "SyntheticTranscriptome", "write_scrna_fastq",
-    "emit_visium_reads", "spot_clone_mixture_vaf",
+    "emit_visium_reads", "spot_clone_mixture_vaf", "site_geometry", "site_coverage",
 ]

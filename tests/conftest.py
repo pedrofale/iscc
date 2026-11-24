@@ -25,7 +25,7 @@ CANCER_CELL_PARAMS = {
 EPITHELIAL_CELL_PARAMS = {"division_rate": 0.0, "death_rate": 0.1}
 STROMAL_CELL_PARAMS = {"division_rate": 0.0, "death_rate": 0.1}
 IMMUNE_CELL_PARAMS = {"division_rate": 0.0, "death_rate": 0.1, "dispersal_rate": 0.1}
-# Density-dependent crowding (DESIGN_crowding.md) makes a lone founder in a small-K deme prone to
+# Density-dependent crowding makes a lone founder in a small-K deme prone to
 # extinction (crowding death ramps up from occupancy 0), so seed an established micro-lesion and use
 # a K well above 1 — the same guidance the shipped configs follow.
 DEME_PARAMS = {"carrying_capacity": 8, "initial_cancer_cells": 5}
@@ -53,30 +53,8 @@ def cancer_cell(selection):
 
 
 @pytest.fixture
-def glandular_tumor():
-    from iscc.tumor.models.glandular import GlandularTumor
-    return GlandularTumor(
-        genome_params=GENOME_PARAMS,
-        selection_params=SELECTION_PARAMS,
-        cancer_cell_params=CANCER_CELL_PARAMS,
-        epithelial_cell_params=EPITHELIAL_CELL_PARAMS,
-        stromal_cell_params=STROMAL_CELL_PARAMS,
-        immune_cell_params=IMMUNE_CELL_PARAMS,
-        deme_params=DEME_PARAMS,
-        grid_size=5,
-        structure_radius=0,
-    )
-
-
-@pytest.fixture
-def grown_tumor(glandular_tumor):
-    glandular_tumor.grow(n_steps=10, seed=0)
-    return glandular_tumor
-
-
-@pytest.fixture
 def synthetic_cell_data():
-    """Minimal cell_data dict matching Tumor.make_cell_data() output."""
+    """Minimal cell_data dict matching GenotypeTumor.make_cell_data() output."""
     rng = np.random.default_rng(0)
     n_cells = 20
     cell_names = [f"C{i}" for i in range(n_cells)]

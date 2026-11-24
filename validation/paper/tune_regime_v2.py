@@ -1,11 +1,9 @@
-"""Retune the paper regime under demon's division and crowding laws (vault: exp-regime-v2-tuning).
+"""Retune the paper regime under demon's division and crowding laws.
 
-The criteria, the grid and the rule that picks the setting were registered in the vault note before
-any run. Each task grows one tumour on the small preview field and records what the criteria need:
+The criteria, the grid and the rule that picks the setting were registered before any run. Each task grows one tumour on the small preview field and records what the criteria need:
 the release of the founding acinus, the first cancer cell in the stroma and whether it carries a
 breach mutation, deme occupancy against capacity, wall time, and at the end the calibration and
-evolutionary-mode summaries. ``v1`` is the old law (the fate split, ``crowding_mode="own"``, offset
-streams, a step-counting clock at 400), grown in the same harness at the same seeds.
+evolutionary-mode summaries. (The old law's ``v1`` arm was removed with the old laws.)
 
 Usage (one task per Slurm array element)::
 
@@ -14,6 +12,8 @@ Usage (one task per Slurm array element)::
     python validation/paper/tune_regime_v2.py count sweep --overfill 1.5 --d1 5
     python validation/paper/tune_regime_v2.py task sweep 3 --overfill 1.5 --d1 5
     python validation/paper/tune_regime_v2.py collect        # -> <out>/regime-v2-tuning.csv
+    python validation/paper/tune_regime_v2.py task current 3  # the regime as it stands (also current_sweep)
+    python validation/paper/tune_regime_v2.py task immune_grid 7   # the immune variant's kill rate
 
 Outputs go to ``$ISCC_PAPER_OUT/tuning-v2`` (or ``analysis_data/paper/tuning-v2``).
 """
@@ -46,15 +46,18 @@ OVERFILLS, D1S = (1.1, 1.5, 2.0), (2.2, 5.0, 20.0)
 # rule): the two points that met every other criterion, at lower mutation rates.
 MU_POINTS, MUS = ((1.5, 5.0), (2.0, 5.0)), (0.25, 0.2, 0.15)
 CANONICAL_DISPERSAL = 0.9
+# The immune variant (regime.IMMUNE_SPATIAL): its kill rate is picked on `immune_grid`, five seeds per
+# rate beside five immune-free tumours of the same code.
+KILLS = (0.5, 1.0, 2.0, 4.0)
+KILLS2 = KILLS + (8.0,)            # the second grid adds a rate of 8 (appended, so earlier tasks keep their index)
+DISPLACED_KILLS = (7.0, 14.0, 28.0, 56.0)   # with the subtypes (8 / 0.575 = 14); 56 grown because 28 passed
 
-# The old law, exactly as the paper regime ran it before v2.
-V1 = dict(
-    deme={"dispersal_law": "compete", "crowding_mode": "own", "crowding_law": "logistic",
-          "crowding_overfill": 1.0, "crowding_d1": None, "maximum_death_rate": 2.2},
-    spatial={"origin_confinement": dict(RG.ORIGIN_CONFINEMENT, generations=400, clock="steps")},
-    rng_streams="offset",
-    mutation_rate=0.30,                         # the ER+ preset, as before v2
-)
+
+def immune(kill, selection=None):
+    law = dict(spatial=dict(RG.IMMUNE_SPATIAL), immune={"prob_kill": kill})
+    if selection:
+        law["selection"] = dict(selection)
+    return law
 
 
 def v2(overfill, d1, mu=None):
@@ -67,13 +70,36 @@ def v2(overfill, d1, mu=None):
 def tasks(stage, overfill=None, d1=None, mu=None):
     """(label, law kwargs, dispersal, seed) for every tumour of a stage."""
     if stage == "grid":
-        pts = [("v1", V1)] + [(f"v2_o{o:g}_d{d:g}", v2(o, d)) for o in OVERFILLS for d in D1S]
+        pts = [(f"v2_o{o:g}_d{d:g}", v2(o, d)) for o in OVERFILLS for d in D1S]
         return [(lab, kw, CANONICAL_DISPERSAL, s) for lab, kw in pts for s in SEEDS]
     if stage == "mu":
         pts = [(f"v2_o{o:g}_d{d:g}_mu{m:g}", v2(o, d, m)) for o, d in MU_POINTS for m in MUS]
         return [(lab, kw, CANONICAL_DISPERSAL, s) for lab, kw in pts for s in SEEDS]
+    if stage == "current":         # the regime as it stands, to recheck the criteria after a model change
+        return [("current", {}, CANONICAL_DISPERSAL, s) for s in range(1, 11)]
+    if stage == "current_sweep":   # criterion 4 for the regime as it stands
+        return [("current", {}, d, s) for d in REG.R1_DISPERSAL for s in SEEDS]
+    if stage == "immune_grid":     # the kill rate of the immune variant
+        return ([("current", {}, CANONICAL_DISPERSAL, s) for s in range(1, 6)]
+                + [(f"immune_k{k:g}", immune(k), CANONICAL_DISPERSAL, s) for k in KILLS for s in range(1, 6)])
+    if stage in ("immune_grid2", "immune_grid3"):
+        # immune_grid2: the variant's immune-resistance target in both arms (effect 1.1);
+        # immune_grid3: the variant's target and per-hit effect (regime.IMMUNE_SELECTION)
+        sel = ({"prop_immune_resistance": 0.002} if stage == "immune_grid2" else RG.IMMUNE_SELECTION)
+        kills = KILLS2 if stage == "immune_grid2" else KILLS
+        return ([("current_ir", dict(selection=dict(sel)), CANONICAL_DISPERSAL, s) for s in range(1, 6)]
+                + [(f"immune_k{k:g}", immune(k, sel), CANONICAL_DISPERSAL, s) for k in kills for s in range(1, 6)])
+    if stage == "immune_displaced":   # the kill rate again, with immune cells that cancer displaces
+        sel, sp = dict(RG.IMMUNE_SELECTION), {**RG.IMMUNE_SPATIAL, "immune_displaceable": True}
+        return [(f"immune_k{k:g}", dict(spatial=dict(sp), selection=dict(sel), immune={"prob_kill": k}),
+                 CANONICAL_DISPERSAL, s) for k in DISPLACED_KILLS for s in range(1, 6)]
+    if stage in ("immune_variant", "immune_subtypes"):
+        # the variant as regime.py states it (immune_variant: in the stroma only; immune_subtypes: with
+        # the immune subtypes and the rescaled kill rate), scored against immune_grid3's current_ir
+        law = dict(spatial=dict(RG.IMMUNE_SPATIAL), selection=dict(RG.IMMUNE_SELECTION), immune=dict(RG.IMMUNE))
+        return [(stage, law, CANONICAL_DISPERSAL, s) for s in range(1, 6)]
     if stage == "sweep":
-        pts = [("v1", V1), (f"v2_o{overfill:g}_d{d1:g}" + (f"_mu{mu:g}" if mu else ""),
+        pts = [(f"v2_o{overfill:g}_d{d1:g}" + (f"_mu{mu:g}" if mu else ""),
                             v2(overfill, d1, mu))]
         return [(lab, kw, d, s) for lab, kw in pts for d in REG.R1_DISPERSAL for s in SEEDS]
     raise ValueError(stage)
@@ -99,6 +125,27 @@ def _stroma(t):
                 if t.genotypes[g].evolutionary_parameters.get("breach", 0.0) > 0:
                     nb += c
     return n, nb
+
+
+def _immune(t):
+    """The cell-weighted mean immune resistance of the cancer cells, the share of cancer cells with
+    at least one resistance hit's worth of it (1 - 1/effect), and the immune share of the cells in
+    the demes that hold cancer."""
+    hit = 1.0 - 1.0 / float(t.selection.immune_resistant_effects)
+    n = ir = n_hit = n_imm = n_all = 0
+    for deme in t.demes:
+        cancer = [(g, c) for g, c in deme.items() if t._is_cancer(g)]
+        if not cancer:
+            continue
+        for g, c in cancer:
+            r = t.genotypes[g].evolutionary_parameters["immune_resistance"]
+            n += c
+            ir += c * r
+            n_hit += c * (r >= hit - 1e-12)
+        n_imm += deme.get("immune", 0)
+        n_all += sum(deme.values())
+    return dict(immune_resistance_mean=ir / n if n else None, immune_resistant_frac=n_hit / n if n else None,
+                immune_share_tumour=n_imm / n_all if n_all else None)
 
 
 def run_task(stage, i, overfill=None, d1=None, mu=None):
@@ -131,6 +178,16 @@ def run_task(stage, i, overfill=None, d1=None, mu=None):
     occ = _occupancy(t)
     full = occ[occ >= 1.0 - 1e-9]
     sc = SS.score_tumour(t)
+    # the cell-weighted mean and spread of the division rate of the cancer cells (regime v3's extra measures)
+    n_g = {}
+    for deme in t.demes:
+        for g, c in deme.items():
+            if t._is_cancer(g):
+                n_g[g] = n_g.get(g, 0) + c
+    rates = np.array([t.genotypes[g].evolutionary_parameters["division_rate"] for g in n_g])
+    w = np.array(list(n_g.values()), dtype=float)
+    div_mean = float(np.average(rates, weights=w)) if w.sum() else None
+    div_cv = float(np.sqrt(np.average((rates - div_mean) ** 2, weights=w)) / div_mean) if div_mean else None
     m0, md = mode_indices(t, detection=0.0), mode_indices(t, detection=DETECTION)
     rec = dict(stage=stage, label=label, dispersal=disp, seed=seed, mutation_rate=cancer.get("mutation_rate"),
                wall_s=round(wall, 1),
@@ -141,10 +198,10 @@ def run_task(stage, i, overfill=None, d1=None, mu=None):
                breach_frac_at_invasion=mon["breach_frac_at_invasion"], max_occ=mon["max_occ"],
                frac_chunks_over_k=mon["chunks_over_k"] / max(mon["n_chunks"], 1),
                mean_occ_full_end=float(full.mean()) if full.size else None,
-               n_genotypes=len(t.genotypes),
+               n_genotypes=len(t.genotypes), division_rate_mean=div_mean, division_rate_cv=div_cv,
                **{k: sc.get(k) for k in ("frac_genome_altered", "mean_ploidy", "pct_wgd", "n_clones",
                                          "max_cna_freq", "n_truncal_segments", "stroma_pct", "flags")},
-               n0=m0["n"], D0=m0["D"], J1=m0["J1"], nd=md["n"], Dd=md["D"])
+               n0=m0["n"], D0=m0["D"], J1=m0["J1"], nd=md["n"], Dd=md["D"], **_immune(t))
     os.makedirs(os.path.join(OUT, stage), exist_ok=True)
     with open(os.path.join(OUT, stage, f"{label}_disp{disp:g}_seed{seed}.json"), "w") as f:
         json.dump(rec, f)

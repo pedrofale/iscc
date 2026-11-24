@@ -45,10 +45,13 @@ def parents_of(t):
 
 class Clones:
     """The clone partition of a tumour: clade roots, their labels and colours, and a lookup that
-    works for any genotype ever created (so snapshots of the past use the same labels)."""
+    works for any genotype ever created (so snapshots of the past use the same labels).
 
-    def __init__(self, t, min_frac=0.04):
-        counts = live_cancer_counts(t)
+    ``counts`` (``{gid: cancer cells}``, default the live state) applies the same definition to
+    another population, for example the tumour at one snapshot of its spatial history."""
+
+    def __init__(self, t, min_frac=0.04, counts=None):
+        counts = live_cancer_counts(t) if counts is None else counts
         self.parents = parents_of(t)
         depth = _depths(self.parents, counts)
         min_cells = max(1, int(min_frac * sum(counts.values())))
@@ -175,11 +178,13 @@ def assays(run, task, seed=0, n_dna=400, force=False):
     cancer_cells = [c for c, k in zip(cells, is_cancer) if k]
     rng = np.random.default_rng(seed)
     dna_cells = list(rng.choice(cancer_cells, size=min(n_dna, len(cancer_cells)), replace=False))
-    dna = scDNA(n_cells=len(dna_cells), breadth="wgs", kappa=500.0, mu_depth=60.0,
-                seed=200 + seed).run(diss, cell_subset=dna_cells)
+    # The DLP+ fit (OV2295). The hand values used before (kappa 500, mu_depth 60, no kappa_loci) left
+    # 58% of the 6,000 loci of a cell without reads and miscalled 35% of its diploid segments.
+    dna = scDNA(n_cells=len(dna_cells), platform="dlp", seed=200 + seed).run(diss, cell_subset=dna_cells)
     rna = scRNA(n_cells=len(cells), seed=100 + seed).run(diss, cell_subset=cells)
-    sec = spec.slice(depth_frac=0.5, max_cells=RG.T["max_cells"])
-    vis = Visium(seed=300 + seed).run(sec, grid_side=t.grid_size)
+    # The section feeds only Visium (and its coordinates and genotypes), so only expression is built.
+    sec = spec.slice(depth_frac=0.5, max_cells=RG.T["max_cells"], layers="visium")
+    vis = Visium(seed=300 + seed, **RG.VISIUM).run(sec, grid_side=t.grid_size)
     out = dict(
         cells=cells, genotype=gid.to_dict(), is_cancer=dict(zip(cells, is_cancer)),
         cell_type=_coarse_type(diss), seg_cn_true=_seg_cn(t, diss),

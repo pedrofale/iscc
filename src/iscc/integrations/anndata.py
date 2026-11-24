@@ -50,8 +50,7 @@ import pandas as pd
 #: The per-cell tables that are NOT plain annotation columns and get their own destination.
 _SPECIAL = {"cell_crd", "cell_program"}
 
-#: The layer set the original dict-only export attached. Kept as the default for that path so
-#: existing callers get exactly what they always got.
+#: The default layer set for a ``cell_data`` dict (no tumour): SNV VAFs and copy number.
 _LEGACY_LAYERS = ("cell_snv", "cell_cnv")
 
 #: Cache of the genotype ids that name a normal cell type rather than a cancer clone (filled on
@@ -70,10 +69,50 @@ def _normal_ids():
 def biological_types(genotype_ids):
     """Coarse cell type per cell: cancer, epithelial, stromal, immune or host.
 
-    A normal cell's genotype id IS its type name; anything else is a cancer clone.
+    A normal cell's genotype id is its type name, or for an immune cell its subtype (``immune`` for T
+    and NK cells, ``myeloid``, ``bplasma``), which all map to ``immune``, or for a stromal cell its
+    subtype (``stromal`` for fibroblasts, ``endothelial``, ``pvl``), which all map to ``stromal``; any
+    other id is a cancer clone. [`cell_subtypes`][iscc.integrations.cell_subtypes] keeps the subtypes
+    apart.
+
+    Parameters
+    ----------
+    genotype_ids : array-like of str
+        The genotype id of each cell, as in the ``cell_type`` table of ``cell_data``.
+
+    Returns
+    -------
+    numpy.ndarray of str
+        One coarse type per cell.
     """
+    from ..constants import IMMUNE_SUBTYPES, STROMAL_SUBTYPES
     normals = _normal_ids()
-    return np.array([g if g in normals else "cancer" for g in map(str, genotype_ids)], dtype=object)
+    return np.array(["immune" if g in IMMUNE_SUBTYPES else "stromal" if g in STROMAL_SUBTYPES
+                     else g if g in normals else "cancer"
+                     for g in map(str, genotype_ids)], dtype=object)
+
+
+def cell_subtypes(genotype_ids):
+    """Cell type per cell with the immune and stromal cells by subtype: cancer, epithelial, host,
+    ``T_NK``, ``myeloid`` or ``B_plasma`` for the immune cells and ``fibroblast``, ``endothelial`` or
+    ``PVL`` for the stromal cells (labels without slashes, so tools such as RCTD and file names take
+    them as they are).
+
+    Parameters
+    ----------
+    genotype_ids : array-like of str
+        The genotype id of each cell, as in the ``cell_type`` table of ``cell_data``.
+
+    Returns
+    -------
+    numpy.ndarray of str
+        One type per cell; the same as [`biological_types`][iscc.integrations.biological_types] except
+        for immune and stromal cells.
+    """
+    from ..constants import IMMUNE_SUBTYPES, STROMAL_SUBTYPES
+    labels = {**IMMUNE_SUBTYPES, **STROMAL_SUBTYPES}
+    coarse = biological_types(genotype_ids)
+    return np.array([labels.get(str(g), c) for g, c in zip(genotype_ids, coarse)], dtype=object)
 
 
 # ------------------------------------------------------------------ uns / value sanitising
@@ -380,7 +419,7 @@ def to_anndata(source, X="cell_exp", layers=None, obs_extra=True, spatial="xy",
     ----------
     source : GenotypeTumor or dict
         A grown tumour, or the per-cell tables it materialised (``tumor.cell_data``, or the dict a
-        :class:`iscc.sample.Resection` returns). Given a tumour, the export also carries the
+        [`Resection`][iscc.sample.Resection] returns). Given a tumour, the export also carries the
         tumour-level ground truth: gene roles, the clone tree, the program dictionary, the clonal
         trace and the run parameters. Given a tumour with nothing materialised yet, the cells are
         materialised first (bounded by the tumour's own cell cap).
@@ -389,7 +428,7 @@ def to_anndata(source, X="cell_exp", layers=None, obs_extra=True, spatial="xy",
     layers : {"all", None} or sequence of str
         Which other per-cell gene matrices become ``.layers``. ``"all"`` takes every one the run
         produced (the default for a tumour); a sequence names them explicitly. For a ``cell_data``
-        dict the default stays the historical ``("cell_snv", "cell_cnv")``.
+        dict the default is ``("cell_snv", "cell_cnv")``.
     obs_extra : bool
         Attach the per-cell annotation tables (deme, gland, compartment, microenvironment,
         evolutionary rates, ...) to ``.obs``. ``False`` keeps only the identity and coordinate
@@ -407,6 +446,17 @@ def to_anndata(source, X="cell_exp", layers=None, obs_extra=True, spatial="xy",
         differently in every tumour. An integer fixes it by hand; ``None`` skips the clade
         labelling and falls back to the genotype id. Either way ``uns["clone_definition"]`` and the
         ``clone_*`` entries next to it record what the labels mean and how many cells fell outside.
+
+    Returns
+    -------
+    anndata.AnnData
+        Cells by genes. ``X`` is the matrix named by ``X``, ``layers`` the other per-cell gene
+        matrices (SNV allele fractions, copy number, RNA allele fractions, allele-resolved
+        expression), and ``obs`` the per-cell annotations, with the coarse cell type and the clone
+        label. ``obsm["spatial"]`` holds the tissue coordinates and ``obsm["program"]`` the program
+        activities when the program layer is on. Given a tumour, ``var`` holds the role and segment
+        of each gene, ``varm`` the program loadings, and ``uns`` the clone tree, the clone trace and
+        the run parameters.
     """
     import anndata as ad
 
@@ -446,6 +496,7 @@ def to_anndata(source, X="cell_exp", layers=None, obs_extra=True, spatial="xy",
             # biological type is derived alongside it.
             _add_obs(obs, "genotype", genotype, taken)
             _add_obs(obs, "cell_type", biological_types(genotype), taken)
+            _add_obs(obs, "cell_subtype", cell_subtypes(genotype), taken)
             clone, clone_uns = _clone_labels(tumor, index, clone_min_cells)
             _add_obs(obs, "clone", genotype if clone is None else clone, taken)
         if obs_extra:
@@ -456,7 +507,7 @@ def to_anndata(source, X="cell_exp", layers=None, obs_extra=True, spatial="xy",
                 for col in frame.columns:
                     _add_obs(obs, str(col), frame[col].values, taken)
     else:
-        # Historical dict export: clone / deme / coordinates (+ microenvironment) only.
+        # Dict export: clone / deme / coordinates (+ microenvironment) only.
         if genotype is not None:
             obs["clone"] = genotype
         deme = frames.get("cell_deme")
@@ -521,7 +572,7 @@ _DERIVED_OBS = ("genotype", "cell_type", "clone", "row", "col")
 
 
 def from_anndata(adata, X="cell_exp"):
-    """Rebuild a ``cell_data``-style dict from an :func:`to_anndata` export.
+    """Rebuild a ``cell_data``-style dict from a [`to_anndata`][iscc.integrations.to_anndata] export.
 
     Returns the per-cell tables (``cell_exp`` and every layer as cells x genes frames, plus
     ``cell_crd`` / ``cell_type`` / ``cell_program`` when the export carried them) so a written

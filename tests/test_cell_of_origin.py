@@ -2,7 +2,7 @@
 
 What must hold:
 
-1. **Off => unchanged.** Without the key, the cancer baseline is its own draw, as before.
+1. **Off => independent.** Without the key, the cancer baseline is its own draw.
 2. **On => shared.** With it, the cancer baseline equals the origin type's, and every other type's
    baseline is untouched.
 3. **Readout only.** Growth, the genotype registry and the layout gene sets are byte-identical with

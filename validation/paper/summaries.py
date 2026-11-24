@@ -12,7 +12,11 @@ Statistics per tumour:
     so undetected clones merge with their parents; ``iscc.inference.mode_indices``).
   * ``seg_cn``, ``seg_net``: count-weighted mean copy number and net oncogenic content per segment.
   * ``wgd_frac``: fraction of cancer cells carrying a whole-genome duplication.
-  * ``assortment``: fraction of neighbouring cancer demes sharing their dominant clone.
+  * ``assortment``: fraction of neighbouring cancer demes sharing their dominant clone, and
+    ``assortment_expected``, its expectation if the same dominant clones were placed on the cancer
+    demes at random: the sum of p_i^2 over the tumour's dominant clones, p_i being the share of cancer
+    demes that clone i dominates. Their ratio separates mixing from clonality: fewer, larger clones
+    raise the raw fraction by composition alone.
   * ``cancer``, ``stroma_frac``: cancer cells, and the share of them in stroma.
 """
 import argparse
@@ -67,9 +71,11 @@ def summarise(run, task):
     counts = C.live_cancer_counts(t)
     tot = sum(counts.values())
     seg = t.n_segments
-    size = t.n_genes // seg
-    onc = np.bincount(np.asarray(t.selection.get_oncogenes(), dtype=int) // size, minlength=seg)
-    tsg = np.bincount(np.asarray(t.selection.get_tsgs(), dtype=int) // size, minlength=seg)
+    off = np.asarray(t.selection._seg_offsets, dtype=int)  # segments differ in size in the human genome layout
+    onc = np.bincount(np.searchsorted(off, np.asarray(t.selection.get_oncogenes(), dtype=int), side="right") - 1,
+                      minlength=seg)
+    tsg = np.bincount(np.searchsorted(off, np.asarray(t.selection.get_tsgs(), dtype=int), side="right") - 1,
+                      minlength=seg)
     w = np.array(list(counts.values()), dtype=float)
     cn = np.array([t.genotypes[g].genome_summary["seg_cns"] for g in counts], dtype=float)
     seg_cn = ((cn * w[:, None]).sum(0) / w.sum()).tolist() if len(w) else [2.0] * seg
@@ -98,6 +104,9 @@ def summarise(run, task):
     rec = dict(run=run, task=task, cancer=int(tot), n0=n0, D0=D0, nd=nd, Dd=Dd, detection=DETECTION, seg_cn=seg_cn,
                seg_net=(onc - tsg).tolist(), wgd_frac=float(wgd),
                assortment=float(same / pairs) if pairs else None,
+               assortment_expected=(float(sum((v / len(dom)) ** 2 for v in Counter(dom.values()).values()))
+                                    if dom else None),
+               n_dominant_clones=len(set(dom.values())),
                stroma_frac=float(stroma / max(tot, 1)), n_clones=len(cl.labels),
                coarsened=bool(t.coarsen_passengers))
     if not t.coarsen_passengers:                 # exact passengers: the neutral spectrum is meaningful

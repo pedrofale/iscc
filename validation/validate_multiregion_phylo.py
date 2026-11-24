@@ -8,9 +8,9 @@ proportions — so a "sample tree" built from regional bulk mutational/VAF profi
 and reversed ordering. Their fix: **deconvolve clones per region first**, then build the clone tree.
 
 Alves et al. used illustrative simulations only. iscc turns the argument into a **quantitative
-benchmark with a ground-truth answer key**, because it uniquely has *both* the true clone phylogeny
+benchmark with a ground-truth ground truth**, because it uniquely has *both* the true clone phylogeny
 (``genotypes_parents`` / ``iscc.integrations.to_newick``) *and* real spatial admixture (clonal
-territories that intermix — tuned by the cancer ``dispersal_rate``). The answer key is
+territories that intermix — tuned by the cancer ``dispersal_rate``). The ground truth is
 ``true_origin_counts``: for every locus, the true number of independent origins from Fitch parsimony
 on the *true* clone tree. Under the engine's per-allele infinite-sites model most loci arise once;
 those single-origin loci are the clean substrate for scoring *spurious* parallelism (an inferred
@@ -48,7 +48,7 @@ from _paths import figure_path
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # A solid tumour with ~15-25 sizeable clones over spatial territories. Large genome (18k loci) keeps
-# the per-allele infinite-sites model sparse, so most loci are single-origin (a clean answer key).
+# the per-allele infinite-sites model sparse, so most loci are single-origin (a clean ground truth).
 # With real per-deme crowding (DESIGN_crowding.md) demes cap near K and the tumour spreads by
 # dispersal, so we seed a founder cluster (a lone founder goes extinct) and use a moderate K and more
 # steps so clones tile the lattice into spatial territories a biopsy disk can straddle.
@@ -62,7 +62,7 @@ STEPS = 700
 def grow(dispersal, seed):
     cancer = {"division_rate": 0.6, "death_rate": 0.05, "max_birth_rate": 0.9,
               "mutation_rate": 0.1, "dispersal_rate": dispersal,
-              # SNV-only, infinite-sites-per-allele: a clean single-origin answer key.
+              # SNV-only, infinite-sites-per-allele: a clean single-origin ground truth.
               "snv_prob": 1.0, "cnv_prob": 0.0, "n_snvs_per_allele": 1.0}
     t = GenotypeTumor(seed=seed, genome_params=GENOME, selection_params=SELECTION,
                       cancer_cell_params=cancer, deme_params=DEME, spatial_params=SPATIAL)
@@ -123,7 +123,7 @@ def main():
                       n_loci=len(ak["loci"]))
 
     print("\n[A/B] Headline reconstruction (dispersal=0.02, K=8, {} seeds):".format(len(seeds)))
-    print("  single-origin loci (answer key) : {} / {}".format(ex["single"], ex["n_loci"]))
+    print("  single-origin loci (ground truth) : {} / {}".format(ex["single"], ex["n_loci"]))
     print("  regions={}  deconvolved clones={}".format(ex["res"]["n_regions"], ex["res"]["n_clones"]))
     print("  NAIVE region sample tree  spurious-parallelism rate : {:.3f}  (mean over seeds)".format(np.mean(naive_rates)))
     print("  FIX   deconvolved clone tree spurious rate          : {:.3f}".format(np.mean(fix_rates)))

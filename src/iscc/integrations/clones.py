@@ -182,6 +182,12 @@ def _clade_owner(parents, depth, roots):
 def clones_from_clades(tumor, min_cells=50, cell_ids=None, label_prefix="clone"):
     """Label each sampled cell with the lineage clade (the clone) it belongs to.
 
+    A clone is a clade of the true genealogy (``tumor.genotypes_parents``) that holds at least
+    ``min_cells`` of the sampled cells. The clones are the deepest such clades, each extended up the
+    tree for as long as it contains no other clone, so they are disjoint and as large as possible.
+    Sampled cancer cells above every clone share the label ``"other"``, and normal cells get no
+    label.
+
     Parameters
     ----------
     tumor : GenotypeTumor
@@ -279,17 +285,32 @@ def _lca(parents, gids):
 
 
 def clone_summary(tumor, clones):
-    """One row per clone: how big it is, which genotype represents it, and what it carries.
+    """One row per clone, with the size, the representative genotype and the mutations of the clone.
 
-    ``clones`` is the Series from :func:`clones_from_clades`. The representative ``genotype`` of a
-    clone is the deepest genotype ancestral to every one of its sampled cells, so the mutation
-    tallies and evolutionary parameters reported next to it are the clone's SHARED state — the
-    traits every cell in the clone inherited, and nothing a sub-lineage picked up on its own. The
-    ``traits`` column renders those tallies as one readable line (``"2 oncogene, 1 breach"``), so a
-    notebook can print which trait mutations separate the clones without unpacking the columns.
-
-    The ``other`` bucket (cells above every clade) appears as a final row with a cell count but no
+    The representative ``genotype`` of a clone is the deepest genotype ancestral to all the sampled
+    cells of the clone. The mutation tallies and evolutionary parameters reported with it are therefore
+    the state shared by every cell of the clone, without what a sub-lineage acquired later. The
+    ``"other"`` label (cells above every clade) is the last row, with a cell count but no
     representative genotype, so the counts add up to the sampled cancer cells.
+
+    Parameters
+    ----------
+    tumor : GenotypeTumor
+        The tumour the labels were computed on, with the same materialised cell data.
+    clones : pandas.Series
+        The clone labels returned by
+        [`clones_from_clades`][iscc.integrations.clones_from_clades].
+
+    Returns
+    -------
+    pandas.DataFrame
+        Indexed by clone label, in the order of the labels. Columns: ``n_cells`` (sampled cells),
+        ``n_genotypes`` (distinct genotypes among them), ``genotype`` (the representative), the
+        number of mutated genes of each trait in the representative (``n_mut_onc``, ``n_mut_tsg``,
+        ``n_mut_disp``, ``n_mut_ir``, ``n_mut_tr``, ``n_mut_breach``, ``n_mut_ss``, ``n_mut_ms``),
+        the evolutionary parameters of the representative (division, death and dispersal rates and
+        trait levels), and
+        ``traits``, the tallies written as one line such as ``"2 oncogene, 1 breach"``.
     """
     genotype = _cell_genotypes(tumor, clones.index)
     parents = {str(k): str(v) for k, v in dict(getattr(tumor, "genotypes_parents", {})).items()}

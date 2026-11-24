@@ -1,4 +1,4 @@
-"""Cell / sample hashing (HTO) — the RNA-modality demultiplexer (DESIGN_cohort.md §2.2/§3).
+"""Cell / sample hashing (HTO) — the RNA-modality demultiplexer.
 
 Genetic demultiplexing (souporcell/vireo) recovers patient-of-origin from **germline SNPs**, which
 works for **DNA** assays (WGS/WES/scDNA cover the genome/exome broadly) but NOT reliably for droplet
@@ -34,6 +34,8 @@ def emit_cell_hashtags(patient_ids, mu_signal=800.0, staining_sigma=0.4, ambient
         proportion to pool composition (the shared soup — the main singlet-misassignment source).
     doublet_rate : float
         fraction of barcodes that are doublets (carry a second patient's hashtag).
+    seed : int
+        RNG seed.
 
     Returns
     -------

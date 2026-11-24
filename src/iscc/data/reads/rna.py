@@ -56,17 +56,78 @@ def distort_vaf(rna_vaf, obs_fidelity):
     return np.clip(v * float(obs_fidelity), 0.0, 1.0)
 
 
-def observed_allele_counts(expr_counts, rna_vaf, obs_fidelity=1.0, error_rate=0.001, rng=None):
+#: Where a protocol's reads fall along a transcript, for the variant-site coverage model
+#: (`site_coverage`): a 3' protocol reads only the last `THREE_PRIME_WINDOW` bases before the
+#: poly(A) tail (10x 3' and Visium); a full-length protocol (Smart-seq3) reads the whole
+#: transcript. Within reach, a molecule's reads cover a given site with probability
+#: `SITE_COVERAGE` (about read length over the window). Both values are those the human genome
+#: layer uses for germline SNPs (`HumanGenomeLayer(snp_window=1000, snp_coverage=0.1)`), so
+#: germline and somatic sites are read by one model.
+PROTOCOL_COVERAGE = {"10x": "3prime", "visium": "3prime", "smartseq3": "full"}
+THREE_PRIME_WINDOW = 1000           # bases from the 3' end that a 3' protocol reads
+SITE_COVERAGE = 0.1                 # probability that a molecule within reach is read at the site
+TRANSCRIPT_MEDIAN = 2500            # median transcript length (bases), about that of human mRNAs
+TRANSCRIPT_SDLOG = 0.7              # log-normal spread of transcript lengths
+
+
+def site_geometry(genes, seed=20240601):
+    """Each gene's transcript length and the distance of its variant site from the 3' end.
+
+    A genome property like `iscc.data.dna.genome_bases`: drawn from a gene-name-seeded RNG at a
+    FIXED genome seed, so it is the same in every run, batch and modality. The length is
+    log-normal around `TRANSCRIPT_MEDIAN`; the site sits at a uniformly random position along the
+    transcript. Returns ``(length, dist_from_3prime)`` as float arrays aligned to `genes`.
+    """
+    from ..dna import _gene_base_seed
+    genes = list(genes)
+    length = np.empty(len(genes))
+    dist = np.empty(len(genes))
+    for i, g in enumerate(genes):
+        # offset the stream so the geometry is independent of the gene's ref/alt draw
+        rng = np.random.default_rng(_gene_base_seed(g, seed) + 7919)
+        length[i] = TRANSCRIPT_MEDIAN * np.exp(TRANSCRIPT_SDLOG * rng.standard_normal())
+        dist[i] = length[i] * rng.random()
+    return length, dist
+
+
+def site_coverage(genes, protocol, window=THREE_PRIME_WINDOW, coverage=SITE_COVERAGE, seed=20240601):
+    """Probability that a counted molecule of each gene is read at the gene's variant site.
+
+    The simplest model of where reads fall: a 3' protocol (``"10x"``, ``"visium"``) can read the
+    site only if it lies within `window` bases of the 3' end; a full-length protocol
+    (``"smartseq3"``) can read it anywhere; within reach, a molecule is read at the site with
+    probability `coverage`. So the same SNV can be visible to Smart-seq3 and invisible to 10x,
+    which, with depth, is why full-length protocols call more SNVs.
+    Returns a float array aligned to `genes` (`coverage` or 0 under this model).
+    """
+    key = str(protocol).lower().replace("-", "").replace("_", "")
+    kind = PROTOCOL_COVERAGE.get(key)
+    if kind is None:
+        raise ValueError(f"no coverage model for protocol {protocol!r}; known: {sorted(PROTOCOL_COVERAGE)}")
+    genes = list(genes)
+    c = float(coverage)
+    if kind == "full":
+        return np.full(len(genes), c)
+    _, dist = site_geometry(genes, seed=seed)
+    return np.where(dist <= float(window), c, 0.0)
+
+
+def observed_allele_counts(expr_counts, rna_vaf, obs_fidelity=1.0, error_rate=0.001, rng=None,
+                           site_cover=None):
     """Split each cell-gene's expression UMIs into alt/ref counts, conserving the total.
 
-      expr_counts   cells x genes UMI matrix (the F3 scRNA count matrix; fixes the totals).
+      expr_counts   cells x genes UMI matrix (the scRNA count matrix; fixes the totals).
       rna_vaf       cells x genes true RNA-VAF (`cell_rna_vaf`); reindexed to `expr_counts`.
       obs_fidelity  the single distortion knob (see `distort_vaf`).
       error_rate    per-base RNA error/editing floor handed to `variants.inject`.
+      site_cover    optional per-gene probability that a molecule is read at the variant site
+                    (`site_coverage`), aligned to the columns. When given, each cell-gene's UMIs
+                    are first thinned to those covering the site, ``Binomial(UMIs, site_cover)``,
+                    and only those are split. ``None`` (default) reads every molecule at the site.
 
-    Returns a `ScrnaAlleleCounts` of cells x genes DataFrames. `alt + ref == expr_counts`
-    element-wise (UMI totals conserved); `obs_vaf = alt / total` (0 where the gene is unexpressed,
-    i.e. uncallable).
+    Returns a `ScrnaAlleleCounts` of cells x genes DataFrames. `alt + ref == total`, where `total`
+    is the expression count (``site_cover=None``) or the molecules covering the site, never more;
+    `obs_vaf = alt / total` (0 where no molecule covers the site, i.e. uncallable).
     """
     if rng is None:
         rng = np.random.default_rng()
@@ -74,6 +135,14 @@ def observed_allele_counts(expr_counts, rna_vaf, obs_fidelity=1.0, error_rate=0.
     vaf = pd.DataFrame(rna_vaf).reindex(index=expr.index, columns=expr.columns).fillna(0.0)
 
     total = expr.values.astype(np.int64)
+    if site_cover is not None:
+        p = np.clip(np.asarray(site_cover, dtype=float).ravel(), 0.0, 1.0)
+        if p.size != total.shape[1]:
+            raise ValueError("site_cover must have one entry per gene column")
+        if np.all((p == 0.0) | (p == 1.0)):          # all-or-nothing coverage needs no draw
+            total = total * p.astype(np.int64)[None, :]
+        else:
+            total = rng.binomial(total, np.broadcast_to(p[None, :], total.shape))
     v_obs = distort_vaf(vaf.values, obs_fidelity)
     split = variants.inject(total, v_obs, error_rate=error_rate, rng=rng)
     alt, ref = split.alt, split.ref
@@ -89,7 +158,7 @@ class SyntheticTranscriptome:
 
     Each gene gets a deterministic random cDNA of `read_length` bases with the variant site at a
     fixed interior position carrying the CANONICAL per-locus ref base; an alt-carrying molecule
-    substitutes the CANONICAL alt base there. Mirrors the DNA `SyntheticReference`: works on today's
+    substitutes the CANONICAL alt base there. Mirrors the DNA `SyntheticReference`: works on the
     abstract genome with no external reference, and crucially shares the SAME canonical (ref, alt)
     map (`iscc.data.dna.genome_bases`) so a somatic SNV emits identical alleles in scRNA/Visium and
     DNA reads. Only the variant SITE must match across modalities; the surrounding transcript
@@ -171,7 +240,7 @@ def spot_clone_mixture_vaf(spot_members, cell_exp, cell_rna_vaf, genes):
                              / sum_{c in s} cell_exp[c, g]                    (0 where unexpressed)
 
     This clone-mixture signal is exactly what spatial deconvolution must untangle. `spot_members` is
-    the per-spot list of member cell ids (the F6 assay records it as ``Visium.spot_members``).
+    the per-spot list of member cell ids (the Visium assay records it as ``Visium.spot_members``).
     Returns a (n_spots x n_genes) DataFrame aligned to `genes`.
     """
     exp = pd.DataFrame(cell_exp).reindex(columns=list(genes))
@@ -196,7 +265,7 @@ def spot_clone_mixture_vaf(spot_members, cell_exp, cell_rna_vaf, genes):
 def emit_visium_reads(cell_data, grid_side=None, obs_fidelity=0.5, error_rate=0.001, seed=42,
                       cell_subset=None, emit_fastq=False, read_length=90, transcriptome=None,
                       outdir="visium_reads_out", count_model="dm", genome_seed=20240601,
-                      **visium_kwargs):
+                      site_coverage_model=False, **visium_kwargs):
     """End-to-end mutation-aware Visium reads: spot counts -> alt/ref UMIs.
 
     Visium reads ARE scRNA reads barcoded by SPOT instead of cell, so this reuses the scRNA
@@ -204,7 +273,7 @@ def emit_visium_reads(cell_data, grid_side=None, obs_fidelity=0.5, error_rate=0.
     `SyntheticTranscriptome`) — the per-"cell" barcode index simply becomes the SPATIAL barcode.
 
     Runs the Visium assay to get the spot x gene expression count matrix (fixing UMI totals) and
-    the spot->cell membership it records, computes the NEW spot-level clone-mixture RNA-VAF (the
+    the spot->cell membership it records, computes the spot-level clone-mixture RNA-VAF (the
     expression-weighted mixture of member cells' `cell_rna_vaf`; see `spot_clone_mixture_vaf`), then
     splits each spot-gene's UMIs into alt/ref via `observed_allele_counts`. The SAME invariants as
     scRNA hold: spot UMI totals conserved exactly (alt + ref == count), and per-base sequencing error
@@ -222,7 +291,7 @@ def emit_visium_reads(cell_data, grid_side=None, obs_fidelity=0.5, error_rate=0.
 
     if "cell_rna_vaf" not in cell_data:
         raise KeyError("cell_data lacks 'cell_rna_vaf'; call make_cell_data() on a current engine "
-                       "(F7b adds it). The mutation-aware Visium path needs the true RNA-VAF.")
+                       "(make_cell_data adds it). The mutation-aware Visium path needs the true RNA-VAF.")
     if "cell_crd" not in cell_data:
         raise KeyError("Visium needs spatial coordinates (cell_crd).")
     os.makedirs(outdir, exist_ok=True)
@@ -237,9 +306,12 @@ def emit_visium_reads(cell_data, grid_side=None, obs_fidelity=0.5, error_rate=0.
                                           cell_data["cell_rna_vaf"], genes)
     spot_rna_vaf.index = spot_counts.index
 
+    # Visium is a 3' protocol: with the site-coverage model on, only molecules whose variant site
+    # lies near the 3' end are read there (`site_coverage`); off (default), every molecule is.
+    cover = site_coverage(genes, "visium", seed=genome_seed) if site_coverage_model else None
     rng = np.random.default_rng(seed + 7)
     allele = observed_allele_counts(spot_counts, spot_rna_vaf, obs_fidelity=obs_fidelity,
-                                    error_rate=error_rate, rng=rng)
+                                    error_rate=error_rate, rng=rng, site_cover=cover)
 
     result = {
         "alt": allele.alt, "ref": allele.ref, "total": allele.total, "obs_vaf": allele.obs_vaf,
@@ -258,7 +330,8 @@ def emit_visium_reads(cell_data, grid_side=None, obs_fidelity=0.5, error_rate=0.
         # write_scrna_fastq is the SINGLE read-error source (otherwise it would be applied twice,
         # doubling the FASTQ's error reads — same single-source contract as scRNA reads).
         mol = observed_allele_counts(spot_counts, spot_rna_vaf, obs_fidelity=obs_fidelity,
-                                     error_rate=0.0, rng=np.random.default_rng(seed + 9))
+                                     error_rate=0.0, rng=np.random.default_rng(seed + 9),
+                                     site_cover=cover)
         fq = write_scrna_fastq(mol.alt, mol.ref, transcriptome, outdir, error_rate=error_rate,
                                seed=seed + 11, prefix="visium")
         result["fastq"] = [fq["R1"], fq["R2"]]
@@ -291,7 +364,8 @@ class ScReadSimAdapter:
 def emit_scrna_reads(cell_data, obs_fidelity=0.5, protocol="10x", error_rate=0.001,
                      seed=42, cell_subset=None, emit_fastq=False, read_length=90,
                      transcriptome=None, reference=None, template_bam=None,
-                     outdir="scrna_reads_out", genome_seed=20240601, **scrna_kwargs):
+                     outdir="scrna_reads_out", genome_seed=20240601, site_coverage_model=False,
+                     **scrna_kwargs):
     """End-to-end mutation-aware scRNA: counts -> observed alt/ref UMI matrices -> reads.
 
     Runs the scRNA assay to get the expression count matrix (fixing UMI totals), pulls the
@@ -305,26 +379,73 @@ def emit_scrna_reads(cell_data, obs_fidelity=0.5, protocol="10x", error_rate=0.0
     SyntheticReference). Supplying a real `reference` + `template_bam` selects the scReadSim seam
     instead (realism on real sequence), skipped gracefully when the binary is absent.
 
-    Returns a dict: ``alt``/``ref``/``total``/``obs_vaf`` (cells x genes), ``dna_vaf`` (true,
-    aligned), ``obs_fidelity``, ``status``, ``fastq`` (paths when emitted) and ``n_reads``.
+    Parameters
+    ----------
+    cell_data : dict
+        Materialised per-cell tables of a tumour or a sample; must hold ``cell_rna_vaf``.
+    obs_fidelity : float, optional
+        Probability that a mutant transcript is reported as mutant (default 0.5), so the observed
+        RNA-VAF is ``cell_rna_vaf * obs_fidelity``. One scalar for monoallelic expression,
+        bursting, RNA editing and reverse-transcription error.
+    protocol : {"10x", "smartseq3"}, optional
+        The scRNA protocol of the assay (default ``"10x"``), which also sets the read window when
+        ``site_coverage_model`` is on.
+    error_rate : float, optional
+        Per-base error rate of the reads (default 0.001).
+    seed : int, optional
+        Seed of the assay and of the allele split (default 42).
+    cell_subset : sequence, optional
+        Cells to assay (default all).
+    emit_fastq : bool, optional
+        Write paired FASTQ on a synthetic transcriptome (default False, counts only).
+    read_length : int, optional
+        Length of the cDNA read of the synthetic transcriptome (default 90).
+    transcriptome : SyntheticTranscriptome, optional
+        A synthetic transcriptome to reuse (default None, built from the genes and ``seed``).
+    reference, template_bam : str, optional
+        A real reference and a template BAM, which select the scReadSim path instead of the
+        synthetic transcriptome. It is skipped when the ``scReadSim`` binary is absent.
+    outdir : str, optional
+        Output directory (default ``"scrna_reads_out"``).
+    genome_seed : int, optional
+        Seed of the transcript lengths and variant-site positions, shared by every run and modality
+        (default 20240601).
+    site_coverage_model : bool, optional
+        Read a variant site only where the protocol reaches it (default False). A 3' protocol
+        (10x) reads a site only within the last 1,000 bases of its transcript and a full-length
+        protocol (Smart-seq3) anywhere, and a molecule within reach is read at the site with
+        probability 0.1, as in the paper. When False, every molecule is read at the site.
+    **scrna_kwargs
+        Passed to [`scRNA`][iscc.data.scRNA].
+
+    Returns
+    -------
+    dict
+        ``alt``/``ref``/``total``/``obs_vaf`` (cells x genes), ``dna_vaf`` (true, aligned),
+        ``obs_fidelity``, ``protocol``, ``site_cover``, ``status``, ``fastq`` (paths when emitted)
+        and ``n_reads``.
     """
     from ..rna import scRNA
 
     if "cell_rna_vaf" not in cell_data:
         raise KeyError("cell_data lacks 'cell_rna_vaf'; call make_cell_data() on a current engine "
-                       "(F7b adds it). The mutation-aware scRNA path needs the true RNA-VAF.")
+                       "(make_cell_data adds it). The mutation-aware scRNA path needs the true RNA-VAF.")
     os.makedirs(outdir, exist_ok=True)
 
     assay = scRNA(protocol=protocol, seed=seed, **scrna_kwargs).run(cell_data, cell_subset=cell_subset)
     expr = assay.observed_counts                                   # cells x genes, fixed UMI totals
+    # With the site-coverage model on, a 3' protocol (10x) reads a molecule at its variant site only
+    # if the site lies near the 3' end, a full-length one (Smart-seq3) always (`site_coverage`).
+    cover = (site_coverage(expr.columns, protocol, seed=genome_seed) if site_coverage_model else None)
     rng = np.random.default_rng(seed + 7)
     allele = observed_allele_counts(expr, cell_data["cell_rna_vaf"], obs_fidelity=obs_fidelity,
-                                    error_rate=error_rate, rng=rng)
+                                    error_rate=error_rate, rng=rng, site_cover=cover)
     dna_vaf = pd.DataFrame(cell_data["cell_snv"]).reindex(index=expr.index, columns=expr.columns)
 
     result = {
         "alt": allele.alt, "ref": allele.ref, "total": allele.total, "obs_vaf": allele.obs_vaf,
         "dna_vaf": dna_vaf, "obs_fidelity": float(obs_fidelity), "protocol": protocol,
+        "site_cover": (None if cover is None else pd.Series(cover, index=expr.columns)),
         "fastq": [], "n_reads": 0, "status": "counts-only",
     }
 
@@ -353,7 +474,8 @@ def emit_scrna_reads(cell_data, obs_fidelity=0.5, protocol="10x", error_rate=0.0
         # site. With one source, the FASTQ's non-ref proportion == error_rate and its observed VAF
         # == the count matrix's p_eff = v_obs*(1-e)+(1-v_obs)*e (see test_error_rate_single_source).
         mol = observed_allele_counts(expr, cell_data["cell_rna_vaf"], obs_fidelity=obs_fidelity,
-                                     error_rate=0.0, rng=np.random.default_rng(seed + 9))
+                                     error_rate=0.0, rng=np.random.default_rng(seed + 9),
+                                     site_cover=cover)
         fq = write_scrna_fastq(mol.alt, mol.ref, transcriptome, outdir,
                                error_rate=error_rate, seed=seed + 11)
         result["fastq"] = [fq["R1"], fq["R2"]]

@@ -4,15 +4,16 @@ Top row, the evolution front's tests (registry tumours):
   (a) evolutionary-mode space (Noble's n, D) against real multi-region tumours, at the full census and
       at the 5% detection limit of Noble et al. (drivers below it removed, clones merged into parents);
   (b) copy number follows oncogenic content under selection, not under neutrality (R2);
-  (c) whole-genome-duplication prevalence across rates against the PCAWG range (R5);
-  (d) the fit to the PCAWG breast-cancer arm landscape: pending its rerun under the corrected model.
+  (c) whole-genome-duplication prevalence across rates against the PCAWG range (R5).
 No 1/f panel: the 6,000-gene genome saturates at tumour scale, so the infinite-sites test does not apply.
+No PCAWG arm-landscape panel: fitting arm selection to PCAWG is CINner's result, and iscc takes its cell
+law from CINner.
 Bottom row, the data front's tests, each fit on a real reference and re-simulated on the showcase
 tumour (R0):
-  (e) scRNA against PBMC3k: library size, mean-variance, zero fraction;
-  (f) DNA against GIAB HG002 (bulk), Tapestri and DLP+ (single cell): coverage dispersion by copy
+  (d) scRNA against PBMC3k: library size, mean-variance, zero fraction;
+  (e) DNA against GIAB HG002 (bulk), Tapestri and DLP+ (single cell): coverage dispersion by copy
       number, and Tapestri allelic dropout;
-  (g) Visium against a real breast-cancer section: per-spot depth and its spatial autocorrelation.
+  (f) Visium against a real breast-cancer section: per-spot depth and its spatial autocorrelation.
 
 Run from the iscc repository root (scanpy's data cache is ./data):
     python validation/paper/fig2_realism.py
@@ -29,6 +30,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
 import common as C  # noqa: E402
 import registry as REG  # noqa: E402
+import regime as RG  # noqa: E402
 import style as S  # noqa: E402
 import realistic_regime as RR  # noqa: E402
 
@@ -46,7 +48,7 @@ def pending(ax, msg="pending: registry run not grown yet"):
     S.despine(ax, False, False)
 
 
-# --- a-d read the cached per-tumour summaries (summaries.py), never the tumours themselves ---------
+# --- a-c read the cached per-tumour summaries (summaries.py), never the tumours themselves ---------
 import summaries as SM  # noqa: E402
 
 
@@ -65,20 +67,21 @@ def panel_a(ax):
         except Exception:
             cov[k] = float("nan")
     ax.scatter(sim.n0, sim.D0, s=4, facecolors="none", edgecolors=S.SOURCE["iscc"], lw=0.3, alpha=0.5,
-               label=f"iscc, full census ({cov['census']:.0%})")
+               label="iscc, full census")
     ax.scatter(sim.nd, sim.Dd, s=4, color=S.SOURCE["iscc"], alpha=0.8,
-               label=f"iscc, 5% detection ({cov['5%']:.0%})")
-    ax.scatter(emp.n, emp.D, s=6, color=S.SOURCE["real"], edgecolors=S.INK, lw=0.3, label="real tumours")
+               label="iscc, 5% detection")
+    ax.scatter(emp.n, emp.D, s=6, color=S.SOURCE["real"], edgecolors=S.INK, lw=0.3, label="real tumors")
     ax.set_yscale("log")
     ax.set_xlabel("Drivers per cell, n")
     ax.set_ylabel("Clonal diversity, D")
-    ax.legend(fontsize=4.5, loc="upper left", title="real tumours inside\nthe iscc hull",
-              title_fontsize=4.5)
+    # the shares of real tumors inside the iscc hull (cov) are reported in the numbers file, not drawn;
+    # the legend keeps the house 5.5 pt, the paper's minimum
+    ax.legend(loc="upper left")
     return dict(n_sim=len(sim), coverage=cov, D_median_detected=float(sim.Dd.median()), n_median_detected=float(sim.nd.median()),
                 D_median_census=float(sim.D0.median()), D_median_real=float(emp.D.median()))
 
 
-def panel_c(ax):
+def panel_b(ax):
     out = {}
     for name, col in (("neutral", S.SOURCE["real"]), ("selected", S.SOURCE["iscc"])):
         rows = [r for r in SM.load("R2") if r["task"].startswith(name)]
@@ -97,22 +100,22 @@ def panel_c(ax):
     return out
 
 
-def panel_d(ax):
+def panel_c(ax):
     rows = SM.load("R5")
     if not rows:
         return pending(ax)
     df = pd.DataFrame([dict(rate=float(r["task"].split("_")[0][3:]), frac=r["wgd_frac"]) for r in rows])
     prev = df.assign(wgd=df.frac > 0.5).groupby("rate").wgd.mean()
     ax.axhspan(0.30, 0.50, color=S.PASTEL["yellow"], lw=0, zorder=0)
-    ax.text(prev.index.max(), 0.40, "PCAWG", fontsize=4.8, ha="right", va="center", color=S.GREY)
+    ax.text(prev.index.max(), 0.40, "PCAWG", fontsize=5.5, ha="right", va="center", color=S.GREY)
     ax.plot(prev.index, prev.values, marker="o", ms=2.5, color=S.SOURCE["iscc"], lw=0.8)
-    ax.set_xlabel("WGD rate per mutating division")
-    ax.set_ylabel("Tumours with WGD")
+    ax.set_xlabel("Whole-genome duplication rate per mutating division", fontsize=5.5)
+    ax.set_ylabel("Share of tumors with a\nwhole-genome duplication")
     ax.set_ylim(0, 1)
     return dict(prevalence=prev.round(2).to_dict(), n_per_rate=int(df.groupby("rate").size().min()))
 
 
-# --- f, g, h: the data front's fit-and-resimulate loops ---------------------------------------------
+# --- d, e, f (cached as parts f, g, h): the data front's fit-and-resimulate loops ---------------------------------------------
 # Each is computed in its own process (``--part f|g|h``) and cached as small JSON (histograms, binned
 # curves, statistics), so no process holds a real reference and a tumour at once for longer than it
 # must, and the render step reads only the caches.
@@ -237,14 +240,20 @@ def compute_h():
     tot = np.asarray(real.X.sum(1)).ravel()
     occ = tot > 0
     mi_o = float(morans_i(tot[occ], coords[occ]))
-    est = estimate_visium(real, count_model="dm", coords=coords)
     toto = np.log10(tot[occ]).tolist()
     del real
+    # Fit the raw all-spot matrix with its tissue mask, as fig3_biases.compute_e does, so the fit returns
+    # the depth before spot swapping; the paper's spot swapping and tissue edge (regime.VISIUM, fitted on
+    # this section's off-tissue spots) then go on top. Fitting the in-tissue matrix alone took the depth
+    # after swapping and swapped again, so the simulated tissue came out 4-6% shallow. load_raw gives
+    # coordinates in iscc's units (pitch 2), so the fitted field length scale is already in demes.
+    import validate_visium_background as VB
+    raw_dir = os.environ.get("ISCC_VISIUM_RAW_DIR") or os.path.join(REPO, "data", "visium_breast_A1")
+    X, in_tissue, raw_coords = VB.load_raw(raw_dir)
+    est = estimate_visium(X, count_model="dm", coords=raw_coords, in_tissue=in_tissue, bleed_min_dist=1.5)
     t = REG.load("R0", "seed1")
     sec = RR.resect(t).slice(depth_frac=0.5, max_cells=6000)
-    kw = {**est.visium_kwargs(), "spot_pitch": 2.0, "spot_radius": 1.0}
-    if kw.get("field_lengthscale") is not None:
-        kw["field_lengthscale"] = 2.0 * kw["field_lengthscale"]      # spot units -> demes (pitch 2)
+    kw = {**est.visium_kwargs(), **getattr(RG, "VISIUM", {}), "spot_pitch": 2.0, "spot_radius": 1.0}
     sim = Visium(seed=11, count_model="dm", **kw).run(sec, grid_side=t.grid_size)
     zs, cs, tots = VV._log_library_residual(sim)
     return dict(toto=toto, tots=np.log10(tots).tolist(), moran_real=mi_o, moran_iscc=float(morans_i(tots, cs)))
@@ -306,7 +315,7 @@ def render_g(ax):
 
 def render_h(fig, x, y):
     d = _cached("h")
-    ax1, ax2 = S.ax_mm(fig, x, y, 21, 21), S.ax_mm(fig, x + 26, y, 9, 21)
+    ax1, ax2 = S.ax_mm(fig, x, y, 18, 21), S.ax_mm(fig, x + 26, y, 9, 21)
     if d is None:
         pending(ax1)
         pending(ax2, "")
@@ -334,23 +343,18 @@ def render():
     # No site-frequency-spectrum (1/f) panel: passengers live on the 6,000-gene genome, which
     # saturates at tumour scale (nearly every site is hit in some lineage), so the spectrum of sites
     # is not a spectrum of mutations and the infinite-sites 1/f test does not apply (issues, B13).
-    xs = [12, 58, 104, 150]
-    for i, (L, fn) in enumerate(zip("abcd", (panel_a, panel_c, panel_d, None))):
-        S.panel_letter(fig, L, xs[i] - 9, 8)
-        ax = S.ax_mm(fig, xs[i], 11, 30, 27 if i < 3 else 22)
-        if fn is None:
-            pending(ax, "PCAWG arm-landscape fit:\npending rerun under the\nploidy-relative arm model")
-            out[L] = "pending"
-        else:
-            out[L] = fn(ax)
+    xs = [12, 73, 134]
+    for x, L, fn in zip(xs, "abc", (panel_a, panel_b, panel_c)):
+        S.panel_letter(fig, L, x - 9, 8)
+        out[L] = fn(S.ax_mm(fig, x, 11, 40, 27))
     S.text_mm(fig, 2, 57.5, "The data front's tests: fit to a real reference, re-simulate on the tumour",
               fontsize=7, va="top", fontweight="bold")
-    S.panel_letter(fig, "e", 2, 63)
-    out["e"] = render_f(fig, 10, 67)
-    S.panel_letter(fig, "f", 92, 63)
-    out["f"] = render_g(S.ax_mm(fig, 100, 67, 28, 21))
-    S.panel_letter(fig, "g", 137, 63)
-    out["g"] = render_h(fig, 145, 67)
+    S.panel_letter(fig, "d", 2, 63)
+    out["d"] = render_f(fig, 10, 67)
+    S.panel_letter(fig, "e", 92, 63)
+    out["e"] = render_g(S.ax_mm(fig, 100, 67, 28, 21))
+    S.panel_letter(fig, "f", 137, 63)
+    out["f"] = render_h(fig, 145, 67)
     path = S.save(fig, "fig2_realism")
     print("wrote", path)
     for k, v in out.items():

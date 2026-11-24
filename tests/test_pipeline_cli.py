@@ -1,9 +1,10 @@
 """End-to-end CLI pipeline test: isccsim -> isccsample -> isccdata.
 
-Guards the stage-2 work (entry points + I/O schema) so the three commands stay
-runnable and their on-disk contract stays stable.
+Guards the entry points and the I/O schema, so the three commands stay runnable and their
+on-disk contract stays stable.
 """
 import os
+import re
 
 import yaml
 import pytest
@@ -14,7 +15,7 @@ from iscc.sample.main import main as sample_main
 from iscc.data.main import main as data_main
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TUMORCFG = os.path.join(REPO_ROOT, "src/iscc/tumor/tumorconfigs/glandular.yaml")
+TUMORCFG = os.path.join(REPO_ROOT, "src/iscc/tumor/tumorconfigs/genotype.yaml")
 ASSAYCFG = os.path.join(REPO_ROOT, "src/iscc/data/assayconfigs")
 
 
@@ -54,7 +55,7 @@ def sample_dir(tmp_path, tumor_dir):
 def test_isccsim_writes_canonical_layout(tumor_dir):
     files = set(os.listdir(tumor_dir))
     assert {"cell_data", "gene_data", "genotypes.csv", "parents.csv",
-            "trace_counts.csv", "grid.csv"} <= files
+            "trace_counts.csv", "genotype_births.csv"} <= files
     cd = set(os.listdir(os.path.join(tumor_dir, "cell_data")))
     assert {"cell_snv.csv", "cell_cnv.csv", "cell_exp.csv", "cell_crd.csv",
             "cell_type.csv", "cell_deme.csv", "cell_evo.csv"} <= cd
@@ -85,3 +86,23 @@ def test_isccdata_runs_each_assay(tmp_path, sample_dir, assay, cfg, expected):
     )
     assert r.exit_code == 0
     assert expected <= set(os.listdir(out))
+
+
+def test_isccdata_takes_the_breadth_of_a_platform_in_the_config(tmp_path, sample_dir):
+    """A config naming a platform runs at the platform's breadth unless --breadth is given."""
+    import pandas as pd
+    cfg = tmp_path / "tapestri.yaml"
+    yaml.safe_dump({"platform": "tapestri", "n_cells": 5}, open(cfg, "w"))
+    breadth, n_loci = {}, {}
+    for name, extra in [("wgs", []), ("platform", []), ("explicit", ["--breadth", "wgs"])]:
+        out = str(tmp_path / f"scdna_{name}")
+        args = [sample_dir, "-a", "scdna", "-o", out, *extra]
+        if name != "wgs":
+            args += ["--assay-config", str(cfg)]
+        r = CliRunner().invoke(data_main, args, catch_exceptions=False)
+        assert r.exit_code == 0
+        breadth[name] = re.search(r"\b(wgs|wes|panel)\) finished", r.output).group(1)
+        n_loci[name] = pd.read_csv(os.path.join(out, "coverage.csv"), index_col=0).shape[1]
+    # the 584 amplicons of the Tapestri panel cover the whole toy genome, so the breadth tells the runs apart
+    assert breadth == {"wgs": "wgs", "platform": "panel", "explicit": "wgs"}
+    assert n_loci["wgs"] == n_loci["explicit"]

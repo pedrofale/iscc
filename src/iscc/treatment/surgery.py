@@ -6,10 +6,10 @@ class Surgery(Treatment):
     (or after) ``start`` every cell in ``site`` (default ``"primary"``) is removed, or with ``region``
     only the cells of the excised specimen, and the simulation continues on what is left.
 
-    Implemented through the ``discrete_event`` hook (the base ``Treatment`` defines it as a no-op), so
-    a run with no ``Surgery`` is byte-identical. ``get_dosage`` returns 0 always, so ``Surgery`` never
-    contributes a death-rate modifier — its only effect is the discrete resection. The genealogy is
-    not pruned, so a 2-band Muller still shows the resected compartment's band cliff to 0 at ``start``.
+    Implemented through the ``discrete_event`` hook, which the base ``Treatment`` defines as a no-op.
+    ``get_dosage`` returns 0 always, so ``Surgery`` never
+    contributes a death-rate modifier, and its only effect is the discrete resection. The genealogy is
+    not pruned, so a two-band Muller plot shows the resected compartment falling to zero at ``start``.
 
     A whole-compartment resection cures that compartment by construction. A partial one (``region``)
     clears only the specimen's demes, cancer and normal residents alike; everything outside keeps
@@ -38,8 +38,7 @@ class Surgery(Treatment):
     region : array-like, optional
         The excised specimen, as global deme indices in the compartment (e.g. from
         [`Resection.bisect`][iscc.sample.Resection.bisect]) or a boolean mask over the
-        compartment's demes (flat, or ``(side, side)``). Default None: the whole compartment, as
-        before.
+        compartment's demes (flat, or ``(side, side)``). Default None: the whole compartment.
     margin : float, optional
         Width, in demes, of the rim just inside the cut that a pathologist would inspect
         (default 0: no rim). A deme is ~50 µm, so a 2 mm margin is ~40 demes; convert before

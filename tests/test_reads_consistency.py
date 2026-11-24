@@ -1,15 +1,15 @@
-"""Cross-modality allele-consistency tests (the shared canonical reference, F7/F7b).
+"""Cross-modality allele-consistency tests (the shared canonical reference).
 
 The engine genome is base-agnostic (a "position L mutated?" bitset); the actual A/C/G/T of an SNV
-is materialised at the READ layer. Historically each modality invented that nucleotide identity
-INDEPENDENTLY, so a single somatic SNV emitted CONTRADICTORY alleles — e.g. C->T in the DNA FASTQ
-but T->C in the RNA/Visium FASTQ for the SAME locus — breaking iscc's "one tumour -> shared ground
-truth across modalities" promise at the read level.
+is materialised at the READ layer. If each modality chose that nucleotide identity INDEPENDENTLY, a
+single somatic SNV could emit CONTRADICTORY alleles — e.g. C->T in the DNA FASTQ but T->C in the
+RNA/Visium FASTQ for the SAME locus — breaking iscc's "one tumour -> shared ground truth across
+modalities" promise at the read level.
 
-The fix: a single canonical per-locus (ref, alt) map (`iscc.data.dna.genome_bases`), a GENOME
-PROPERTY (deterministic in the gene set + a FIXED genome seed, like `genome_features`), placed at
-the variant site of every read reference. These tests are the regression that would have caught the
-bug — strict equality of ref AND alt across DNA == RNA == Visium at every mutated locus.
+A single canonical per-locus (ref, alt) map (`iscc.data.dna.genome_bases`), a GENOME PROPERTY
+(deterministic in the gene set + a FIXED genome seed, like `genome_features`), is placed at the
+variant site of every read reference. These tests check strict equality of ref AND alt across
+DNA == RNA == Visium at every mutated locus.
 
 CI-light: the scRNA/Visium FASTQs are self-contained (no external binary); the DNA per-cell FASTA is
 always written (the DWGSIM/ART shell-out is the only binary-gated step, and is not needed here).
@@ -173,7 +173,7 @@ class TestReferencesCarryCanonical:
             assert tx.alt_base[g] == alt_b[gi]
 
     def test_dna_and_rna_references_agree(self):
-        """The two backends, built INDEPENDENTLY, agree on (ref, alt) at every locus (the fix)."""
+        """The two backends, built INDEPENDENTLY, agree on (ref, alt) at every locus."""
         sr = SyntheticReference(self.GENES, seed=1)
         tx = SyntheticTranscriptome(self.GENES, seed=2)                 # different run seed
         for gl, g in enumerate(self.GENES):
@@ -199,7 +199,7 @@ class TestReferencesCarryCanonical:
 # ============================================================ THE CROSS-MODALITY GATE ==========
 class TestCrossModalityAlleles:
     """One tumour -> emit DNA, scRNA and Visium reads -> the SAME ref AND alt at every mutated
-    locus. This is the regression test for the independent-reference bug."""
+    locus."""
 
     def test_map_level_every_mutated_locus_agrees(self, cell_data):
         """STRICT: at EVERY locus mutated anywhere in the tumour, the DNA reference, the scRNA/Visium

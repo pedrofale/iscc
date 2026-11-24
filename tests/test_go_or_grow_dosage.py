@@ -1,16 +1,16 @@
 """``Selection.trait_source`` — what a dissemination/niche TRAIT reads off the genome.
 
 The dissemination traits (breach, stromal_survival, met_survival, immune/treatment resistance) each
-cost proliferation everywhere via the go-or-grow ``*_cost``, and historically each read the
-ploidy-normalised dosage of ALL its genes' copies, mutated or not. Because a trait axis is scattered
-uniformly at ``prop_*``, a segment's trait-gene count fluctuates around the genome mean, so almost
-every copy-number change moves a trait — and with the costs on, ordinary copy-number drift became a
-proliferation tax that made nearly every CNA net-antiproliferative.
+cost proliferation everywhere via the go-or-grow ``*_cost``. Under the default ``"dosage"`` each
+reads the ploidy-normalised dosage of ALL its genes' copies, mutated or not. Because a trait axis is
+scattered uniformly at ``prop_*``, a segment's trait-gene count fluctuates around the genome mean, so
+almost every copy-number change moves a trait — and with the costs on, ordinary copy-number drift
+becomes a proliferation tax that makes nearly every CNA net-antiproliferative.
 
 ``trait_source="mutation"`` makes a trait read only its SNV-MUTATED copies, so an arm-level gain of
-unmutated invasion genes no longer makes a cell invasive. Covered here:
+unmutated invasion genes does not make a cell invasive. Covered here:
 
-  * the DEFAULT ("dosage") is the historical expression, bit-for-bit, at both the formula and the
+  * the DEFAULT ("dosage") is the plain dosage expression, bit-for-bit, at both the formula and the
     grown-tumour level;
   * under "mutation" a pure copy-number event (amplification, deletion, whole-genome duplication)
     leaves every trait exactly where it was, and costs exactly nothing;
@@ -83,7 +83,7 @@ def _cell(sel, genome=None, cancer=None):
     return c
 
 
-# --- the DEFAULT is the historical behaviour ---------------------------------------------------
+# --- the DEFAULT is the plain dosage expression ------------------------------------------------
 def test_default_trait_source_is_dosage():
     assert Selection().trait_source == "dosage"
     assert _selection().trait_source == "dosage"
@@ -91,7 +91,7 @@ def test_default_trait_source_is_dosage():
 
 def test_default_reproduces_the_historical_expression_bit_for_bit():
     """Every trait axis under the default must be EXACTLY ``_rel_fitness(n_wt, n_mut, ploidy, N, e,
-    e**2)`` — the expression each update_* carried before ``trait_source`` existed."""
+    e**2)`` — the plain dosage expression."""
     sel = _selection()
     rng = np.random.default_rng(0)
     for _ in range(200):
@@ -134,8 +134,7 @@ def _grow(trait_source=None, seed=1, steps=120):
 
 @pytest.mark.parametrize("seed", (1, 2))
 def test_growth_unchanged_when_the_option_is_absent(seed):
-    """Engine level: not naming ``trait_source`` grows exactly the tumour ``"dosage"`` does, so an
-    existing config is untouched."""
+    """Engine level: not naming ``trait_source`` grows exactly the tumour ``"dosage"`` does."""
     assert _grow(seed=seed) == _grow(trait_source="dosage", seed=seed)
 
 
@@ -241,7 +240,7 @@ def test_driver_dosage_fitness_identical_in_both_modes():
     assert traces["dosage"][0].std() > 0    # the comparison is not vacuous
 
 
-# --- the population statement: the copy-number proliferation tax is gone ------------------------
+# --- the population statement: no copy-number proliferation tax under "mutation" ---------------
 def test_mutation_mode_removes_the_copy_number_proliferation_tax():
     """On a realistic-shaped genome, a single CNA under ``"mutation"`` moves the net division rate by
     the DRIVER fitness alone: ``net == min(baseline * driver_fitness, max_birth_rate)`` exactly. Under

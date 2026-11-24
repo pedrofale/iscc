@@ -5,12 +5,12 @@ once and inherited. Under the default "uniform" it is applied to EVERY cancer cl
 compartment regardless of resistance, so a clone taking zero drug still mutates `mutagenicity`x
 faster forever. That is the only drug effect in the engine not scaled by (1 - treatment_resistance),
 and its main effect on a resistant clone is to multiply the CNA rate that deletes its own resistance
-allele — i.e. the mutator added to make resistance ARISE also makes it revert.
+allele — i.e. the mutator that makes resistance ARISE also makes it revert.
 
 "dose" scales the boost by the dose the clone actually receives, exactly as ``_kill_amount`` scales
 the hazard. Covered here:
 
-  * the DEFAULT is unchanged — every exposed clone still gets the full multiplier;
+  * under the DEFAULT every exposed clone gets the full multiplier;
   * under "dose" a fully resistant clone gets NO boost, and a partially resistant one gets a
     proportionate share;
   * a fully protected clone is left unflagged, so a descendant that loses resistance is mutagenized
@@ -145,7 +145,7 @@ def test_target_all_raises_the_cna_rate_too():
 def test_target_snv_leaves_the_cna_rate_untouched():
     """A point mutagen: more base substitutions, the SAME chromosomal instability.
 
-    This is the property the whole change exists for -- reversion is a CNA deleting the copy that
+    This is the property the option exists for -- reversion is a CNA deleting the copy that
     carries the resistance SNV, so holding the CNA rate fixed holds reversion at baseline."""
     t = _tumor()
     gid = next(g for g in t.genotypes_counts if t._is_cancer(g))
@@ -173,7 +173,7 @@ def test_target_snv_does_not_touch_the_mutation_fate_probability():
 
 
 def test_target_all_still_scales_the_fate_probability():
-    """The DEFAULT is unchanged: it multiplies mutation_rate and so raises BOTH branches."""
+    """The DEFAULT multiplies mutation_rate and so raises BOTH branches."""
     t = _tumor()
     gid = next(g for g in t.genotypes_counts if t._is_cancer(g))
     rep = t.genotypes[gid]

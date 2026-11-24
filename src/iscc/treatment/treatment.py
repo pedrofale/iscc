@@ -1,51 +1,59 @@
-import numpy as np
-
 class Treatment(object):
-    """Shared base for the therapies; defines the dosing schedule and per-cell effect.
+    """Shared base of the therapies, with the dosing schedule and the drug response.
 
     The therapies ([`Chemotherapy`][iscc.treatment.Chemotherapy],
     [`TargetedTherapy`][iscc.treatment.TargetedTherapy],
     [`Immunotherapy`][iscc.treatment.Immunotherapy],
-    [`Surgery`][iscc.treatment.Surgery]) share the dosing / scheduling parameters below;
-    each subclass adds its own targeting knobs and defines how a dose modifies a cell.
-    Pass an instance to a tumour engine's ``grow(..., treatment=...)``.
+    [`Surgery`][iscc.treatment.Surgery]) share the parameters below, and each subclass adds its
+    own targeting parameters. Pass an instance to
+    [`GenotypeTumor.grow`][iscc.tumor.GenotypeTumor.grow] as ``treatment=...``.
+
+    While a dose is active, the growth engine adds a death hazard to each clone (chemotherapy and
+    targeted therapy) or lowers its immune resistance (immunotherapy). With ``response="label"``,
+    a cancer clone that is a target takes the dose ``effectiveness * (1 - r)`` and any other clone
+    ``toxicity * (1 - r)``, where ``r`` is the largest of the treatment resistance, the drug
+    tolerance and the carried resistance state of the clone. Normal cells take ``toxicity``. A dose
+    ``x`` adds the death hazard ``x * max(kill_rate - d, 0)`` under ``kill_mode="additive"`` and
+    ``x * kill_rate * b`` under ``kill_mode="proliferation"``, where ``d`` and ``b`` are the death
+    and division rates of the clone.
 
     Parameters
     ----------
     adaptive : bool, optional
-        If ``True``, dose only while the tumour exceeds ``max_tumor_size`` (adaptive
-        therapy); if ``False`` (default), dose continuously within the active window.
+        Dose only while the tumour exceeds ``max_tumor_size`` (adaptive therapy). Default False,
+        which doses throughout the active window.
     start : int, optional
         First step at which the therapy is active (default 0).
     duration : int, optional
-        Number of steps the therapy stays active (default ``None`` = until the run ends).
+        Number of steps the therapy stays active (default ``None``, until the run ends).
     dosage_decay : float, optional
-        Between-round dose decay factor (default 0.5).
+        Not read by the growth engine (default 0.5).
     rounds : int, optional
-        Number of dosing rounds (default 4).
+        Not read by the growth engine (default 4).
     rate_multiplier : float, optional
-        Factor applied to a fully-sensitive cell's affected rate under full dose
-        (default 2.0); the exponent depends on the cell's ``treatment_resistance``.
+        Not read by the growth engine, whose hazard is set by ``kill_rate`` (default 2.0).
     toxicity : float, optional
-        Per-step probability of off-target action on a non-cancer cell (default 0.1).
+        Share of the full dose taken by a cell that is not a target, a normal cell or a cancer
+        clone outside the targets (default 0.1).
     effectiveness : float, optional
-        Per-step probability the therapy acts on a targeted cell (default 0.9).
+        Share of the full dose taken by a cancer clone that is a target, before its resistance is
+        applied (default 0.9).
     kill_rate : float, optional
-        Death hazard imposed on a fully-sensitive cell under full dose in the genotype
-        engine (default 1.5); set above the ``max_birth_rate`` cap so even high-fitness
-        (driver-amplified) sensitive clones still regress while resistant clones escape.
+        Sets the death hazard of a fully sensitive cell under the full dose (default 1.5), as
+        ``kill_rate - d`` under ``kill_mode="additive"`` and ``kill_rate * b`` under
+        ``kill_mode="proliferation"``.
     max_tumor_size : int, optional
         Size threshold that gates dosing when ``adaptive=True`` (default 100000).
     sites : {"both", "primary", "met"}, optional
-        Compartment(s) the therapy acts on (default ``"both"`` = systemic): ``"primary"``
-        (neoadjuvant / local) or ``"met"`` (adjuvant after primary resection).
+        Compartment(s) the therapy acts on (default ``"both"``, systemic): ``"primary"``
+        (neoadjuvant or local) or ``"met"`` (adjuvant after primary resection).
     mutagenicity : float, optional
         Therapy-induced mutator: an exposed cancer clone's mutation rate is multiplied by this
         once, on first exposure, and its descendants inherit it (default 1.0 = off).
     kill_mode : {"additive", "proliferation"}, optional
-        How the kill scales with the clone in the genotype engine. ``"additive"`` (default) adds
-        the same death hazard to every clone; ``"proliferation"`` scales it by the clone's
-        division rate, as cytotoxic chemotherapy kills cells as they replicate.
+        How the hazard scales with the clone. ``"additive"`` (default) adds a hazard that does not
+        depend on the division rate, and ``"proliferation"`` scales it by the division rate of the
+        clone, as cytotoxic chemotherapy kills cells as they replicate.
     mutagenicity_mode : {"uniform", "dose"}, optional
         Who gets the mutator: every exposed cancer clone (``"uniform"``, default), or a share
         scaled by the dose the clone receives (``"dose"``).
@@ -53,22 +61,21 @@ class Treatment(object):
         What the mutator accelerates: every mutation (``"all"``, default) or point mutations
         only (``"snv"``), leaving the copy-number rate where it was.
     response : {"label", "mechanistic"}, optional
-        How the genotype engine decides a cancer clone's response. ``"label"`` (default): by its
-        resistance labels, so ``treatment_resistance``, ``drug_tolerance`` and the carried
-        resistance state scale down the dose it takes. ``"mechanistic"``: the labels are
-        ignored and the response comes from the genotype and its expression alone. A clone is
+        How the response of a cancer clone is decided. With ``"label"`` (default), the resistance
+        labels ``treatment_resistance``, ``drug_tolerance`` and the carried resistance state scale
+        down the dose the clone takes. With ``"mechanistic"``, the labels are ignored and the
+        response follows from the genotype of the clone and its expression alone. A clone is
         on target only if it carries the therapy's targets (see
         [`TargetedTherapy`][iscc.treatment.TargetedTherapy]); off-target clones take
         ``toxicity`` as before. With ``target_genes`` its dose also scales with its expression
         of those genes, and with ``kill_mode="proliferation"`` a broad drug kills in proportion
         to division rate. Under ``mutagenicity_mode="dose"`` the mutator follows the same
-        expression scaling instead of ``1 - treatment_resistance``. The per-cell engine
-        ([`GlandularTumor`][iscc.tumor.GlandularTumor]) implements only ``"label"``.
+        expression scaling instead of ``1 - treatment_resistance``.
     target_genes : list, optional
         Mechanistic mode only: genes the drug acts through, as ``(segment, position)``
-        coordinates or flat gene indices. An on-target clone's dose is multiplied by its mean
-        expression of these genes relative to the founding clone's, so a clone at the founder's
-        level takes the nominal dose and one at twice the level twice the dose. Expression is
+        coordinates or flat gene indices. The dose of an on-target clone is multiplied by its mean
+        expression of these genes relative to that of the founding clone, so a clone at the level
+        of the founder takes the nominal dose and one at twice the level twice the dose. Expression is
         the clone's dosage-driven baseline times its mean program activity (the same law
         ``make_cell_data`` uses, without the per-cell noise and the niche).
     expression_threshold : float, optional
@@ -105,9 +112,9 @@ class Treatment(object):
         self.dosage_decay = dosage_decay
         self.rounds = rounds
         self.max_tumor_size = max_tumor_size
-        # Which compartment(s) the therapy acts on (metastasis module, R9): "both" (systemic, default),
-        # "met" (adjuvant after primary resection), or "primary" (neoadjuvant / local). The engine
-        # gates the per-genotype death/immune override by the deme's compartment (GenotypeTumor._death_rate).
+        # Which compartment(s) the therapy acts on: "both" (systemic, default), "met" (adjuvant after
+        # primary resection), or "primary" (neoadjuvant / local). The engine gates the per-genotype
+        # death/immune override by the deme's compartment (GenotypeTumor._death_rate).
         self.sites = sites
         # HOW the kill scales with the cell (genotype engine). "additive" (default) gives every clone
         # the same absolute extra death, so survival under drug is decided by birth rate and a
@@ -123,42 +130,38 @@ class Treatment(object):
         # leave lasting mutational signatures), so an exposed cell's mutation rate rises and STAYS
         # risen — and its descendants inherit it. Multiplies `mutation_rate` ONCE per genotype on
         # first exposure, never compounding per step and never reverting when the drug stops.
-        # 1.0 (default) -> no genotype is ever touched -> byte-identical to before.
+        # 1.0 (default) leaves every genotype untouched.
         # NOTE the effect saturates: iscc draws mutation as an alternative FATE to dispersal
         # (mut_prob = mutation_rate / (mutation_rate + dispersal_rate)), so mut_prob -> 1 at most,
         # i.e. at the shipped rates the mutant fraction can rise 0.25 -> 1.0, a ceiling of 4x.
         self.mutagenicity = float(mutagenicity)
         # WHO gets the mutator phenotype. "uniform" (default) raises it for every cancer clone in a
         # treated compartment, regardless of resistance — so a clone taking ZERO drug still mutates
-        # 4x faster, permanently. That is the only drug effect in the engine NOT scaled by
+        # faster, permanently. It is the only drug effect in the engine NOT scaled by
         # (1 - treatment_resistance): the kill, immunotherapy's resistance stripping and the persister
-        # cost all are. It also cuts against the mutator's own purpose — the elevated rate that makes
-        # de novo resistance likely is inherited by the resistant clone, where its main effect is to
-        # multiply the CNA rate that DELETES the resistance allele (reversion), ~4x.
+        # cost all are. The elevated rate is also inherited by a resistant clone, where it multiplies
+        # the CNA rate that DELETES the resistance allele (reversion).
         # "dose" scales the boost by the dose the clone actually receives,
         #     factor = 1 + (mutagenicity - 1) * (1 - tr),
         # exactly as `_kill_amount` scales the hazard: a sensitive cell gets the full multiplier, a
         # fully resistant one gets none. Mechanistically this says the mutagenesis comes from drug
         # that reaches the DNA — true of efflux/detoxification resistance, weaker for target-site
-        # resistance where the drug still enters. Default "uniform" -> byte-identical to before.
+        # resistance where the drug still enters.
         self.mutagenicity_mode = str(mutagenicity_mode)
         # WHAT the mutator accelerates. `mutagenicity` multiplies `mutation_rate`, i.e. the chance a
         # division takes the MUTATION fate at all; the SNV/CNA split happens downstream on
-        # snv_prob/cnv_prob, so point mutations and copy-number events scale TOGETHER. That couples
-        # the two processes this model cares about: resistance is ACQUIRED by an SNV landing on a
-        # resistance locus and LOST by a CNA deleting the copy that carries it. Measured, the
-        # acquisition:reversion ratio is 0.09 at mutagenicity 1.0 and 0.09 at 4.0 — turning the
-        # mutator up cannot shift the balance, only the scale.
+        # snv_prob/cnv_prob, so with "all" (default) point mutations and copy-number events scale
+        # TOGETHER. That couples the two processes this model cares about: resistance is ACQUIRED by
+        # an SNV landing on a resistance locus and LOST by a CNA deleting the copy that carries it,
+        # so turning the mutator up changes the scale of both, not their balance.
         # "snv" makes the drug a POINT MUTAGEN rather than a clastogen: cnv_prob is lowered by
         # exactly the factor that keeps the ABSOLUTE per-division CNA rate where it was, so extra
-        # mutating divisions all become SNVs. Measured: reversion 1.10e-3 -> 5.83e-4 (back to the
-        # no-mutator baseline) with acquisition held, ratio 0.09 -> 0.27. This is a claim about the
-        # AGENT — platinums and alkylators are base-damaging and leave substitution signatures, which
-        # is mechanistically distinct from inducing chromosome missegregation.
-        # Default "all" -> both scale together -> byte-identical to before.
+        # mutating divisions all become SNVs. This is a claim about the AGENT — platinums and
+        # alkylators are base-damaging and leave substitution signatures, which is mechanistically
+        # distinct from inducing chromosome missegregation.
         self.mutagenicity_target = str(mutagenicity_target)
         # HOW a cancer clone's response is decided (genotype engine). "label" (default) reads the
-        # resistance labels, as above; the escape-mode studies are built on it. "mechanistic" ignores
+        # resistance labels, as above. "mechanistic" ignores
         # them and derives the response from the genotype (does it carry the target?) and its
         # expression (how much target does it make?). The knobs below only mean something there.
         if response not in ("label", "mechanistic"):
@@ -180,22 +183,15 @@ class Treatment(object):
                                         else int(amplification_threshold))
         self.dosage_trace = []  # list of (step, dosage) for every queried step
 
-    def _apply(self, cell):
-        pass
-
     def discrete_event(self, tumor, step):
         """One-shot state edits that are NOT rate modifiers (e.g. surgical resection). The base
-        treatment does nothing; `Surgery` overrides this. The engine calls it once per step, so
-        chemo-only / no-surgery runs stay byte-identical (no state change, no rng draw)."""
+        treatment does nothing; `Surgery` overrides this. The engine calls it once per step; the base
+        version changes no state and draws no random numbers, so it leaves runs without surgery
+        unaffected."""
         pass
 
     def is_target(self, cell, **kwargs):
         pass
-
-    def apply(self, cell, **kwargs):
-        if self.is_target(cell, **kwargs) or (not self.is_target(cell, **kwargs) and np.random.binomial(1, self.toxicity)):
-            if np.random.binomial(1, self.effectiveness):
-                self._apply(cell)
 
     def get_dosage(self, step, tumor_size):
         in_window = step >= self.start
