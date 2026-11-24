@@ -322,8 +322,10 @@ def _forest(ax, rows, band, tool, show_labels, ranks=False):
                            facecolors=r["colour"] if r.get("filled") else "white",
                            edgecolors=r["colour"], linewidths=0.7, zorder=4)
         if r.get("note"):
-            ax.text(0.97, yk, r["note"], transform=ax.get_yaxis_transform(), fontsize=FS_SMALL - 0.6,
-                    color=S.GREY, ha="right", va="center")
+            # on the side away from the row's own marker, so a large estimate does not cover it
+            left = any(v is not None and np.isfinite(v) and v > 0 for v in r["values"])
+            ax.text(0.03 if left else 0.97, yk, r["note"], transform=ax.get_yaxis_transform(),
+                    fontsize=FS_SMALL - 0.6, color=S.GREY, ha="left" if left else "right", va="center")
         if ranks and r.get("rank") is not None:
             ax.text(1.05, yk, f"{r['rank']}", transform=ax.get_yaxis_transform(), fontsize=FS_SMALL,
                     color=S.GREY, va="center", ha="left")
