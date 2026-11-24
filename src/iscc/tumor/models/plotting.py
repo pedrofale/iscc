@@ -120,10 +120,12 @@ class PlottingMixin:
 
         Parameters
         ----------
-        color : {"state", "cancer_frac", "clone", "stage"}
+        color : {"state", "cancer_frac", "immune", "clone", "stage"}
             ``"state"`` (default): categorical — empty / stroma / duct(normal) / DCIS (cancer in a
             duct) / IDC (cancer in stroma). ``"cancer_frac"``: the per-deme cancer fraction as a
-            heatmap. ``"clone"``: colour each cancer deme by its dominant clone's DRIVER-clone colour
+            heatmap. ``"immune"``: the share of immune cells (all three subtypes) in each deme as a
+            heatmap, with the demes that hold cancer cells outlined, so that the immune cells of the
+            stroma and their loss from the tumor show. ``"clone"``: colour each cancer deme by its dominant clone's DRIVER-clone colour
             (the same driver-collapsed palette as ``plot_muller(by_drivers=True)`` and
             ``plot_phylogeny``), on a pale-stroma background. ``"stage"``: colour each cancer deme by
             the most advanced trait of its dominant clone (none, proliferation, breach, stromal
@@ -149,6 +151,23 @@ class PlottingMixin:
                     img[di] = sum(c for g, c in d.items() if gid_is_can[g]) / tot
             im = ax.imshow(img.reshape(G, G), cmap=cmap or "magma", vmin=0, vmax=1, interpolation="nearest")
             plt.colorbar(im, ax=ax, fraction=0.046, label="cancer fraction")
+        elif color == "immune":
+            from matplotlib.lines import Line2D
+            img = np.full(G * G, np.nan)
+            has_cancer = np.zeros(G * G, dtype=bool)
+            is_immune = {g: self.genotypes[g].type == "immune" for g in self.genotypes}
+            for di in range(min(len(self.demes), G * G)):
+                d = self.demes[di]
+                tot = sum(d.values())
+                if tot:
+                    img[di] = sum(c for g, c in d.items() if is_immune[g]) / tot
+                    has_cancer[di] = any(gid_is_can[g] for g in d)
+            im = ax.imshow(img.reshape(G, G), cmap=cmap or "Purples", vmin=0, vmax=1, interpolation="nearest")
+            plt.colorbar(im, ax=ax, fraction=0.046, label="share of immune cells")
+            if has_cancer.any():
+                ax.contour(has_cancer.reshape(G, G).astype(float), levels=[0.5], colors="#d62728", linewidths=0.8)
+                ax.legend(handles=[Line2D([], [], color="#d62728", lw=1, label="cancer cells")],
+                          loc="upper right", fontsize=8, framealpha=0.9)
         elif color == "clone":
             from .. import viz
             clone_colors = viz.functional_clone_colors(

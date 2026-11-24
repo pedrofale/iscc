@@ -76,3 +76,18 @@ def test_materialised_subtypes_take_their_own_baseline():
     m = {g: exp.loc[gids.index[gids == g]].mean(axis=0).to_numpy() for g in ("immune", "myeloid", "bplasma")}
     assert np.corrcoef(m["immune"], m["myeloid"])[0, 1] < 0.9
     assert np.corrcoef(m["myeloid"], m["bplasma"])[0, 1] < 0.9
+
+
+def test_tissue_map_shows_the_share_of_immune_cells():
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    t = _tumour({**FIELD, "immune_composition": MIX})
+    ax = t.plot_tissue(color="immune")
+    shown = np.ma.filled(ax.get_images()[0].get_array(), np.nan).ravel()
+    expected = np.array([sum(c for g, c in d.items() if t.genotypes[g].type == "immune") / sum(d.values())
+                         if d else np.nan for d in t.demes[:t.grid_size ** 2]])
+    np.testing.assert_allclose(shown, expected)                   # all three subtypes, per deme
+    assert np.nanmax(shown) > 0 and np.nanmin(shown) == 0         # immune cells in the stroma, none in the duct
+    assert [x.get_text() for x in ax.get_legend().get_texts()] == ["cancer cells"]
+    plt.close("all")
