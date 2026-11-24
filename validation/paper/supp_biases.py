@@ -40,12 +40,12 @@ _HX = "src/iscc/data/human/expression.py"
 BIASES = [
     # --- sampling: the sample-prep biology, before any library is made -------------------------------
     Bias("sampling", ("scDNA", "scRNA"), "cell-type recovery", "recovery_probs",
-         "immune 0.4 ... cancer 0.9", SET, None,
+         "T and NK 0.9 ... cancer 0.09", SET, None,
          (f"{_DIS}:52",), None),                                       # DEFAULT_RECOVERY
     Bias("sampling", ("scRNA",), "dissociation stress", "stress_strength", "0 (random 5% of genes)", SET, None,
-         (f"{_DIS}:135", f"{_DIS}:86"), None),
+         (f"{_DIS}:151", f"{_DIS}:102"), None),
     Bias("sampling", ("Visium",), "section thickness", "depth_frac", "0.5", SET, None,
-         (f"{_RES}:330",), None),
+         (f"{_RES}:332",), None),
     # --- library: capture and amplification ------------------------------------------------------------
     Bias("library", ("WGS", "scDNA"), "GC bias", "gc_curve_sigma", "0.20 (panel 0.05)", COND, "needs GC",
          (f"{_D}:45", f"{_D}:51"), (f"{_ED}:126",)),
@@ -112,8 +112,8 @@ BIASES = [
 # What the figure prints for each entry of BIASES, keyed by (bias, param, default): the quantity the
 # parameter sets and its default, in words, and for a conditional fit what the real data must carry.
 PLAIN = {
-    ("cell-type recovery", "recovery_probs", "immune 0.4 ... cancer 0.9"):
-        "recovery probability, immune 0.4 to cancer 0.9",
+    ("cell-type recovery", "recovery_probs", "T and NK 0.9 ... cancer 0.09"):
+        "recovery probability, cancer 0.09 to T and NK 0.9",
     ("dissociation stress", "stress_strength", "0 (random 5% of genes)"): "strength 0, on a random 5% of genes",
     ("section thickness", "depth_frac", "0.5"): "share of the depth kept 0.5",
     ("GC bias", "gc_curve_sigma", "0.20 (panel 0.05)"): "curve strength 0.20, panel 0.05",
