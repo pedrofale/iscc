@@ -40,8 +40,8 @@ is downloaded on first use, checked and cached.
 | [`iscc.pregrown.neutral`](pregrown_neutral.md) | A tumor grown without selection, whose clones branch without sweeps. |
 | [`iscc.pregrown.sweeps`](pregrown_sweeps.md) | A tumor with few, strong drivers, whose clones sweep in turn. |
 | [`iscc.pregrown.cin`](pregrown_cin.md) | A tumor with frequent copy-number events and genome doubling. |
-| [`iscc.pregrown.immune`](pregrown_immune.md) | The paper's tumor with T and NK cells in the stroma, which kill cancer cells and induce an interferon response. |
-| [`iscc.pregrown.cohort`](pregrown_cohort.md) | Six patients grown over one configuration of the paper's regime. |
+| [`iscc.pregrown.immune`](pregrown_immune.md) | The paper's tumor with immune cells in the stroma, of which the T and NK cells kill cancer cells and induce an interferon response. |
+| [`iscc.pregrown.cohort`](pregrown_cohort.md) | Six patients grown over one configuration of the paper's regime, with immune cells. |
 
 ## Treatment
 

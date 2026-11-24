@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Grow the tumours and the cohort of ``iscc.pregrown`` and write the package's manifest.
 
-Every tumour is the paper's regime (``validation/paper/regime.py``) on the arm-level human genome, as
+Every tumour is the paper's regime (``regime.py`` in this folder) on the arm-level human genome, as
 the registry's run R11 grows it, at the cm scale (grid 170) to 200,000 cancer cells. ``ductal`` is
 that tumour; ``immune`` is it with the regime's immune cells, ``neutral``, ``sweeps`` and ``cin`` are variants
 of ``immune``, and ``cohort`` is six
@@ -10,9 +10,9 @@ integration across patients should keep) at the mid scale (grid 96) to 60,000 ca
 ``grow`` leaves a tumour, so that a loaded tumour is in the same state.
 
 Usage:
-    python scripts/build_pregrown.py grow <out_dir> [name ...] [--scale mid --target 60000]
+    python validation/paper/build_pregrown.py grow <out_dir> [name ...] [--scale mid --target 60000]
                                      [--cohort-scale small --cohort-target 8000]
-    python scripts/build_pregrown.py manifest <out_dir> [--base-url URL]
+    python validation/paper/build_pregrown.py manifest <out_dir> [--base-url URL]
 
 ``grow`` writes ``<name>.iscc``, a summary ``<name>.json`` and a figure ``<name>.png`` (the tissue
 and the Muller plot) per name; ``--scale`` and ``--target`` grow smaller trial versions. ``manifest``
@@ -26,10 +26,11 @@ import subprocess
 import sys
 import time
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(os.path.dirname(HERE))
 os.environ.setdefault("ISCC_PAPER_TIER", "full")
 sys.path.insert(0, os.path.join(REPO, "src"))
-sys.path.insert(0, os.path.join(REPO, "validation", "paper"))
+sys.path.insert(0, HERE)
 import regime as RG  # noqa: E402
 import registry as REG  # noqa: E402
 from iscc import pregrown  # noqa: E402

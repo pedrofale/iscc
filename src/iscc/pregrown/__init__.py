@@ -16,7 +16,7 @@ origin, and differ in their evolution. [`ductal`][iscc.pregrown.ductal] grows wi
 other four tumors and the cohort grow with the regime's immune cells in the stroma, so that the data
 generated from them hold the immune cells of a breast tumor. They carry germline variants at the density of a genotyping
 array (30% of the neutral genes heterozygous), so that the DNA assays carry the B-allele signal of
-allele-specific callers, and no segment at zero copies. ``scripts/build_pregrown.py`` in the
+allele-specific callers, and no segment at zero copies. ``validation/paper/build_pregrown.py`` in the
 repository grows them.
 """
 import json
@@ -70,7 +70,7 @@ def _path(name):
 def _grown_elsewhere(**kwargs):
     """The growth function of the pregrown cohort, which grows no further patients."""
     raise RuntimeError("the pregrown cohort was grown with the paper's regime by "
-                       "scripts/build_pregrown.py of the iscc repository; build a Cohort with your "
+                       "validation/paper/build_pregrown.py of the iscc repository; build a Cohort with your "
                        "own growth function to grow more patients")
 
 
