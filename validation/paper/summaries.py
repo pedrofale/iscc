@@ -71,9 +71,11 @@ def summarise(run, task):
     counts = C.live_cancer_counts(t)
     tot = sum(counts.values())
     seg = t.n_segments
-    size = t.n_genes // seg
-    onc = np.bincount(np.asarray(t.selection.get_oncogenes(), dtype=int) // size, minlength=seg)
-    tsg = np.bincount(np.asarray(t.selection.get_tsgs(), dtype=int) // size, minlength=seg)
+    off = np.asarray(t.selection._seg_offsets, dtype=int)  # segments differ in size in the human genome layout
+    onc = np.bincount(np.searchsorted(off, np.asarray(t.selection.get_oncogenes(), dtype=int), side="right") - 1,
+                      minlength=seg)
+    tsg = np.bincount(np.searchsorted(off, np.asarray(t.selection.get_tsgs(), dtype=int), side="right") - 1,
+                      minlength=seg)
     w = np.array(list(counts.values()), dtype=float)
     cn = np.array([t.genotypes[g].genome_summary["seg_cns"] for g in counts], dtype=float)
     seg_cn = ((cn * w[:, None]).sum(0) / w.sum()).tolist() if len(w) else [2.0] * seg
