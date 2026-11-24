@@ -14,7 +14,7 @@ set -euo pipefail
 # --- internal-only paths (kept on dev for development, never published to public main) ---
 INTERNAL_FILES=(
   SCHEMA.md docs/schema.md
-  notebooks/TUTORIALS_PLAN.md WORKSPACE.md
+  notebooks/TUTORIALS_PLAN.md notebooks/archive/TUTORIALS_PLAN.md WORKSPACE.md
 )
 INTERNAL_DIRS=( analysis scripts .claude )
 # NB: DESIGN_*.md, BACKLOG.md, AUDIT.md, RESEARCH_QUESTIONS.md, handoffs/ and manuscript/ left this
@@ -42,7 +42,7 @@ git add -A
 
 # SAFETY: never publish if an internal path leaked into the staged tree
 LEAK=$(git diff --cached --name-only | grep -Ei \
-  '^(DESIGN_|BACKLOG|AUDIT|RESEARCH_QUESTIONS|SCHEMA|WORKSPACE|handoffs/|analysis/|manuscript/|scripts/|\.claude|notebooks/TUTORIALS_PLAN)|docs/schema\.md|\.DS_Store' || true)
+  '^(DESIGN_|BACKLOG|AUDIT|RESEARCH_QUESTIONS|SCHEMA|WORKSPACE|handoffs/|analysis/|manuscript/|scripts/|\.claude)|TUTORIALS_PLAN|docs/schema\.md|\.DS_Store' || true)
 [ -z "$LEAK" ] || { echo "ABORT: internal paths would be published to main:"; echo "$LEAK"; \
   git reset -q --hard HEAD; git checkout -q dev; git branch -f main origin/main; exit 1; }
 
