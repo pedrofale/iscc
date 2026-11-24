@@ -61,7 +61,13 @@ SELECTION = {"prop_breach": 0.002, "prop_stromal_survival": 0.002, "breach_effec
 # in the stroma over tumours grown without the hazard (median of ten seeds; 20% of stromal cancer cells
 # carry it) and not in the gland, within every registered criterion; at 1.2 genome doublings sweep most
 # tumours.
-STROMA = {"stromal_hazard": 0.9}
+# The stromal cells of each deme split into fibroblasts, endothelial cells and perivascular cells with
+# the shares of the stroma of Wu et al. 2021 (CAFs 6,573, endothelial 7,605 and PVL 5,423 of 19,601
+# cells), which need no recovery correction since the three are recovered alike (decision
+# `decision-stromal-subtypes`, 2026-11-24). Every subtype counts as stroma for the hazard and for
+# eviction, so the split changes the data and not the growth, and registry.load splits stored tumours.
+STROMAL_COMPOSITION = {"stromal": 0.335, "endothelial": 0.388, "pvl": 0.277}
+STROMA = {"stromal_hazard": 0.9, "stromal_composition": STROMAL_COMPOSITION}
 
 # The founding acinus stays closed for 200 generations after it is half full: long enough for a
 # truncal copy-number layer, short enough that the in-situ phase is not one deme for most of the run.

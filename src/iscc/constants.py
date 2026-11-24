@@ -34,15 +34,25 @@ LAYOUT_OFFSET_MET = 301            # metastasis module: the host-parenchyma base
                                    # profile for the metastatic deposit (celltype_exps["host"])
 LAYOUT_OFFSET_IMMUNE_SUBTYPES = 401  # the baseline expression of the myeloid and B/plasma immune
                                    # subtypes (celltype_exps["myeloid"], ["bplasma"])
+LAYOUT_OFFSET_STROMAL_SUBTYPES = 402  # the baseline expression of the endothelial and perivascular
+                                   # stromal subtypes (celltype_exps["endothelial"], ["pvl"])
 RUN_OFFSET_IMMUNE_SPLIT = 6101     # per run: the split of each deme's immune cells into subtypes
+RUN_OFFSET_STROMAL_SPLIT = 6102    # per run: the split of each deme's stromal cells into subtypes, and
+                                   # of each eviction of stromal cells among the subtypes
 
 # Immune cells come in three subtypes, each a static normal genotype whose type is "immune": T and NK
 # cells (genotype "immune", the only ones that kill cancer cells), myeloid cells (macrophages,
 # monocytes, dendritic and mast cells) and B and plasma cells. Genotype id -> the subtype's label.
 IMMUNE_SUBTYPES = {"immune": "T_NK", "myeloid": "myeloid", "bplasma": "B_plasma"}
 
+# Stromal cells come in three subtypes, each a static normal genotype whose type is "stromal" and
+# which all count as stroma for the stromal hazard and for eviction: fibroblasts (genotype
+# "stromal"), endothelial cells and perivascular cells (pericytes and vascular smooth muscle cells).
+# Genotype id -> the subtype's label.
+STROMAL_SUBTYPES = {"stromal": "fibroblast", "endothelial": "endothelial", "pvl": "PVL"}
+
 normal_cmap = {'epithelial': 'green', 'immune': 'yellow', 'stromal': 'pink', 'host': 'lightgray',
-               'myeloid': 'orange', 'bplasma': 'khaki'}
+               'myeloid': 'orange', 'bplasma': 'khaki', 'endothelial': 'salmon', 'pvl': 'rosybrown'}
 normal_names = list(normal_cmap.keys())
 normal_colors = list(normal_cmap.values())
 normal_colors_rgba = np.array([np.array(mcolors.to_rgba(color)) for color in normal_colors])

@@ -14,7 +14,9 @@ The five tumors grow in the ductal field of the paper, at its regime on the arm-
 [`arm_genome`][iscc.data.human.arm_genome] (the paper's run R11) with the epithelium as the cell of
 origin, and differ in their evolution. [`ductal`][iscc.pregrown.ductal] grows without immune cells; the
 other four tumors and the cohort grow with the regime's immune cells in the stroma, so that the data
-generated from them hold the immune cells of a breast tumor. They carry germline variants at the density of a genotyping
+generated from them hold the immune cells of a breast tumor. Their stroma holds fibroblasts,
+endothelial cells and perivascular cells in the shares of a breast cancer atlas
+(``stromal_composition``). They carry germline variants at the density of a genotyping
 array (30% of the neutral genes heterozygous), so that the DNA assays carry the B-allele signal of
 allele-specific callers, and no segment at zero copies. ``validation/paper/build_pregrown.py`` in the
 repository grows them.

@@ -244,8 +244,9 @@ class Resection:
             [`make_cell_data`][iscc.tumor.GenotypeTumor.make_cell_data]. ``None`` builds them all.
         recovery_probs : dict or "default", optional
             Per-biological-type recovery probability (``cancer``, ``epithelial``, ``host``,
-            ``stromal``, and the immune subtypes ``immune`` for T and NK cells, ``myeloid`` and
-            ``bplasma``, each its own key), merged over ``DEFAULT_RECOVERY``; ``"default"`` (or an empty dict)
+            ``stromal``, the immune subtypes ``immune`` for T and NK cells, ``myeloid`` and
+            ``bplasma``, each its own key, and the stromal subtypes ``endothelial`` and ``pvl``, which
+            take the value of ``stromal`` unless named), merged over ``DEFAULT_RECOVERY``; ``"default"`` (or an empty dict)
             uses the defaults as they are. ``None`` (default) recovers every cell, unless a stress
             signature is asked for, in which case every type is recovered with probability 1.
         stress_strength : float, default 0.0
@@ -272,7 +273,7 @@ class Resection:
             return self._materialise(install, section=False, region=region, max_cells=max_cells,
                                      layers=layers)
         import numpy as np
-        from ..dissociation import Dissociation, DEFAULT_RECOVERY
+        from ..dissociation import Dissociation, DEFAULT_RECOVERY, merge_recovery
 
         if recovery_probs is None:
             probs = {t: 1.0 for t in DEFAULT_RECOVERY}
@@ -284,7 +285,7 @@ class Resection:
             probs = dict(recovery_probs)
         n_materialise = max_cells
         if max_cells is not None:
-            rate = self._expected_recovery(region, {**DEFAULT_RECOVERY, **probs})
+            rate = self._expected_recovery(region, merge_recovery(probs))
             if 0 < rate < 1:
                 n_materialise = int(np.ceil(1.1 * max_cells / rate))
         cd = self._materialise(install, section=False, region=region, max_cells=n_materialise,
@@ -317,12 +318,13 @@ class Resection:
 
     def _expected_recovery(self, region, probs):
         """The share of the cells of ``region`` a dissociation recovers on average, from their types
-        (a cell of an unlisted type is recovered, as in ``Dissociation``)."""
+        (a normal cell by its genotype, the key ``Dissociation`` reads; a cell of an unlisted type is
+        recovered, as in ``Dissociation``)."""
         n = kept = 0.0
         G = self.tumor.genotypes
         for i in region:
             for gid, c in self.tumor.demes[i].items():
-                t = "cancer" if G[gid].type == "cancer" else G[gid].type
+                t = "cancer" if G[gid].type == "cancer" else str(gid)
                 n += c
                 kept += c * float(probs.get(t, 1.0))
         return kept / n if n else 1.0

@@ -32,7 +32,7 @@ stress signature, if enabled, returns a modified copy of ``cell_exp``).
 import numpy as np
 import pandas as pd
 
-from ...constants import normal_names
+from ...constants import STROMAL_SUBTYPES, normal_names
 
 # Every NON-cancer cell type the engine can seed, taken from the engine's own list rather
 # than repeated here, so no type is missed — e.g. ``host`` (the resident parenchyma of a
@@ -53,11 +53,27 @@ DEFAULT_RECOVERY = {
     "cancer": 0.09,
     "epithelial": 0.09,
     "host": 0.09,
-    "stromal": 0.27,
+    "stromal": 0.27,       # fibroblasts
     "immune": 0.9,          # T and NK cells
     "myeloid": 0.45,        # macrophages, 5-8 times malignant cells in the same sample
     "bplasma": 0.9,         # B and plasma cells, as T and NK cells (snRNA-seq barely captures them)
+    "endothelial": 0.27,   # 7.0 and 3.2 times malignant cells against 5.5 and 2.9 for fibroblasts in
+                           # the same sample; 2.4 times epithelium against 2.9 in the atlas
+    "pvl": 0.27,           # perivascular cells, not measured; as fibroblasts
 }
+
+
+def merge_recovery(recovery_probs=None):
+    """``DEFAULT_RECOVERY`` with ``recovery_probs`` merged over it; a probability given for
+    ``stromal`` also applies to the stromal subtypes (``endothelial``, ``pvl``) that are not named."""
+    probs = dict(DEFAULT_RECOVERY)
+    given = dict(recovery_probs or {})
+    probs.update(given)
+    if "stromal" in given:
+        for g in STROMAL_SUBTYPES:
+            if g not in given:
+                probs[g] = given["stromal"]
+    return probs
 
 
 def biological_type(genotype_id):
@@ -135,9 +151,7 @@ class Dissociation(object):
                  stress_strength=0.0, n_stress_genes=None, stress_genes=None):
         self.cell_data = cell_data
         self.rng = rng if rng is not None else np.random.default_rng()
-        self.recovery_probs = dict(DEFAULT_RECOVERY)
-        if recovery_probs:
-            self.recovery_probs.update(recovery_probs)
+        self.recovery_probs = merge_recovery(recovery_probs)
         self.stress_strength = float(stress_strength)
         self.n_stress_genes = n_stress_genes
         self.stress_genes = None if stress_genes is None else list(stress_genes)

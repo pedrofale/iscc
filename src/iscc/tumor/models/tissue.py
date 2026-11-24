@@ -5,6 +5,7 @@ A mixin of [`GenotypeTumor`][iscc.tumor.GenotypeTumor]; it holds no state of its
 
 import numpy as np
 from ..geometry import bresenham_circumference, get_inside
+from ...constants import LAYOUT_OFFSET_STROMAL_SUBTYPES, RUN_OFFSET_STROMAL_SPLIT, STROMAL_SUBTYPES
 
 
 class TissueMixin:
@@ -322,27 +323,95 @@ class TissueMixin:
         return sum(c for g, c in deme.items() if self.genotypes[g].type in self._EVICTABLE)
 
     def _evict(self, deme_idx, n, rng):
-        """Displace ``n`` resident cells from ``deme_idx``, drawn across the resident genotypes in
+        """Displace ``n`` resident cells from ``deme_idx``, drawn across the resident cell types in
         proportion to their counts. Returns the number actually removed (< n only if the deme runs
-        out of residents). One resident genotype — the overwhelmingly common case — costs no rng
-        draw."""
+        out of residents). One resident type — the overwhelmingly common case — costs no rng draw.
+        Within a type, the subtypes (the stromal subtypes) share the removals in proportion to their
+        counts, drawn from the run's subtype stream, so the growth stream ``rng`` is the same with or
+        without subtypes."""
         if n <= 0:
             return 0
         gids = self._evictable_gids(deme_idx)
         if not gids:
             return 0
         deme = self.demes[deme_idx]
-        if len(gids) == 1:
-            k = min(n, deme[gids[0]])
-            self._remove(deme_idx, gids[0], k)
-            return k
-        counts = np.array([deme[g] for g in gids], dtype=np.int64)
+        groups = {}
+        for g in gids:
+            groups.setdefault(self.genotypes[g].type, []).append(g)
+        counts = np.array([sum(deme[g] for g in members) for members in groups.values()], dtype=np.int64)
         take = min(n, int(counts.sum()))
-        drawn = rng.multivariate_hypergeometric(counts, take)
-        for g, k in zip(gids, drawn):
-            if k:
-                self._remove(deme_idx, g, int(k))
+        drawn = [take] if len(groups) == 1 else rng.multivariate_hypergeometric(counts, take)
+        for members, k in zip(groups.values(), drawn):
+            if not k:
+                continue
+            if len(members) == 1:
+                self._remove(deme_idx, members[0], int(k))
+                continue
+            within = self._subtype_rng.multivariate_hypergeometric(
+                np.array([deme[g] for g in members], dtype=np.int64), int(k))
+            for g, kk in zip(members, within):
+                if kk:
+                    self._remove(deme_idx, g, int(kk))
         return take
+
+    def split_stroma(self, composition=None):
+        """Split the fibroblasts of every deme into the stromal subtypes with the shares of
+        ``composition``.
+
+        A tumour built with ``stromal_composition`` is split when its tissue is seeded. Every subtype
+        counts as stroma for the stromal hazard and for eviction, so the split changes the data and
+        not the growth, and a tumour grown or saved before the subtypes takes them by this call: the
+        split of the stromal cells of a deme has the same distribution whether drawn at seeding or
+        afterwards, since evictions remove the subtypes in proportion to their counts.
+
+        Parameters
+        ----------
+        composition : dict, optional
+            Shares of ``"stromal"`` (fibroblasts), ``"endothelial"`` and ``"pvl"`` (perivascular
+            cells) that sum to 1. Default all fibroblasts, which leaves the tumour unchanged.
+
+        Returns
+        -------
+        GenotypeTumor
+            The tumour itself.
+        """
+        composition = dict(composition or {"stromal": 1.0})
+        unknown = set(composition) - set(STROMAL_SUBTYPES)
+        if unknown or not np.isclose(sum(composition.values()), 1.0) or min(composition.values()) < 0:
+            raise ValueError(f"stromal_composition takes non-negative shares of {list(STROMAL_SUBTYPES)} "
+                             f"that sum to 1, got {composition}")
+        self.stromal_composition = composition
+        self._subtype_rng = np.random.default_rng([int(self.seed), RUN_OFFSET_STROMAL_SPLIT])
+        if composition == {"stromal": 1.0} or not any(g in self.genotypes for g in STROMAL_SUBTYPES):
+            return self
+        if any(g in self.genotypes for g in STROMAL_SUBTYPES if g != "stromal"):
+            raise ValueError("the stroma of this tumour is already split into subtypes")
+        names = [g for g in STROMAL_SUBTYPES if composition.get(g, 0) > 0]
+        shares = np.array([composition[g] for g in names], dtype=float)
+        for g in names:
+            self._normal_params.setdefault(g, self._normal_params["stromal"])   # a tumour saved before the subtypes
+            self._normal_genotype(g)
+        n_primary = getattr(self, "n_primary_demes", len(self.demes))
+        for i in range(n_primary):
+            n = self.demes[i].get("stromal", 0)
+            if not n:
+                continue
+            for g, k in zip(names, self._subtype_rng.multinomial(n, shares)):
+                if g != "stromal" and k:
+                    self._remove(i, "stromal", int(k))
+                    self._add(i, g, int(k))
+        # baseline expression of the subtypes beside the fibroblasts, from their own layout
+        # sub-stream, so every other tumour's landscape is unchanged
+        srng = np.random.default_rng(self.layout_seed + LAYOUT_OFFSET_STROMAL_SUBTYPES)
+        for g in STROMAL_SUBTYPES:
+            if g == "stromal":
+                continue
+            exp = srng.beta(0.1, 1.0, size=self.n_genes)
+            exp[self.selection.get_tsgs()] = 0.8
+            exp[self.selection.get_oncogenes()] = 0.01
+            if g in names:
+                self.celltype_exps[g] = exp
+        return self
 
     def _displace_immune(self, deme_idx, n_births, rng):
         """Push immune cells out of a deme that cancer is taking over: each of ``n_births`` cancer

@@ -58,7 +58,7 @@ def test_bad_composition_is_refused():
 def test_labels():
     ids = ["immune", "myeloid", "bplasma", "stromal", "epithelial", "host", "c12"]
     assert list(biological_types(ids)) == ["immune", "immune", "immune", "stromal", "epithelial", "host", "cancer"]
-    assert list(cell_subtypes(ids)) == ["T_NK", "myeloid", "B_plasma", "stromal", "epithelial", "host", "cancer"]
+    assert list(cell_subtypes(ids)) == ["T_NK", "myeloid", "B_plasma", "fibroblast", "epithelial", "host", "cancer"]
 
 
 def test_materialised_subtypes_take_their_own_baseline():

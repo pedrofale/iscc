@@ -236,7 +236,7 @@ def _grow_safe(job):
 
 
 def load(run, task):
-    """The saved tumour of one task, with the paper regime's current O2 field.
+    """The saved tumour of one task, with the paper regime's current O2 field and stromal subtypes.
 
     The microenvironment is readout-only (it picks its target genes once, at construction, and is
     applied when cell data are materialised), so a stored tumour takes the regime's O2 settings
@@ -258,6 +258,10 @@ def load(run, task):
     if getattr(t, "programs", None) is not None:
         t.programs.max_log_fold = RG.PROGRAM_MAX_LOG_FOLD
         _apply_dosage(t)
+    # The stromal subtypes change the data and not the growth, so a tumour grown before them takes
+    # them here.
+    if "stromal" in t.genotypes and not {"endothelial", "pvl"} & set(t.genotypes):
+        t.split_stroma(RG.STROMAL_COMPOSITION)
     return t
 
 

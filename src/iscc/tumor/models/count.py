@@ -30,7 +30,7 @@ from ..components.cell import CancerCell, EpithelialCell, StromalCell, ImmuneCel
 from ..germline import draw_germline_sites, apply_germline, seed_founder_mutations
 from ..programs import ProgramModel
 from ...constants import (IMMUNE_SUBTYPES, LAYOUT_OFFSET_IMMUNE_SUBTYPES, RUN_OFFSET_IMMUNE_SPLIT,
-                          normal_names)
+                          STROMAL_SUBTYPES, normal_names)
 from .tissue import TissueMixin
 from .metastasis import MetastasisMixin
 from .therapy import TherapyMixin
@@ -117,7 +117,10 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         - Ductal field: ``structure_radius`` (default 0, no glands), ``n_glands`` (default 1),
           ``gland_radius`` (default ``structure_radius``), ``min_gland_sep`` (the minimum
           distance between gland centres), ``stroma_fill_frac`` (stromal cells seeded per stroma
-          deme, as a fraction of its capacity; default 1.0), ``K_duct`` and ``K_stroma`` (the
+          deme, as a fraction of its capacity; default 1.0), ``stromal_composition`` (the shares of
+          the stromal subtypes, ``{"stromal": fibroblasts, "endothelial": ..., "pvl": perivascular
+          cells}``, drawn per deme; default all fibroblasts; every subtype counts as stroma, so the
+          composition changes the data and not the growth), ``K_duct`` and ``K_stroma`` (the
           capacities of duct and stroma demes; default ``carrying_capacity``),
           ``cross_gland_kappa`` (a fraction kappa / (1 + kappa) of the daughters that leave a gland
           jump to the lumen of another gland; default 0), ``cross_gland_lambda`` (the length of the
@@ -400,6 +403,9 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         self._normal_params = {
             "epithelial": (EpithelialCell, p.epithelial or {}),
             "stromal": (StromalCell, p.stromal or {}),
+            # the stromal subtypes beside the fibroblasts: endothelial and perivascular cells
+            "endothelial": (StromalCell, p.stromal or {}),
+            "pvl": (StromalCell, p.stromal or {}),
             "immune": (ImmuneCell, p.immune or {}),
             # the immune subtypes that do not kill: myeloid, and B and plasma cells
             "myeloid": (ImmuneCell, {**(p.immune or {}), "prob_kill": 0.0}),
@@ -549,6 +555,9 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
 
         if self.structure_radius > 0:
             self._seed_structure()
+            # The stromal cells of each deme split into subtypes with the shares of
+            # stromal_composition (default all fibroblasts), from the run's own stream.
+            self.split_stroma(p.spatial.get("stromal_composition"))
         else:
             center = (self.grid_size // 2) * self.grid_size + (self.grid_size // 2)
             self._add(center, self.founder_id, self._n_founder)
@@ -618,7 +627,7 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
         # compartment is absent its fraction is identically zero, so the matching death term can skip
         # the O(#genotypes-in-deme) composition scan — the same optimisation as _has_immune.
         self._has_epithelial = "epithelial" in self.genotypes
-        self._has_stromal = "stromal" in self.genotypes
+        self._has_stromal = any(g in self.genotypes for g in STROMAL_SUBTYPES)
 
         # Germline layer. Applied HERE — after every normal genotype has been registered, so the
         # inherited variants reach the whole tissue and not just the tumour, and before the per-deme

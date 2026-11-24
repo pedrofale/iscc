@@ -70,8 +70,10 @@ def biological_types(genotype_ids):
     """Coarse cell type per cell: cancer, epithelial, stromal, immune or host.
 
     A normal cell's genotype id is its type name, or for an immune cell its subtype (``immune`` for T
-    and NK cells, ``myeloid``, ``bplasma``), which all map to ``immune``; any other id is a cancer
-    clone. [`cell_subtypes`][iscc.integrations.cell_subtypes] keeps the immune subtypes apart.
+    and NK cells, ``myeloid``, ``bplasma``), which all map to ``immune``, or for a stromal cell its
+    subtype (``stromal`` for fibroblasts, ``endothelial``, ``pvl``), which all map to ``stromal``; any
+    other id is a cancer clone. [`cell_subtypes`][iscc.integrations.cell_subtypes] keeps the subtypes
+    apart.
 
     Parameters
     ----------
@@ -83,16 +85,18 @@ def biological_types(genotype_ids):
     numpy.ndarray of str
         One coarse type per cell.
     """
-    from ..constants import IMMUNE_SUBTYPES
+    from ..constants import IMMUNE_SUBTYPES, STROMAL_SUBTYPES
     normals = _normal_ids()
-    return np.array(["immune" if g in IMMUNE_SUBTYPES else g if g in normals else "cancer"
+    return np.array(["immune" if g in IMMUNE_SUBTYPES else "stromal" if g in STROMAL_SUBTYPES
+                     else g if g in normals else "cancer"
                      for g in map(str, genotype_ids)], dtype=object)
 
 
 def cell_subtypes(genotype_ids):
-    """Cell type per cell with the immune cells by subtype: cancer, epithelial, stromal, host, and
-    ``T_NK``, ``myeloid`` or ``B_plasma`` for the immune cells (labels without slashes, so tools such as
-    RCTD and file names take them as they are).
+    """Cell type per cell with the immune and stromal cells by subtype: cancer, epithelial, host,
+    ``T_NK``, ``myeloid`` or ``B_plasma`` for the immune cells and ``fibroblast``, ``endothelial`` or
+    ``PVL`` for the stromal cells (labels without slashes, so tools such as RCTD and file names take
+    them as they are).
 
     Parameters
     ----------
@@ -103,11 +107,12 @@ def cell_subtypes(genotype_ids):
     -------
     numpy.ndarray of str
         One type per cell; the same as [`biological_types`][iscc.integrations.biological_types] except
-        for immune cells.
+        for immune and stromal cells.
     """
-    from ..constants import IMMUNE_SUBTYPES
+    from ..constants import IMMUNE_SUBTYPES, STROMAL_SUBTYPES
+    labels = {**IMMUNE_SUBTYPES, **STROMAL_SUBTYPES}
     coarse = biological_types(genotype_ids)
-    return np.array([IMMUNE_SUBTYPES.get(str(g), c) for g, c in zip(genotype_ids, coarse)], dtype=object)
+    return np.array([labels.get(str(g), c) for g, c in zip(genotype_ids, coarse)], dtype=object)
 
 
 # ------------------------------------------------------------------ uns / value sanitising

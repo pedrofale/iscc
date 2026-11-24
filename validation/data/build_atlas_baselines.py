@@ -17,6 +17,8 @@ counts per cell relative to the luminal epithelium. iscc's types map onto the at
     ``LummHR-*`` (hormone-responsive) and ``Lumsec-*`` (secretory) cells. Basal cells are left out:
     iscc's ductal field has one epithelial type, lining the duct.
   * ``stromal``: fibroblasts.
+  * ``endothelial``: vascular (venous, capillary and arterial) and lymphatic endothelial cells.
+  * ``pvl``: perivascular cells, pericytes and vascular smooth muscle cells.
   * ``immune``: T and NK cells, the cells that kill tumour cells in iscc's immune model.
   * ``myeloid``: macrophages, monocytes, dendritic and mast cells (neutrophils, nearly absent from
     dissociated tissue, are left out).
@@ -33,6 +35,8 @@ Usage::
 
     python validation/data/build_atlas_baselines.py --h5ad <atlas.h5ad> --gmt <h.all...gmt>
     python validation/data/build_atlas_baselines.py --gmt <h.all...gmt>     # the programmes only
+    python validation/data/build_atlas_baselines.py --h5ad <atlas.h5ad> --only endothelial,pvl
+                                                    # those types, the other columns kept as they are
 """
 import argparse
 import gzip
@@ -47,6 +51,8 @@ OUT = os.path.join(HERE, "..", "..", "src", "iscc", "data", "human", "reference"
 TYPES = {
     "epithelial": ("author_cell_type", ("LummHR", "Lumsec")),
     "stromal": ("cell_type", ("fibroblast",)),
+    "endothelial": ("cell_type", ("endothelial cell",)),
+    "pvl": ("cell_type", ("pericyte", "vascular associated smooth muscle cell")),
     "immune": ("cell_type", ("T cell", "natural killer cell", "mature NK T cell")),
     "myeloid": ("cell_type", ("macrophage", "monocyte", "dendritic cell", "myeloid cell", "mast cell")),
     "bplasma": ("cell_type", ("B cell", "plasma cell")),
@@ -71,7 +77,7 @@ def _select(obs, column, patterns):
     return lab.apply(lambda s: any(p in s for p in patterns))
 
 
-def type_profiles(h5ad, genes, chunk=20000):
+def type_profiles(h5ad, genes, chunk=20000, types=None, epithelial_counts=None):
     import anndata as ad
     a = ad.read_h5ad(h5ad, backed="r")
     obs = a.obs
@@ -97,6 +103,8 @@ def type_profiles(h5ad, genes, chunk=20000):
                 taken.add(j)
     prof, rows = {}, []
     for t, (column, patterns) in TYPES.items():
+        if types is not None and t not in types:
+            continue
         sel = np.flatnonzero(_select(obs, column, patterns).to_numpy() & v3.to_numpy())
         acc = np.zeros(len(gene_pos))
         totals = []
@@ -116,7 +124,9 @@ def type_profiles(h5ad, genes, chunk=20000):
                      float(totals.mean())))
     info = pd.DataFrame(rows, columns=["type", "atlas_column", "atlas_labels", "n_cells", "n_donors",
                                        "mean_counts"])
-    info["rna_content"] = info["mean_counts"] / float(info.loc[info.type == "epithelial", "mean_counts"].iat[0])
+    if epithelial_counts is None:
+        epithelial_counts = float(info.loc[info.type == "epithelial", "mean_counts"].iat[0])
+    info["rna_content"] = info["mean_counts"] / epithelial_counts
     n_missing = int((col < 0).sum())
     return pd.DataFrame(prof), info, n_missing
 
@@ -144,12 +154,25 @@ def main():
     ap.add_argument("--h5ad", default=None, help="the atlas; without it the baselines are kept")
     ap.add_argument("--gmt", default=None, help="MSigDB Hallmark GMT; without it the programme table is kept")
     ap.add_argument("--out", default=OUT)
+    ap.add_argument("--only", default=None,
+                    help="comma-separated types to build; the other columns of the tables in --out are kept")
     args = ap.parse_args()
     with gzip.open(os.path.join(args.out, "grch38_2020A_genes.tsv.gz"), "rt") as f:
         genes = pd.read_csv(f, sep="\t")
-    if args.h5ad:
+    if args.h5ad and args.only:
+        only = args.only.split(",")
+        with gzip.open(os.path.join(args.out, "hbca_type_baselines.tsv.gz"), "rt") as f:
+            kept = pd.read_csv(f, sep="\t", dtype={"gene_id": str}, keep_default_na=False)
+        kept_info = pd.read_csv(os.path.join(args.out, "hbca_types.tsv"), sep="\t")
+        epi = float(kept_info.loc[kept_info.type == "epithelial", "mean_counts"].iat[0])
+        prof, info, n_missing = type_profiles(args.h5ad, genes, types=only, epithelial_counts=epi)
+        out = pd.concat([kept.drop(columns=[t for t in only if t in kept]), prof], axis=1)
+        info = pd.concat([kept_info[~kept_info.type.isin(only)], info], ignore_index=True)
+    elif args.h5ad:
         prof, info, n_missing = type_profiles(args.h5ad, genes)
-        out = pd.concat([genes[["gene_id"]], prof], axis=1)
+    if args.h5ad:
+        if not args.only:
+            out = pd.concat([genes[["gene_id"]], prof], axis=1)
         with gzip.open(os.path.join(args.out, "hbca_type_baselines.tsv.gz"), "wt", compresslevel=9) as f:
             out.to_csv(f, sep="\t", index=False, float_format="%.6g")
         info.to_csv(os.path.join(args.out, "hbca_types.tsv"), sep="\t", index=False)

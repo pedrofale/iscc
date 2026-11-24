@@ -70,6 +70,12 @@ spatial_params:
   K_duct: 60
   K_stroma: 30
   stroma_fill_frac: 0.3
+  # the stromal cells split into fibroblasts, endothelial cells and perivascular cells, with the shares of
+  # the stroma of a breast cancer atlas (regime.STROMAL_COMPOSITION)
+  stromal_composition:
+    stromal: 0.335
+    endothelial: 0.388
+    pvl: 0.277
   # immune cells: 6 per stroma deme, none in the ducts, split into T and NK cells (the only ones that kill),
   # myeloid cells and B and plasma cells (regime.IMMUNE_SPATIAL)
   immune_density: 0.2

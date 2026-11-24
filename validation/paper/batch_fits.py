@@ -457,9 +457,12 @@ def stress_score(X, genes_idx):
 
 def recovery_draws(n_patients=N_PATIENTS, sd=RECOVERY_SD, seed=RECOVERY_SEED):
     """Per patient and biological type: expit(logit(default recovery) + N(0, sd^2))."""
+    from iscc.constants import STROMAL_SUBTYPES
     from iscc.sample.dissociation import DEFAULT_RECOVERY
     rng = np.random.default_rng(seed)
-    types = list(DEFAULT_RECOVERY)
+    # the stromal subtypes take the draw of the stroma (merge_recovery), so the draws are those of the
+    # types before the subtypes
+    types = [t for t in DEFAULT_RECOVERY if t == "stromal" or t not in STROMAL_SUBTYPES]
     out = {}
     for p in range(n_patients):
         z = rng.normal(0.0, sd, size=len(types))

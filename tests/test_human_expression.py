@@ -97,7 +97,8 @@ def grown(reference):
 
 def test_packaged_tables():
     tab, info = load_atlas_baselines()
-    assert len(tab) == 36601 and set(tab.columns) == {"epithelial", "stromal", "immune", "myeloid", "bplasma"}
+    assert len(tab) == 36601 and set(tab.columns) == {"epithelial", "stromal", "endothelial", "pvl", "immune",
+                                                      "myeloid", "bplasma"}
     assert np.allclose(tab.sum(axis=0), 1.0, atol=1e-4)
     assert set(info["type"]) == set(tab.columns)
     hp = load_hallmark_programs()

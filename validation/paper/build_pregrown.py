@@ -12,11 +12,14 @@ integration across patients should keep) at the mid scale (grid 96) to 60,000 ca
 Usage:
     python validation/paper/build_pregrown.py grow <out_dir> [name ...] [--scale mid --target 60000]
                                      [--cohort-scale small --cohort-target 8000]
+    python validation/paper/build_pregrown.py split <out_dir> [name ...]
     python validation/paper/build_pregrown.py manifest <out_dir> [--base-url URL]
 
 ``grow`` writes ``<name>.iscc``, a summary ``<name>.json`` and a figure ``<name>.png`` (the tissue
 and the Muller plot) per name; ``--scale`` and ``--target`` grow smaller trial versions. ``manifest``
-writes the checksums of the files in ``<out_dir>`` into ``src/iscc/pregrown/manifest.json``.
+writes the checksums of the files in ``<out_dir>`` into ``src/iscc/pregrown/manifest.json``. ``split``
+gives objects saved before the stromal subtypes the regime's stroma (``regime.STROMAL_COMPOSITION``),
+in place; objects grown since have it from their configuration.
 """
 import argparse
 import functools
@@ -184,6 +187,48 @@ def grow(out_dir, names, scale, target, cohort_scale=COHORT_SCALE, cohort_target
         print(json.dumps(summary), flush=True)
 
 
+def split(out_dir, names):
+    """Split the stroma of saved objects grown before the stromal subtypes, in place.
+
+    The subtypes change the data and not the growth, so each file keeps its tumours: the object is
+    unpickled without rebuilding its per-cell tables, split with the regime's composition and written
+    back under its header, so that a loaded tumour still rebuilds its tables at once."""
+    import lzma
+    import pickle
+    from iscc.tumor import io
+    for name in names:
+        path = os.path.join(out_dir, f"{name}.iscc")
+        if not os.path.exists(path):
+            continue
+        t0 = time.time()
+        header = io.read_header(path)
+        with open(path, "rb") as f:
+            f.readline()
+            f.readline()
+            obj = pickle.loads(lzma.decompress(f.read()))
+        tumours = [t for t in io._tumours(obj) if not {"endothelial", "pvl"} & set(t.genotypes)]
+        for t in tumours:
+            t.split_stroma(RG.STROMAL_COMPOSITION)
+        if not tumours:
+            print(f"{name}: already split", flush=True)
+            continue
+        payload = lzma.compress(pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL), preset=6)
+        del obj
+        with open(path + ".tmp", "wb") as f:
+            f.write(io.MAGIC)
+            f.write(json.dumps({**header, "iscc": io.iscc_version()}).encode() + b"\n")
+            f.write(payload)
+        os.replace(path + ".tmp", path)
+        _check_loads(path, header["kind"])
+        with open(os.path.join(out_dir, f"{name}.json")) as f:
+            summary = json.load(f)
+        summary.update(bytes=os.path.getsize(path), stroma=RG.STROMAL_COMPOSITION)
+        with open(os.path.join(out_dir, f"{name}.json"), "w") as f:
+            json.dump(summary, f, indent=1)
+        print(f"{name}: split {len(tumours)} tumour(s), {os.path.getsize(path):,} bytes, "
+              f"{time.time() - t0:.0f} s", flush=True)
+
+
 def manifest(out_dir, base_url):
     files = {}
     for name in [*TUMOURS, "cohort"]:
@@ -202,7 +247,7 @@ def manifest(out_dir, base_url):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("action", choices=["grow", "manifest"])
+    ap.add_argument("action", choices=["grow", "split", "manifest"])
     ap.add_argument("out_dir")
     ap.add_argument("names", nargs="*")
     ap.add_argument("--scale", default=SCALE)
@@ -214,5 +259,7 @@ if __name__ == "__main__":
     if a.action == "grow":
         grow(a.out_dir, a.names or [*TUMOURS, "cohort"], a.scale, a.target, a.cohort_scale,
              a.cohort_target)
+    elif a.action == "split":
+        split(a.out_dir, a.names or [*TUMOURS, "cohort"])
     else:
         manifest(a.out_dir, a.base_url)
