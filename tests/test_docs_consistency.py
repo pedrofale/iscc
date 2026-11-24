@@ -86,8 +86,9 @@ def test_prose_parameter_claims_match_the_config():
     ok_glands = {s["n_glands"] for s in RR.SCALES.values()}
     ok_genes = {gen["n_segments"] * gen["segment_size"], gen["segment_size"]}
     # Gene counts that are not the simulated genome's: the genes detected in the real 10x breast
-    # section (Shape the data) and the 100-gene window of infercnvpy (the scRNA copy-number tutorial).
-    ok_genes |= {25_062, 100}
+    # section (Shape the data), the 100-gene window of infercnvpy (the scRNA copy-number tutorial) and
+    # the 4,000 highly variable genes of the check in the integration tutorial.
+    ok_genes |= {25_062, 100, 4_000}
 
     checks = [(re.compile(r"grid[ -]?(\d{2,4})", re.I), ok_grid, "grid_size"),
               (re.compile(r"(\d{1,2})\s+(?:ducts|glands)\b", re.I), ok_glands, "n_glands"),
