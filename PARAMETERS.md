@@ -40,6 +40,20 @@ Defaults are those of `notebooks/example_config.yaml`. Set them under the matchi
 | `n_snvs_per_allele` | 0.1 (bare engine 0.5) | ~0.1–3 | **low** → no SNV diversity; **high** → hypermutated genome |
 | `snv_prob` / `cnv_prob` | 0.5 / 0.045 (`cnv_prob` from the ER+ subtype preset; bare engine 0.5 / 0.5) | relative weights of SNV and copy number aberration (CNA) events | all SNV → no CNAs (inferCNV and clonealign examples degrade); all CNA → no SNV phylogeny |
 
+### Genome-wide passengers (`genome_passengers`, top-level, on by default)
+
+The SNVs above fall on the growth genes, a few thousand sites, so at tumor scale the same gene is
+mutated in many lineages. [`PassengerCatalogue`][iscc.tumor.PassengerCatalogue] adds the neutral
+passengers of the whole genome when cells are materialised, each at a site of its own, and bulk WGS
+reports them in `passenger_data`. Growth never reads them.
+
+| Parameter | Default | Valid range | Outside the range |
+|---|---|---|---|
+| `rate` | 2.0 | ≥ 0 passenger SNVs per cell division (healthy tissue about 1.1 to 1.4, tumors higher; Werner et al. 2020) | **0** → no passengers inside clones or on their edges, only the truncal ones; **high** → more subclonal passengers per clade, a denser 1/f tail and a larger `passenger_data` |
+| `truncal` | 1,000 | ≥ 0 passengers carried by the founder | **0** → no clonal cluster at the passenger sites |
+
+`genome_passengers=False` turns the layer off.
+
 ### Growth and survival (`cell_params.cancer`, `deme_params`)
 | Parameter | Default | Valid range | Outside the range |
 |---|---|---|---|

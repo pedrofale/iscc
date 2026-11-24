@@ -798,6 +798,7 @@ class DNABatch:
             self.capture_eff = np.ones(n)
         eff = gc_mult * mappability * self.capture_eff
         m = eff.mean()
+        self._eff_norm = float(m)
         self.efficiency = eff / m if m > 0 else np.ones(n)
         # per-locus effective error (+ FFPE C>T deamination at C-sites)
         err = np.full(n, self.h.error_rate, dtype=float)
@@ -812,14 +813,22 @@ class DNABatch:
         """Draw per-locus coverage via the pluggable depth model (DM default / NB)."""
         return DNA_DEPTH_MODELS[self.h.depth_model](self.rng, weights, N, self.h)
 
+    def locus_efficiency(self, gc, mappability):
+        """The efficiency of further loci of a WGS library under this batch's GC curve, on the
+        scale of the realised loci (mean 1 there). There is no capture term: the further loci are
+        the genome-wide passenger sites, which a WGS library reads with the rest of the genome."""
+        eff = np.exp(-self.gc_strength * (np.asarray(gc, float) - self.gc_opt) ** 2) * np.asarray(mappability, float)
+        return eff / self._eff_norm if self._eff_norm > 0 else np.ones(len(eff))
+
     # -- allele layer ------------------------------------------------------------------
-    def alleles_binomial(self, coverage, true_af):
+    def alleles_binomial(self, coverage, true_af, error=None):
         """BULK allele draw: alt ~ Binomial(coverage, p_eff) with sequencing error.
 
         p_eff = true_af*(1-e) + (1-true_af)*e folds the per-base error in both directions
-        (false alt on ref bases, false ref on alt bases).
+        (false alt on ref bases, false ref on alt bases). ``error`` replaces the per-locus error
+        of the realised loci, for loci beyond them.
         """
-        e = self.error
+        e = self.error if error is None else error
         p = np.clip(np.asarray(true_af) * (1 - e) + (1 - np.asarray(true_af)) * e, 0.0, 1.0)
         return self.rng.binomial(coverage, p)
 

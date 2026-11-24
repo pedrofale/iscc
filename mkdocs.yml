@@ -130,6 +130,7 @@ nav:
       - reference/index.md
       - Tumor:
           - GenotypeTumor: reference/GenotypeTumor.md
+          - PassengerCatalogue: reference/PassengerCatalogue.md
       - Cohort:
           - Cohort: reference/Cohort.md
           - grow_tumor: reference/grow_tumor.md
