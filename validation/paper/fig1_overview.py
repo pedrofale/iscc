@@ -256,9 +256,16 @@ def _halves(t):
     return (rest, part) if DISSOCIATE == "remainder" else (part, rest)
 
 
+def _normal_code(gid):
+    """-1 .. -4 for the normal type of a normal genotype: its subtypes (fibroblasts, endothelial and
+    perivascular cells; T and NK, myeloid, B and plasma cells) are coded as stroma or immune."""
+    from iscc.integrations import biological_types
+    return -1 - NORMALS.index(str(biological_types([gid])[0]))
+
+
 def _code(lab, li):
     """Integer code of a cell's label: the clone index for cancer cells, -1 .. -4 for the normal types."""
-    return li[lab] if lab in li else -1 - NORMALS.index(lab)
+    return li[lab] if lab in li else _normal_code(lab)
 
 
 # --- part: tissue (counts only) ----------------------------------------------------------------------
@@ -618,7 +625,7 @@ def compute_section():
     gid = sec["cell_type"]["cell_id"].astype(str)
     code = {}
     for c, g in gid.items():
-        code[c] = li[cl.of(g)] if (g in t.genotypes and t._is_cancer(g)) else -1 - NORMALS.index(g)
+        code[c] = li[cl.of(g)] if (g in t.genotypes and t._is_cancer(g)) else _normal_code(g)
     del t
     gc.collect()
     vis = Visium(seed=300, **RG.VISIUM).run(sec, grid_side=G)
