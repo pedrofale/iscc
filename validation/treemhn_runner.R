@@ -10,7 +10,7 @@
 # the same parameter as iscc's planted E (a fitness/selection coefficient), so the benchmark scores
 # recovered EDGES, not values.
 #
-# Usage: Rscript treemhn_runner.R <trees.csv> <out_theta.csv> [gamma]
+# Usage: Rscript treemhn_runner.R <trees.csv> <out_theta.csv> [gamma] [seed]
 #   trees.csv columns: Patient_ID, Tree_ID, Node_ID, Mutation_ID, Parent_ID  (Mutation_ID 0 = root)
 
 suppressMessages(library(TreeMHN))
@@ -18,6 +18,7 @@ suppressMessages(library(TreeMHN))
 args <- commandArgs(trailingOnly = TRUE)
 in_csv <- args[1]; out_csv <- args[2]
 gamma <- if (length(args) > 2) as.numeric(args[3]) else 0.5
+seed <- if (length(args) > 3) as.integer(args[4]) else 0L
 
 df <- read.csv(in_csv)
 n <- max(df$Mutation_ID)                       # number of real events (root is 0)
@@ -31,7 +32,18 @@ tree_obj <- input_tree_df(n = n, tree_df = tree_df,
 
 # gamma is TreeMHN's L1 penalty on the off-diagonal -- the knob that decides how many edges it is
 # willing to report. Left at the package default unless overridden.
-Theta <- learn_MHN(tree_obj, gamma = gamma, verbose = FALSE, return_Theta_only = TRUE)
+# learn_MHN starts from a random Theta, so a fit can stop with a non-finite objective ("L-BFGS-B needs
+# finite values of 'fn'"); a failed start is retried from the next seed, up to five (as the paper's
+# tools/treemhn_runner.R does).
+Theta <- NULL; failed <- character(0)
+for (s in seed + 0:4) {
+  set.seed(s)
+  Theta <- tryCatch(learn_MHN(tree_obj, gamma = gamma, verbose = FALSE, return_Theta_only = TRUE),
+                    error = function(e) { failed <<- c(failed, conditionMessage(e)); NULL })
+  if (!is.null(Theta)) break
+}
+if (is.null(Theta)) stop("learn_MHN failed from seeds ", seed, "-", seed + 4, ": ",
+                         paste(unique(failed), collapse = "; "))
 
 rownames(Theta) <- colnames(Theta) <- paste0("E", seq_len(n) - 1)
 write.csv(Theta, out_csv)

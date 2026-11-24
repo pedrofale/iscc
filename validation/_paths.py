@@ -1,4 +1,4 @@
-"""Where the generated figures go.
+"""Where the generated figures go, and where the cluster runs keep their data and tools.
 
 The paper lives in its own repository (`iscc-overleaf`), a sibling of this one inside the iscc
 workspace, so a regenerated figure shows up as a diff in the paper repo instead of a copy step
@@ -10,8 +10,18 @@ Resolution order:
 2. ``../iscc-overleaf`` — the workspace sibling. The normal case.
 3. ``./manuscript`` — the legacy in-repo location, so a bare clone of the public repository still
    runs end to end without the paper repo next to it.
+
+The scripts of ``validation/paper`` that run on a computing cluster read two more locations from
+the environment, through `data_dir` and `tools_dir`, and stop with a message when the variable they
+need is not set:
+
+* ``$ISCC_DATA_DIR`` — the directory that holds the stored runs, job summaries and logs of the
+  paper's figures;
+* ``$ISCC_TOOLS_DIR`` — the directory that holds the container images of the published tools
+  (``<tool>.sif``).
 """
 import os
+import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -37,3 +47,23 @@ def figures_dir():
 def figure_path(name):
     """Absolute path to write the figure `name` to."""
     return os.path.join(figures_dir(), name)
+
+
+def _required_dir(var, holds):
+    """The directory named by the environment variable ``var``; exits with a message when unset."""
+    path = os.environ.get(var)
+    if not path:
+        sys.exit(f"{var} is not set. Set it to the directory that holds {holds}.")
+    return os.path.abspath(os.path.expanduser(path))
+
+
+def data_dir(*parts):
+    """A path under ``$ISCC_DATA_DIR``, the directory of the stored runs, job summaries and logs."""
+    return os.path.join(_required_dir("ISCC_DATA_DIR",
+                                      "the stored runs, job summaries and logs of the paper's figures"),
+                        *parts)
+
+
+def tools_dir():
+    """``$ISCC_TOOLS_DIR``, the directory of the container images of the published tools."""
+    return _required_dir("ISCC_TOOLS_DIR", "the container images of the published tools (<tool>.sif)")

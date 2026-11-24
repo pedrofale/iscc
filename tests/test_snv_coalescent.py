@@ -1,20 +1,20 @@
-"""Coalescent SNV overlay (v1, DESIGN_snv_coalescent.md §9 step 1).
+"""Coalescent SNV overlay.
 
 The count engine coarsens pure-passenger divisions into a per-clone counter (``_pass_load``) instead
 of spawning a genotype each. ``GenotypeTumor._reconstruct_passengers`` re-emits those passengers at
-materialisation. This module tests the v1 "star-at-founding" overlay that REPLACED the old per-cell
-INDEPENDENT reconstruction (which re-drew each cell's passengers from scratch, destroying the
-passenger genealogy) with a LINEAGE-CONSISTENT, allele-resolved one:
+materialisation. This module tests the "star-at-founding" overlay, which is LINEAGE-CONSISTENT and
+allele-resolved — unlike a per-cell INDEPENDENT reconstruction, which re-draws each cell's
+passengers from scratch and destroys the passenger genealogy:
 
   * clade-clonal "stem" passengers born on a clone's edge are shared by its whole subtree, so cells of
     the same clade share passenger SNVs and a passenger-only tree recovers the clone-tree clades;
   * multiplicity is propagated through the exact per-clone allele-specific CN events (WGD / amp / del);
   * the primary output is allele-resolved (``cell_snv_p`` + ``cell_snv_m`` == ``cell_snv``), with the
-    collapsed ``cell_snv`` kept back-compatible in shape/semantics.
+    collapsed ``cell_snv`` keeping its usual shape and semantics.
 
-Acceptance (see the DESIGN §8 validation plan): the headline is driver<->passenger consistency — the
-new overlay's cophenetic correlation (single-cell Hamming distance vs the true lineage distance) is
-MATERIALLY higher than the old independent baseline, which is ~noise for the passenger layer.
+The headline is driver<->passenger consistency — the overlay's cophenetic correlation (single-cell
+Hamming distance vs the true lineage distance) is MATERIALLY higher than the independent baseline,
+which is ~noise for the passenger layer.
 """
 import os
 import sys
@@ -47,10 +47,10 @@ def tumor():
     return _grow_small()
 
 
-# --------------------------------------------------------------------------- baseline (pre-change)
+# --------------------------------------------------------------------------- independent baseline
 def old_independent_reconstruction(t, seed_off=909090):
-    """The pre-change per-cell-INDEPENDENT reconstruction, recomputed on the SAME materialised cells
-    for a fair before/after baseline: each cancer cell draws ``Poisson(load/count)`` neutral sites at
+    """A per-cell-INDEPENDENT reconstruction, computed on the SAME materialised cells for a fair
+    baseline: each cancer cell draws ``Poisson(load/count)`` neutral sites at
     VAF ``1/cn``, on top of the exact clonal genome (``get_snvs``)."""
     cd = t.cell_data
     types = cd["cell_type"]["cell_id"].astype(str).values
@@ -84,7 +84,7 @@ def old_independent_reconstruction(t, seed_off=909090):
 
 def cophenetic_r(t, snv, n=250, seed=0, cols=None):
     """Pearson r between observed neutral-site Hamming distance and true lineage (LCA) distance over a
-    random sample of cancer cells — the DESIGN §8 "cophenetic jump" metric (as in the phylo probe)."""
+    random sample of cancer cells — the "cophenetic jump" metric."""
     from scipy.stats import pearsonr
     cd = t.cell_data
     types = cd["cell_type"]["cell_id"].astype(str).values
@@ -142,7 +142,7 @@ def test_overlay_is_reproducible():
 
 def test_fallback_is_byte_identical_with_coarsening_off():
     """With coarsening OFF the overlay is a no-op: no allele frames are added and cell_snv is exactly
-    the stacked exact-genome VAFs (the untouched pre-change path)."""
+    the stacked exact-genome VAFs."""
     t = GenotypeTumor(seed=5, genome_params={"n_segments": 3, "segment_size": 30},
                       selection_params={"prop_driver": 0.1, "prop_dispersal": 0.1},
                       cancer_cell_params={"division_rate": 0.6, "death_rate": 0.1,
@@ -161,7 +161,7 @@ def test_fallback_is_byte_identical_with_coarsening_off():
 
 def test_multiplicity_is_not_all_one_under_wgd(tumor):
     """On a WGD tumour some passenger sites sit at multiplicity >= 2 (pre-WGD / amplified) rather than
-    all at 1 — recovering the mutation-timing signal the flat ``1/cn`` placeholder destroyed."""
+    all at 1 — recovering the mutation-timing signal a flat ``1/cn`` placement would destroy."""
     cd = tumor.cell_data
     types = cd["cell_type"]["cell_id"].astype(str).values
     is_can = np.array([tumor._is_cancer(g) for g in types])
@@ -177,14 +177,14 @@ def test_multiplicity_is_not_all_one_under_wgd(tumor):
 
 
 def test_driver_passenger_consistency_headline(tumor):
-    """HEADLINE (DESIGN §6 invariant): a tree built from the reconstructed passenger SNVs recovers the
-    true clone-tree structure. Quantified as the cophenetic correlation between single-cell Hamming
-    distance and the true lineage distance — the NEW lineage-consistent overlay is MATERIALLY higher
-    than the OLD per-cell-independent baseline (which carries only the sparse clonal-genome signal)."""
+    """HEADLINE: a tree built from the reconstructed passenger SNVs recovers the true clone-tree
+    structure. Quantified as the cophenetic correlation between single-cell Hamming distance and the
+    true lineage distance — the lineage-consistent overlay beats the per-cell-independent baseline
+    (which carries only the sparse clonal-genome signal)."""
     new = tumor.cell_data["cell_snv"].values
     old = old_independent_reconstruction(tumor)
 
-    # Compare on SUBCLONAL neutral sites only. The founding patch now sweeps a truncal layer into the
+    # Compare on SUBCLONAL neutral sites only. The founding patch sweeps a truncal layer into the
     # genome itself, and the baseline is rebuilt from that same genome, so both arms inherit it — a
     # whole-genome comparison mostly measures the trunk and says nothing about the overlay. Masking the
     # near-clonal sites isolates the subclonal passengers, which are the overlay's actual job.
@@ -201,18 +201,15 @@ def test_driver_passenger_consistency_headline(tumor):
     assert r_new > 0.7, f"absolute clade recovery too low: {r_new:.3f}"
     assert r_new > r_old, f"overlay did worse than an independent draw: new={r_new:.3f} old={r_old:.3f}"
 
-    # NOTE: this used to demand a fixed +0.15 margin over the baseline. That is no longer a meaningful
-    # assertion. The founding patch now sweeps a truncal layer into the genome, the baseline is rebuilt
-    # from that same genome, and how much trunk forms varies from tumour to tumour — so the margin
-    # measures the size of the trunk, not the quality of the overlay. Measured over five seeds it ranged
-    # 0.041 to 0.533 (mean 0.213). A fixed threshold on that is a coin toss; the two assertions above
-    # hold on every seed.
+    # No fixed margin over the baseline: how much trunk forms varies from tumour to tumour, so the
+    # margin measures the size of the trunk, not the quality of the overlay (over five seeds it ranged
+    # 0.041 to 0.533). The two assertions above hold on every seed.
 
 
 @pytest.mark.skipif(not RUN_SLOW, reason="slow cm-ish verification; set ISCC_RUN_SLOW=1 to run")
 def test_cophenetic_jump_at_scale():
     """The cophenetic jump persists at a larger (mid) scale, where the passenger layer dominates the
-    signal and the old independent draw is close to noise."""
+    signal and the independent draw is close to noise."""
     t = RR.grow_realistic(seed=3, target_cancer=20000, scale="mid", coarsen=True,
                           cancer={"mutation_rate": 0.6, "n_snvs_per_allele": 0.1, "wgd_rate": 0.05},
                           materialise=True, max_cells=12000)

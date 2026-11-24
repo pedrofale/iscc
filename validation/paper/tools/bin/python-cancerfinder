@@ -1,0 +1,4 @@
+#!/bin/bash
+# Python of Cancer-Finder's environment (torch 1.13 CPU); its code is at /opt/cancerfinder.
+# Point the matching ISCC_*_RSCRIPT / ISCC_*_PYTHON variable at this file; ISCC_TOOLS_DIR holds the images.
+exec apptainer exec --cleanenv -B /nobackup  "${ISCC_TOOLS_DIR:?set ISCC_TOOLS_DIR to the directory of the tool images}/py-tools.sif" /opt/envs/cancerfinder/bin/python "$@"

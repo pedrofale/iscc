@@ -1,12 +1,11 @@
-"""Metastasis module (R9): a second, clonally-linked deme-grid (the metastatic deposit) reached from
+"""Metastasis module: a second, clonally-linked deme-grid (the metastatic deposit) reached from
 the primary by an invasion-gated migration operator, plus per-site treatment, surgical resection, and
 the two-compartment views.
 
-Design docs: the metastasis plan (2-band Muller + two-grid plot_grid), building on the ductal field
-(DESIGN_ductal_field.md) and compartment selection (DESIGN_phenotype_plasticity.md). COUNT engine only.
+Builds on the ductal field and compartment selection. COUNT engine only.
 
 Covered here:
-  * OFF-by-default -> byte-identical: the met_survival axis is inert at prop 0, and an ENABLED-but-inert
+  * off by default -> byte-identical: the met_survival axis is inert at prop 0, and an ENABLED-but-inert
     met (met_grid_size>0, met_seed_kappa=0, met_hazard=0) leaves the primary cancer growth byte-identical
     (exact + tau) — the appended host-only demes carry zero event rate.
   * met_survival is a real, sequenceable heritable axis (gene counts + per-genotype trait surface).
@@ -274,9 +273,16 @@ def _normal_count(t, lo=0, hi=None):
     return sum(c for i in range(lo, hi) for g, c in t.demes[i].items() if g in normal_names)
 
 
-def test_chemo_toxicity_kills_normal_tissue():
+def _no_eviction(monkeypatch):
+    """Births never displace residents, so normal cells change only by the drug's toxicity."""
+    monkeypatch.setattr(GenotypeTumor, "_evict", lambda self, deme_idx, n, rng: 0)
+    monkeypatch.setattr(GenotypeTumor, "_n_evictable", lambda self, deme_idx: 0)
+
+
+def test_chemo_toxicity_kills_normal_tissue(monkeypatch):
     """Systemic chemo's toxicity removes off-target normal cells; without treatment the static normals
-    are unchanged (so the loss is the drug's, not drift)."""
+    are unchanged (so the loss is the drug's, not drift). Eviction is switched off for the check."""
+    _no_eviction(monkeypatch)
     t = _grow_to_met(_build({**SPATIAL, **MET}))
     n0 = _normal_count(t)
     t.grow(4, seed=t.seed)                                    # untreated -> normals static
@@ -286,8 +292,9 @@ def test_chemo_toxicity_kills_normal_tissue():
     assert _normal_count(t) < n0
 
 
-def test_toxicity_gated_to_treated_compartment():
+def test_toxicity_gated_to_treated_compartment(monkeypatch):
     """Chemo sites='met' kills the met's host tissue but spares primary normal tissue."""
+    _no_eviction(monkeypatch)
     t = _grow_to_met(_build({**SPATIAL, **MET}))
     p0 = _normal_count(t, 0, t.n_primary_demes)
     m0 = _normal_count(t, t.n_primary_demes)
@@ -358,7 +365,7 @@ def test_clone_grid_series_renders(met_tumor):
 
 def test_stage_dominant_coloring(met_tumor):
     """The stage-dominant-driver colouring maps each cancer clone to its highest arc stage and renders
-    on the Muller + grids on one categorical palette (todo #14)."""
+    on the Muller + grids on one categorical palette."""
     import matplotlib
     matplotlib.use("Agg")
     from iscc.tumor import viz
@@ -386,3 +393,30 @@ def test_clone_tree_renders(met_tumor):
     # empty degrades gracefully
     ax3 = viz.plot_clone_tree([{"genotypes_counts": {}}], {}, min_freq=0.1)
     assert ax3 is not None
+
+
+def test_o2_field_solved_per_lattice():
+    """The hypoxia field with the met lattice on: primary and met demes are not one grid, so each
+    lattice gets its own field — one value per deme, and the primary block equals the field solved on
+    the primary lattice alone."""
+    t = _grow_to_met(_build({**SPATIAL, **MET}), target=5)
+    G, n = t.grid_size, t.n_primary_demes
+    for source in ("uniform", "perfused"):
+        h = t._o2_field(source=source)
+        assert h.shape == (len(t.demes),) and (h >= 0).all() and (h <= 1).all()
+        dens = t._deme_density()[:n].reshape(G, G)
+        perf = np.clip(1.0 - t._emitter_density("cancer")[:n], 0.0, 1.0).reshape(G, G)
+        supply = 0.2 * perf if source == "perfused" else 0.2
+        np.testing.assert_array_equal(h[:n], t._o2_relax(dens, supply, G, 1.0, 1.0, 500, 1e-5))
+
+
+def test_phylogeny_ends_the_branches_with_the_sites_of_their_cells(met_tumor):
+    """The clones whose cells are at the metastatic site end in its colour, named in the legend."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import to_rgb
+    ax = met_tumor.plot_phylogeny(min_freq=0.03)
+    assert "at the metastatic site" in [x.get_text() for x in ax.get_legend().get_texts()]
+    assert any(np.allclose(p.get_facecolor()[:3], to_rgb("#2ca02c")) for p in ax.patches)
+    plt.close("all")

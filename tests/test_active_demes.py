@@ -1,12 +1,11 @@
 """The cancer-occupied deme index that keeps a tau substep O(occupied demes).
 
-A tau substep used to walk all ``grid_size**2`` demes and pay a composition scan for each of them.
-In the ductal field every deme is non-empty (it is pre-filled with normal tissue), so that scan was
-paid whatever the lesion's size — and a lesion still confined to its founding acinus paid all 28,900
-of them at grid 170 to advance a single occupied deme. ``_active_demes`` iterates the demes that can
-actually draw an event instead.
+In the ductal field every deme is non-empty (it is pre-filled with normal tissue), so walking all
+``grid_size**2`` demes would pay a composition scan per deme whatever the lesion's size — 28,900 of
+them at grid 170 to advance a lesion still confined to one acinus. ``_active_demes`` iterates only
+the demes that can draw an event.
 
-That is a PERFORMANCE change and nothing else, so the tests below pin both halves of it: the index
+The narrowing must not change the tumour, so the tests below pin both halves of it: the index
 (``_deme_cancer_n``) stays exactly in step with the demes through births, deaths and resection, and
 a tumour grown through the narrowed loop is identical cell for cell to one grown through the full
 range.
@@ -87,7 +86,7 @@ def test_index_matches_the_demes_through_growth(gens):
 
 
 def test_index_survives_the_lottery_crowding_law():
-    T = advance(make(deme=dict(crowding_mode="lottery")), 25)
+    T = advance(make(deme=dict(crowding_mode="lottery", crowding_law="noble")), 25)
     assert T._deme_cancer_n == recomputed(T)
 
 
@@ -148,8 +147,8 @@ def test_active_demes_falls_back_to_every_deme_under_therapy():
 def test_narrowing_the_loop_does_not_change_the_trajectory(confinement, monkeypatch):
     """The skipped demes draw no rng and change no state, so a tumour grown through the narrowed
     loop has to be identical — cell for cell — to one grown through the full range. Checked with
-    confinement OFF and ON: confined growth is the case the narrowing was built for (one occupied
-    deme out of thousands), and it must not buy its speed with a different tumour."""
+    confinement OFF and ON: confined growth is where the narrowing matters most (one occupied deme
+    out of thousands), and it must not buy its speed with a different tumour."""
     narrowed = advance(make(confinement=confinement), 60)
     monkeypatch.setattr(GenotypeTumor, "_active_demes", lambda self: range(len(self.demes)))
     full = advance(make(confinement=confinement), 60)

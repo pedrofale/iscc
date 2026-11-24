@@ -1,4 +1,4 @@
-"""F1 biopsy tests: spatial geometry, multi-region heterogeneity, liquid bias."""
+"""Biopsy tests: spatial geometry, multi-region heterogeneity, liquid bias."""
 import os
 
 import numpy as np

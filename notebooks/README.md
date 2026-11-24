@@ -1,81 +1,32 @@
-# iscc example notebooks
+# iscc tutorials
 
-The notebooks published under **Tutorials** on the docs site, in three groups: how the simulator
-works, what data it emits, and what real analysis tools do with that data.
+The notebooks published under **Tutorials** on the docs site.
+`docs/tutorials/*.ipynb` are symlinks to this folder, so editing here edits the site.
+Every notebook is committed with its outputs; re-execute one with `jupyter nbconvert --execute --inplace`.
 
-`docs/tutorials/*.ipynb` are symlinks to this folder, so editing here is editing the site. Every
-notebook is committed **with its outputs** — re-execute with `jupyter nbconvert --execute --inplace`
-and then run `python scripts/clean_notebook_outputs.py notebooks/*.ipynb` to drop progress-bar noise.
+## Using iscc
 
-## Overview
+- **`01_quickstart.ipynb`**: one tumor and its four data sets in a few calls, and the ground truth (clones, genealogy, copy number, cell types, niches).
+- **`02_shape_the_tumor.ipynb`**: what each part of the configuration does to the tumor (selection, mutation, tissue architecture, niche selection, the metastatic site, treatment), shown by contrasting runs.
+- **`03_shape_the_data.ipynb`**: the assays and their technology presets, the measurement biases, fitting the assay parameters to a real data set, and batches.
+- **`04_cohort.ipynb`**: many patients over one configuration, pooled into sequencing batches, with the ground truth across patients.
+- **`05_simulated_next_to_real.ipynb`**: the data of `iscc` next to the real data they stand for, a breast tumor in scRNA-seq (Wu et al. 2021) and a breast cancer section in Visium, by cell type, marker genes, composition and depth.
 
-- **`01_pipeline_walkthrough.ipynb`** — one tumour, end to end: grow → sample → assay → inspect,
-  with the Python API and the equivalent CLI (`isccsim`/`isccsample`/`isccdata`).
+## Analysis tools
 
-## Tumor evolution
+One notebook per main use case, each running one standard tool as its documentation shows and scoring it against the ground truth.
+Each tool runs in its own conda environment (`iscc-<tool>`), never in the environment of `iscc`.
 
-- **`02_tumor_growth.ipynb`** — the tumour itself: spatial structure, the CINner-style selection
-  model, clonal dynamics.
-- **`base_simulation.ipynb`** — the shared multi-focal DCIS→IDC lesion on a ductal field that the
-  science notebooks are built on, and the ground-truth matrices each one reads.
-- **`compartment_selection_confound.ipynb`** — the DCIS→IDC transition (a lumen founder confined by
-  the gland wall + stroma until escape traits evolve) and the **genetic-vs-niche** expression
-  confound.
-- **`treatment_escape_modes.ipynb`** — the four routes to therapy escape (Kane & Maley), all
-  reproduced on one treatment model.
-- **`metastasis.ipynb`** — seeding, dormancy and outgrowth at a distant site.
+- **`tool_ascat_pyclonevi.ipynb`**: purity, ploidy and allele-specific copy number from bulk WGS with ASCAT, then clones with PyClone-VI.
+- **`tool_hmmcopy.ipynb`**: copy number from single-cell DNA with HMMcopy at the settings of the DLP+ pipeline.
+- **`tool_clonealign.ipynb`**: matching scRNA cells to the clones of the scDNA with clonealign.
+- **`tool_scrna_cnv.ipynb`**: copy number and malignancy from scRNA with inferCNV (infercnvpy).
+- **`tool_rctd.ipynb`**: cell-type deconvolution of Visium spots with RCTD.
+- **`tool_integration.ipynb`**: batch integration of a cohort with Harmony and scVI.
 
-## Data generation
+## Configuration
 
-Per-modality demos of the assay layer's realism (counts/coverage, and how parameters are fit to real
-references). Generated from the matching `_build_*.py` scripts.
+- **`tutorial_config.yaml`**: the configuration the tutorials grow from, the paper's regime at its sweep scale (a 96 by 96 field) with its immune variant (T and NK, myeloid and B and plasma cells in the stroma, the T and NK cells killing) and a stroma of fibroblasts, endothelial cells and perivascular cells, without the metastatic site or treatment.
+- **`example_config.yaml`**: the base configuration of the paper's regime, which `validation/realistic_regime.py` reads.
 
-- **`assay_dna.ipynb`** — bulk + single-cell DNA: copy-number-dependent and GC-biased coverage, het
-  allele-fraction spread with allelic dropout, `estimate_dna` round-trips.
-- **`assay_scrna.ipynb`** — scRNA counts: variable library size, negative-binomial overdispersion,
-  dropout, batch/technical effects.
-- **`assay_spatial.ipynb`** — 10x Visium: per-spot aggregation, spatial autocorrelation,
-  `estimate_visium` fit to a real section.
-- **`reads.ipynb`** — read-level output: per-cell reference → coverage budget → the shared variant
-  seam → FASTQ/BAM (DWGSIM/ART), degrading gracefully without the binaries.
-
-## Data analysis examples
-
-Each of these runs a **real, published tool** on `iscc` output and scores it against ground truth the
-tool never sees. Two rules hold throughout:
-
-1. **No simulation in the notebook.** The datasets are generated once by
-   `python validation/make_analysis_data.py` into `analysis_data/<tool>/` (git-ignored). The
-   notebook loads files; `r_preamble.R`'s `analysis_dir()` errors with the regeneration command if
-   they are missing.
-2. **No subprocesses.** Each notebook runs in the tool's *own* kernel — `R (iscc-clonealign)`,
-   `Python (iscc-scdef)`, and so on — so the fitted object is inspectable and the tool's own
-   plotting functions work. Plots come from the tool wherever the tool ships one; hand-drawn figures
-   are only for scoring against `iscc` truth, which no tool ships a plotter for.
-
-- **`analysis_ground_truth.ipynb`** — the shared analysis dataset and everything `iscc` knows about
-  it, including the true clone phylogeny. The other notebooks reference it.
-- **`tool_clonealign_R.ipynb`** — clonealign: assign scRNA cells to scDNA copy-number clones.
-- **`tool_numbat_R.ipynb`** — Numbat: call copy number from scRNA with an allele layer.
-- **`tool_hmmcopy_R.ipynb`** — HMMcopy: call copy number from single-cell read depth; feeds clonealign.
-- **`tool_scite_trees.ipynb`** — SCITE: reconstruct the mutation tree from single-cell genotypes.
-- **`tool_pyclonevi.ipynb`** — PyClone-VI: clonal clusters and cancer-cell fractions from bulk DNA.
-- **`tool_rctd_R.ipynb`** — RCTD: deconvolve Visium spots against an scRNA reference.
-- **`tool_treemhn_R.ipynb`** — TreeMHN: recover planted precedence constraints from mutation trees.
-- **`tool_mhn_bulk.ipynb`** — MHN: the same cohort read cross-sectionally, order discarded.
-- **`tool_scdef_cohort.ipynb`** — scDEF: recover programs shared across a five-patient cohort
-  despite batch effects.
-
-## Shared example data
-
-`01` and `02` read a small shared dataset under `example_out/` (git-ignored), produced by:
-
-```bash
-python notebooks/generate_example.py          # ~2s; skips if already present
-python notebooks/generate_example.py --force  # regenerate
-```
-
-The notebooks regenerate it automatically on first run if it is missing. `example_config.yaml` is
-the small tumour config they share.
-
-The production-tool benchmarks these examples point to live under `validation/`.
+`archive/` holds the notebooks of earlier releases, which are no longer published.

@@ -208,14 +208,46 @@ def tree_balance(tumor):
     return tree_balance_j1(parents, sizes)
 
 
-def mode_indices(tumor):
+def detect_combinations(combos, detection):
+    """Driver combinations as sequencing at a ``detection`` limit sees them.
+
+    Drivers carried by fewer than ``detection`` of the cancer cells are removed from every
+    combination, and combinations that become identical are merged. A clone whose frequency,
+    with its descendants, is below the limit thus merges with its parent, as in Noble et al.
+    (2022), whose main comparison with multi-region data uses a 5% limit.
+    """
+    total = sum(combos.values())
+    if detection <= 0 or total == 0:
+        return dict(combos)
+    freq = {}
+    for combo, cnt in combos.items():
+        for d in combo:
+            freq[d] = freq.get(d, 0) + cnt
+    seen = {d for d, c in freq.items() if c / total >= detection}
+    out = {}
+    for combo, cnt in combos.items():
+        key = frozenset(d for d in combo if d in seen)
+        out[key] = out.get(key, 0) + cnt
+    return out
+
+
+def mode_indices(tumor, detection=0.0):
     """Noble ``(n, D, J1)`` evolutionary-mode indices, plus the clone count, in one pass.
 
     Returns ``dict(n=..., D=..., J1=..., n_clones=...)`` over the tumour's *cancer* population.
     With no cancer cells everything is ``nan`` (``n_clones`` ``0``); ``J1`` is also ``nan`` when
     the clone phylogeny has no branching (a single clone), where tree balance is undefined.
+
+    Parameters
+    ----------
+    tumor : GenotypeTumor
+        A grown tumour.
+    detection : float, default 0.0
+        Detection limit as a fraction of cancer cells. Drivers below it are removed before ``n``,
+        ``D`` and ``n_clones`` are computed (see :func:`detect_combinations`); 0 keeps the full
+        census. ``J1`` is always computed on the full clone tree.
     """
-    combos = driver_combination_counts(tumor)
+    combos = detect_combinations(driver_combination_counts(tumor), detection)
     total = sum(combos.values())
     if total == 0:
         return dict(n=float("nan"), D=float("nan"), J1=float("nan"), n_clones=0)

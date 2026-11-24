@@ -75,10 +75,10 @@ class TestTapestriReducer:
         cov, alt, cn, het = B.reduce_tapestri(dp, af, ngt, var_amplicon, amplicon_reads, amplicon_ids)
         assert cov.shape == alt.shape == cn.shape == het.shape == (4, 3)
         assert alt[0, 0] == 20 and alt[0, 2] == 60                       # round(50/100*40), 100/100*60
-        # het is now a GERMLINE-het LOCUS mask (not per-cell NGT==1): var0 is het in all cells
-        # (balanced BAF) -> germline; var1/var2 are not -> excluded. For cell0 that still reads
-        # [T,F,F], but the difference is that germline loci are marked over DROPOUT cells too
-        # (see TestGermlineHetMask).
+        # het is a GERMLINE-het LOCUS mask (not per-cell NGT==1): var0 is het in all cells
+        # (balanced BAF) -> germline; var1/var2 are not -> excluded. For cell0 that reads
+        # [T,F,F] either way; the difference is that germline loci are marked over DROPOUT cells
+        # too (see TestGermlineHetMask).
         assert het.tolist()[0] == [True, False, False]
         # missing genotype (cell1, var1) -> zero coverage so it drops out of fits
         assert cov[1, 1] == 0 and alt[1, 1] == 0
@@ -86,9 +86,9 @@ class TestTapestriReducer:
 
 
 class TestGermlineHetMask:
-    """ADO fix: het is a germline-het LOCUS mask broadcast over covered cells, so the dropout cells
-    (genotyped homozygous) are visible to the ADO estimator — the per-cell NGT==1 mask hid them,
-    collapsing the Tapestri ADO fit to ~0."""
+    """het is a germline-het LOCUS mask broadcast over covered cells, so the dropout cells
+    (genotyped homozygous) are visible to the ADO estimator — a per-cell NGT==1 mask would hide
+    them and collapse the Tapestri ADO fit to ~0."""
 
     def test_germline_locus_marked_over_dropout_cells(self):
         cov = np.full((10, 2), 30)

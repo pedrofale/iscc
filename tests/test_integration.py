@@ -27,13 +27,13 @@ import integration_common as C  # noqa: E402
 # A small, fast, deterministic tumour: a few segments so distinct CNAs accumulate, a normal
 # compartment (structure_radius>0) for the inferCNV reference, grown just long enough for subclones.
 GENOME = {"n_segments": 6, "segment_size": 40}
-# Real per-deme crowding (DESIGN_crowding.md) caps demes near K, so the cancer spreads across the
+# Per-deme crowding caps demes near K, so the cancer spreads across the
 # gland rather than piling up; grow a larger gland (bigger grid/duct + K + steps) so each clone holds
 # enough cells for scDNA to recover its consensus copy number cleanly.
 SPATIAL = {"grid_size": 18, "structure_radius": 5}
 DEME = {"carrying_capacity": 15, "initial_cancer_cells": 4}
 CANCER = {"division_rate": 0.6, "death_rate": 0.03, "max_birth_rate": 0.98,
-          "mutation_rate": 1.2, "dispersal_rate": 0.5}
+          "mutation_rate": 1.0, "dispersal_rate": 0.5}
 
 
 @pytest.fixture(scope="module")
@@ -125,12 +125,17 @@ class TestInferCNVReal:
 
 
 # ==================================================================================================
-# Numbat (allele-aware CNA-from-expression) — demo 2
+# Numbat (allele-aware CNA-from-expression)
 # --------------------------------------------------------------------------------------------------
 @pytest.fixture(scope="module")
 def allele_tumor():
-    # the same small gland, grown with the R13 allele layer ON so cell_rna_baf exists for Numbat
-    return C.grow_tumor_alleles(seed=0, steps=650, genome=GENOME, spatial=SPATIAL, deme=DEME,
+    # the same small gland, grown with the allele layer ON so cell_rna_baf exists for Numbat. The
+    # founding acinus stays closed for 15 generations, as in the paper regime, so the tumour has a
+    # truncal copy-number layer: without it, a gland this small is a mosaic of subclones whose
+    # alterations average out in Numbat's pseudobulk, and Numbat calls nothing on most seeds.
+    spatial = dict(SPATIAL, origin_confinement={"dispersal_factor": 0.0, "established_at": 0.5,
+                                                "generations": 15, "clock": "generations"})
+    return C.grow_tumor_alleles(seed=0, steps=2500, genome=GENOME, spatial=spatial, deme=DEME,
                                 cancer=dict(CANCER, cnv_prob=0.6, snv_prob=0.4))
 
 
@@ -144,21 +149,24 @@ def numbat_bundle(allele_tumor):
 
 class TestNumbatDataGen:
     def test_allele_layer_materialises(self, allele_tumor):
-        assert "cell_rna_baf" in allele_tumor.cell_data          # R13 allele layer is on
+        assert "cell_rna_baf" in allele_tumor.cell_data          # allele layer is on
         assert "cell_exp_p" in allele_tumor.cell_data and "cell_exp_m" in allele_tumor.cell_data
 
     def test_emergent_allelic_imbalance_tracks_cnas(self, allele_tumor):
-        # the signal Numbat exploits: BAF deviates from 0.5 exactly where copy number is altered,
-        # and NOT (much) where it is balanced — an emergent, non-imposed consequence of dosage.
-        # Use PER-CELL copy number (a gene altered in one clone only is balanced on the cancer average
-        # but altered in that clone's cells, so a cell-averaged mask contaminates the balanced set).
+        # the signal Numbat exploits: BAF deviates from 0.5 exactly where the two homologs differ in
+        # copy number, and NOT (much) where they are balanced — an emergent, non-imposed consequence
+        # of dosage. Use PER-CELL allele-specific copy number: a gene altered in one clone only is
+        # balanced on the cancer average but not in that clone's cells, and a total of 2 can be a
+        # copy-neutral LOH (2+0), so neither a cell-averaged nor a total-copy-number mask is clean.
         types = C.cell_types(allele_tumor)
-        cnv = allele_tumor.cell_data["cell_cnv"].values
         baf = allele_tumor.cell_data["cell_rna_baf"].values
-        cancer = types == "cancer"
-        cn_c = cnv[cancer]
-        baf_c = np.abs(baf[cancer] - 0.5)
-        altered = np.abs(cn_c - 2.0) > 0.5                       # per (cell, gene)
+        acn = C.segment_allele_cn(allele_tumor)
+        _, gene_seg = C.segment_cn(allele_tumor)
+        cells = list(allele_tumor.cell_data["cell_type"].index)
+        rows = [i for i, c in enumerate(cells) if types[i] == "cancer" and acn.get(c) is not None]
+        imbalanced_seg = np.stack([acn[cells[i]][:, 0] != acn[cells[i]][:, 1] for i in rows])
+        altered = imbalanced_seg[:, gene_seg]                    # per (cell, gene)
+        baf_c = np.abs(baf[rows] - 0.5)
         assert altered.sum() > 0
         dev_alt = baf_c[altered].mean()
         dev_bal = baf_c[~altered].mean()

@@ -285,7 +285,7 @@ def grow_and_score(label, seed=3, scale="small", target_cancer=None, materialise
     per configuration::
 
         rows = [grow_and_score("shipped"),
-                grow_and_score("fixed crowding", deme={"crowding_mode": "fixed"})]
+                grow_and_score("low dispersal", cancer={"dispersal_rate": 0.1})]
         print(summarise(rows))
 
     ``target_cancer`` defaults per scale (see :data:`DEFAULT_TARGET`). ``materialise`` is off because

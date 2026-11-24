@@ -1,4 +1,4 @@
-"""Real-genome mode + per-arm selection (M3b, DESIGN_inference A.5).
+"""Real-genome mode + per-arm selection.
 
 Unit tests for the engine generalization (variable segment sizes, per-arm copy-number selection),
 the GenomeSpec wiring, the per-arm summary, and a tiny end-to-end ABC on a toy arm genome. The
@@ -41,7 +41,7 @@ def test_variable_segment_sizes_genome_shape():
 
 
 def test_uniform_default_matches_scalar():
-    # segment_sizes=None must reproduce the uniform scalar behaviour (abstract mode unchanged).
+    # segment_sizes=None must reproduce the uniform scalar behaviour (the abstract mode).
     c = CancerCell(n_segments=3, segment_size=5)
     assert c.segment_sizes == [5, 5, 5]
     assert c.n_genes == 15
@@ -153,7 +153,7 @@ def test_real_genome_tumor_runs_with_wgd():
                             "mutation_rate": 0.4, "dispersal_rate": 0.2,
                             "snv_prob": 0.0, "cnv_prob": 1.0, "n_snvs_per_allele": 1, "amp_prob": 0.5,
                             "wgd_rate": 0.1},
-        deme_params={"carrying_capacity": 8, "maximum_death_rate": 0.5},
+        deme_params={"carrying_capacity": 8, "maximum_death_rate": 1.0},
         spatial_params={"grid_size": 10, "structure_radius": 0, "immune_density": 0.0},
     )
     t.grow(n_steps=400, seed=3)
@@ -195,7 +195,7 @@ def test_real_genome_tumor_runs_and_responds():
         cancer_cell_params={"max_birth_rate": 0.95, "division_rate": 0.4, "death_rate": 0.02,
                             "mutation_rate": 0.4, "dispersal_rate": 0.2,
                             "snv_prob": 0.0, "cnv_prob": 1.0, "n_snvs_per_allele": 1, "amp_prob": 0.5},
-        deme_params={"carrying_capacity": 8, "maximum_death_rate": 0.5},
+        deme_params={"carrying_capacity": 8, "maximum_death_rate": 1.0},
         spatial_params={"grid_size": 10, "structure_radius": 0, "immune_density": 0.0},
     )
     t.grow(n_steps=900, seed=3)
@@ -229,7 +229,7 @@ def test_simulator_callable_returns_cohort_frequencies():
     assert ((v >= 0) & (v <= 1)).all()             # frequencies in [0, 1]
 
 
-# --- pooled per-arm regressor (the M3b estimator), on synthetic data --------
+# --- pooled per-arm regressor (the real-genome estimator), on synthetic data
 def test_per_arm_regressor_recovers_monotone_map():
     # synthetic reference where gain rises and loss falls with s (the engine's qualitative law);
     # the pooled regressor must recover s from (gain, loss) and respect the direction.

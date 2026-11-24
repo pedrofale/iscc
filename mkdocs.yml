@@ -7,9 +7,8 @@ repo_name: pedrofale/iscc
 edit_uri: edit/dev/docs/
 docs_dir: docs
 
-# Not published yet (kept in docs/ to finish privately): the Guide pages (parameters/schema).
+# Not published yet (kept in docs/ to finish privately): the output schema page.
 exclude_docs: |
-  parameters.md
   schema.md
 
 theme:
@@ -88,7 +87,7 @@ plugins:
           options:
             docstring_style: numpy   # the codebase documents params NumPy-style (Parameters\n----------)
             docstring_options:
-              # Several public classes (treatments, GlandularTumor) intentionally forward
+              # Several public classes (the treatments) intentionally forward
               # constructor args through **kwargs to a base class; we still document those
               # params on the subclass page, so don't warn that they aren't literal signature params.
               warn_unknown_params: false
@@ -96,7 +95,7 @@ plugins:
             show_root_full_path: true   # show the full call path, e.g. iscc.data.scDNA
             show_bases: true
             show_source: false
-            inherited_members: true   # e.g. GlandularTumor's API lives on the shared Tumor base
+            inherited_members: true
             merge_init_into_class: true
             docstring_section_style: table
             separate_signature: true
@@ -113,37 +112,38 @@ nav:
   - Home: index.md
   - Overview: overview.md
   - Installation: installation.md
+  - Parameters: parameters.md
   - Tutorials:
-      - iscc overview: tutorials/01_pipeline_walkthrough.ipynb
-      - Tumor evolution:
-          - Exploring the tumor: tutorials/02_tumor_growth.ipynb
-          - The shared tumour: tutorials/base_simulation.ipynb
-          - Compartment selection — DCIS to IDC: tutorials/compartment_selection_confound.ipynb
-          - Treatment and the four escape modes: tutorials/treatment_escape_modes.ipynb
-          - Metastasis: tutorials/metastasis.ipynb
-      - Data generation:
-          - Bulk & single-cell DNA: tutorials/assay_dna.ipynb
-          - Single-cell RNA: tutorials/assay_scrna.ipynb
-          - Spatial (Visium): tutorials/assay_spatial.ipynb
-          - Sequencing reads: tutorials/reads.ipynb
-      - Data analysis examples:
-          - The analysis dataset and its ground truth: tutorials/analysis_ground_truth.ipynb
-          - Calling copy number from single-cell DNA with HMMcopy: tutorials/tool_hmmcopy_R.ipynb
-          - Tree reconstruction from single-cell DNA with SCITE: tutorials/tool_scite_trees.ipynb
-          - Clone inference from bulk DNA with PyClone-VI: tutorials/tool_pyclonevi.ipynb
-          - Integrating scDNA and scRNA with clonealign: tutorials/tool_clonealign_R.ipynb
-          - Calling copy number from scRNA with Numbat: tutorials/tool_numbat_R.ipynb
-          - Deconvolving Visium spots with RCTD: tutorials/tool_rctd_R.ipynb
-          - Recovering progression constraints with TreeMHN: tutorials/tool_treemhn_R.ipynb
-          - Progression constraints from cross-sectional data with MHN: tutorials/tool_mhn_bulk.ipynb
-          - Integrating a patient cohort with scDEF: tutorials/tool_scdef_cohort.ipynb
-          - Cell–cell communication with CellChat: tutorials/tool_cellchat_R.ipynb
+      - Quickstart: tutorials/01_quickstart.ipynb
+      - Shape the tumor: tutorials/02_shape_the_tumor.ipynb
+      - Shape the data: tutorials/03_shape_the_data.ipynb
+      - A cohort: tutorials/04_cohort.ipynb
+      - Simulated next to real data: tutorials/05_simulated_next_to_real.ipynb
+      - Analysis tools:
+          - Purity, copy number and clones from bulk WGS with ASCAT and PyClone-VI: tutorials/tool_ascat_pyclonevi.ipynb
+          - Copy number from single-cell DNA with HMMcopy: tutorials/tool_hmmcopy.ipynb
+          - Matching scRNA cells to scDNA clones with clonealign: tutorials/tool_clonealign.ipynb
+          - Copy number and malignancy from scRNA with inferCNV: tutorials/tool_scrna_cnv.ipynb
+          - Cell-type deconvolution of Visium spots with RCTD: tutorials/tool_rctd.ipynb
+          - Batch integration of a cohort with Harmony and scVI: tutorials/tool_integration.ipynb
   - API Reference:
       - reference/index.md
       - Tumor:
           - GenotypeTumor: reference/GenotypeTumor.md
-          - GlandularTumor: reference/GlandularTumor.md
-          - Tumor (base): reference/Tumor.md
+      - Cohort:
+          - Cohort: reference/Cohort.md
+          - grow_tumor: reference/grow_tumor.md
+          - assign_batches: reference/assign_batches.md
+          - pool_cell_data: reference/pool_cell_data.md
+          - run_cohort_batches: reference/run_cohort_batches.md
+          - concat_cohort_batches: reference/concat_cohort_batches.md
+      - Pregrown:
+          - ductal: reference/pregrown_ductal.md
+          - neutral: reference/pregrown_neutral.md
+          - sweeps: reference/pregrown_sweeps.md
+          - cin: reference/pregrown_cin.md
+          - immune: reference/pregrown_immune.md
+          - cohort: reference/pregrown_cohort.md
       - Treatment:
           - Chemotherapy: reference/Chemotherapy.md
           - TargetedTherapy: reference/TargetedTherapy.md
@@ -165,10 +165,37 @@ nav:
           - DNABatchHyperParams: reference/DNABatchHyperParams.md
           - RNABatchHyperParams: reference/RNABatchHyperParams.md
           - VisiumBatchHyperParams: reference/VisiumBatchHyperParams.md
+          - Visium spot swapping: reference/visium_bleed.md
+          - run_dna_batches: reference/run_dna_batches.md
+          - run_scrna_batches: reference/run_scrna_batches.md
+          - atlas_scrna_batches: reference/atlas_scrna_batches.md
+          - concat_batches: reference/concat_batches.md
+          - morans_i: reference/morans_i.md
+      - Human genome:
+          - arm_genome: reference/arm_genome.md
+          - HumanGenomeLayer: reference/HumanGenomeLayer.md
+          - HumanExpression: reference/HumanExpression.md
+          - GeneLift: reference/GeneLift.md
+          - AlleleCounts: reference/AlleleCounts.md
+          - write_visium: reference/write_visium.md
+          - write_scrna: reference/write_scrna.md
+          - check_tool_ready: reference/check_tool_ready.md
+          - HumanReference: reference/HumanReference.md
+          - load_reference: reference/load_reference.md
+          - fetch_snps: reference/fetch_snps.md
+          - load_atlas_baselines: reference/load_atlas_baselines.md
+          - load_hallmark_programs: reference/load_hallmark_programs.md
+          - load_visium_platform_factor: reference/load_visium_platform_factor.md
       - Reads:
           - emit_dna_reads: reference/emit_dna_reads.md
           - emit_scrna_reads: reference/emit_scrna_reads.md
           - emit_visium_reads: reference/emit_visium_reads.md
+      - Integrations:
+          - clones_from_clades: reference/clones_from_clades.md
+          - clone_summary: reference/clone_summary.md
+          - to_anndata: reference/to_anndata.md
+          - biological_types: reference/biological_types.md
+          - cell_subtypes: reference/cell_subtypes.md
       - Inference:
           - ABC: reference/ABC.md
           - Prior: reference/Prior.md

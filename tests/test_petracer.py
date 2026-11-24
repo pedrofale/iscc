@@ -1,4 +1,4 @@
-"""PEtracer lineage-vs-spatial decomposition tests (Tier 1) — DESIGN_features §H/§I.
+"""PEtracer lineage-vs-spatial decomposition tests.
 
 Covers the `iscc.integrations` export seam and the flagship finding:
   * the lineage tree from `genotypes_parents` is well-formed (founder root, non-negative LCA
@@ -23,7 +23,7 @@ from iscc.integrations import (to_lineage_tree, to_newick, to_anndata,
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "validation", "data"))
-import build_petracer_reference as B  # noqa: E402  (Tier-2 reducer + Newick parser)
+import build_petracer_reference as B  # noqa: E402  (real-data reducer + Newick parser)
 
 GENOME = {"n_segments": 4, "segment_size": 25}
 SELECTION = {"prop_driver": 0.1, "prop_dispersal": 0.1, "prop_immune_resistance": 0.1,
@@ -33,7 +33,7 @@ SPATIAL = {"grid_size": 16, "structure_radius": 0}
 MP = {"hypoxia": {"strength": 2.5, "n_genes": 20, "o2_consumption": 1.5, "o2_supply": 0.5,
                   "o2_source": "perfused"},
       "cci": {"strength": 1.5, "n_target_genes": 20, "emitter_type": "cancer", "lengthscale": 2.5}}
-# With real per-deme crowding (DESIGN_crowding.md) a low-dispersal tumour SPREADS one deme at a time
+# With per-deme crowding a low-dispersal tumour SPREADS one deme at a time
 # and caps near K instead of overfilling, so the territories carry fewer cells; we raise K and the
 # step count so each clonal territory holds enough cells for the lineage-vs-space signal to stabilise
 # (small capped tumours make the field autocorrelation noisy).
@@ -144,7 +144,7 @@ class TestDecomposition:
         assert conf["intrinsic"] >= 0.9                        # intrinsic genes correctly heritable
 
     def test_split_recovered_under_intermixing(self, high):
-        # HIGH dispersal: the hypoxia field is now correctly MORE spatial than lineage, and fewer
+        # HIGH dispersal: the hypoxia field is correctly MORE spatial than lineage, and fewer
         # extrinsic genes are mis-called heritable.
         on, off = high
         dec = decompose_lineage_spatial(on, seed=0)
@@ -165,7 +165,7 @@ class TestDecomposition:
         assert c_lo["extrinsic"] > c_hi["extrinsic"]
 
     def test_observed_counts_supported(self, low):
-        # The decomposition also runs on F9 OBSERVED counts (adds realistic noise); the confound
+        # The decomposition also runs on single-cell spatial OBSERVED counts (adds realistic noise); the confound
         # (field lineage > spatial under territories) survives.
         from iscc.data import scSpatial
         on, _ = low
@@ -181,7 +181,7 @@ class TestDecomposition:
         assert len(dec.cells) <= 50
 
 
-# --------------------------------------------------------------------- Tier 2: real-data reducer
+# --------------------------------------------------------------------- real-data reducer
 # Network-free: the Newick parser + `reduce_petracer` are exercised on tiny in-memory fixtures (the
 # shape of the real PEtracer source); the fetcher's graceful fallback is checked directly.
 class TestTier2Newick:

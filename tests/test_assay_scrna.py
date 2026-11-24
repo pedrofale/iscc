@@ -1,4 +1,4 @@
-"""Tests for the scRNA assay batch-effect model (DESIGN_features §B / milestone F3)."""
+"""Tests for the scRNA assay batch-effect model."""
 import hashlib
 
 import numpy as np
@@ -11,7 +11,7 @@ from conftest import N_GENES
 def _plain_cell_data(n_cells=600, n_genes=40, seed=0):
     """Expression table with no ground-truth annotation, fixed shape and seed.
 
-    Used by the byte-identity regression test, so its construction must never change.
+    Used by the fixed-output hash test, so its construction must never change.
     """
     rng = np.random.default_rng(seed)
     gene_base = rng.lognormal(0.0, 1.0, size=n_genes)
@@ -90,9 +90,9 @@ class TestBatch:
         assert np.allclose(comp.sum(axis=1), 1.0)
 
     def test_dm_count_model_emits_fixed_total(self):
-        # The DM seam is now implemented (F6 wired it for the Visium assay): a fixed library total
-        # partitioned across genes via Dirichlet(kappa*comp) -> Multinomial, so each cell's counts
-        # sum to round(lib) exactly (the compositional alternative to the independent-per-gene NB).
+        # DM: a fixed library total partitioned across genes via Dirichlet(kappa*comp) ->
+        # Multinomial, so each cell's counts sum to round(lib) exactly (the compositional
+        # alternative to the independent-per-gene NB).
         from iscc.data.batch import Batch, RNABatchHyperParams
         b = Batch(RNABatchHyperParams(kappa=50.0), seed=4).realize([f"g{i}" for i in range(3)],
                                                                  np.ones(3))
@@ -142,10 +142,13 @@ class TestScRNAAssay:
         assert (a.obs["clone"].values == src.reindex(a.obs.index).astype(str).values).all()
 
     def test_smartseq3_deeper_and_sparser_than_10x(self, labelled_cell_data):
-        """Smart-seq3 preset: higher sensitivity (deeper) and lower dropout (fewer zeros)."""
+        """Smart-seq3 preset: higher sensitivity (deeper) and lower dropout (fewer zeros).
+
+        The 10x preset no longer draws dropout; the 10x run pins its old midpoint of 1.5, so the
+        comparison stays the one this test was written for."""
         from iscc.data.rna import scRNA
         sub = labelled_cell_data["cell_exp"].index
-        tenx = scRNA(protocol="10x", seed=1).run(labelled_cell_data, cell_subset=sub)
+        tenx = scRNA(protocol="10x", seed=1, dropout_mid=1.5).run(labelled_cell_data, cell_subset=sub)
         ss3 = scRNA(protocol="smartseq3", seed=1).run(labelled_cell_data, cell_subset=sub)
         assert ss3.observed_counts.values.sum() > tenx.observed_counts.values.sum()
         ss3_zero = (ss3.observed_counts.values == 0).mean()
@@ -310,19 +313,178 @@ class TestPlateNestedDepth:
             assert np.array_equal(base, alt)
 
     def test_default_smartseq3_counts_unchanged_by_the_plate_model(self):
-        """Regression guard: the presets reproduce the pre-plate-model output exactly."""
+        """The default presets reproduce a pinned count hash, so default output is stable across releases."""
         from iscc.data.rna import scRNA
         cd = _plain_cell_data(600)
         ss3 = scRNA(protocol="smartseq3", n_cells=600, seed=1).run(cd).observed_counts.values
         tenx = scRNA(protocol="10x", n_cells=600, seed=1).run(cd).observed_counts.values
+        # Re-pinned when the ambient soup became a share of the library instead of counts on top
+        # of it, and the 10x preset took the PBMC3k fit (dispersion 0.30 -> 0.35) and dropped its
+        # hand-set dropout (midpoint 1.5 -> 0).
         assert (_counts_hash(ss3), int(ss3.sum())) == (
-            "655f81aa1744a65441f209212283a2c7b1b5fc4cca6dc7e81731aa1fd8899e15", 4455795)
+            "5640d61df1b41e078a9616648ef5581ca46738c205257764b5c194195c56d39b", 4446386)
         assert (_counts_hash(tenx), int(tenx.sum())) == (
-            "ca7778be26c8af4aed58c6d2333304e836c7faa3311613b70e80efa48dab202c", 2415897)
+            "a5b0b61683ed5e0bb6164937da4bced9ab39b2cc3c8a00f728a4810d75217852", 2289045)
+
+
+class TestCallerPlateLayout:
+    """`plate_layout`: the caller decides which plate (and well) each cell is sorted into."""
+
+    N = 600
+
+    def _regions(self):
+        cd = _plain_cell_data(self.N)
+        cells = list(cd["cell_exp"].index)
+        region = {c: "A" if i < self.N // 2 else "B" for i, c in enumerate(cells)}
+        return cd, cells, region
+
+    def _region_and_plate_gaps(self, layout, seeds=range(20)):
+        """Per seed: the A - B gap in mean log depth, and the realized log plate-offset ratio."""
+        from iscc.data.rna import scRNA
+        cd, _, region = self._regions()
+        gaps, offsets = [], []
+        for seed in seeds:
+            a = scRNA(protocol="smartseq3", n_cells=self.N, plate_sigma=0.15,
+                      plate_layout=layout, seed=seed).run(cd)
+            y = np.log(a.obs["n_counts"].values)
+            in_a = np.array([region[c] == "A" for c in a.obs.index])
+            on_p1 = a.obs["plate"].values == f"batch{seed}_P1"
+            gaps.append((y[in_a].mean() - y[~in_a].mean(), y[on_p1].mean() - y[~on_p1].mean()))
+            offsets.append(np.log(a.batch.plate_factor[0] / a.batch.plate_factor[1]))
+        gaps = np.array(gaps)
+        return gaps[:, 0], gaps[:, 1], np.array(offsets)
+
+    def test_region_confounded_layout_puts_the_plate_effect_on_the_region(self):
+        _, cells, region = self._regions()
+        confounded = {c: 1 if region[c] == "A" else 2 for c in cells}
+        region_gap, _, offset = self._region_and_plate_gaps(confounded)
+        assert offset.std() > 0.1                          # the plates really differ in depth
+        # ... and the region gap IS the plate offset, seed by seed (cell noise SE ~0.04)
+        assert np.corrcoef(region_gap, offset)[0, 1] > 0.9
+        assert np.abs(region_gap - offset).max() < 0.15
+
+    def test_balanced_layout_keeps_the_plate_effect_off_the_region(self):
+        _, cells, region = self._regions()
+        balanced = {c: 1 + i % 2 for i, c in enumerate(cells)}   # each region half on each
+        region_gap, plate_gap, offset = self._region_and_plate_gaps(balanced)
+        assert offset.std() > 0.1
+        assert np.corrcoef(plate_gap, offset)[0, 1] > 0.9      # the plate effect is still there
+        assert np.abs(region_gap).max() < 0.15                  # but the regions do not see it
+        assert region_gap.std() < 0.3 * offset.std()
+
+    def test_a_map_of_the_default_layout_reproduces_the_default_counts(self):
+        """The map only replaces WHERE cells sit: same placement, same counts."""
+        from iscc.data.rna import scRNA
+        cd = _plain_cell_data(self.N)
+        kw = dict(protocol="smartseq3", n_cells=self.N, plate_sigma=0.15, seed=4)
+        default = scRNA(**kw).run(cd)
+        layout = dict(zip(default.obs.index, zip(default.obs["plate_index"], default.obs["well"])))
+        mapped = scRNA(plate_layout=layout, **kw).run(cd)
+        assert np.array_equal(default.observed_counts.values, mapped.observed_counts.values)
+        assert (default.obs["plate"] == mapped.obs["plate"]).all()
+        assert (default.obs["well"] == mapped.obs["well"]).all()
+
+    def test_pairs_put_each_cell_in_its_well(self, labelled_cell_data):
+        from iscc.data.rna import scRNA
+        cells = list(labelled_cell_data["cell_exp"].index)
+        layout = {c: ("plateA" if i % 2 else "plateB", i // 2) for i, c in enumerate(cells)}
+        layout[cells[0]] = ("plateB", "P24")                    # a well name, the last well
+        a = scRNA(protocol="smartseq3", n_cells=60, plate_layout=layout, batch_label="run",
+                  seed=1).run(labelled_cell_data)
+        assert a.obs.loc[cells[0], "plate"] == "run_plateB"
+        assert a.obs.loc[cells[0], "well"] == "P24"
+        assert a.obs.loc[cells[3], "plate"] == "run_plateA"
+        assert a.obs.loc[cells[3], "well"] == "A02"             # index 1
+        assert a.obs.loc[cells[3], "plate_index"] == 0          # labels index in sorted order
+        assert a.to_anndata().uns["plate_layout"]["plate_labels"] == ["plateA", "plateB"]
+
+    def test_labels_fill_wells_in_assay_order(self, labelled_cell_data):
+        from iscc.data.rna import scRNA
+        cells = list(labelled_cell_data["cell_exp"].index)
+        a = scRNA(protocol="smartseq3", n_cells=60,
+                  plate_layout={c: i % 3 for i, c in enumerate(cells)},
+                  batch_label="B", seed=1).run(labelled_cell_data)
+        assert sorted(set(a.obs["plate"])) == ["B_P0", "B_P1", "B_P2"]
+        for p in range(3):
+            on = a.obs[a.obs["plate_index"] == p]
+            assert list(on["well"]) == [f"A{k + 1:02d}" for k in range(20)]
+
+    def test_split_batches_each_sort_their_own_cells_by_the_map(self, labelled_cell_data):
+        from iscc.data.rna import run_scrna_batches, concat_batches
+        cells = list(labelled_cell_data["cell_exp"].index)
+        layout = {c: 1 if i < 30 else 2 for i, c in enumerate(cells)}
+        assays = run_scrna_batches(labelled_cell_data, n_batches=2, base_seed=12, design="split",
+                                   protocol="smartseq3", n_cells=30, plate_layout=layout,
+                                   plate_sigma=0.2)
+        for b, a in enumerate(assays):
+            expect = [f"batch{b}_P{layout[c]}" for c in a.obs.index]
+            assert list(a.obs["plate"]) == expect
+            assert a.plates.n_plates == 2                       # plate indices are run-wide
+        combined = concat_batches(assays)
+        assert len(set(zip(combined.obs["plate"].astype(str),
+                           combined.obs["well"].astype(str)))) == combined.n_obs
+
+    def test_custom_layout_survives_h5ad_roundtrip(self, labelled_cell_data, tmp_path):
+        import anndata as ad
+        from iscc.data.rna import scRNA
+        cells = list(labelled_cell_data["cell_exp"].index)
+        a = scRNA(protocol="smartseq3", n_cells=60, batch_label="run1",
+                  plate_layout={c: "left" if i < 25 else "right" for i, c in enumerate(cells)},
+                  seed=1).run(labelled_cell_data)
+        a.write(str(tmp_path))
+        back = ad.read_h5ad(str(tmp_path / "run1.h5ad"))
+        assert (back.obs["plate"].astype(str).values == a.obs["plate"].values).all()
+        assert list(back.uns["plate_layout"]["plate_labels"]) == ["left", "right"]
+
+    @pytest.mark.parametrize("layout,match", [
+        (lambda cells: {c: 1 for c in cells[:-1]}, "no plate for 1"),
+        (lambda cells: {c: (1, 0) for c in cells}, "share plate P1 well A01"),
+        (lambda cells: {c: (1, 384 + i) for i, c in enumerate(cells)}, "not on a 384-well"),
+        (lambda cells: {c: (1, "Q01" if i == 0 else i) for i, c in enumerate(cells)},
+         "not on a 384-well"),
+        (lambda cells: {c: (1, "A25") for c in cells}, "column 25"),
+        (lambda cells: {c: (1, "7A") for c in cells}, "neither a 0-based index"),
+        (lambda cells: {c: (1, i) if i else 1 for i, c in enumerate(cells)}, "mixes"),
+        (lambda cells: {c: None for c in cells}, "missing plate label"),
+        (lambda cells: {c: (1, i) if i < 30 else ("P1", i) for i, c in enumerate(cells)},
+         "collide"),
+    ])
+    def test_bad_layouts_are_rejected(self, labelled_cell_data, layout, match):
+        from iscc.data.rna import scRNA
+        cells = list(labelled_cell_data["cell_exp"].index)
+        with pytest.raises(ValueError, match=match):
+            scRNA(protocol="smartseq3", n_cells=60, plate_layout=layout(cells),
+                  seed=1).run(labelled_cell_data)
+
+    def test_a_plate_holds_at_most_n_wells_cells(self):
+        from iscc.data.rna import scRNA
+        cd = _plain_cell_data(200)
+        cells = list(cd["cell_exp"].index)
+        layout = {c: "big" if i < 120 else "small" for i, c in enumerate(cells)}
+        with pytest.raises(ValueError, match="plate big holds 120 .* 96 wells"):
+            scRNA(protocol="smartseq3", n_cells=200, n_wells=96, plate_layout=layout,
+                  seed=1).run(cd)
+        # the same map fits once the assayed cells do (capacity is about the cells sorted)
+        a = scRNA(protocol="smartseq3", n_wells=96, plate_layout=layout,
+                  seed=1).run(cd, cell_subset=cells[30:150])
+        assert np.bincount(a.plates.plate).tolist() == [90, 30]
+
+    def test_layout_needs_plates_and_a_consistent_plate_count(self, labelled_cell_data):
+        from iscc.data.rna import scRNA
+        cells = list(labelled_cell_data["cell_exp"].index)
+        layout = {c: i % 2 for i, c in enumerate(cells)}
+        with pytest.raises(ValueError, match="plate protocol"):
+            scRNA(protocol="10x", plate_layout=layout)
+        with pytest.raises(ValueError, match="n_plates=3 contradicts"):
+            scRNA(protocol="smartseq3", n_cells=60, n_plates=3, plate_layout=layout,
+                  seed=1).run(labelled_cell_data)
+        with pytest.raises(TypeError, match="dict or pandas Series"):
+            scRNA(protocol="smartseq3", n_cells=60, plate_layout=[0, 1] * 30,
+                  seed=1).run(labelled_cell_data)
 
 
 # --------------------------------------------------------------------------------------
-# Multi-batch generation (DESIGN_features §B.3)
+# Multi-batch generation
 # --------------------------------------------------------------------------------------
 class TestMultiBatch:
     def test_shared_design_same_biology_different_technical(self, labelled_cell_data):
@@ -376,3 +538,79 @@ class TestMultiBatch:
         from iscc.data.rna import run_scrna_batches
         with pytest.raises(ValueError):
             run_scrna_batches(labelled_cell_data, design="bogus")
+
+
+# --------------------------------------------------------------------------------------
+# Dropout and ambient RNA
+# --------------------------------------------------------------------------------------
+def _two_population_cell_data(n_per=300, n_genes=200, n_markers=20, seed=0):
+    """Population A expresses every gene; population B expresses none of the first `n_markers`
+    genes (exact zeros), like stromal cells and cancer markers. Returns (cell_data, is_b)."""
+    rng = np.random.default_rng(seed)
+    base = rng.lognormal(0.0, 1.0, size=n_genes)
+    a = np.tile(base, (n_per, 1))
+    b = np.tile(base, (n_per, 1))
+    b[:, :n_markers] = 0.0
+    exp = pd.DataFrame(np.vstack([a, b]), index=[f"C{i}" for i in range(2 * n_per)],
+                       columns=[f"g{i}" for i in range(n_genes)])
+    return {"cell_exp": exp}, np.r_[np.zeros(n_per, bool), np.ones(n_per, bool)]
+
+
+class TestDropoutAndAmbient:
+    def test_ambient_is_a_share_of_the_library(self):
+        """The soup takes ambient_frac of each library and the counts of the cell itself the rest, so the
+        mean depth does not grow with ambient_frac (it grew by 1 + ambient_frac)."""
+        from iscc.data.rna import scRNA
+        cd = _plain_cell_data(600)
+        tot = {a: scRNA(protocol="10x", n_cells=600, seed=4, ambient_frac=a, doublet_rate=0.0,
+                        depth_batch_sigma=0.0).run(cd).observed_counts.values.sum(axis=1).mean()
+               for a in (0.0, 0.2)}
+        assert tot[0.2] == pytest.approx(tot[0.0], rel=0.02)
+
+    def test_dm_concentration_is_the_fitted_one(self):
+        """count_model="dm" at the 10x preset spreads the counts of a cell like the NB does; the old
+        concentration of 50 put about three quarters of them in 50 genes."""
+        from iscc.data.rna import PROTOCOL_PRESETS, scRNA
+        assert PROTOCOL_PRESETS["10x"]["kappa"] == 1500.0
+        cd = _plain_cell_data(300, n_genes=2000, seed=2)
+        share = {}
+        for model in ("nb", "dm"):
+            X = scRNA(protocol="10x", n_cells=300, seed=6, count_model=model).run(cd).observed_counts.values
+            share[model] = np.median(np.sort(X, axis=1)[:, -50:].sum(1) / X.sum(1))
+        assert share["dm"] < share["nb"] + 0.05
+
+    def test_presets_add_no_dropout(self):
+        """UMI counts carry no zeros beyond the negative binomial, so no preset draws a dropout
+        (the 10x preset used to set dropout_mid=1.5 by hand)."""
+        from iscc.data.batch import RNABatchHyperParams
+        from iscc.data.rna import PROTOCOL_PRESETS, scRNA
+        assert all(p["dropout_mid"] == 0.0 for p in PROTOCOL_PRESETS.values())
+        assert RNABatchHyperParams().dropout_mid == 0.0
+        assert scRNA(protocol="10x").hypers.dropout_mid == 0.0
+
+    def test_dropout_is_keyed_to_everything_in_the_droplet(self):
+        """A gene the cell does not express still holds ambient molecules; dropout treats them as
+        it treats the molecules of the cell at the same expected count, instead of deleting them all."""
+        from iscc.data.batch import Batch, RNABatchHyperParams
+        h = RNABatchHyperParams(ambient_frac=0.2, dropout_mid=1.5, dropout_shape=1.0)
+        b = Batch(h, seed=1).realize(["g0", "g1"], np.array([1.0, 1.0]))
+        comp = np.array([[0.0, 1.0]])                    # the cell does not express g0
+        lib = np.array([20.0])
+        _, p_drop = b.apply_dropout(np.ones((1, 2), dtype=int), comp, lib)
+        mu = np.array([0.2 * 20 * 0.5, 0.8 * 20 + 0.2 * 20 * 0.5])   # cell + ambient expected counts
+        assert np.allclose(p_drop[0], 1.0 / (1.0 + mu / 1.5))
+        assert p_drop[0, 0] < 0.5                        # 2 ambient UMIs expected: mostly kept
+
+    @pytest.mark.parametrize("dropout_mid", [0.0, 1.5])
+    def test_ambient_counts_reach_cells_that_do_not_express_the_gene(self, dropout_mid):
+        """The marker share of population B follows the ambient fraction, with or without dropout.
+        With dropout keyed to the expression of the cell alone it stayed at 0 at every ambient fraction."""
+        from iscc.data.rna import scRNA
+        cd, is_b = _two_population_cell_data()
+        share = {}
+        for amb in (0.02, 0.2):
+            X = scRNA(protocol="10x", n_cells=600, seed=3, ambient_frac=amb, doublet_rate=0.0,
+                      dropout_mid=dropout_mid).run(cd, cell_subset=cd["cell_exp"].index).observed_counts.values
+            share[amb] = X[is_b, :20].sum() / X[is_b].sum()
+        assert share[0.2] > 0.002                        # B's marker UMIs are ambient, and survive
+        assert share[0.2] > 4 * share[0.02]              # and they scale with the ambient fraction

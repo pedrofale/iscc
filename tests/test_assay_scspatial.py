@@ -1,8 +1,8 @@
-"""F9 single-cell spatial (imaging) assay tests (DESIGN_features F9 milestone).
+"""Single-cell spatial (imaging) assay tests.
 
-Internal-validation targets for the F9 spec:
+Internal-validation targets:
   * SINGLE-CELL resolution — one observation per input cell (no spot aggregation), each carrying
-    its own `cell_crd` coordinates (the imaging headline vs Visium/F6);
+    its own `cell_crd` coordinates (what distinguishes imaging from Visium);
   * TRANSCRIPTOME COVERAGE — the measured gene set is the requested panel (`panel` list or
     `n_panel_genes` top-N), whole-transcriptome by default;
   * counts track the cell's own expression (a pure clone cell expresses only its gene block);

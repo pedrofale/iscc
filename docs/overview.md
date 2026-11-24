@@ -8,63 +8,95 @@
 [![Tests](https://github.com/pedrofale/iscc/actions/workflows/main.yaml/badge.svg)](https://github.com/pedrofale/iscc/actions/workflows/main.yaml)
 [![Docs](https://github.com/pedrofale/iscc/actions/workflows/docs.yml/badge.svg)](https://pedrofale.github.io/iscc/)
 
-`iscc` (in silico cancer center) is a multi-modal tumor evolution data simulator. It grows one
-selection-driven, spatially-structured tumor, optionally treats it, samples it, and generates
-single-cell and bulk DNA, RNA, and spatial data, down to sequencing reads. Because every run knows
-the true clones, mutations, copy numbers, cell states, spatial niches, and lineages, `iscc` provides
-a realistic ground truth for benchmarking computational tumor evolution methods.
+`iscc` (in silico cancer center) is a Python package that simulates a growing tumor and the
+molecular data measured from it. It grows a tumor under copy-number and driver selection in a field
+of glands, stroma and an optional metastatic site, where selection depends on the niche. It then
+carries the same cells through biopsy and dissociation into bulk and single-cell DNA, RNA and spatial
+transcriptomics data, down to sequencing reads, and therapies can be applied during growth. `iscc`
+records the ground truth of every cell, clone and niche, and of where and when each clone arose, so
+that methods that profile tumor heterogeneity, including those that integrate several data layers,
+can be scored against it.
 
 ## Main features
 
-- **Multi-modal data generation.** DNA, RNA, and spatial data are emitted from the same evolving cells, so cross-modal relationships are coherent by construction.
-- **Ground truth for benchmarking.** Every run knows the true clones, copy numbers, mutations, cell
-  states, spatial niches, and lineage.
-- **Calibrated to real data.** Assay parameters can be fit from a pilot dataset, and the defaults were pre-tuned to fit real data.
+- **Selection that depends on the niche.** A lesion founded in a gland stays there until a clone
+  carries the breach trait, resident stromal cells add a death hazard that a stromal-survival trait
+  offsets, and a metastatic site is entered through a vessel, with a host hazard that a third trait
+  offsets.
+- **One tumor, many modalities.** DNA, RNA and spatial data come from the same cells, so the
+  relationships between data layers follow from one generative process.
+- **Ground truth for benchmarking.** The ground truth contains the clone, lineage, genotype, copy
+  number, niche and program activity of every cell, and the place and time at which every clone
+  arose.
+- **Biases fitted to real data.** The technical parameters of each assay can be estimated from a real
+  reference dataset. The default dispersions of the DNA, scRNA and Visium assays are fits to public
+  reference data (HG002, DLP+, PBMC3k and a 10x breast-cancer section), and the other defaults are
+  set by hand. Each scRNA batch can take the settings fitted to one tumor of a breast cancer atlas
+  ([`atlas_scrna_batches`](reference/atlas_scrna_batches.md)). We compare the data of a simulated
+  breast tumor with those of a real one in [Simulated next to real
+  data](tutorials/05_simulated_next_to_real.ipynb).
 
 ## The pipeline
 
-`iscc` is a pipeline with a command-line tool associated with the main steps:
+`iscc` is a pipeline with a command-line tool for each of its main steps:
 
 | Stage | CLI | Does |
 |---|---|---|
-| 1. Grow | `isccsim` | grow (and treat) a tumor; write ground-truth genotypes / CNVs / expression / spatial state |
-| 2. Sample | `isccsample` | biopsy / dissociate the tumor into a sample of cells |
-| 3. Assay | `isccdata` | generate single-cell & bulk DNA/RNA and spatial-transcriptomics data |
-| 4. Visualize | `isccfig`, `isccgif` | Muller plot, 2D slice, clone tree, and growth animations |
+| Grow | `isccsim` | grow (and treat) a tumor; write ground-truth genotypes / CNVs / expression / spatial state |
+| Sample | `isccsample` | biopsy / dissociate the tumor into a sample of cells |
+| Assay | `isccdata` | generate bulk & single-cell DNA, RNA, and spatial-transcriptomics data |
+| Visualize | `isccfig`, `isccgif` | Muller plot, 2D slice, clone tree, and growth animations |
 
 ## Quickstart
 
 ```bash
-isccsim --sim-config config.yaml --steps 2000 --random-seed 0 -o sim_out
+isccsim --sim-config notebooks/example_config.yaml --steps 320 --random-seed 2 -o sim_out
 ```
 
-The shipped defaults produce a realistic multi-clone tumor, and `tumor.diagnose()` flags a degenerate
-tumor after growth and tells you which knob to turn.
+`notebooks/example_config.yaml` is the base configuration of the paper's regime, a ductal field grown
+by tau-leaping. It keeps the package default driver effect of 1.1, at which almost every cell reaches
+the maximum division rate during the in-situ phase, so competition between clones is nearly neutral
+afterwards. The settings of the paper are in `validation/paper/regime.py`, and
+`notebooks/tutorial_config.yaml` holds them at the scale of the tutorials, with immune cells in the
+stroma. After growth,
+`tumor.diagnose()` flags degenerate tumors, such as extinct, monoclonal or well-mixed ones, and names
+the parameter to change.
+
+To generate data without growing a tumor, [`iscc.pregrown`](reference/index.md#pregrown-tumors) loads
+five tumors of 200,000 cancer cells and a cohort of six patients, grown once from the paper's regime
+and its variants:
+`iscc.pregrown.ductal()` returns a tumor ready to be resected, sampled and measured.
 
 ## Reproducing the landing animation
 
-The animation on the home page is one simulated tumor carried through the whole clinical arc: a
-primary ductal lesion fills the ducts (DCIS), a subclone breaches into the stroma (IDC), it seeds a
-metastasis, and a resistant clone relapses after chemotherapy. It is reproducible from the ordinary
-`iscc` CLI by using the provided config file:
+On the home page we show one simulated tumor carried through a clinical arc on a field of 96 by 96
+demes. The lesion fills the ducts (DCIS), invades the stroma after a breach of the duct wall (IDC)
+and seeds a metastasis. The share of cancer cells with stromal survival increases in the stroma. We
+then resect the primary and give chemotherapy, under which the metastasis shrinks to about a fifth of
+its size and then regrows from a resistant subclone. It is reproducible from the ordinary `iscc`
+CLI with the provided config file:
 
 ```bash
 # 1. run the whole clinical arc (grow -> resect the primary -> chemo -> relapse) and write the
 #    compartment trajectory the renderer consumes. --no-tables writes ONLY that trajectory, which
 #    is all the renderer reads; drop it if you also want to run isccsample / isccdata on the result.
-isccsim --sim-config configs/landing.yaml -o out --no-tables
+isccsim --sim-config configs/landing_hero.yaml -o out --no-tables
 
 # 2. fully-labelled version (use --splash to drop the annotations as in the home page).
 #    --skip-confinement starts the animation where the lesion first breaks out of its founding duct:
-#    the founder is sealed in one acinus for the first ~84% of the run, so without it most frames
+#    the founder is sealed in one acinus for about the first half of the run, so without it most frames
 #    show a duct where nothing moves.
 isccgif out --compartment --skip-confinement -o landing_full.gif
 ```
 
-`configs/landing.yaml` holds the exact parameters (genome, selection, ductal-field, metastasis and
+`configs/landing_hero.yaml` holds the exact parameters (genome, selection, ductal-field, metastasis and
 treatment settings) and the timed treatment `schedule:` (the multi-phase arc, including the surgical
-resection). Clones are coloured by their dominant selective trait and have the same colour in the grids
-and the Muller plots:
+resection). We grow the tumor under the regime of the paper at its sweep scale, add the
+treatment-resistance genes and the schedule of `configs/landing.yaml` with a shorter course of
+chemotherapy, and list every value that differs from `configs/landing.yaml` in the header of the
+config. We chose the seed for illustration, since whether stromal survival sweeps varies between
+tumors. Clones are coloured by their dominant selective trait and have the same colour in the
+grids and the Muller plots:
 
 | Colour | Trait |
 |---|---|
@@ -73,3 +105,10 @@ and the Muller plots:
 | green | stromal survival |
 | purple | metastasis establishment |
 | red | chemotherapy resistance |
+
+## Citing iscc
+
+If you use `iscc`, please cite the preprint that describes it and the release you used. The preprint
+is in preparation, and release v0.4.0 will be archived with a DOI. Both references will be listed here
+when they are available. Until then, the citation of the software is in `CITATION.cff` in the
+repository.

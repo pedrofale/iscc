@@ -37,8 +37,8 @@ REGIMES = [
     ("monoclonal", "monoclonal", "#d94801"),
     ("low_mutation", "monoclonal", "#d94801"),
     ("well_mixed", "well-mixed", "#6a51a3"),
-    # carrying-capacity QC (DESIGN_crowding.md): demes over-filling. With density-dependent death
-    # this should never fire (demes cap near K) — its absence across the map IS the fix's evidence.
+    # carrying-capacity QC: a deme above its slot cap floor(crowding_overfill x K). The engine keeps
+    # that cap, so this should never fire anywhere on the map.
     ("overfilled", "over-filling", "#252525"),
 ]
 GOOD = ("realistic", "#31a354")

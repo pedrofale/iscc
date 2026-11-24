@@ -15,6 +15,58 @@ import pymuller
 from ..constants import normal_names, normal_cmap_rgba
 
 
+def _strains_ordering(adjacency_df, identities=()):
+    """The nested band order of a Muller plot: each clone, its descendants, then the clone again.
+
+    Replaces ``pymuller.logic._get_strains_ordering``, which starts a subtree at every identity not yet
+    placed, in sorted string order. Genotype ids are numbers and the founder of a tumour is ``"2"``,
+    so every clone whose id sorts before it (``"10"``, ``"11717"``) was laid out twice, once on its
+    own and once under the founder, and its cells counted twice. Here the subtrees start from the
+    roots only, and the traversal is iterative, so a deep tree needs no recursion limit.
+    ``identities`` (the clones of the population) adds as roots the clones no edge mentions, such as
+    the one clone of a tumour whose display collapses to a single clone."""
+    children = adjacency_df.groupby("Parent")["Identity"].apply(sorted).to_dict()
+    roots = sorted((set(adjacency_df["Parent"]) | {str(i) for i in identities})
+                   - set(adjacency_df["Identity"]))
+    order, seen = [], set()
+    stack = [(r, False) for r in reversed(roots)]
+    while stack:
+        strain, closing = stack.pop()
+        if not closing:
+            if strain in seen:
+                continue
+            seen.add(strain)
+            stack.append((strain, True))
+            stack.extend((c, False) for c in reversed(children.get(strain, [])))
+        order.append(strain)
+    return np.array(order)
+
+
+def _y_values(populations_df, adjacency_df, smoothing_std):
+    """``pymuller.logic._get_y_values`` with the band order of :func:`_strains_ordering`, given the
+    clones of the population, so that a population of one clone (no ancestry edge) has its band."""
+    ordering = _strains_ordering(adjacency_df, populations_df["Identity"].astype(str).unique())
+    population_size_max = populations_df.groupby("Generation")["Population"].sum().max()
+    generations = populations_df["Generation"].max() - populations_df["Generation"].min()
+    pivot = populations_df.pivot(index="Generation", columns="Identity", values="Population").sort_index()
+    pivot.columns = pivot.columns.astype(str)
+    pivot = pivot.rolling(max(int(generations), 1), 1, True, "gaussian").mean(std=smoothing_std)
+    pivot = pivot.clip(0, population_size_max)
+    Y = pivot[ordering] / 2
+    keep = [0]
+    for i, c in enumerate(Y.columns[1:], 1):
+        if c == Y.columns[i - 1]:
+            Y.iloc[:, i] *= 2
+            keep.pop()
+        keep.append(i)
+    return Y.iloc[:, keep]
+
+
+# pymuller's functions look these up in its module, so the fix applies to every caller.
+pymuller.logic._get_strains_ordering = _strains_ordering
+pymuller.logic._get_y_values = _y_values
+
+
 #: Copy-number colormap convention: blue (loss) — white (diploid, CN=2) — red (gain).
 CNV_CMAP = "bwr"
 
@@ -72,7 +124,11 @@ def _prepare(genotype_counts, genotype_parents):
     # single ancestry edge this equals anc_df.shape[0] + 1, the former hard-coded length; using
     # the identity count directly keeps it correct when roots/dangling edges differ -- e.g. under
     # tau-leaping, where a generation elapses between snapshots.)
-    ids = pop_df["Identity"].unique()
+    # Identities in creation order (genotype ids count up), not in the order of the columns, which
+    # follows string sets and so changes between Python processes: the colours then stay the same
+    # from one run to the next.
+    ids = sorted(pop_df["Identity"].unique(),
+                 key=lambda x: (0, int(x), "") if str(x).isdigit() else (1, 0, str(x)))
     color_by = pd.Series(np.arange(len(ids)), index=ids)
     return pop_df, anc_df, color_by
 
@@ -241,19 +297,19 @@ def _cancer_only(traces, genotypes_parents):
     return genotype_counts, genotype_parents
 
 
-def _muller_stackplot(ax, pop_df, anc_df, color_by, colormap, normalize, smoothing_std, baseline="zero"):
+def _muller_stackplot(ax, pop_df, anc_df, color_by, colormap, normalize, smoothing_std, baseline="zero",
+                      times=None):
     """Muller stackplot with pymuller's nested layout + colour mapping. ``baseline=0`` grows upward
     from zero; ``baseline="sym"`` grows symmetrically from a central midline (the Noble et al. 2021
     "fish"/stream layout). When ``normalize`` is set the bands are a proper 0-1 frequency at every
-    step: pymuller's ``_get_y_values`` draws each clone as two nested half-bands, so the raw stack
-    sums to a tree-dependent factor (1 for one clone, up to ~2 for a deep tree), which we divide out
-    per generation so the frequency axis stays in [0, 1]."""
+    step: the smoothing can move the stack slightly off 1, which we divide out per generation so the
+    frequency axis stays in [0, 1]."""
     import sys as _sys
     pop = pop_df.copy()
     if normalize:
         pop["Population"] = pop.groupby("Generation")["Population"].transform(
             lambda v: v / v.sum() if v.sum() else v)
-    x = pop["Generation"].unique()
+    x = pop["Generation"].unique() if times is None else np.asarray(times, dtype=float)
     _old = _sys.getrecursionlimit()
     try:
         _sys.setrecursionlimit(max(_old, 20000))
@@ -270,7 +326,8 @@ def _muller_stackplot(ax, pop_df, anc_df, color_by, colormap, normalize, smoothi
 
 
 def plot_muller(traces, genotypes_parents, ax=None, colormap="gnuplot", normalize=True,
-                smoothing_std=0.1, show_axes=True, min_freq=None, driver_map=None, centered=False):
+                smoothing_std=0.1, show_axes=True, min_freq=None, driver_map=None, centered=False,
+                times=None):
     """Muller plot of clonal dynamics.
 
     ``driver_map`` ({genotype_id -> hashable driver signature}, supplied by the engine) colours by
@@ -279,11 +336,14 @@ def plot_muller(traces, genotypes_parents, ax=None, colormap="gnuplot", normaliz
     driver clones). ``min_freq`` (a fraction) additionally merges clones whose subtree never reaches
     that share of the grown cancer population into their nearest ancestor (Noble-style sensitivity
     threshold). The two compose: driver-collapse first, then the size threshold. Both default off, in
-    which case every genotype is a clone (the historical behaviour).
+    which case every genotype is a clone.
 
     ``centered`` (default False) stacks the clone bands SYMMETRICALLY around a central horizontal axis
     (the Noble "fish"/stream layout, ``baseline="sym"``) instead of upward from zero; the default is the
-    historical zero-based pymuller layout, byte-identical."""
+    zero-based pymuller layout.
+
+    ``times`` (one per trace, in generations) puts the x axis in generations; without it the x axis
+    counts the records."""
     genotype_counts, genotype_parents = _cancer_only(traces, genotypes_parents)
     # FULL parent map used to reconnect ancestry; replaced by the driver-tree edges after a collapse.
     merge_parents = genotypes_parents
@@ -311,11 +371,11 @@ def plot_muller(traces, genotypes_parents, ax=None, colormap="gnuplot", normaliz
         _sys.setrecursionlimit(max(_old_limit, 20000))
         baseline = "sym" if centered else "zero"
         _muller_stackplot(ax, pop_df, anc_df, color_by, colormap, normalize, smoothing_std,
-                          baseline=baseline)
+                          baseline=baseline, times=times)
     finally:
         _sys.setrecursionlimit(_old_limit)
     if show_axes:
-        ax.set_xlabel("Step")
+        ax.set_xlabel("Step" if times is None else "Generation")
         ax.set_ylabel("Frequency" if normalize else "Cells")
     else:
         ax.axis("off")
@@ -341,13 +401,13 @@ def _expanded_cell_grid(cell_data, grid_size, traces, genotypes_parents, section
     colour. Under infinite-sites most divisions spawn a new (passenger-differentiated) genotype, so
     per-clone is usually a noisy rainbow; the single colour reads as tissue structure.
 
-    A 2D deme stands for a 3D column of up to K cells (DESIGN_ductal_field.md §3), so a flat section
+    A 2D deme stands for a 3D column of up to K cells, so a flat section
     should show only a SLICE of that depth, not the whole column: ``section_frac`` (≈
     section_thickness / column_depth) is the fraction of each deme's cells sampled UNIFORMLY at random
     into the section (1.0 = the whole column). Cells are scattered within the deme's block — the count
     engine tracks per-deme COUNTS, not sub-deme positions, so the intra-deme layout is cosmetic while
     the composition (and the sampled section depth) is exact. ``empty_color`` recolours the empty
-    background (empty demes + unfilled positions); ``None`` keeps the historical white. Returns
+    background (empty demes + unfilled positions); ``None`` keeps it white. Returns
     ``(rgb, s, type_cmap)``.
     """
     from collections import defaultdict
@@ -503,8 +563,8 @@ def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap=
                 if color_key.startswith(prefix):
                     val = cell_data[key][color_key.split("_", 1)[1]]
             if val is None:
-                # search every per-cell frame, including the ductal-field (cell_gland) and F8
-                # (cell_microenv) labels, so `color=["gland_id"]` / `["hypoxia_level"]` just work.
+                # search every per-cell frame, including the ductal-field (cell_gland) and
+                # microenvironment (cell_microenv) labels, so `color=["gland_id"]` / `["hypoxia_level"]` just work.
                 for key in ["cell_evo", "cell_exp", "cell_snv", "cell_gland", "cell_microenv",
                             "cell_program"]:
                     if key in cell_data and color_key in cell_data[key].columns:
@@ -534,7 +594,7 @@ def plot_grid(cell_data, grid_size, traces, genotypes_parents, color=None, cmap=
     return ax
 
 
-# --- metastasis: two-compartment views sharing one clone colormap (R9) -------------------------
+# --- metastasis: two-compartment views sharing one clone colormap ------------------------------
 
 def _compartment_cancer_counts(traces, key, all_cols):
     """Per-generation cancer counts for ONE compartment as a (generations x all_cols) frame, zero-
@@ -734,7 +794,7 @@ def _get_y_values_hardcut(populations_df, adjacency_df, smoothing_std, cutoff_ge
     centerline afterward). Ordering + leaf-doubling mirror ``_get_y_values`` so the band colours line
     up exactly with the ordinarily-smoothed (non-cut) panels."""
     import scipy.ndimage as _ndi
-    ordering = pymuller.logic._get_strains_ordering(adjacency_df)
+    ordering = _strains_ordering(adjacency_df, populations_df["Identity"].astype(str).unique())
     population_size_max = populations_df.groupby("Generation")["Population"].sum().max()
     pivot = populations_df.pivot(index="Generation", columns="Identity",
                                  values="Population").sort_index()
@@ -762,7 +822,7 @@ def _draw_muller_panel(ax, pop_df, anc, band_colors, normalize, smoothing_std,
     """Draw ONE Muller panel with EXPLICIT per-band colours, bypassing pymuller's colormap
     normalisation so a categorical palette maps exactly. Mirrors pymuller._muller_plot's layout.
     ``centered=True`` uses a symmetric (``baseline="sym"``) baseline — the Noble "fish"/stream layout,
-    bands growing outward from a central midline; default is the historical zero-based stack.
+    bands growing outward from a central midline; default is the zero-based stack.
     ``hard_cutoff_gen`` (e.g. the primary's resection generation) makes the transition to 0 at that
     generation a hard cliff rather than a smoothed taper (see ``_get_y_values_hardcut``)."""
     import sys as _sys

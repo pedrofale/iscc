@@ -1,0 +1,28 @@
+{
+ "cancer": "BRCA",
+ "n_samples": 1020,
+ "n_high_purity": 315,
+ "high_purity": 0.7,
+ "n_genes": 17413,
+ "s_ref": 0.7,
+ "purity_median": 0.59,
+ "ploidy_median": 2.16,
+ "s_grid": [
+  0.0,
+  0.1,
+  0.2,
+  0.3,
+  0.4,
+  0.5,
+  0.6,
+  0.7,
+  0.8,
+  0.9,
+  1.0
+ ],
+ "saturation_per_allele": 4,
+ "sources": [
+  "TCGA PanCanAtlas (GDC): EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2.geneExp.tsv, TCGA_mastercalls.abs_segtabs.fixed.txt, TCGA_mastercalls.abs_tables_JSedit.fixed.txt, merged_sample_quality_annotations.tsv",
+  "GENCODE v19 gene annotation (hg19)"
+ ]
+}

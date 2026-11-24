@@ -1,1 +1,0 @@
-::: iscc.tumor.GlandularTumor

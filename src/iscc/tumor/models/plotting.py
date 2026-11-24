@@ -1,0 +1,590 @@
+"""Plots and images of a GenotypeTumor (Muller plots, tissue maps, phylogenies, H&E).
+
+A mixin of [`GenotypeTumor`][iscc.tumor.GenotypeTumor]; it holds no state of its own."""
+
+import numpy as np
+from ...constants import normal_names
+
+
+class PlottingMixin:
+    def plot_muller(self, ax=None, by_drivers=False, **kwargs):
+        """Render a Muller plot of the clonal dynamics (clone frequencies over steps, nested by ancestry).
+
+        ``by_drivers=True`` colours by distinct DRIVER-mutation combinations (Noble's demon
+        convention) instead of by genotype, collapsing passenger-only diversity; combine with
+        ``min_freq`` for a size threshold. Additional keywords (``ax``, ``colormap``,
+        ``normalize``) select the target axes and control the styling. The x axis is in generations
+        when every record has its time (tau-leaping), and counts the records otherwise."""
+        from .. import viz
+        driver_map = self._driver_signatures() if by_drivers else None
+        if len(self.trace_times) == len(self.traces):
+            kwargs.setdefault("times", self.trace_times)
+        return viz.plot_muller(self.traces, self.genotypes_parents, ax=ax,
+                               driver_map=driver_map, **kwargs)
+
+    def _driver_signatures(self):
+        """Map every cancer genotype id -> a hashable signature of its mutated DRIVER genes (the
+        oncogene/TSG loci, ``driver_types != 0``, carrying an SNV). Covers ancestors too (needed to
+        build the driver-clone ancestry). Genotypes sharing a signature are one 'driver clone'."""
+        dts = getattr(self.selection, "driver_types", None)
+        if not dts:
+            return {}
+        driver_idx = np.flatnonzero(np.concatenate(dts) != 0)
+        if driver_idx.size == 0:
+            return {}
+        out = {}
+        for gid, rep in self.genotypes.items():
+            if gid in normal_names or not hasattr(rep, "get_snvs"):
+                continue
+            vafs = rep.get_snvs()
+            out[str(gid)] = tuple(int(i) for i in driver_idx[vafs[driver_idx] > 0])
+        return out
+
+    def _functional_signatures(self):
+        """Map every cancer genotype id -> a hashable signature of its mutated FUNCTIONAL genes: ALL the
+        selection axes (oncogene/TSG + dispersal + immune/treatment resistance + breach/stromal/met
+        survival) carrying an SNV. Unlike ``_driver_signatures`` (onc/TSG only), sharing a signature
+        means sharing the mutations selection acts on, so a sweep on ANY axis (breach, met_survival,
+        treatment_resistance, ...) becomes one functional clone -> one Muller band -> visible selection."""
+        s = self.selection
+        parts = [s.get_oncogenes(), s.get_tsgs(), s.get_dispersal_genes(), s.get_immune_resistant(),
+                 s.get_treatment_resistant(), s.get_breach(), s.get_stromal_survival(),
+                 s.get_met_survival(), s.get_drug_tolerance()]
+        parts = [np.asarray(p, dtype=int) for p in parts if len(p)]
+        if not parts:
+            return {}
+        func_idx = np.unique(np.concatenate(parts))
+        out = {}
+        for gid, rep in self.genotypes.items():
+            if gid in normal_names or not hasattr(rep, "get_snvs"):
+                continue
+            vafs = rep.get_snvs()
+            out[str(gid)] = tuple(int(i) for i in func_idx[vafs[func_idx] > 0])
+        return out
+
+    def _stage_colors(self):
+        """{gid -> rgba} colouring each CANCER genotype by its STAGE-DOMINANT driver — the highest arc
+        stage it has activated (from its heritable traits), on the 7-stage scheme of ``_stage_of``:
+        1 proliferation (division rate raised by an onc/TSG mutation), 2 breach (duct escape),
+        3 stromal survival, 4 met survival, 5 drug tolerance, 6 chemo resistance; 0 = no driver. Normal
+        cells keep their type colours. A categorical view: a few colours tracking the selection
+        cascade.
+
+        Returns the map plus the sorted set of stages actually present, for the legend."""
+        from .. import viz
+        from ...constants import normal_cmap_rgba
+        out, present = {}, set()
+        for gid, rep in self.genotypes.items():
+            if getattr(rep, "type", None) != "cancer":
+                out[str(gid)] = normal_cmap_rgba.get(rep.type, (0.8, 0.8, 0.8, 1.0))
+                continue
+            s = self._stage_of(rep)
+            out[str(gid)] = viz.STAGE_PALETTE[s]
+            present.add(s)
+        return out, sorted(present)
+
+    def _stage_of(self, rep):
+        """Stage-dominant driver of one CANCER genotype, on the SAME 7-stage scheme as
+        ``iscc.tumor.arc.stage_of``: 0 none, 1 proliferation (division raised above baseline), 2 breach
+        (duct escape), 3 stromal survival, 4 met survival, 5 drug tolerance, 6 chemo resistance — the
+        highest arc stage its heritable traits have activated. The return value INDEXES
+        ``viz.STAGE_PALETTE`` / ``viz.STAGE_NAMES``. Robust to missing evo keys."""
+        ep = rep.evolutionary_parameters
+        div = ep.get("division_rate", 0.0)
+        base = getattr(rep, "baseline_rates", {}).get("division_rate", div)
+        # Drug escape as the ENGINE defines it: protection is max(treatment_resistance, drug_tolerance)
+        # (see _apply_treatment), so a pure persister takes zero drug and must not read as sensitive;
+        # tolerance is its own stage, and claims the cell only when it STRICTLY exceeds resistance —
+        # the same tie-break _apply_treatment uses to decide who pays the persister cost. See
+        # arc.stage_of, which this mirrors.
+        tr = ep.get("treatment_resistance", 0)
+        dt = ep.get("drug_tolerance", 0.0)
+        if max(tr, dt) > 0:
+            return 5 if dt > tr else 6
+        if ep.get("met_survival", 0) > 0:
+            return 4
+        if ep.get("stromal_survival", 0) > 0:
+            return 3
+        if ep.get("breach", 0) > 0:
+            return 2
+        if div > base + 1e-9:
+            return 1
+        return 0
+
+    def plot_tissue(self, ax=None, color="state", cmap=None, figsize=(7, 7), min_freq=0.02):
+        """Deme-resolution tissue map built directly from the per-deme genotype COUNTS.
+
+        Unlike ``plot_grid`` (which reads the possibly-subsampled ``cell_data`` and so goes holey at
+        cm-scale when ``max_cells`` thins the tissue), this colours EVERY occupied deme from the full
+        counts, so the spatial overview is always complete. Primary grid only.
+
+        Parameters
+        ----------
+        color : {"state", "cancer_frac", "immune", "clone", "stage"}
+            ``"state"`` (default): categorical — empty / stroma / duct(normal) / DCIS (cancer in a
+            duct) / IDC (cancer in stroma). ``"cancer_frac"``: the per-deme cancer fraction as a
+            heatmap. ``"immune"``: the share of immune cells (all three subtypes) in each deme as a
+            heatmap, with the demes that hold cancer cells outlined, so that the immune cells of the
+            stroma and their loss from the tumor show. ``"clone"``: colour each cancer deme by its dominant clone's DRIVER-clone colour
+            (the same driver-collapsed palette as ``plot_muller(by_drivers=True)`` and
+            ``plot_phylogeny``), on a pale-stroma background. ``"stage"``: colour each cancer deme by
+            the most advanced trait of its dominant clone (none, proliferation, breach, stromal
+            survival, metastatic survival, drug tolerance, chemotherapy resistance) on a pale-stroma
+            background.
+        min_freq : float, optional
+            For ``color="clone"``, the size threshold (fraction of the cancer population) below which
+            driver clones are merged into their nearest surviving ancestor before colouring — matched
+            to the Muller's ``min_freq`` so the two share a palette. Default 0.02.
+        """
+        import matplotlib.pyplot as plt
+        from matplotlib.colors import ListedColormap
+        if ax is None:
+            _, ax = plt.subplots(figsize=figsize)
+        G = self.grid_size
+        gid_is_can = {g: self._is_cancer(g) for g in self.genotypes}
+        if color == "cancer_frac":
+            img = np.full(G * G, np.nan)
+            for di in range(min(len(self.demes), G * G)):
+                d = self.demes[di]
+                tot = sum(d.values())
+                if tot:
+                    img[di] = sum(c for g, c in d.items() if gid_is_can[g]) / tot
+            im = ax.imshow(img.reshape(G, G), cmap=cmap or "magma", vmin=0, vmax=1, interpolation="nearest")
+            plt.colorbar(im, ax=ax, fraction=0.046, label="cancer fraction")
+        elif color == "immune":
+            from matplotlib.lines import Line2D
+            img = np.full(G * G, np.nan)
+            has_cancer = np.zeros(G * G, dtype=bool)
+            is_immune = {g: self.genotypes[g].type == "immune" for g in self.genotypes}
+            for di in range(min(len(self.demes), G * G)):
+                d = self.demes[di]
+                tot = sum(d.values())
+                if tot:
+                    img[di] = sum(c for g, c in d.items() if is_immune[g]) / tot
+                    has_cancer[di] = any(gid_is_can[g] for g in d)
+            im = ax.imshow(img.reshape(G, G), cmap=cmap or "Purples", vmin=0, vmax=1, interpolation="nearest")
+            plt.colorbar(im, ax=ax, fraction=0.046, label="share of immune cells")
+            if has_cancer.any():
+                ax.contour(has_cancer.reshape(G, G).astype(float), levels=[0.5], colors="#d62728", linewidths=0.8)
+                ax.legend(handles=[Line2D([], [], color="#d62728", lw=1, label="cancer cells")],
+                          loc="upper right", fontsize=8, framealpha=0.9)
+        elif color == "clone":
+            from .. import viz
+            clone_colors = viz.functional_clone_colors(
+                self.traces, self.genotypes_parents, driver_map=self._driver_signatures(), min_freq=min_freq)
+            default = (0.6, 0.6, 0.6, 1.0)
+            rgba = np.tile(np.array([0.95, 0.91, 0.91, 1.0]), (G * G, 1))   # pale-stroma background
+            for di in range(min(len(self.demes), G * G)):
+                d = self.demes[di]
+                best_g, best_c = None, 0
+                for g, c in d.items():
+                    if gid_is_can[g] and c > best_c:
+                        best_g, best_c = g, c
+                if best_g is not None:
+                    rgba[di] = clone_colors.get(str(best_g), default)
+            ax.imshow(rgba.reshape(G, G, 4), interpolation="nearest")
+        elif color == "stage":
+            from .. import viz
+            from matplotlib.colors import to_hex
+            from matplotlib.patches import Patch
+            img = np.full(G * G, -1, dtype=int)             # -1 = empty/stroma background
+            for di in range(min(len(self.demes), G * G)):
+                d = self.demes[di]
+                best_g, best_c = None, 0
+                for g, c in d.items():
+                    if gid_is_can[g] and c > best_c:
+                        best_g, best_c = g, c
+                if best_g is not None:
+                    img[di] = self._stage_of(self.genotypes[best_g])
+            img = img.reshape(G, G)
+            ax.imshow(np.zeros((G, G)), cmap=ListedColormap(["#f3e7e7"]))    # pale stroma
+            cm = ListedColormap(list(viz.STAGE_PALETTE))
+            ax.imshow(np.ma.masked_where(img < 0, img), cmap=cm, vmin=0,
+                      vmax=len(viz.STAGE_PALETTE) - 1, interpolation="nearest")
+            names = ["none", "proliferation", "breach", "stromal", "met survival", "drug tolerance",
+                     "chemo resist"]
+            present = sorted({int(v) for v in img.ravel() if v >= 0})
+            if present:
+                ax.legend(handles=[Patch(color=to_hex(viz.STAGE_PALETTE[i]), label=names[i]) for i in present],
+                          loc="upper right", fontsize=8, framealpha=0.9)
+        else:
+            # 0 empty, 1 stroma, 2 duct(normal), 3 DCIS (cancer in duct), 4 IDC (cancer in stroma)
+            img = np.zeros(G * G, dtype=int)
+            for di in range(min(len(self.demes), G * G)):
+                d = self.demes[di]
+                ncan = sum(c for g, c in d.items() if gid_is_can[g])
+                induct = self.gland_id is not None and self.gland_id[di] >= 0
+                img[di] = (3 if induct else 4) if ncan > 0 else (2 if (induct and d) else (1 if d else 0))
+            cm = cmap or ListedColormap(["white", "#f3d3d3", "#2e8b57", "#4b0082", "#d62728"])
+            ax.imshow(img.reshape(G, G), cmap=cm, vmin=0, vmax=4, interpolation="nearest")
+            from matplotlib.patches import Patch
+            names = [None, "stroma", "duct", "cancer in duct", "cancer in stroma"]
+            present = sorted(set(np.unique(img)) - {0})
+            if present:
+                ax.legend(handles=[Patch(color=cm(i / 4), label=names[i]) for i in present],
+                          loc="upper right", fontsize=8, framealpha=0.9)
+        ax.set_xticks([]); ax.set_yticks([])
+        return ax
+
+    #: The heritable traits plot_phylogeny marks where a lineage gained them: key, letter, name.
+    _TREE_TRAITS = (("breach", "B", "breach"), ("stromal_survival", "S", "stromal survival"),
+                    ("immune_resistance", "I", "immune resistance"), ("met_survival", "M", "metastatic survival"),
+                    ("drug_tolerance", "T", "drug tolerance"), ("treatment_resistance", "R", "treatment resistance"),
+                    ("is_wgd", "W", "genome doubling"))
+
+    def plot_phylogeny(self, ax=None, min_freq=0.02, figsize=(9, 4), annotate=True, trait_min_freq=0.01,
+                       sites=True):
+        """The clone tree of the tumor on the time axis of ``plot_muller``, with the events of its history.
+
+        The cancer cells are collapsed to driver clones, and a clone that never reaches ``min_freq``
+        of the cancer cells is merged into its parent, as ``plot_muller(by_drivers=True)`` draws them
+        and in the same colours. Each clone is a horizontal branch from the generation it arose to
+        the last generation it had cells, thicker the larger its peak size, and joined to its parent
+        clone where it arose; the descendants of a clone lie below it, the oldest first.
+
+        With ``annotate``, a letter on a branch marks where a lineage of that clone gained a
+        heritable trait: breach (B), stromal survival (S), immune resistance (I), metastatic survival
+        (M), drug tolerance (T), treatment resistance (R) or a doubled genome (W). Only the gains whose
+        descendants hold at least ``trait_min_freq`` of the cancer cells at the end of growth are
+        marked. A triangle marks the first cells of a clone to seed the metastatic site, and dotted
+        lines the release of the founding acinus and each resection.
+
+        With ``sites``, a bar at the end of each branch splits the cells of the clone at the end of
+        growth by where they are: in a duct, in the stroma or at the metastatic site, so that the
+        clones that invaded and the clones that seeded the metastasis stand out.
+
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes, optional
+            The axes to draw on; a new figure of ``figsize`` otherwise.
+        min_freq : float, optional
+            Clones below this share of the cancer cells are merged into their parent (default 0.02).
+        figsize : tuple, optional
+            Size of the new figure (default (9, 4)).
+        annotate : bool, optional
+            Mark the trait gains and the events (default True).
+        trait_min_freq : float, optional
+            Share of the final cancer cells that a lineage must hold for its trait gain to be marked
+            (default 0.01).
+        sites : bool, optional
+            End each branch with the sites of the cells of the clone (default True); drawn when the
+            cells are in more than one site.
+
+        Returns
+        -------
+        matplotlib.axes.Axes
+        """
+        import matplotlib.pyplot as plt
+        import matplotlib.patheffects as pe
+        from collections import defaultdict
+        from matplotlib.lines import Line2D
+        from matplotlib.patches import Patch
+        from .. import viz
+        if ax is None:
+            _, ax = plt.subplots(figsize=figsize)
+        driver_map = self._driver_signatures()
+        counts, parents, gmap, cols = viz._display_basis(
+            self.traces, self.genotypes_parents, driver_map=driver_map, min_freq=min_freq)
+        clones = [str(c) for c in cols]
+        if not clones:
+            raise ValueError("no cancer clones to build a phylogeny")
+        # the colours plot_muller draws these clones in (functional_clone_colors, from the basis above)
+        pop_df, anc, color_by = viz._prepare(counts.copy(), parents)
+        band_colors, band_order = viz._get_colormap(pop_df, anc, color_by, "gnuplot")
+        colors = dict(zip([str(b) for b in band_order], band_colors))
+        timed = len(getattr(self, "trace_times", [])) == len(self.traces)
+        t = (np.asarray(self.trace_times, float) if timed else np.arange(len(self.traces), dtype=float))
+        X = counts[clones].to_numpy(float)
+        t = t[:len(X)]
+        alive = X > 0
+        first = {c: int(np.argmax(alive[:, k])) for k, c in enumerate(clones)}
+        last = {c: int(len(X) - 1 - np.argmax(alive[::-1, k])) for k, c in enumerate(clones)}
+        peak = {c: float(X[:, k].max()) for k, c in enumerate(clones)}
+        pmap = ({str(c): str(parents.iloc[0][c]) for c in parents.columns} if parents.shape[1] else {})
+        present = set(clones)
+        children, roots = defaultdict(list), []
+        for c in clones:
+            p = pmap.get(c)
+            (children[p] if (p in present and p != c) else roots).append(c)
+        # one row per clone, its descendants below it, the oldest child first
+        row, stack = {}, sorted(roots, key=lambda c: first[c], reverse=True)
+        while stack:
+            c = stack.pop()
+            row[c] = len(row)
+            stack.extend(sorted(children.get(c, []), key=lambda z: first[z], reverse=True))
+        pmax = max(peak.values()) or 1.0
+        for c, y in row.items():
+            lw = 1.5 + 6.0 * np.sqrt(peak[c] / pmax)
+            ax.plot([t[first[c]], t[last[c]]], [y, y], color=colors.get(c, (0.6, 0.6, 0.6, 1.0)), lw=lw,
+                    solid_capstyle="butt", zorder=2, gid="branch",
+                    path_effects=[pe.Stroke(linewidth=lw + 1.0, foreground="0.3"), pe.Normal()])
+            p = pmap.get(c)
+            if p in row:
+                ax.plot([t[first[c]]] * 2, [row[p], y], color="0.45", lw=0.8, zorder=1)
+        par = {str(k): str(v) for k, v in dict(self.genotypes_parents).items()}
+
+        def clade(g):                               # the drawn clone a genotype belongs to
+            for _ in range(len(par) + 1):
+                if gmap.get(g) in row:
+                    return gmap[g]
+                if par.get(g, g) == g:
+                    return None
+                g = par[g]
+            return None
+
+        span = (t[-1] - t[0]) or 1.0
+        handles = []
+        if annotate:
+            def x_of(time, step):                   # an event on the time axis of the traces
+                if timed:
+                    return float(time)
+                every = max(int(getattr(self, "snapshot_every", 1) or 1), 1)
+                return float(step) / every
+
+            def level(rep, key):
+                return float(getattr(rep, "is_wgd", False)) if key == "is_wgd" else \
+                    float(rep.evolutionary_parameters.get(key, 0.0))
+
+            # cancer cells at the end of growth descending from each genotype, children before parents
+            final = {str(g): int(n) for g, n in self.genotypes_counts.items()
+                     if g in self.genotypes and self._is_cancer(g)}
+            total = sum(final.values()) or 1
+            sub = defaultdict(int)
+            ordinal = {str(g): getattr(r, "ord", 0) for g, r in self.genotypes.items()}
+            for g in sorted(set(par) | set(final), key=lambda g: ordinal.get(g, 0), reverse=True):
+                sub[g] += final.get(g, 0)
+                p = par.get(g)
+                if p is not None and p != g:
+                    sub[p] += sub[g]
+            marks, shown = defaultdict(list), {}
+            for g, rep in self.genotypes.items():
+                g = str(g)
+                if rep.type != "cancer" or sub.get(g, 0) < trait_min_freq * total:
+                    continue
+                prep = self.genotypes.get(par.get(g))
+                prep = prep if (prep is not None and prep.type == "cancer" and par.get(g) != g) else None
+                c = clade(g)
+                if c is None:
+                    continue
+                born = getattr(rep, "birth_time", float("nan"))
+                x = float(born) if (timed and np.isfinite(born)) else \
+                    float(t[min(int(getattr(rep, "birth_trace", 0)), len(t) - 1)])
+                for key, letter, name in self._TREE_TRAITS:
+                    if level(rep, key) > 0 and (prep is None or level(prep, key) == 0):
+                        marks[(c, x)].append(letter)
+                        shown[letter] = name
+            for (c, x), letters in marks.items():
+                for i, letter in enumerate(sorted(set(letters))):
+                    ax.text(x + i * 0.018 * span, row[c], letter, ha="center", va="center", fontsize=7,
+                            fontweight="bold", zorder=5,
+                            bbox=dict(boxstyle="circle,pad=0.18", fc="white", ec="0.2", lw=0.6))
+            seeded = {}
+            for e in self.events:
+                if e.get("event") == "seeding":
+                    c = clade(str(e.get("genotype")))
+                    if c is not None:
+                        seeded[c] = min(seeded.get(c, np.inf), x_of(e.get("time", 0), e.get("step", 0)))
+            for c, x in seeded.items():
+                ax.scatter([x], [row[c] - 0.35], marker="v", s=40, color="black", zorder=6)
+            for e in self.events:
+                name = {"origin_release": "acinus opens", "resection": "resection"}.get(e.get("event"))
+                if name:
+                    x = x_of(e.get("time", 0), e.get("step", 0))
+                    ax.axvline(x, color="0.5", ls=":", lw=0.9, zorder=0)
+                    ax.text(x, -0.9, f" {name}", fontsize=7, color="0.35", va="bottom")
+            order = [letter for _, letter, _ in self._TREE_TRAITS if letter in shown]
+            handles = [Line2D([], [], ls="none", marker=f"${letter}$", color="0.1", markersize=7,
+                              label=shown[letter]) for letter in order]
+            if seeded:
+                handles.append(Line2D([], [], ls="none", marker="v", color="black", label="seeds the metastasis"))
+        site_handles = []
+        if sites:
+            # where the cells of each clone are at the end of growth: a duct, the stroma, the met site
+            gland = getattr(self, "gland_id", None)
+            n_primary = getattr(self, "n_primary_demes", len(self.demes))
+            names = (["in a duct", "in the stroma"] if gland is not None else [None, "in the primary tumor"])
+            names.append("at the metastatic site")
+            site_colors = ["#4b0082", "#d62728", "#2ca02c"]
+            where = defaultdict(lambda: np.zeros(3))
+            for di, deme in enumerate(self.demes):
+                k = 2 if di >= n_primary else (0 if gland is not None and gland[di] >= 0 else 1)
+                for g, n in deme.items():
+                    if self._is_cancer(g):
+                        c = clade(str(g))
+                        if c is not None:
+                            where[c][k] += n
+            used = sorted({k for v in where.values() for k in np.flatnonzero(v)})
+            if len(used) > 1:
+                x0, width = t[-1] + 0.02 * span, 0.06 * span
+                for c, v in where.items():
+                    left = x0
+                    for k in used:
+                        w = width * v[k] / v.sum()
+                        if w > 0:
+                            ax.barh(row[c], w, left=left, height=0.7, color=site_colors[k], lw=0, zorder=3)
+                        left += w
+                ax.text(x0 + width / 2, -0.9, "site", ha="center", va="bottom", fontsize=7, color="0.35")
+                site_handles = [Patch(color=site_colors[k], label=names[k]) for k in used]
+        ax.set_ylim(len(row) - 0.5, -1.2)
+        ax.set_yticks([])
+        ax.set_xlabel("Generation" if timed else "record")
+        for side in ("top", "right", "left"):
+            ax.spines[side].set_visible(False)
+        # one legend, so that a saved figure keeps all of it: the trait gains, then the sites
+        heading = lambda text: Line2D([], [], ls="none", label=text)
+        entries = ([heading("gained")] + handles if handles else []) + \
+                  ([heading("cells at the end")] + site_handles if site_handles else [])
+        if entries:
+            ax.legend(handles=entries, loc="upper left", bbox_to_anchor=(1.0, 1.0), frameon=False, fontsize=8)
+        return ax
+
+    def he_image(self, px=6, darkness=0.8, sigma_frac=0.5):
+        """Dense H&E-like morphology image built from the per-deme cell COUNTS.
+
+        The tissue *image* a histology/Visium slide sits on. Unlike rasterising the (possibly
+        subsampled) ``cell_data`` — which is a THIN section and so renders faint and holey at
+        cm-scale — this paints EVERY occupied deme from the full counts, so denser tissue (packed
+        DCIS ducts, invasive masses) reads dark and looser stroma reads pale, giving a complete,
+        high-contrast image. Cancer nuclei tint toward hematoxylin purple; stroma stays eosin pink.
+
+        The image is in the raw deme-grid frame (``px`` pixels per deme). To overlay a placed Visium
+        slide, shift the spot coordinates back into this frame by the placement translation,
+        ``spot_coords.mean(0) - section_cell_crd.mean(0)``.
+
+        Parameters
+        ----------
+        px : int, default 6
+            Pixels per deme.
+        darkness : float, default 0.8
+            Maximum staining of the densest tissue.
+        sigma_frac : float, default 0.5
+            Gaussian smoothing sigma as a fraction of ``px``.
+
+        Returns
+        -------
+        image : numpy.ndarray, shape (G*px, G*px, 3), float32
+            RGB H&E morphology image in ``[0, 1]``.
+        px : float
+            Pixels per deme (the scale factor mapping deme coords onto the image).
+        """
+        from scipy.ndimage import gaussian_filter
+        G = self.grid_size
+        gid_is_can = {g: self._is_cancer(g) for g in self.genotypes}
+        tot = np.zeros(G * G); can = np.zeros(G * G)
+        for di in range(min(len(self.demes), G * G)):
+            d = self.demes[di]
+            if not d:
+                continue
+            tot[di] = sum(d.values())
+            can[di] = sum(c for g, c in d.items() if gid_is_can[g])
+        tot = tot.reshape(G, G); can = can.reshape(G, G)
+        frac = np.divide(can, tot, out=np.zeros_like(can), where=tot > 0)
+        ref = np.percentile(tot[tot > 0], 98) if np.any(tot > 0) else 1.0
+        dens = np.clip(tot / (ref or 1.0), 0.0, 1.0)
+        dens = gaussian_filter(np.kron(dens, np.ones((px, px))), sigma=px * sigma_frac)
+        fr = gaussian_filter(np.kron(frac, np.ones((px, px))), sigma=px * sigma_frac)
+        d = darkness * dens
+        # eosin-pink stroma darkening toward hematoxylin purple where cancer nuclei are dense
+        image = np.stack([1 - d * (0.35 + 0.10 * fr),
+                          1 - d * (0.62 + 0.33 * fr),
+                          1 - d * (0.33 + 0.05 * fr)], axis=-1)
+        return np.clip(image, 0.0, 1.0).astype(np.float32), float(px)
+
+    def plot_grid(self, color=None, ax=None, **kwargs):
+        """Plot the spatial deme grid, colouring each deme by a per-cell attribute.
+
+        Rebuilds the per-cell data if it is missing, stale or a section's, then draws the grid
+        coloured by ``color``
+        (default the dominant clone / cell type). When the metastatic compartment is enabled
+        and no explicit ``ax`` is passed, both the primary and met grids are drawn side by
+        side with a shared clone colormap.
+
+        Parameters
+        ----------
+        color : str or list of str, optional
+            Attribute key(s) to colour by; defaults to the dominant clone / cell type.
+        ax : matplotlib.axes.Axes, optional
+            Axes to draw into; forces the single-panel primary view. A new figure is created
+            when ``None``.
+
+        Returns
+        -------
+        matplotlib.axes.Axes
+            The axes drawn into.
+        """
+        from .. import viz
+        if (self.cell_data is None or getattr(self, "_cell_data_stale", False)
+                or not getattr(self, "_cell_data_whole", True)):
+            self.make_cell_data()
+        # With the metastatic deposit enabled, `plot_grid()` shows BOTH grids (primary + met) side by
+        # side with a shared clone colormap, so the same clone is the same colour across compartments.
+        # (Pass an explicit `ax` to force the single-panel primary view instead.)
+        if self._met_enabled and ax is None and "cell_compartment" in self.cell_data:
+            return self.plot_grid_compartments(color=color, **kwargs)
+        return viz.plot_grid(self.cell_data, self.grid_size, self.traces,
+                             self.genotypes_parents, color=color, ax=ax, **kwargs)
+
+    def plot_grid_compartments(self, color=None, axes=None, by_drivers=False, by_stage=False, **kwargs):
+        """Two spatial grids (primary + met) side by side, shared clone colormap. ``by_drivers``
+        colours by functional clone (matching the driver-collapsed 2-band Muller); ``by_stage`` colours
+        by the stage-dominant driver; pass ``min_freq`` to also merge below-threshold clones."""
+        from .. import viz
+        if (self.cell_data is None or getattr(self, "_cell_data_stale", False)
+                or not getattr(self, "_cell_data_whole", True)):
+            self.make_cell_data()
+        if by_stage:
+            colors, present = self._stage_colors()
+            kwargs.setdefault("clone_colors", colors)
+            kwargs.setdefault("color_legend", viz.stage_legend(present))
+        driver_map = self._functional_signatures() if by_drivers else None
+        return viz.plot_grid_compartments(self.cell_data, self.grid_size, self.met_grid_size,
+                                          self.traces, self.genotypes_parents, color=color,
+                                          axes=axes, driver_map=driver_map, **kwargs)
+
+    def plot_muller_compartments(self, axes=None, by_drivers=False, by_stage=False, star_seeder=True,
+                                 **kwargs):
+        """Two-band Muller (primary over met) sharing one colormap with the grids. ``by_drivers``
+        collapses genotypes to FUNCTIONAL clones and ``min_freq`` (a fraction) merges below-threshold
+        clones, so selective sweeps (DCIS→IDC breach, the met founder, post-chemo resistant escape) show
+        as bands instead of a passenger rainbow. ``by_stage`` instead colours by the STAGE-DOMINANT
+        driver. ``star_seeder`` stars the first met-seeding clone's band in BOTH panels at the
+        seeding moment (so a minor founder is findable)."""
+        from .. import viz
+        driver_map = self._functional_signatures() if by_drivers else None
+        if by_stage:
+            colors, present = self._stage_colors()
+            kwargs.setdefault("clone_colors", colors)
+            kwargs.setdefault("color_legend", viz.stage_legend(present))
+        if star_seeder and "star_genotype" not in kwargs:
+            seeders = [e for e in self.events if e.get("event") == "seeding"]
+            if seeders:
+                kwargs["star_genotype"] = str(seeders[0]["genotype"])
+                for i, tr in enumerate(self.traces):
+                    if any(str(g) not in normal_names for g in tr.get("met_counts", {})):
+                        kwargs["star_gen"] = i
+                        break
+        return viz.plot_muller_compartments(self.traces, self.genotypes_parents, axes=axes,
+                                            driver_map=driver_map, **kwargs)
+
+    def plot_muller_founders(self, ax=None, **kwargs):
+        """A SINGLE primary Muller highlighting the clone(s) that seeded the metastasis, so you can
+        see which — usually minor — primary population founds the met. Founders are read from the
+        seeding events; a primary clone is highlighted iff it shares a functional signature with one."""
+        from .. import viz
+        founders = {e["genotype"] for e in self.events if e.get("event") == "seeding"}
+        return viz.plot_muller_founders(self.traces, self.genotypes_parents, founders,
+                                        self._functional_signatures(), ax=ax, **kwargs)
+
+    def plot_clone_tree(self, ax=None, by_stage=False, by_drivers=False, **kwargs):
+        """Ground-truth clone tree: the TRUE genotypes_parents genealogy collapsed to the
+        display clones, each node at its true mutational depth, sized by peak population and coloured by
+        ``by_stage`` (stage-dominant driver) or ``by_drivers`` (functional clone). Pass ``min_freq`` to
+        set the collapse threshold (default 0.02)."""
+        from .. import viz
+        if by_stage:
+            colors, present = self._stage_colors()
+            kwargs.setdefault("clone_colors", colors)
+            kwargs.setdefault("color_legend", viz.stage_legend(present))
+        driver_map = self._functional_signatures() if by_drivers else None
+        return viz.plot_clone_tree(self.traces, self.genotypes_parents, driver_map=driver_map,
+                                   ax=ax, **kwargs)

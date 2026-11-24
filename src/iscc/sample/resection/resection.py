@@ -2,35 +2,40 @@
 
 A specimen is physically divided by two orthogonal cuts before any assay runs:
 
-* an **in-plane cut** (:meth:`Resection.bisect`) splits the 2-D tissue into disjoint parts — one is
+* an **in-plane cut** ([`Resection.bisect`][iscc.sample.Resection.bisect]) splits the 2-D tissue into disjoint parts — one is
   dissociated for the sequencing assays (bulk DNA / scDNA / scRNA), the rest is kept for imaging;
-* a **depth cut** (:meth:`Resection.slice`) thins a part to ~one layer — a thin histology / Visium
+* a **depth cut** ([`Resection.slice`][iscc.sample.Resection.slice]) thins a part to ~one layer — a thin histology / Visium
   section that keeps the 2-D structure but lowers each deme-column's occupancy (a deme's ``K`` stands
   for the cells in its 3-D column).
 
 The cuts operate on the tumour's per-deme genotype counts and materialise only what each sample needs
-(via :meth:`GenotypeTumor.make_cell_data`), so ``Resection`` stays memory-safe at cm-scale — you never
+(via [`GenotypeTumor.make_cell_data`][iscc.tumor.GenotypeTumor.make_cell_data]), so ``Resection`` stays memory-safe at cm-scale — you never
 materialise the whole tumour just to sample a piece of it.
 
-Taking a sample does not change the tumour: :meth:`dissociate` and :meth:`slice` RETURN their
+Taking a sample does not change the tumour: ``dissociate`` and ``slice`` RETURN their
 per-cell tables and leave ``tumor.cell_data`` exactly as they found it, so cutting a section never
 silently redefines what ``to_anndata(tumor)`` / ``tumor.write_h5ad(...)`` export. Pass
 ``install=True`` when you *want* the sample to become the tumour's own table — that is what the
 tumour-level helpers that read ``tumor.cell_data`` (``clones_from_clades``, ``to_anndata(tumor)``)
 then see.
 """
+import warnings
+
+from ...tumor.models.materialise import SectionCapWarning
 
 
 class _CellDataGuard:
     """Context manager that leaves ``tumor.cell_data`` as it found it.
 
     ``make_cell_data`` both returns the sample AND installs it on the tumour. A sample is not the
-    tumour, so :class:`Resection` runs it inside this guard: the returned tables are unaffected
+    tumour, so [`Resection`][iscc.sample.Resection] runs it inside this guard: the returned tables are unaffected
     (``make_cell_data`` rebinds ``cell_data`` to a fresh dict rather than mutating the old one), and
-    the tumour keeps whatever it had before the cut.
+    the tumour keeps whatever it had before the cut. That includes the stale flag
+    ``grow(materialize=False)`` sets: ``make_cell_data`` clears it, and the restored tables are as
+    stale as they were. The flag that tells a whole-tumour table from a section's is restored too.
     """
 
-    __slots__ = ("tumor", "_had", "_saved")
+    __slots__ = ("tumor", "_had", "_saved", "_stale", "_whole")
 
     def __init__(self, tumor):
         self.tumor = tumor
@@ -38,9 +43,15 @@ class _CellDataGuard:
     def __enter__(self):
         self._had = hasattr(self.tumor, "cell_data")
         self._saved = getattr(self.tumor, "cell_data", None)
+        self._stale = getattr(self.tumor, "_cell_data_stale", None)
+        self._whole = getattr(self.tumor, "_cell_data_whole", None)
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        if self._stale is not None:
+            self.tumor._cell_data_stale = self._stale
+        if self._whole is not None:
+            self.tumor._cell_data_whole = self._whole
         if self._had:
             self.tumor.cell_data = self._saved
         else:                                    # nothing was installed before: leave it that way
@@ -62,8 +73,8 @@ class Resection:
         Which grid the specimen is taken from. ``"primary"`` (default) resects only the primary
         tumour; ``"met"`` resects only the metastatic deposit (errors if the tumour has no
         metastasis); ``"both"`` resects both grids (falls back to the primary alone when there is
-        no metastasis). This sets the deme set that :meth:`bisect` partitions and that
-        :meth:`dissociate` / :meth:`slice` default to when ``region`` is ``None``.
+        no metastasis). This sets the deme set that [`bisect`][iscc.sample.Resection.bisect] partitions and that
+        [`dissociate`][iscc.sample.Resection.dissociate] / [`slice`][iscc.sample.Resection.slice] default to when ``region`` is ``None``.
 
     Examples
     --------
@@ -85,13 +96,14 @@ class Resection:
         self.tumor = tumor
         self.compartment = compartment
         self._grids = self._compartment_grids()
+        self.dissociation_meta = None       # the last dissociate()'s record (None: no recovery/stress)
 
     def _compartment_grids(self):
         """The ``(base_deme_index, grid_side)`` of each grid in the resected compartment.
 
         Primary demes occupy indices ``0 .. grid_size**2 - 1``; the metastasis (when present) is a
         ``met_grid_size`` lattice appended at ``n_primary_demes``. Returns one entry per included
-        grid so :meth:`bisect` can cut each in-plane and :meth:`dissociate` / :meth:`slice` can
+        grid so [`bisect`][iscc.sample.Resection.bisect] can cut each in-plane and [`dissociate`][iscc.sample.Resection.dissociate] / [`slice`][iscc.sample.Resection.slice] can
         enumerate their demes.
         """
         t = self.tumor
@@ -114,11 +126,43 @@ class Resection:
             out.extend(range(base, base + side * side))
         return out
 
+    def cancer_region(self, margin=1):
+        """The piece of tumour a pathologist sends for dissociation: the demes of the specimen that
+        hold cancer cells, with a rim of ``margin`` demes around them.
+
+        A resection of the simulated field is mostly normal tissue, so dissociating all of it gives a
+        sample of mostly normal cells, the more so as malignant cells are the hardest to recover.
+        Pass the result as ``region`` to [`dissociate`][iscc.sample.Resection.dissociate] or
+        [`slice`][iscc.sample.Resection.slice].
+
+        Parameters
+        ----------
+        margin : int, default 1
+            Width of the rim of normal tissue around the cancer cells, in demes (Chebyshev distance);
+            0 keeps only the demes that hold cancer cells.
+
+        Returns
+        -------
+        list of int
+            Deme indices, in index order.
+        """
+        import numpy as np
+        from scipy.ndimage import binary_dilation
+        G_ = self.tumor.genotypes
+        out = []
+        for base, side in self._grids:
+            mask = np.array([any(G_[g].type == "cancer" for g in self.tumor.demes[base + i])
+                             for i in range(side * side)]).reshape(side, side)
+            if margin > 0 and mask.any():
+                mask = binary_dilation(mask, structure=np.ones((3, 3), bool), iterations=int(margin))
+            out.extend(base + int(i) for i in np.flatnonzero(mask.ravel()))
+        return out
+
     def bisect(self, frac=0.5, axis="x"):
         """In-plane cut: split the specimen into two disjoint 2-D parts.
 
-        Cuts each grid of the resected :attr:`compartment` at ``frac`` of its side along ``axis`` and
-        returns the deme indices on each side, ready to pass to :meth:`dissociate` / :meth:`slice`
+        Cuts each grid of the resected ``compartment`` at ``frac`` of its side along ``axis`` and
+        returns the deme indices on each side, ready to pass to [`dissociate`][iscc.sample.Resection.dissociate] / [`slice`][iscc.sample.Resection.slice]
         (or ``make_cell_data(region=)``). For ``compartment="both"`` each grid is cut at the same
         fraction and the parts are unioned.
 
@@ -145,43 +189,147 @@ class Resection:
                     (part if key < s else remainder).append(base + r * G + c)
         return part, remainder
 
-    def _materialise(self, install, **kwargs):
-        """``make_cell_data`` for a sample: return its tables, leave the tumour's own alone."""
-        if install:
-            return self.tumor.make_cell_data(**kwargs)
-        with _CellDataGuard(self.tumor):
-            return self.tumor.make_cell_data(**kwargs)
+    def _materialise(self, install, section=True, **kwargs):
+        """``make_cell_data`` for a sample: return its tables, leave the tumour's own alone.
 
-    def dissociate(self, region=None, max_cells=None, install=False):
+        A dissociation (``section=False``) takes ``max_cells`` cells by design, so the warning that
+        the cap thins a physical section does not apply to it."""
+        with warnings.catch_warnings():
+            if not section:
+                warnings.simplefilter("ignore", SectionCapWarning)
+            if install:
+                return self.tumor.make_cell_data(**kwargs)
+            with _CellDataGuard(self.tumor):
+                return self.tumor.make_cell_data(**kwargs)
+
+    def dissociate(self, region=None, max_cells=None, install=False, layers=None,
+                   recovery_probs=None, stress_strength=0.0, n_stress_genes=None,
+                   stress_genes=None, seed=None):
         """Dissociate a 2-D part into a per-cell table for the sequencing assays.
 
         Materialises the part at FULL column depth (all ~K cells/deme, subsampled to ``max_cells``);
         the cells lose their spatial position, as in a real dissociation.
 
+        By default that is all: every materialised cell is returned, as it was in the tissue. With
+        ``recovery_probs`` and/or ``stress_strength`` the dissociation's own biology is applied too,
+        through [`iscc.sample.Dissociation`][iscc.sample.Dissociation]: each cell is recovered with its
+        biological type's probability (composition bias) and the recovered cells' expression picks
+        up the stress signature. This is how per-patient dissociation settings reach a cohort: call
+        ``resect(t).dissociate(..., recovery_probs=..., stress_strength=..., seed=...)`` per patient.
+        The recovery draw comes first from the generator, so with the same ``seed`` and
+        ``recovery_probs`` the recovered cells are the same whatever the stress strength, and so is
+        the stress-gene set (unless ``stress_genes`` names it). The dissociation's record (recovery
+        probabilities, compositions before and after, the stress genes) is kept in
+        ``dissociation_meta``; it is None after a plain dissociation.
+
         Parameters
         ----------
         region : iterable of int, optional
-            Deme indices of the part to dissociate (e.g. the first element of :meth:`bisect`). ``None``
-            dissociates the whole resected :attr:`compartment` (the primary by default).
+            Deme indices of the part to dissociate (e.g. the first element of [`bisect`][iscc.sample.Resection.bisect]). ``None``
+            dissociates the whole resected ``compartment`` (the primary by default).
         max_cells : int, optional
-            Cap on materialised cells (a representative subsample above it).
+            Cap on the cells returned (a representative subsample above it). With a recovery bias,
+            enough cells are materialised that about ``max_cells`` survive it, from the expected
+            recovery of the part's cell types and a 10% margin, and ``max_cells`` of the recovered
+            cells are kept at random, as a single-cell run captures a target number of cells from a
+            suspension.
         install : bool, default False
             Also make this sample the tumour's own ``cell_data``. Off by default: a sample is not
             the tumour, and installing it would silently redefine what ``to_anndata(tumor)`` and
             ``tumor.write_h5ad(...)`` export. Turn it on when you want the tumour-level helpers
             that read ``tumor.cell_data`` (``clones_from_clades``, ``to_anndata(tumor)``) to work
             on exactly these cells.
+        layers : str or iterable of str, optional
+            The gene-wide frames to build, by frame or assay name (``"scrna"``, ``"scdna"``); see
+            [`make_cell_data`][iscc.tumor.GenotypeTumor.make_cell_data]. ``None`` builds them all.
+        recovery_probs : dict or "default", optional
+            Per-biological-type recovery probability (``cancer``, ``epithelial``, ``host``,
+            ``stromal``, the immune subtypes ``immune`` for T and NK cells, ``myeloid`` and
+            ``bplasma``, each its own key, and the stromal subtypes ``endothelial`` and ``pvl``, which
+            take the value of ``stromal`` unless named), merged over ``DEFAULT_RECOVERY``; ``"default"`` (or an empty dict)
+            uses the defaults as they are. ``None`` (default) recovers every cell, unless a stress
+            signature is asked for, in which case every type is recovered with probability 1.
+        stress_strength : float, default 0.0
+            Dissociation-stress bump: the stress genes of every recovered cell are multiplied by
+            ``1 + stress_strength``. 0 leaves the expression as it is.
+        n_stress_genes : int, optional
+            Size of the randomly drawn stress-gene set (default 5% of the expression genes).
+        stress_genes : list of str, optional
+            The stress-gene set itself, instead of the random draw.
+        seed : int or numpy.random.Generator, optional
+            Seed (or generator) for the recovery and stress-gene draws. ``None`` draws fresh entropy,
+            so pass a seed whenever the same patient is dissociated more than once.
 
         Returns
         -------
         dict
-            The per-cell ``cell_data`` tables (pass to ``bulkDNA`` / ``scDNA`` / ``scRNA``).
+            The per-cell ``cell_data`` tables (pass to ``bulkDNA`` / ``scDNA`` / ``scRNA``): with
+            recovery, only the recovered cells, and with stress, their stressed ``cell_exp``.
         """
         if region is None:
             region = self._all_demes()
-        return self._materialise(install, region=region, max_cells=max_cells)
+        self.dissociation_meta = None
+        if recovery_probs is None and float(stress_strength) == 0.0:
+            return self._materialise(install, section=False, region=region, max_cells=max_cells,
+                                     layers=layers)
+        import numpy as np
+        from ..dissociation import Dissociation, DEFAULT_RECOVERY, merge_recovery
 
-    def slice(self, region=None, depth_frac=0.5, max_cells=None, install=False):
+        if recovery_probs is None:
+            probs = {t: 1.0 for t in DEFAULT_RECOVERY}
+        elif isinstance(recovery_probs, str):
+            if recovery_probs != "default":
+                raise ValueError(f"recovery_probs must be a dict, 'default' or None, got {recovery_probs!r}")
+            probs = {}
+        else:
+            probs = dict(recovery_probs)
+        n_materialise = max_cells
+        if max_cells is not None:
+            rate = self._expected_recovery(region, merge_recovery(probs))
+            if 0 < rate < 1:
+                n_materialise = int(np.ceil(1.1 * max_cells / rate))
+        cd = self._materialise(install, section=False, region=region, max_cells=n_materialise,
+                               layers=layers)
+        if float(stress_strength) != 0.0 and cd.get("cell_exp") is None:
+            raise ValueError("a stress signature needs the expression table; pass layers that "
+                             "build cell_exp (e.g. 'scrna')")
+        rng = seed if isinstance(seed, np.random.Generator) else np.random.default_rng(seed)
+        # the cells kept after recovery come from a child generator, which leaves the recovery and
+        # stress-gene draws as they were and keeps the kept cells independent of the stress strength
+        keep_rng = rng.spawn(1)[0]
+        diss = Dissociation(cd, rng=rng, recovery_probs=probs, stress_strength=stress_strength,
+                            n_stress_genes=n_stress_genes, stress_genes=stress_genes)
+        chosen, meta, exp_override = diss.run()
+        if max_cells is not None and len(chosen) > max_cells:
+            chosen = np.sort(keep_rng.choice(np.asarray(chosen), size=max_cells, replace=False))
+            meta["n_kept"] = int(max_cells)
+        meta["n_materialised"] = int(len(cd["cell_type"]))
+        out = {}
+        for key, df in cd.items():
+            src = exp_override if (key == "cell_exp" and exp_override is not None) else df
+            out[key] = src.loc[chosen]
+        meta["recovery_probs_given"] = (None if recovery_probs is None else
+                                        ("default" if isinstance(recovery_probs, str) else
+                                         {k: float(v) for k, v in dict(recovery_probs).items()}))
+        self.dissociation_meta = meta
+        if install:
+            self.tumor.cell_data = out
+        return out
+
+    def _expected_recovery(self, region, probs):
+        """The share of the cells of ``region`` a dissociation recovers on average, from their types
+        (a normal cell by its genotype, the key ``Dissociation`` reads; a cell of an unlisted type is
+        recovered, as in ``Dissociation``)."""
+        n = kept = 0.0
+        G = self.tumor.genotypes
+        for i in region:
+            for gid, c in self.tumor.demes[i].items():
+                t = "cancer" if G[gid].type == "cancer" else str(gid)
+                n += c
+                kept += c * float(probs.get(t, 1.0))
+        return kept / n if n else 1.0
+
+    def slice(self, region=None, depth_frac=0.5, max_cells=None, install=False, layers=None):
         """Cut a thin histology / Visium **section**: a depth cut of a 2-D part.
 
         Keeps ``depth_frac`` of each deme's 3-D column (default half — "take away half"), leaving the
@@ -190,8 +338,8 @@ class Resection:
         Parameters
         ----------
         region : iterable of int, optional
-            Deme indices of the part to section (e.g. the remainder from :meth:`bisect`). ``None``
-            sections the whole resected :attr:`compartment` (the primary by default).
+            Deme indices of the part to section (e.g. the remainder from [`bisect`][iscc.sample.Resection.bisect]). ``None``
+            sections the whole resected ``compartment`` (the primary by default).
         depth_frac : float, default 0.5
             Fraction of each deme's column kept in the slice. Note this thins the same 3-D column
             that ``Visium(section_frac=...)`` thins, so the two **compose multiplicatively**: keep
@@ -199,8 +347,13 @@ class Resection:
         max_cells : int, optional
             Cap on materialised cells (bounds the section at cm-scale).
         install : bool, default False
-            Also make this section the tumour's own ``cell_data`` — see :meth:`dissociate`. Off by
+            Also make this section the tumour's own ``cell_data`` — see [`dissociate`][iscc.sample.Resection.dissociate]. Off by
             default, so taking a section never changes what the tumour itself exports.
+        layers : str or iterable of str, optional
+            The gene-wide frames to build, by frame or assay name; ``"visium"`` builds only the
+            expression a Visium assay reads, which is most of the memory saving for a large
+            section. See [`make_cell_data`][iscc.tumor.GenotypeTumor.make_cell_data]. ``None`` builds
+            them all.
 
         Returns
         -------
@@ -210,4 +363,4 @@ class Resection:
         if region is None:
             region = self._all_demes()
         return self._materialise(install, region=region, depth_frac=depth_frac,
-                                 max_cells=max_cells)
+                                 max_cells=max_cells, layers=layers)

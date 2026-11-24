@@ -22,10 +22,10 @@ from iscc.integrations import multiregion as mr
 
 
 # Small, fast, deterministic tumour: ~1600 loci keeps the per-allele infinite-sites model sparse
-# (clean single-origin answer key); low dispersal + capacity gives spatial clone territories.
+# (clean single-origin ground truth); low dispersal + capacity gives spatial clone territories.
 GENOME = {"n_segments": 20, "segment_size": 80}
 SELECTION = {"prop_driver": 0.05, "prop_dispersal": 0.1}
-# Real per-deme crowding (DESIGN_crowding.md): seed a founder cluster (or a low-dispersal tumour goes
+# Per-deme crowding: seed a founder cluster (or a low-dispersal tumour goes
 # extinct), and grow longer at a slightly higher K so the tumour spreads across enough demes to build
 # the ~15-25 sizeable clonal territories a multi-region biopsy straddles.
 DEME = {"carrying_capacity": 15, "initial_cancer_cells": 5}
@@ -104,7 +104,7 @@ def test_hamming_nj_tree_groups_identical_leaves():
 
 
 # ---------------------------------------------------------------------------------------------
-# Answer key (true origins)
+# Ground truth (true origins)
 # ---------------------------------------------------------------------------------------------
 def test_answer_key_has_single_origin_loci(answer_key):
     ak = answer_key
@@ -168,3 +168,11 @@ def test_runs_without_optional_tree_dependency():
     assert "ete3" not in sys.modules and "dendropy" not in sys.modules
     importlib.reload(mr)  # re-import cleanly; must not raise on a missing optional dep
     assert hasattr(mr, "neighbor_joining") and hasattr(mr, "robinson_foulds")
+
+
+def test_hamming_nj_tree_with_two_leaves_is_a_star():
+    # two clones (or regions) give no internal node to root at; the tree is a star and Fitch works
+    P = np.array([[1, 0, 1], [0, 0, 1]])
+    children, root = mr.hamming_nj_tree(P)
+    assert root == 2 and sorted(children[root]) == [0, 1]
+    assert mr.fitch_length(children, {0: 1, 1: 0}, root) == 1

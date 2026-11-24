@@ -88,16 +88,6 @@ def test_nullisomy_count_is_zero_copy_segments():
 
 
 # --- A4: celltype baseline expression indexes drivers correctly --------------
-def test_make_celltype_exps_sets_driver_genes(glandular_tumor):
-    t = glandular_tumor
-    tsgs = t.selection.get_tsgs()
-    oncs = t.selection.get_oncogenes()
-    for celltype, exp in t.celltype_exps.items():
-        assert np.allclose(exp[tsgs], 0.8)
-        assert np.allclose(exp[oncs], 0.01)
-
-
-# --- A5: death_rate is not overwritten by the division-rate fitness ----------
 def test_death_rate_not_changed_by_genome_selection():
     selection = _make_selection()
     cell = _make_cancer_cell(selection)
@@ -170,39 +160,3 @@ def test_mutation_does_not_corrupt_shared_clonemates():
 
 
 # --- B8: immune-cell dispersal migrates the cell and conserves the population -
-def test_immune_dispersal_migrates_cell(glandular_tumor):
-    from iscc.tumor.components.cell import ImmuneCell
-    t = glandular_tumor
-    src = t.grid[2][2]
-    imm = ImmuneCell(n_segments=N_SEGMENTS, segment_size=SEGMENT_SIZE,
-                     division_rate=0.0, death_rate=0.1, dispersal_rate=0.1)
-    src.add_cell(imm)
-    before = sum(len(d.cells) for d in t.deme_list)
-    src.apply_event('dispersal', imm, rng=np.random.default_rng(0))
-    after = sum(len(d.cells) for d in t.deme_list)
-    assert before == after            # population conserved (moved, not duplicated/lost)
-    assert imm not in src.cells       # left the source deme
-    assert any(imm in d.cells for d in t.deme_list)  # landed in a neighbour
-
-
-# --- B12/B14: a structured glandular tumor builds and grows end-to-end --------
-def test_structured_glandular_tumor_builds_and_grows():
-    from collections import Counter
-    from iscc.tumor.models.glandular import GlandularTumor
-    from conftest import (GENOME_PARAMS, SELECTION_PARAMS, CANCER_CELL_PARAMS,
-                          EPITHELIAL_CELL_PARAMS, STROMAL_CELL_PARAMS,
-                          IMMUNE_CELL_PARAMS, DEME_PARAMS)
-    t = GlandularTumor(
-        genome_params=GENOME_PARAMS, selection_params=SELECTION_PARAMS,
-        cancer_cell_params=CANCER_CELL_PARAMS, epithelial_cell_params=EPITHELIAL_CELL_PARAMS,
-        stromal_cell_params=STROMAL_CELL_PARAMS, immune_cell_params=IMMUNE_CELL_PARAMS,
-        deme_params=DEME_PARAMS, grid_size=9, structure_radius=3,
-    )
-    types = Counter(c.type for d in t.deme_list for c in d.cells)
-    # structure_radius > 0 must place all three normal/cancer populations
-    assert {'epithelial', 'stromal', 'cancer'} <= set(types)
-    # normal cells must share the tumor's genome size (segment_size propagated, B14)
-    a_cell = next(iter(next(d for d in t.deme_list if d.cells).cells))
-    assert a_cell.segment_size == SEGMENT_SIZE
-    t.grow(n_steps=5, seed=0)
-    assert t.cell_data['cell_snv'].shape[1] == t.n_genes

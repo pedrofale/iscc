@@ -33,10 +33,14 @@ other validation scripts, because a de novo origin needs a deposit large enough 
 panel is cached as an .npz under validation/.cache_escape_modes/, so re-plotting is free and an
 interrupted run resumes. Use --only to run a subset, --force to recompute.
 
+Beside each .npz the run also leaves <key>_growth.pkl: the metastasis deme snapshots and per-clone
+counts that escape_modes_slides.py draws its growth figures from. The figure here does not read it.
+
 Usage:  python validation/validate_escape_modes.py [--only I,IV] [--force]
 """
 import argparse
 import os
+import pickle
 import sys
 import tempfile
 import time
@@ -209,7 +213,52 @@ def _simulate(panel):
           f"{len(tumor.genotypes):,} genotypes", flush=True)
     return dict(sens=sens, res=res, c0=mark["chemo start"],
                 c1=min(mark.get("chemo end", n - 1), n - 1), origin_row=origin_row,
-                trace_gen=_generation_index(gen_row, n))
+                trace_gen=_generation_index(gen_row, n),
+                growth=_growth_record(tumor, frames, stage, parents))
+
+
+def _growth_record(tumor, frames, stage, parents):
+    """The metastasis half of the run, kept for the growth figures (escape_modes_slides.py).
+
+    The deme snapshots ``execute_schedule`` captures (every 3rd generation while growing, every
+    generation on drug), cut to the met compartment and to frames that already hold a cancer cell;
+    the met's per-clone counts on every trace row; and the genealogy, stage and driver signature of
+    every clone either one mentions, closed over ancestors so the Muller can collapse them into
+    functional clones. Read-only on the tumour: the dynamics, and so the .npz, are untouched.
+    """
+    n0 = int(tumor.n_primary_demes)
+    met_frames, present = [], set()
+    for f in frames:
+        demes = {i: {str(g): int(c) for g, c in d.items() if c > 0}
+                 for i, d in enumerate(f["demes"][n0:]) if d}
+        cancer = {g for d in demes.values() for g in d if tumor._is_cancer(g)}
+        if not cancer:
+            continue
+        present |= cancer
+        met_frames.append(dict(row=int(f["cursor"]) - 1, demes=demes))
+
+    met_counts = []
+    for row in tumor.traces:
+        mc = {str(g): int(c) for g, c in row.get("met_counts", {}).items() if tumor._is_cancer(g)}
+        present |= set(mc)
+        met_counts.append(mc)
+
+    keep = set()
+    for g in present:
+        while g is not None and g not in keep:
+            keep.add(g)
+            g = parents.get(g)
+    signatures = tumor._functional_signatures()
+    return dict(
+        frames=met_frames,
+        met_counts=met_counts,
+        parents={g: parents[g] for g in keep if g in parents},
+        stage={g: stage.get(g) for g in keep},
+        driver_map={str(g): tuple(int(i) for i in v) for g, v in signatures.items()
+                    if str(g) in keep},
+        met_coords=[(int(r), int(c)) for r, c in tumor.deme_coords[n0:]],
+        met_grid_size=int(tumor.met_grid_size),
+    )
 
 
 def _generation_index(gen_row, n):
@@ -221,19 +270,43 @@ def _generation_index(gen_row, n):
     return trace_gen
 
 
-def _load(panel, force=False, cache_dir=None):
+def _load(panel, force=False, cache_dir=None, growth=False):
     """Run (or reuse) one panel. ``cache_dir`` overrides :data:`CACHE` so
     ``make_analysis_data.py`` can write the panels straight into ``analysis_data/escape_modes``,
-    where every other analysis notebook looks for its input."""
+    where every other analysis notebook looks for its input.
+
+    ``growth=True`` also returns the panel's growth record, as ``(out, growth)``. A panel cached
+    before the record existed is re-run for it, and the re-run's curves are checked against the
+    cached ones -- the record is only worth drawing if it comes from the run the paper shows."""
     cache = cache_dir or CACHE
     os.makedirs(cache, exist_ok=True)
     path = os.path.join(cache, f"{panel['key']}.npz")
+    gpath = os.path.join(cache, f"{panel['key']}_growth.pkl")
+    cached = None
     if os.path.exists(path) and not force:
         z = np.load(path, allow_pickle=True)
-        return {k: z[k] for k in z.files}
+        cached = {k: z[k] for k in z.files}
+        if not growth:
+            return cached
+        if os.path.exists(gpath):
+            with open(gpath, "rb") as f:
+                return cached, pickle.load(f)
     out = _simulate(panel)
+    record = out.pop("growth")
+    if cached is not None:
+        if not all(np.array_equal(cached[k], out[k]) for k in ("sens", "res", "trace_gen")):
+            stem = os.path.join(cache, f"{panel['key']}.rerun")
+            np.savez(stem + ".npz", **out)
+            with open(stem + "_growth.pkl", "wb") as f:
+                pickle.dump(record, f, protocol=pickle.HIGHEST_PROTOCOL)
+            raise RuntimeError(f"{panel['key']}: the re-run's curves differ from {path}; kept both "
+                               f"(re-run at {stem}.npz) rather than pair a growth record with a "
+                               f"different run")
+        print(f"  {panel['key']}: re-run matches the cached curves", flush=True)
     np.savez(path, **out)
-    return out
+    with open(gpath, "wb") as f:
+        pickle.dump(record, f, protocol=pickle.HIGHEST_PROTOCOL)
+    return (out, record) if growth else out
 
 
 def main():

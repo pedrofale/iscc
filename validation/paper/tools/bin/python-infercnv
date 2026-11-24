@@ -1,0 +1,4 @@
+#!/bin/bash
+# Python of the image's base environment (infercnvpy, scanpy).
+# Point the matching ISCC_*_RSCRIPT / ISCC_*_PYTHON variable at this file; ISCC_TOOLS_DIR holds the images.
+exec apptainer exec --cleanenv -B /nobackup  "${ISCC_TOOLS_DIR:?set ISCC_TOOLS_DIR to the directory of the tool images}/py-tools.sif" /opt/conda/bin/python "$@"

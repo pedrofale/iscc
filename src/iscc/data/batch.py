@@ -1,14 +1,14 @@
-"""Assay batch-effect model (DESIGN_features.md §B).
+"""Assay batch-effect model.
 
 A **batch** is one realization of an assay instance — a single reaction / lane / plate
 keyed by a seed. The *hyper-parameters* (`RNABatchHyperParams`) are protocol-typical
 magnitudes; one seed draws a concrete *realization* (`Batch`) whose technical signature
 is applied consistently across every cell of that instance and is reproducible from the
 seed. Two `Batch`es with identical hyper-parameters but different seeds = same biology,
-two technical signatures (§B.3).
+two technical signatures.
 
-The hyper-parameter names here are exactly what `estimate()` (DESIGN_inference.md §B / M2)
-will fit from real data, so they are named for that purpose:
+The hyper-parameter names here are exactly what `estimate()` fits from real data, so they
+are named for that purpose:
 
     sigma_batch       per-gene batch-factor LogNormal sd  (Splatter `batch.facScale`)
     mu_lib            mean library size (counts / cell)    -> sequencing depth
@@ -25,15 +25,18 @@ will fit from real data, so they are named for that purpose:
     depth_batch_sigma per-batch depth-shift LogNormal sd (so batches differ in depth)
     kappa             Dirichlet concentration (only for the `dm` count model)
 
-The **count emission is a pluggable step** (§B.2): everything above (biology -> library ->
+The **count emission is a pluggable step**: everything above (biology -> library ->
 batch) is shared and only the final draw is swapped via ``COUNT_MODELS``.
 """
 from dataclasses import dataclass, asdict
+from typing import Optional
 
 import math
+import re
 import warnings
 
 import numpy as np
+import pandas as pd
 
 
 # --------------------------------------------------------------------------------------
@@ -81,10 +84,11 @@ def row_label(i):
 class PlateLayout:
     """Where each cell physically sits: its plate, its well, and the well's row/column.
 
-    Assignment is deterministic (no RNG): the cells are split as evenly as possible across
-    the plates, and within a plate the wells are filled in reading order (A01, A02, ... then
-    B01). Because one cell occupies one well, `n_plates * n_wells` is a hard capacity —
-    see [`assign_plates`][iscc.data.batch.assign_plates].
+    Assignment is deterministic (no RNG). By default the cells are split as evenly as possible
+    across the plates, and within a plate the wells are filled in reading order (A01, A02, ...
+    then B01). Because one cell occupies one well, `n_plates * n_wells` is a hard capacity —
+    see [`assign_plates`][iscc.data.batch.assign_plates]. A caller-given plate map replaces
+    that split (`assign_plates_from_map`), and then the plates carry the map's own names.
 
     Attributes
     ----------
@@ -102,6 +106,9 @@ class PlateLayout:
         0-based well index within that plate.
     row, col : ndarray of int
         0-based row / column of that well on the plate.
+    labels : list of str, optional
+        Name of each plate, by plate index, when the layout came from a plate map; None for
+        the default split, whose plates are named by index ("P0", "P1", ...).
     """
     n_cells: int
     n_wells: int
@@ -112,6 +119,7 @@ class PlateLayout:
     well: np.ndarray
     row: np.ndarray
     col: np.ndarray
+    labels: list = None
 
     def well_ids(self):
         """Human-readable well names ("A01" ... "P24")."""
@@ -123,11 +131,16 @@ class PlateLayout:
         Two batches are two physical plate runs, so qualifying keeps their plates distinct
         when several batches are concatenated.
         """
+        if self.labels is not None:
+            return np.array([f"{label}_{self.labels[p]}" for p in self.plate])
         return np.array([f"{label}_P{p}" for p in self.plate])
 
     def to_dict(self):
-        return dict(n_plates=int(self.n_plates), n_wells=int(self.n_wells),
-                    n_rows=int(self.n_rows), n_cols=int(self.n_cols))
+        out = dict(n_plates=int(self.n_plates), n_wells=int(self.n_wells),
+                   n_rows=int(self.n_rows), n_cols=int(self.n_cols))
+        if self.labels is not None:
+            out["plate_labels"] = list(self.labels)
+        return out
 
 
 def assign_plates(n_cells, n_wells, n_plates=0):
@@ -182,8 +195,127 @@ def assign_plates(n_cells, n_wells, n_plates=0):
     )
 
 
+_WELL_NAME = re.compile(r"^([A-Za-z]+)(\d+)$")
+
+
+def _plate_name(label):
+    """A plate label as a name: integers become "P<n>" (like the default plates), the rest str."""
+    if isinstance(label, (int, np.integer)) and not isinstance(label, bool):
+        return f"P{label}"
+    return str(label)
+
+
+def _well_index(well, n_cols):
+    """0-based well index from an int (already an index) or a well name ("A01", "P24")."""
+    if isinstance(well, (int, np.integer)) and not isinstance(well, bool):
+        return int(well)
+    m = _WELL_NAME.match(str(well))
+    if m is None:
+        raise ValueError(f"well {well!r} is neither a 0-based index nor a well name like 'A01'")
+    row = 0
+    for ch in m.group(1).upper():                # inverse of `row_label`: A -> 0, AA -> 26
+        row = row * 26 + ord(ch) - ord("A") + 1
+    col = int(m.group(2)) - 1
+    if not 0 <= col < n_cols:
+        raise ValueError(f"well {well!r}: column {col + 1} is not on a plate with {n_cols} columns")
+    return (row - 1) * n_cols + col
+
+
+def assign_plates_from_map(cells, plate_map, n_wells, n_plates=0):
+    """Lay `cells` out on plates by a caller-given plate map, one cell per well.
+
+    Parameters
+    ----------
+    cells : array-like
+        Ids of the cells to place, in assay order.
+    plate_map : dict or pandas.Series
+        Keyed by cell id; must cover every cell in `cells` and may hold more. Each value is
+        either a ``(plate, well)`` pair — the well an int (0-based, reading order: A01 = 0,
+        A02 = 1, ...) or a name such as ``"A01"`` — or a plate label alone, in which case the
+        wells of each plate are filled in reading order, in the order the cells come in
+        `cells`. All values take one of the two forms.
+    n_wells : int
+        Wells per plate. Must be positive.
+    n_plates : int, default 0
+        The map decides the plates, so this must be 0 or exactly the number of plates the map
+        names; any other count is an error.
+
+    Returns
+    -------
+    PlateLayout
+        The placement. Plates are indexed in sorted label order over the WHOLE map, so a plate
+        keeps its index in every batch that draws cells from the same map, and they are named
+        by their labels (an integer label ``n`` is named ``"P<n>"``).
+
+    Notes
+    -----
+    **Capacity.** One cell occupies one well, so a plate takes at most `n_wells` of the cells
+    being placed and no two of them may share a well. Unlike `assign_plates` this raises
+    rather than growing the plate count: the map names the plates, so there is none to add.
+    """
+    n_wells = int(n_wells)
+    if n_wells <= 0:
+        raise ValueError(f"n_wells must be positive to lay cells out on plates, got {n_wells}")
+    if isinstance(plate_map, pd.DataFrame) or not isinstance(plate_map, (dict, pd.Series)):
+        raise TypeError("plate_layout must be a dict or pandas Series keyed by cell id, got "
+                        f"{type(plate_map).__name__}")
+    pmap = pd.Series(plate_map, dtype=object)
+    if not pmap.index.is_unique:
+        raise ValueError("plate_layout lists a cell more than once")
+    paired = np.array([isinstance(v, (tuple, list)) for v in pmap.values], dtype=bool)
+    if paired.any() and not paired.all():
+        raise ValueError("plate_layout mixes (plate, well) pairs with bare plate labels; use one")
+    paired = bool(paired.size) and bool(paired.all())
+    if paired and any(len(v) != 2 for v in pmap.values):
+        raise ValueError("plate_layout pairs must be (plate, well)")
+    plate_labels = [v[0] for v in pmap.values] if paired else list(pmap.values)
+    codes, uniques = pd.factorize(pd.Series(plate_labels, dtype=object), sort=True)
+    if (codes < 0).any():
+        raise ValueError("plate_layout has a missing plate label")
+    labels = [_plate_name(u) for u in uniques]
+    if len(set(labels)) != len(labels):
+        raise ValueError(f"plate labels {list(uniques)} collide once named as {labels}")
+    if int(n_plates) not in (0, len(labels)):
+        raise ValueError(f"n_plates={int(n_plates)} contradicts plate_layout, which names "
+                         f"{len(labels)} plate(s)")
+
+    cells = np.asarray(cells)
+    missing = ~pd.Index(cells).isin(pmap.index)
+    if missing.any():
+        raise ValueError(f"plate_layout has no plate for {int(missing.sum())} assayed cell(s), "
+                         f"e.g. {list(cells[missing][:3])}")
+    pos = pmap.index.get_indexer(cells)
+    plate = codes[pos].astype(int)
+    n_rows, n_cols = well_grid(n_wells)
+    if paired:
+        well = np.array([_well_index(pmap.values[i][1], n_cols) for i in pos], dtype=int)
+        bad = (well < 0) | (well >= n_wells)
+        if bad.any():
+            i = int(np.flatnonzero(bad)[0])
+            raise ValueError(f"cell {cells[i]!r}: well {pmap.values[pos[i]][1]!r} is not on a "
+                             f"{n_wells}-well plate")
+        taken = pd.Series(list(zip(plate, well))).duplicated(keep=False).to_numpy()
+        if taken.any():
+            i = np.flatnonzero(taken)[:2]
+            w = int(well[i[0]])
+            raise ValueError(f"cells {list(cells[i])} share plate {labels[plate[i[0]]]} well "
+                             f"{row_label(w // n_cols)}{w % n_cols + 1:02d} (one cell per well)")
+    else:
+        sizes = np.bincount(plate, minlength=len(labels))
+        if sizes.max(initial=0) > n_wells:
+            p = int(sizes.argmax())
+            raise ValueError(f"plate {labels[p]} holds {int(sizes[p])} of the cells but has "
+                             f"{n_wells} wells (one cell per well)")
+        well = pd.Series(plate).groupby(plate).cumcount().to_numpy(dtype=int)
+    return PlateLayout(
+        n_cells=len(cells), n_wells=n_wells, n_plates=len(labels), n_rows=n_rows, n_cols=n_cols,
+        plate=plate, well=well, row=(well // n_cols).astype(int), col=(well % n_cols).astype(int),
+        labels=labels,
+    )
+
+
 # --------------------------------------------------------------------------------------
-# Pluggable count-emission step (DESIGN_features §B.2).
+# Pluggable count-emission step.
 #
 # Each emitter has the signature  emit(rng, comp, lib, batch) -> counts (n_cells, n_genes)
 # where `comp` is the per-cell normalized composition (rows sum to 1, already carrying the
@@ -220,7 +352,7 @@ def _emit_dm(rng, comp, lib, batch):
 
     `kappa` (= `RNABatchHyperParams.kappa` / `VisiumBatchHyperParams.kappa`) is the Dirichlet
     concentration: large kappa -> p≈comp (multinomial/Poisson-like); small kappa -> lumpy,
-    over-dispersed proportions. NB stays the default for scRNA (what M2 fits); DM is the
+    over-dispersed proportions. NB is the default for scRNA (the model `estimate()` fits); DM is the
     default-eligible model for the Visium assay (compositional per-spot capture).
     """
     comp = np.asarray(comp, dtype=float)
@@ -247,8 +379,10 @@ class RNABatchHyperParams:
     Holds the protocol-typical magnitudes of the scRNA count model: the batch and
     library-size scales, the NB overdispersion and logistic dropout curve, and the
     ambient / doublet contamination rates. The [`scRNA`][iscc.data.scRNA] assay builds
-    one from its protocol preset and lets you override any field, and
-    [`estimate_rna`][iscc.data.estimate_rna] fits these same parameters from real data.
+    one from its protocol preset and lets you override any field.
+    [`estimate_rna`][iscc.data.estimate_rna] fits the library size and the dispersion from real
+    data, the batch spreads when the data hold several batches, and the dropout curve only with
+    ``fit_dropout=True``.
 
     Attributes
     ----------
@@ -265,11 +399,13 @@ class RNABatchHyperParams:
         NB overdispersion phi (var = mu + phi*mu^2); used only by the "nb" count model
         (phi <= 0 collapses to Poisson).
     ambient_frac : float
-        Fraction of the library that is ambient ("soup") contamination.
+        Fraction of the library that is ambient ("soup") contamination. The soup is a share of
+        the library, not counts on top of it, so the mean library stays ``mu_lib``.
     doublet_rate : float
         Fraction of barcodes that are doublets (two cells merged).
     dropout_mid : float
-        Logistic dropout midpoint in expected-count space (0 disables dropout).
+        Logistic dropout midpoint in expected-count space: the expected count of a gene in the
+        droplet, ambient molecules included (0, the default, disables dropout).
     dropout_shape : float
         Logistic dropout steepness (active only when dropout_mid > 0).
     well_sigma : float
@@ -291,15 +427,17 @@ class RNABatchHyperParams:
         Dirichlet concentration for the "dm" count model only (large kappa ->
         multinomial/Poisson-like, small kappa -> lumpy over-dispersed proportions).
     """
-    # mu_lib / sigma_lib CALIBRATED to real 10x PBMC3k (`estimate(sc.datasets.pbmc3k())`) — the
-    # scale-free library-size magnitudes transfer. `dispersion` and the dropout curve are NOT taken
-    # from PBMC3k: they are gene-set / cell-type-heterogeneity dependent (PBMC's fit ~0.6 is inflated
-    # by cross-cell-type variance unreachable by a clonal tumour, see M2), so iscc-scale values stay.
+    # mu_lib / sigma_lib CALIBRATED to real 10x PBMC3k (`estimate_rna(sc.datasets.pbmc3k())`) — the
+    # scale-free library-size magnitudes transfer. `dispersion` is the NB dispersion WITHIN cell types
+    # of PBMC3k (0.345 by `estimate_rna`; pooling all cells gives 0.61, which also holds the variance
+    # between types, and a tumour draws its own cell types on top). Dropout is off: within types the
+    # NB alone reproduces the PBMC3k zero fraction at every mean, so UMI counts leave no zeros for a
+    # dropout curve to explain (Svensson 2020). `kappa` is the PBMC3k fit of the 10x preset (see rna.py).
     protocol: str = "10x"
     sigma_batch: float = 0.10
-    mu_lib: float = 2400.0      # real PBMC3k ~2,367 UMIs/cell; was 4,000
+    mu_lib: float = 2400.0      # real PBMC3k ~2,367 UMIs/cell
     sigma_lib: float = 0.43     # real PBMC3k 0.431
-    dispersion: float = 0.30
+    dispersion: float = 0.35
     ambient_frac: float = 0.05
     doublet_rate: float = 0.05
     dropout_mid: float = 0.0
@@ -309,7 +447,7 @@ class RNABatchHyperParams:
     n_plates: int = 0           # 0 = as many plates as the cells need
     plate_sigma: float = 0.0    # 0 = no shared plate depth offset (default: off)
     depth_batch_sigma: float = 0.05
-    kappa: float = 50.0
+    kappa: float = 1500.0
 
     def to_dict(self):
         return asdict(self)
@@ -402,21 +540,47 @@ class Batch:
             )
         return COUNT_MODELS[count_model](self.rng, comp, lib, self)
 
+    def _soup_share(self):
+        return min(max(float(self.h.ambient_frac), 0.0), 1.0)
+
+    def own_library(self, lib):
+        """The part of each library that is the molecules of the cell itself: ``(1 - ambient_frac) * lib``.
+
+        The ambient soup is a share of the library (``add_ambient`` draws the rest), so the expected
+        total of a cell stays ``lib`` whatever ``ambient_frac`` is, as in a real droplet, whose
+        observed library holds both.
+        """
+        return np.asarray(lib, dtype=float) * (1.0 - self._soup_share())
+
+    def _ambient_mu(self, lib):
+        """Expected ambient counts per cell and gene: ``ambient_frac * lib_c`` spread over the soup."""
+        return (self._soup_share() * np.asarray(lib, dtype=float))[:, None] * self.ambient_profile[None, :]
+
     def add_ambient(self, counts, lib):
-        """Add ambient contamination: Poisson counts from the batch soup profile."""
+        """Add ambient contamination: Poisson counts from the batch soup profile, ``ambient_frac`` of
+        each library ``lib`` (the counts of the cell itself are drawn on ``own_library(lib)``)."""
         if self.h.ambient_frac <= 0:
             return counts
-        amb_mu = (self.h.ambient_frac * lib)[:, None] * self.ambient_profile[None, :]
-        return counts + self.rng.poisson(amb_mu)
+        return counts + self.rng.poisson(self._ambient_mu(lib))
 
     def apply_dropout(self, counts, comp, lib):
         """Optional Splatter-style logistic dropout (zero-inflation), keyed to mean count.
+
+        The count of a gene in a droplet is zeroed with probability
+        ``1 / (1 + (mu / dropout_mid) ** dropout_shape)``, where ``mu`` is the expected count of the
+        gene in the droplet: the molecules of the cell plus the ambient ones. Dropout acts on every
+        molecule in the droplet, so ambient counts survive it as often as the counts of the cell at
+        the same expected count. Keying it to the expression of the cell alone would delete the
+        ambient counts of every gene the cell does not express.
 
         Returns (counts, p_drop). `p_drop` is None when dropout is disabled.
         """
         if self.h.dropout_mid <= 0:
             return counts, None
-        mu = np.maximum(lib[:, None] * comp, 1e-12)
+        mu = self.own_library(lib)[:, None] * comp
+        if self.h.ambient_frac > 0:
+            mu = mu + self._ambient_mu(lib)
+        mu = np.maximum(mu, 1e-12)
         p_drop = 1.0 / (1.0 + np.exp(self.h.dropout_shape * (np.log(mu) - np.log(self.h.dropout_mid))))
         keep = self.rng.random(counts.shape) >= p_drop
         return counts * keep, p_drop
@@ -445,22 +609,24 @@ class Batch:
 
 
 # ======================================================================================
-# DNA assay batch model (DESIGN_features.md §C / §D) — shared by bulk and single-cell.
+# DNA assay batch model — shared by bulk and single-cell.
 #
-# The physics of DNA coverage differ from scRNA expression, so the pluggable choices flip
-# (§C C1): the *depth* default is **Dirichlet-Multinomial** (compositional — a fixed read
+# The physics of DNA coverage differ from scRNA expression, so the pluggable choices flip:
+# the *depth* default is **Dirichlet-Multinomial** (compositional — a fixed read
 # budget partitioned across loci, proportions driven by COPY NUMBER) rather than NB, and
 # the *allele* layer is a separate binomial/beta-binomial draw with explicit ADO for
 # single-cell. The unifying knob across bulk vs single-cell is **kappa = the amplification
-# regime**: large kappa  ≈ multinomial/Poisson (un-amplified BULK), small kappa = lumpy
-# (whole-cell-amplified SINGLE-CELL).
+# regime**: the Dirichlet concentration over all loci, so the excess per-locus coverage
+# variance is about n_loci / kappa (large -> multinomial/Poisson, small -> lumpy). Because
+# that depends on the number of loci, a kappa travels with the locus count it was fitted
+# on (`kappa_loci`) and is rescaled to the genome it is drawn on.
 #
-# All hyper-parameter names here are M4 `estimate()` targets (DESIGN_inference): `kappa`
+# All hyper-parameter names here are `estimate_dna()` targets: `kappa`
 # (amplification regime), `capture_sigma` (per-target/amplicon efficiency), `ado_rate`,
 # `beta_binom_conc`, the GC-curve params, and `error_rate`.
 # ======================================================================================
 
-# ---- Pluggable DNA depth-emission step (DESIGN_features §C C1) ------------------------
+# ---- Pluggable DNA depth-emission step ------------------------------------------------
 # Each emitter has the signature  emit(rng, weights, N, h) -> counts (n_loci,)  where
 # `weights` are non-negative per-locus relative coverage drivers (∝ CN · length · GC /
 # mappability efficiency), `N` is the total read budget, and `h` is the hyper-parameters.
@@ -470,8 +636,11 @@ def _dna_depth_dm(rng, weights, N, h):
 
         p_seg ~ Dirichlet(kappa * p_bar),  p_bar ∝ weights;   y ~ Multinomial(N, p)
 
-    Large `kappa` → p≈p_bar → multinomial/Poisson (BULK); small `kappa` → lumpy
-    over-Poisson coverage (SINGLE-CELL amplification). Because the budget is fixed, an
+    The coverage CV^2 at a locus is about 1/mean + n_loci/kappa: large `kappa` → p≈p_bar →
+    multinomial/Poisson; small `kappa` → lumpy over-Poisson coverage (whole-genome
+    amplification). With `kappa_loci` set, `kappa` is first rescaled to
+    ``kappa * n_loci / kappa_loci``, which keeps the excess at ``kappa_loci / kappa`` on any
+    number of loci. Because the budget is fixed, an
     amplified (high-CN) segment compositionally *steals* reads from the rest — exactly the
     coupling independent-per-bin models miss, and the reason depth is RELATIVE not absolute.
     """
@@ -481,7 +650,8 @@ def _dna_depth_dm(rng, weights, N, h):
     if s <= 0 or N <= 0:
         return np.zeros(len(w), dtype=int)
     p_bar = w / s
-    alpha = np.maximum(h.kappa * p_bar, 1e-12)
+    kappa = h.kappa if not h.kappa_loci else h.kappa * len(w) / h.kappa_loci
+    alpha = np.maximum(kappa * p_bar, 1e-12)
     p = rng.dirichlet(alpha)
     return rng.multinomial(N, p)
 
@@ -520,7 +690,7 @@ class DNABatchHyperParams:
     allele layer (sequencing error, single-cell ADO, beta-binomial overdispersion,
     doublets, FFPE C>T). The [`scDNA`][iscc.data.scDNA] / [`bulkDNA`][iscc.data.bulkDNA]
     assays build one and let you override any field, and
-    [`estimate_dna`][iscc.data.estimate_dna] fits these same parameters from real data.
+    [`estimate_dna`][iscc.data.estimate_dna.estimate_dna] fits these same parameters from real data.
 
     Attributes
     ----------
@@ -531,13 +701,24 @@ class DNABatchHyperParams:
     mu_depth : float
         Mean per-locus coverage (the depth regime; breadth sets it).
     kappa : float
-        DM concentration = amplification regime (large = bulk, small = single-cell).
+        DM concentration = amplification regime: the excess per-locus coverage CV^2 is about
+        ``n_loci / kappa`` (large = near-Poisson, small = lumpy). The default 121,241 is the
+        GIAB HG002 WGS fit, as in [`bulkDNA`][iscc.data.bulkDNA].
+    kappa_loci : int, optional
+        Number of loci ``kappa`` was fitted on. The DM's excess per-locus coverage variance is
+        about ``n_loci / kappa``, so a ``kappa`` fitted on one locus count gives a different
+        coverage spread on another. When set, the depth draw rescales ``kappa`` to its own locus
+        count (``kappa * n_loci / kappa_loci``), so a fit transfers. ``None`` uses ``kappa`` as
+        given. The default 20,000 is the number of HG002 sites the default ``kappa`` was fitted
+        on, so set the two together. [`estimate_dna`][iscc.data.estimate_dna.estimate_dna] sets
+        both, and the assays drop the default ``kappa_loci`` when given a ``kappa`` alone.
     nb_dispersion : float
-        NB per-bin overdispersion phi (only for depth_model="nb").
+        NB per-bin overdispersion phi (only for depth_model="nb"). The default 0.165 is the
+        GIAB HG002 WGS fit.
     gc_curve_sigma : float
         Per-batch GC->coverage curve strength (the GC bias a panel-of-normals fits).
     mappability_sigma : float
-        Unused placeholder kept for symmetry with the genome mappability field.
+        Not used by the DNA assay.
     capture_sigma : float
         Per-target (WES) / per-amplicon (panel) capture-efficiency LogNormal sd.
     error_rate : float
@@ -556,8 +737,9 @@ class DNABatchHyperParams:
     breadth: str = "wgs"
     depth_model: str = "dm"
     mu_depth: float = 30.0
-    kappa: float = 2000.0
-    nb_dispersion: float = 0.1
+    kappa: float = 121_241.0             # GIAB HG002 WGS (estimate_dna), on the loci below
+    kappa_loci: Optional[int] = 20_000
+    nb_dispersion: float = 0.165         # GIAB HG002 WGS (estimate_dna, depth_model="nb")
     gc_curve_sigma: float = 0.20
     mappability_sigma: float = 0.10
     capture_sigma: float = 0.0
@@ -575,7 +757,7 @@ class DNABatchHyperParams:
 class DNABatch:
     """One seeded realization of a DNA assay instance (a library / run / chip).
 
-    Mirrors `Batch` (scRNA) for DNA (DESIGN_features §D): draws the run-level technical
+    Mirrors `Batch` (scRNA) for DNA: draws the run-level technical
     state shared across the assay — a **per-batch GC->coverage curve**, a per-locus
     mappability multiplier, a systematic **per-target/amplicon capture efficiency**, a
     per-batch **depth shift**, and a per-locus **error rate** (+ optional FFPE C>T) — then
@@ -692,7 +874,7 @@ class DNABatch:
 
 
 # ======================================================================================
-# Visium (spatial transcriptomics) batch model (DESIGN_features.md §D "spatial" row / F6).
+# Visium (spatial transcriptomics) batch model.
 #
 # The distinctive requirement of the spatial assay is that the technical noise is SPATIALLY
 # CORRELATED: neighbouring spots share capture efficiency. So the headline component is a
@@ -702,12 +884,12 @@ class DNABatch:
 # the realized per-spot depth carries positive spatial autocorrelation (Moran's I > 0) — the
 # signal `estimate_visium()` inverts and `validate_visium.py` checks.
 #
-# Everything else is shared with the scRNA batch model (§B.2): the per-gene LogNormal batch
+# Everything else is shared with the scRNA batch model: the per-gene LogNormal batch
 # factor (`sigma_batch`), ambient soup (`ambient_frac`), and the pluggable NB/DM count draw
 # (`COUNT_MODELS`). `VisiumBatch` therefore subclasses `Batch` and reuses `composition` /
-# `emit` / `add_ambient` unchanged; only the realization (per-gene factor + spatial field) and
-# the per-spot library draw are spatial-specific. All hyper-parameter names here are the M4
-# `estimate_visium()` targets (DESIGN_inference §C.2).
+# `emit` / `add_ambient` as is; only the realization (per-gene factor + spatial field) and
+# the per-spot library draw are spatial-specific. All hyper-parameter names here are the
+# `estimate_visium()` targets.
 # ======================================================================================
 @dataclass
 class VisiumBatchHyperParams:
@@ -718,7 +900,7 @@ class VisiumBatchHyperParams:
     capture-efficiency field (lengthscale, strength, tissue-edge falloff), lateral mRNA
     diffusion, and the shared per-gene batch factor / ambient soup / pluggable count
     model. The [`Visium`][iscc.data.Visium] assay builds one and lets you override any
-    field, and [`estimate_visium`][iscc.data.estimate_visium] fits these same parameters
+    field, and [`estimate_visium`][iscc.data.estimate_visium.estimate_visium] fits these same parameters
     from real data.
 
     Attributes
@@ -726,11 +908,14 @@ class VisiumBatchHyperParams:
     protocol : str
         Protocol preset the magnitudes come from (e.g. "visium").
     spot_pitch : float
-        Spot centre-to-centre spacing (sets spot density / spots-per-tissue).
+        Spot centre-to-centre spacing (sets spot density / spots-per-tissue). The default of 2.0 demes
+        is the 100 um pitch of Visium v1, with a deme of ~50 um.
     spot_radius : float
-        Spot capture radius (sets spot->cell aggregation, ~1-10 cells/spot).
+        Spot capture radius (sets spot->cell aggregation). The default of 0.55 demes is the 55 um
+        spot of Visium v1, so a spot pools about one deme's share of the section.
     mu_counts : float
-        Mean per-spot library size (total UMIs / spot).
+        Mean library size of a tissue spot (total UMIs / spot) before spot swapping; without
+        swapping it is the mean depth of the tissue spots.
     sigma_counts : float
         Per-spot library-size LogNormal sd.
     field_lengthscale : float
@@ -740,8 +925,20 @@ class VisiumBatchHyperParams:
         Capture-field strength (log-space sd of the smooth field).
     edge_sigma : float
         Tissue-boundary capture-efficiency falloff (0 = none; <1 keeps it positive).
+    edge_reference : str
+        What the falloff is measured from: ``"grid"`` (the spot grid's bounding box, the
+        default) or ``"tissue"`` (the nearest spot without tissue, so the tissue's own edge is dimmed
+        whatever the slide's size).
     diffusion_sigma : float
-        Lateral mRNA bleed: Gaussian kernel sd spreading expression to neighbours.
+        Lateral smoothing of composition between spots: Gaussian kernel sd (moves no counts).
+    bleed_rate : float
+        Spot swapping (SpotClean's bleeding rate): the share of each spot's counts that leaves it
+        for other spots of the slide, tissue or not; 0 = off. See
+        [`bleed`][iscc.data.visium_background.bleed].
+    bleed_distal : float
+        Share of the bled counts spread uniformly over the whole slide (the slide-wide ambient floor).
+    bleed_sigma : float
+        Sd of the Gaussian kernel the rest of the bled counts spread through (coordinate units).
     sigma_batch : float
         Per-gene batch-factor LogNormal sd.
     ambient_frac : float
@@ -749,29 +946,41 @@ class VisiumBatchHyperParams:
     count_model : str
         Count emission {"dm" (default, compositional capture), "nb"}.
     kappa : float
-        Dirichlet-Multinomial concentration (only for count_model="dm").
+        Dirichlet-Multinomial concentration (only for count_model="dm"). A gene's variance is
+        ``(N + kappa) / (1 + kappa)`` times its multinomial variance at a spot depth ``N``, whatever
+        the number of genes, so a value fitted on one gene set applies to any other.
     nb_dispersion : float
         NB overdispersion phi (var = mu + phi*mu^2; only for count_model="nb").
     """
     # Defaults CALIBRATED to a real 10x Visium breast-cancer section (estimate_visium on
     # `scanpy.datasets.visium_sge('V1_Breast_Cancer_Block_A_Section_1')`), so out-of-the-box Visium
-    # is realistic with no user data. Only the SCALE-FREE / unit-reconciled fits are transferred;
-    # `kappa` is NOT (the real fit's ~89k is a full-transcriptome sparsity artifact — averaged over
-    # 36k mostly-zero genes — and does not transfer to iscc's small dense gene model; the
-    # comparable-gene fit gives ~50–90, so the iscc-scale default is kept).
+    # is realistic with no user data. The spot geometry is Visium v1 at ~50 um per deme.
+    # `kappa` transfers between gene sets: the Dirichlet-multinomial inflates every gene's variance by
+    # (N + kappa) / (1 + kappa), which depends on the spot depth N and not on the number of genes or
+    # their composition, so unlike the DNA concentration (kappa_loci) it is not rescaled by the number
+    # of genes. The direct fit (89,197 over the section's 3,798 in-tissue spots) reads the tissue's
+    # heterogeneity as count noise, so it bounds the technical kappa from below; a simulated section
+    # reproduces the real estimate at an input of about 1,400,000 (HUMAN_VISIUM_KAPPA, by indirect
+    # inference). The old default of 50 inflated each gene's variance about 390-fold at 20,000 UMIs
+    # per spot: over 6,000 growth genes a spot detected 281 genes instead of ~4,700 and put 77% of
+    # its counts in 50 of them.
     protocol: str = "visium"
     spot_pitch: float = 2.0
-    spot_radius: float = 1.0
-    mu_counts: float = 20000.0       # real ~21,815 UMIs/spot (deep Visium); was 5,000
+    spot_radius: float = 0.55        # 55 um spot at the 100 um pitch of Visium v1
+    mu_counts: float = 20000.0       # real ~21,815 UMIs/spot (deep Visium)
     sigma_counts: float = 0.45       # real 0.455
-    field_lengthscale: float = 18.0  # real ~9 spots x spot_pitch 2.0 (coord units); was 4.0
+    field_lengthscale: float = 18.0  # real ~9 spots x spot_pitch 2.0 (coord units)
     field_sigma: float = 0.70        # real 0.697 (capture-field strength)
     edge_sigma: float = 0.30
+    edge_reference: str = "grid"
     diffusion_sigma: float = 0.0
+    bleed_rate: float = 0.0
+    bleed_distal: float = 0.0
+    bleed_sigma: float = 0.0
     sigma_batch: float = 0.10
     ambient_frac: float = 0.05
     count_model: str = "dm"
-    kappa: float = 50.0              # iscc-scale (NOT the sparse-transcriptome 89k — see note above)
+    kappa: float = 1_400_000.0       # technical noise near multinomial; see the note above
     nb_dispersion: float = 0.30
 
     def to_dict(self):
@@ -781,11 +990,11 @@ class VisiumBatchHyperParams:
 class VisiumBatch(Batch):
     """One seeded realization of a Visium section (a slide / capture area).
 
-    Mirrors `Batch` (scRNA) for spatial transcriptomics (DESIGN_features §D): draws the per-gene
-    batch factor + ambient soup (shared §B.2 machinery) AND the spatial-specific piece — a smooth
+    Mirrors `Batch` (scRNA) for spatial transcriptomics: draws the per-gene
+    batch factor + ambient soup (shared with `Batch`) AND the spatial-specific piece — a smooth
     positive **capture-efficiency field** over the spot coordinates (a squared-exponential GP times
     a tissue-boundary falloff). It reuses `composition` / `emit` / `add_ambient` from `Batch`
-    unchanged; only `realize` (which now also samples the spatial field) and `spot_library` (the
+    as is; only `realize` (which also samples the spatial field) and `spot_library` (the
     per-spot depth, scaled by the field) are overridden. Reproducible from `seed`.
     """
 
@@ -796,15 +1005,17 @@ class VisiumBatch(Batch):
         self.rng = np.random.default_rng(self.seed)
         self._realized = False
 
-    def realize(self, genes, base_profile, spot_coords):
+    def realize(self, genes, base_profile, spot_coords, in_tissue=None):
         """Draw the section-level technical state for `spot_coords` (n_spots, 2).
 
         `base_profile` (pooled spot expression) sets the ambient soup; the per-gene batch factor
         and the spatial capture field are the technical signature (reproducible from the seed).
+        `in_tissue` (a per-spot boolean) marks the spots the capture field is normalised over, and
+        is the edge of ``edge_reference="tissue"``; without it every spot counts as tissue.
         """
         n = len(genes)
         self.genes = list(genes)
-        # per-gene batch factor beta_g ~ LogNormal(0, sigma_batch^2), shared across spots (§B.2)
+        # per-gene batch factor beta_g ~ LogNormal(0, sigma_batch^2), shared across spots
         self.beta = self.rng.lognormal(mean=0.0, sigma=self.h.sigma_batch, size=n)
         # NB dispersion (used only when count_model="nb"; exposed via the `dispersion` property)
         self._phi = float(self.h.nb_dispersion)
@@ -814,20 +1025,24 @@ class VisiumBatch(Batch):
         self.ambient_profile = amb / tot if tot > 0 else np.full(n, 1.0 / n)
         # the headline piece: a spatially-autocorrelated positive capture-efficiency field
         self.spot_coords = np.asarray(spot_coords, dtype=float)
-        self.capture_field = self._draw_capture_field(self.spot_coords)
+        self.capture_field = self._draw_capture_field(self.spot_coords, in_tissue=in_tissue)
         self._realized = True
         return self
 
     # -- the spatially-correlated capture-efficiency field -----------------------------
-    def _draw_capture_field(self, coords):
+    def _draw_capture_field(self, coords, in_tissue=None):
         """Smooth POSITIVE random field over spot coords: squared-exponential GP x edge falloff.
 
         A zero-mean GP with an RBF (squared-exponential) covariance ``K_ij = exp(-||x_i - x_j||^2
         / (2*ell^2))`` (ell = `field_lengthscale`) is sampled on the spot grid and pushed through a
         LogNormal link (strength `field_sigma`) so the field is positive. Larger `field_lengthscale`
         -> smoother field -> stronger positive spatial autocorrelation (higher Moran's I). The field
-        is then multiplied by a tissue-boundary falloff (`edge_sigma`) and normalized to mean 1, so
-        it RESHAPES capture (a spatial bias) without moving the absolute depth scale `mu_counts` sets.
+        is then multiplied by a tissue-boundary falloff (`edge_sigma`) and normalized to mean 1 over
+        the tissue spots (`in_tissue`; every spot when it is None), so it RESHAPES capture (a spatial
+        bias) without moving the mean depth of a tissue spot, which `mu_counts` sets.
+        Normalising over the whole slide instead scales a section that covers part of it by the field's
+        mean over the tissue: 0.55 to 1.49 over five seeds for a section on 28% of the v1 slide, since
+        the field is correlated over ~9 pitches.
         """
         coords = np.asarray(coords, dtype=float)
         n = coords.shape[0]
@@ -842,20 +1057,38 @@ class VisiumBatch(Batch):
         g = L @ self.rng.standard_normal(n)                # zero-mean unit-variance SE-GP sample
         # LogNormal link -> positive field with mean ~1 (before edge / renormalization)
         field = np.exp(self.h.field_sigma * g - 0.5 * self.h.field_sigma ** 2)
-        field = field * self._edge_falloff(coords)
-        m = field.mean()
+        field = field * self._edge_falloff(coords, in_tissue=in_tissue)
+        tis = None if in_tissue is None else np.asarray(in_tissue, dtype=bool)
+        m = field[tis].mean() if tis is not None and tis.any() else field.mean()
         return field / m if m > 0 else np.ones(n)
 
-    def _edge_falloff(self, coords):
-        """Tissue-boundary capture-efficiency falloff: lower efficiency near the section edge.
+    def _edge_falloff(self, coords, in_tissue=None):
+        """Capture-efficiency falloff: lower efficiency near an edge.
 
-        Distance of each spot to the nearest boundary of the spot-grid extent, normalized to [0,1]
-        (0 at the boundary, 1 at the centre); efficiency = ``1 - edge_sigma * exp(-3*dnorm)`` so the
-        very edge is reduced by `edge_sigma` and the interior is ~1. `edge_sigma<1` keeps it positive.
+        With ``edge_reference="grid"`` (the default) the edge is the spot grid's bounding box: the
+        distance of each spot to its nearest side, normalized to [0, 1] (0 at the side, 1 at the
+        centre). With ``edge_reference="tissue"`` it is the tissue's own boundary: the distance of each
+        tissue spot beyond the tissue's outermost ring, in spot pitches (0 on that ring; spots outside
+        the tissue also sit at 0), so the falloff is confined to about one pitch of the edge whatever
+        the size of the tissue, as on a real section. Either way efficiency =
+        ``1 - edge_sigma * exp(-3*dnorm)``, so the very edge is reduced by `edge_sigma` and the
+        interior is ~1. `edge_sigma<1` keeps it positive.
         """
         n = coords.shape[0]
         if self.h.edge_sigma <= 0 or n == 0:
             return np.ones(n)
+        reference = getattr(self.h, "edge_reference", "grid")
+        if reference not in ("grid", "tissue"):
+            raise ValueError(f"edge_reference must be 'grid' or 'tissue', got {reference!r}")
+        if reference == "tissue" and in_tissue is not None:
+            from scipy.spatial import cKDTree
+            tis = np.asarray(in_tissue, dtype=bool)
+            if tis.all() or not tis.any():
+                return np.ones(n)
+            dist = np.zeros(n)
+            d = cKDTree(coords[~tis]).query(coords[tis])[0]
+            dist[tis] = d - d.min()                        # the tissue's outermost spots sit at 0
+            return 1.0 - float(self.h.edge_sigma) * np.exp(-3.0 * dist / float(self.h.spot_pitch))
         r, c = coords[:, 0], coords[:, 1]
         dr = np.minimum(r - r.min(), r.max() - r)
         dc = np.minimum(c - c.min(), c.max() - c)

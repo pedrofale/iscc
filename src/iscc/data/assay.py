@@ -1,4 +1,4 @@
-"""Base assay (DESIGN_features.md §B / §E).
+"""Base assay.
 
 An `Assay` is `protocol + batch hyper-parameters + seed`. Its job is to turn the
 biological ground truth (a sampled tumor's `cell_data`) into observed molecular data by

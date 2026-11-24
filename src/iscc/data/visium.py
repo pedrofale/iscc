@@ -1,23 +1,24 @@
-"""Spatial transcriptomics (Visium) assay with a spatially-correlated batch model (F6).
+"""Spatial transcriptomics (Visium) assay with a spatially-correlated batch model.
 
-Upgrades the original grid-spots -> averaged-expression -> fixed-multinomial stub to a proper
-assay matching the scRNA (F3) / DNA (F4/F5) modalities: an `Assay` + a `VisiumBatch` realization
-(`batch.py`) + hyper-parameters (`VisiumBatchHyperParams`) + AnnData output, with an `estimate`
-(`estimate_visium`, M4 §C.2) and validation (`validate_visium.py`).
+Built like the scRNA and DNA modalities: an `Assay` + a `VisiumBatch` realization
+(`batch.py`) + hyper-parameters (`VisiumBatchHyperParams`) + AnnData output, with an estimator
+(`estimate_visium`) and validation (`validate_visium.py`).
 
-Generative model for spot *s*, gene *g* (DESIGN_features §D "spatial" row):
+Generative model for spot *s*, gene *g*:
 
   1. **Spot layout** — Visium-like hexagonal spots over the 2D section (`spot_pitch` spacing,
-     `spot_radius` capture radius, ~1-10 cells/spot). iscc is 2D (single section, no z).
+     `spot_radius` capture radius; the defaults are Visium v1's 55 um spots at a 100 um pitch, with a
+     deme of ~50 um). iscc is 2D (single section, no z).
   2. **Spot->cell aggregation** — pool the `cell_exp` of cells whose `cell_crd` falls in the spot;
      record per-spot ground truth (n_cells, member cell ids, dominant clone + clone fractions).
   3. **Lateral mRNA diffusion** — a Gaussian kernel (`diffusion_sigma`) bleeds expression to
      neighbouring spots (the spatial-mixing artifact spatial-deconvolution methods fight).
   4. **Spatially-correlated capture-efficiency field** — the HEADLINE piece: a smooth positive
      random field over the spot coords (squared-exponential GP, `field_lengthscale` / `field_sigma`)
-     times an `edge_sigma` tissue-boundary falloff, scaling the per-spot library so the realized
-     depth has positive spatial autocorrelation (Moran's I > 0). Lives in `VisiumBatch`.
-  5. **Shared §B.2 layer** — per-gene batch factor (`sigma_batch`), per-spot library
+     times an `edge_sigma` tissue-boundary falloff, normalised to mean 1 over the tissue spots and
+     scaling the per-spot library, so the realized depth has positive spatial autocorrelation
+     (Moran's I > 0) and a tissue spot holds `mu_counts` UMIs on average. Lives in `VisiumBatch`.
+  5. **Layer shared with scRNA** — per-gene batch factor (`sigma_batch`), per-spot library
      (LogNormal `mu_counts`/`sigma_counts`), the pluggable NB/DM count draw (`COUNT_MODELS`),
      and ambient soup (`ambient_frac`).
 
@@ -31,6 +32,7 @@ from .assay import Assay
 from .batch import VisiumBatch, VisiumBatchHyperParams, COUNT_MODELS
 
 import os
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -45,7 +47,21 @@ def morans_i(values, coords, lengthscale=None):
     ``I = (n / W) * sum_ij w_ij z_i z_j / sum_i z_i^2`` with z the mean-centred values and a
     Gaussian distance weight ``w_ij = exp(-d_ij^2 / (2*L^2))`` (self-weight 0). I > 0 means
     nearby spots have similar values (positive autocorrelation); ~0 means no spatial structure.
-    `lengthscale` L defaults to the median nearest-neighbour distance (a local-neighbourhood scale).
+
+    Parameters
+    ----------
+    values : array-like, shape (n,)
+        One value per spot, for example its total counts.
+    coords : array-like, shape (n, 2)
+        The spot coordinates.
+    lengthscale : float, optional
+        The length scale L of the weights. Default None takes the median nearest-neighbour
+        distance, a local-neighbourhood scale.
+
+    Returns
+    -------
+    float
+        Moran's I, or NaN for fewer than three spots or constant values.
     """
     v = np.asarray(values, dtype=float).ravel()
     coords = np.asarray(coords, dtype=float)
@@ -73,8 +89,12 @@ def morans_i(values, coords, lengthscale=None):
 class Visium(Assay):
     """Visium spatial assay: lays spots over the section, aggregates cells, applies a `VisiumBatch`.
 
-    Any hyper-parameter below can be overridden explicitly (``None`` keeps the default, which
-    is calibrated to a real 10x Visium section). Legacy aliases are accepted: ``n_reads`` maps
+    Any hyper-parameter below can be overridden explicitly, and ``None`` keeps the default. The
+    defaults of the spot depth and the capture field (``mu_counts``, ``sigma_counts``,
+    ``field_lengthscale``, ``field_sigma``, ``kappa``) were fitted to a 10x Visium breast-cancer
+    section, the spot geometry is Visium v1's, and the others are set by hand. Spot swapping
+    (``bleed_rate``) is off by default, and ambient RNA
+    within each spot (``ambient_frac``, 0.05) is on. Aliases are accepted: ``n_reads`` maps
     onto ``mu_counts``, and a spot grid requested via ``n_spots_x`` / ``n_spots_y`` derives
     ``spot_pitch`` from ``grid_side`` at run time. The number of spots (and cells per spot)
     follows from ``grid_side`` (passed to ``run``) and the sampled ``cell_data``, so there is
@@ -88,16 +108,19 @@ class Visium(Assay):
     batch_label : str, optional
         Section/batch label; defaults to ``f"visium{seed}"``.
     n_reads : float, optional
-        Legacy alias for ``mu_counts`` (mean per-spot library size).
+        Alias for ``mu_counts`` (mean per-spot library size).
     spot_pitch : float, default 2.0
         Spot centre-to-centre spacing (coordinate units); sets spot density / number of spots.
         Overridden at run time if ``n_spots_x`` / ``n_spots_y`` are given.
-    spot_radius : float, default 1.0
-        Spot capture radius: cells within this distance of a spot centre are pooled into it
-        (~1-10 cells / spot).
+    spot_radius : float, default 0.55
+        Spot capture radius: cells within this distance of a spot centre are pooled into it. With a
+        deme of ~50 um, 0.55 at the default pitch of 2.0 is the 55 um spot of Visium v1 at its
+        100 um pitch, and a spot pools about one deme's share of the section.
     mu_counts : float, default 20000.0
-        Mean per-spot library size (total UMIs / spot); ``ell_s ~ LogNormal(log mu_counts,
-        sigma_counts^2) × capture_field``.
+        Mean library size of a tissue spot (total UMIs / spot); ``ell_s ~ LogNormal(log mu_counts,
+        sigma_counts^2) × capture_field``, with the capture field at mean 1 over the tissue spots.
+        Ambient RNA is part of this library. With spot swapping on, it is the depth before swapping:
+        the tissue spots then keep less, since some of their counts land outside the tissue.
     sigma_counts : float, default 0.45
         Per-spot library-size LogNormal sd (spot-to-spot depth variation).
     field_lengthscale : float, default 18.0
@@ -109,26 +132,41 @@ class Visium(Assay):
     edge_sigma : float, default 0.30
         Tissue-boundary capture falloff: the very edge of the section is reduced by this
         fraction, the interior stays ~1. 0 disables; a value < 1 keeps efficiency positive.
+    edge_reference : {"grid", "tissue"}, default "grid"
+        What the falloff of ``edge_sigma`` is measured from: the spot grid's bounding box, or the
+        tissue's own boundary (the nearest spot without cells).
     diffusion_sigma : float, default 0.0
-        Lateral mRNA-bleed Gaussian kernel sd, spreading each spot's expression into its
-        neighbours before counting; 0 disables (no bleed).
+        Gaussian kernel sd of a lateral smoothing of composition between spots before counting; it
+        moves no counts, so spots without tissue stay empty. 0 disables.
+    bleed_rate : float, default 0.0
+        Spot swapping, as SpotClean models it: the share of each spot's counts that bleeds to other
+        spots of the slide, including spots without tissue, conserving the total (see
+        [`bleed`][iscc.data.visium_background.bleed]). 0 disables it.
+    bleed_distal : float, default 0.0
+        Share of the bled counts spread uniformly over the slide (the slide-wide ambient floor).
+    bleed_sigma : float, default 0.0
+        Sd of the Gaussian kernel the rest of the bled counts spread through, in coordinate units
+        (the spot pitch is 2.0).
     sigma_batch : float, default 0.10
         Per-gene batch-factor LogNormal sd, shared across spots (Splatter ``batch.facScale``).
     ambient_frac : float, default 0.05
         Fraction of each spot's library drawn as ambient "soup" contamination.
-    kappa : float, default 50.0
+    kappa : float, default 1400000.0
         Dirichlet-multinomial concentration (only for ``count_model="dm"``); large -> ~
-        multinomial, small -> lumpy proportions.
+        multinomial, small -> lumpy proportions. It inflates every gene's variance by
+        ``(N + kappa) / (1 + kappa)`` at a spot depth ``N``, whatever the gene set, so a fitted value
+        applies to growth genes and human genes alike. The default is the human layer's
+        ``HUMAN_VISIUM_KAPPA``, fitted by indirect inference to a real section.
     nb_dispersion : float, default 0.30
         Negative-binomial overdispersion phi (``var = mu + phi*mu^2``; only for
         ``count_model="nb"``).
     section_frac : float, optional
         Take a thin physical **section** of a count-based (deme) tumor before assaying: place
         each deme's cells within its unit cell and keep this fraction of each deme's 3-D column
-        (see :func:`iscc.sample.spatialize`). The tissue is then centred on the fixed slide and a
+        (see [`iscc.sample.spatialize`][iscc.sample.spatialize]). The tissue is then centred on the fixed slide and a
         morphology *image* is attached to the output. ``None`` (default) uses ``cell_crd`` as
         given (no placement) — appropriate when the coordinates are already at cell resolution.
-        This thins the same 3-D column as :meth:`iscc.sample.Resection.slice`'s ``depth_frac``, so
+        This thins the same 3-D column as [`iscc.sample.Resection.slice`][iscc.sample.Resection.slice]'s ``depth_frac``, so
         the two **compose multiplicatively** — keep one at ``1.0`` (the tutorials slice via
         ``Resection`` and pass ``section_frac=1.0`` here).
     placement : tuple of float, optional
@@ -143,11 +181,11 @@ class Visium(Assay):
         centroid). The v1 slide is wider than it is tall, so a tall section captures more of itself
         rotated 90° to lie along the slide's long axis.
     n_spots_x : int, optional
-        Legacy alias: request a fixed spot-grid width. When both ``n_spots_x`` and
+        Alias: request a fixed spot-grid width. When both ``n_spots_x`` and
         ``n_spots_y`` are set, the pitch is derived as ``grid_side / max(n_spots_x, n_spots_y)``
         at run time instead of using ``spot_pitch``.
     n_spots_y : int, optional
-        Legacy alias: request a fixed spot-grid height (see ``n_spots_x``).
+        Alias: request a fixed spot-grid height (see ``n_spots_x``).
     seed : int, default 42
         RNG seed. Fixes the technical signature (per-gene batch factor, spatial capture field,
         per-spot depth) and is reproducible.
@@ -158,7 +196,8 @@ class Visium(Assay):
                  field_lengthscale=None, field_sigma=None, edge_sigma=None,
                  diffusion_sigma=None, sigma_batch=None, ambient_frac=None,
                  kappa=None, nb_dispersion=None, section_frac=None, placement=None, rotation=0.0,
-                 n_spots_x=None, n_spots_y=None, seed=42):
+                 n_spots_x=None, n_spots_y=None, seed=42, edge_reference=None, bleed_rate=None,
+                 bleed_distal=None, bleed_sigma=None):
         super(Visium, self).__init__(seed=seed, protocol="visium")
         if count_model not in COUNT_MODELS:
             raise ValueError(f"unknown count_model {count_model!r}; choose {sorted(COUNT_MODELS)}")
@@ -170,17 +209,20 @@ class Visium(Assay):
 
         params = VisiumBatchHyperParams().to_dict()
         params["count_model"] = count_model
-        if n_reads is not None:                            # legacy alias -> per-spot library
+        if n_reads is not None:                            # alias -> per-spot library
             params["mu_counts"] = float(n_reads)
         for name, val in dict(
             spot_pitch=spot_pitch, spot_radius=spot_radius, mu_counts=mu_counts,
             sigma_counts=sigma_counts, field_lengthscale=field_lengthscale,
             field_sigma=field_sigma, edge_sigma=edge_sigma, diffusion_sigma=diffusion_sigma,
             sigma_batch=sigma_batch, ambient_frac=ambient_frac, kappa=kappa,
-            nb_dispersion=nb_dispersion,
+            nb_dispersion=nb_dispersion, bleed_rate=bleed_rate, bleed_distal=bleed_distal,
+            bleed_sigma=bleed_sigma,
         ).items():
             if val is not None:
                 params[name] = float(val)
+        if edge_reference is not None:
+            params["edge_reference"] = str(edge_reference)
         self.hypers = VisiumBatchHyperParams(**params)
         self.n_reads = self.hypers.mu_counts               # convenience mirror
         self.section_frac = section_frac                   # None -> use cell_crd as given
@@ -238,7 +280,8 @@ class Visium(Assay):
         """The fixed 10x Visium v1 capture array: 78 x 64 hexagonally-packed spots (**4,992**).
 
         A real slide is a fixed grid of spots regardless of the tissue placed on it; ``spot_pitch``
-        sets the physical spacing (100 um in v1 = one coordinate unit at the default pitch)."""
+        sets the physical spacing (100 um in v1 = two coordinate units, i.e. demes of ~50 um, at the
+        default pitch)."""
         pitch = float(self.hypers.spot_pitch)
         n_cols, n_rows = V1_SPOT_COLS, V1_SPOT_ROWS
         row_dy = pitch * np.sqrt(3.0) / 2.0
@@ -254,7 +297,7 @@ class Visium(Assay):
     def _place_section(self, cell_data, spot_coords):
         """Place a thin section of a deme-based tumor onto the fixed spot array.
 
-        :func:`iscc.sample.spatialize` (seeded by ``self.seed``) gives sub-deme cell positions; the
+        [`iscc.sample.spatialize`][iscc.sample.spatialize] (seeded by ``self.seed``) gives sub-deme cell positions; the
         section is then rotated by ``self.rotation`` degrees about the placement point and that point
         is shifted onto the centre of ``spot_coords``. The placement point is the section centroid, or
         ``self.placement`` — so a section larger than the slide is imaged at a chosen location and
@@ -277,7 +320,7 @@ class Visium(Assay):
         """Place the fixed spot grid on a section WITHOUT assaying it, and store the placement.
 
         Lays the slide over the (placed, optionally rotated) section, records which spots cover tissue,
-        and renders the section's H&E over its whole extent. Afterwards :meth:`to_anndata` returns a
+        and renders the section's H&E over its whole extent. Afterwards [`to_anndata`][iscc.data.Visium.to_anndata] returns a
         standard 10x AnnData of the spot grid on the full H&E — with an ``in_tissue`` flag but ZERO
         expression — ready to plot with squidpy/scanpy to judge the placement before assaying::
 
@@ -285,12 +328,12 @@ class Visium(Assay):
             sq.pl.spatial_scatter(vz.to_anndata(), color="in_tissue", img=True)   # check the placement
             vz.run()                                                              # then assay it
 
-        :meth:`run` calls this itself if you did not, and reuses it if you did.
+        [`run`][iscc.data.Visium.run] calls this itself if you did not, and reuses it if you did.
 
         Parameters
         ----------
         cell_data : dict
-            The section to image (e.g. from :meth:`Resection.slice`).
+            The section to image (e.g. from [`Resection.slice`][iscc.sample.Resection.slice]).
         grid_side : int, optional
             Capture-area side; ``None`` (default) uses the fixed v1 slide.
         px : int, default 6
@@ -329,10 +372,10 @@ class Visium(Assay):
         """Render the placed tissue section as an H&E-like image, **without** running the assay.
 
         Preview the slide's tissue morphology before assaying it. This runs the *same*
-        :meth:`place_grid` step the assay uses (frame, placement, rotation and ``px`` all match), so
+        [`place_grid`][iscc.data.Visium.place_grid] step the assay uses (frame, placement, rotation and ``px`` all match), so
         the returned image is byte-identical to the ``img=True`` background of the AnnData that
-        :meth:`to_anndata` / :meth:`run` produce. It also leaves the grid placed, so a following
-        :meth:`run` (with no argument) reuses this exact placement. Requires ``section_frac`` to be
+        [`to_anndata`][iscc.data.Visium.to_anndata] / [`run`][iscc.data.Visium.run] produce. It also leaves the grid placed, so a following
+        [`run`][iscc.data.Visium.run] (with no argument) reuses this exact placement. Requires ``section_frac`` to be
         set (otherwise there is no placement to render).
 
         Parameters
@@ -342,12 +385,12 @@ class Visium(Assay):
         grid_side : int, optional
             Capture-area side; ``None`` (default) uses the fixed v1 slide (4,992 spots).
         px : int, default 6
-            Pixels per coordinate unit (must match :meth:`place_grid` to align with the assay).
+            Pixels per coordinate unit (must match [`place_grid`][iscc.data.Visium.place_grid] to align with the assay).
 
         Returns
         -------
         numpy.ndarray, shape (H, W, 3), float32
-            The H&E-like tissue-morphology image (see :func:`iscc.sample.tissue_image`).
+            The H&E-like tissue-morphology image (see [`iscc.sample.tissue_image`][iscc.sample.tissue_image]).
         """
         if self.section_frac is None:
             raise ValueError("section_image requires section_frac to be set on the Visium assay")
@@ -368,28 +411,38 @@ class Visium(Assay):
         return W @ raw
 
     # -- run ---------------------------------------------------------------------------
-    def run(self, cell_data=None, grid_side=None):
+    def run(self, cell_data=None, grid_side=None, gene_lift=None):
         """Assay a 10x Visium spatial-transcriptomics section over the placed spot grid.
 
-        The slide is a **fixed** capture grid laid over the section (see :meth:`place_grid`): it pools
+        The slide is a **fixed** capture grid laid over the section (see [`place_grid`][iscc.data.Visium.place_grid]): it pools
         each spot's cells, applies lateral mRNA diffusion and a smooth spatial capture field, and draws
-        per-spot UMI counts. If you called :meth:`place_grid` first, ``run`` reuses that placement;
+        per-spot UMI counts. If you called [`place_grid`][iscc.data.Visium.place_grid] first, ``run`` reuses that placement;
         otherwise pass the section here and ``run`` places it itself (per ``placement`` / ``rotation``).
-        A morphology tissue image is attached to :meth:`to_anndata` for ``img=True`` overlays.
+        A morphology tissue image is attached to [`to_anndata`][iscc.data.Visium.to_anndata] for ``img=True`` overlays.
 
         Parameters
         ----------
         cell_data : dict, optional
-            The section to assay; omit only if :meth:`place_grid` was already called. Passing it
+            The section to assay; omit only if [`place_grid`][iscc.data.Visium.place_grid] was already called. Passing it
             (re-)places the grid.
         grid_side : int, optional
             Capture-area side; ``None`` (default) uses the fixed 10x v1 slide (4,992 spots).
+        gene_lift : GeneLift or HumanExpression, optional
+            Count human genes instead of the growth genes, before diffusion and counting. A
+            ``GeneLift`` ([`HumanGenomeLayer.lift`][iscc.data.human.HumanGenomeLayer]) lifts each
+            spot's pooled expression; it is linear, so pooling first keeps the cost at the growth
+            genes' size. A ``HumanExpression``
+            ([`HumanGenomeLayer.expression`][iscc.data.human.HumanGenomeLayer.expression]) pools
+            each spot's cells per cell type and lifts each pool with that type's atlas baseline, with
+            the programme genes summed cell by cell. Default None counts the growth genes.
 
         Returns
         -------
         Visium
-            ``self``, with the spot-by-gene UMI matrix in ``spot_counts`` etc. Export with
-            :meth:`to_anndata` / ``write``.
+            ``self``, with the spot-by-gene UMI matrix in ``spot_counts``, one row per spot in ``obs``
+            (cells, UMIs, library size, capture field and dominant clone), and the ids of the cells
+            of each spot in ``spot_members``, in the order of ``obs``. Export with
+            [`to_anndata`][iscc.data.Visium.to_anndata] / ``write``.
         """
         if cell_data is not None or self._grid is None:
             if cell_data is None:
@@ -400,12 +453,18 @@ class Visium(Assay):
         cell_exp = placed["cell_exp"]
         genes = cell_exp.columns
         n_genes = len(genes)
-        exp_vals = cell_exp.values.astype(float)
+        exp_vals = cell_exp.values                  # summed in float64 per spot, never copied whole
         cell_ids = np.asarray(cell_exp.index)
         ctype = placed.get("cell_type")
         clone_labels = ctype.reindex(cell_exp.index).iloc[:, 0].astype(str).values if ctype is not None else None
         n_spots = spot_coords.shape[0]
         n_cells_arr = g["n_cells"]
+        if len(cell_ids) and not np.any(np.asarray(n_cells_arr) > 0):
+            warnings.warn(
+                f"no spot of the slide covers a cell of the section ({len(cell_ids):,} cells): the "
+                "section lies outside the spot grid, so every spot is off tissue. Pass "
+                "section_frac=1.0 to place the slide over the section, or a grid_side that covers "
+                "its coordinates.", stacklevel=2)
 
         # 1-2. spot -> cell aggregation over the pre-placed grid (pool cell_exp; record ground truth)
         raw = np.zeros((n_spots, n_genes))
@@ -413,7 +472,7 @@ class Visium(Assay):
         for s, inb in enumerate(members):
             member_ids.append(cell_ids[inb])
             if inb.size:
-                raw[s] = exp_vals[inb].sum(axis=0)
+                raw[s] = exp_vals[inb].sum(axis=0, dtype=float)
             if inb.size and clone_labels is not None:
                 labs, cnts = np.unique(clone_labels[inb], return_counts=True)
                 dominant.append(str(labs[cnts.argmax()]))
@@ -421,6 +480,11 @@ class Visium(Assay):
             else:
                 dominant.append("")
                 clone_fracs.append({})
+
+        self.gene_lift = gene_lift
+        if gene_lift is not None:                           # growth genes -> human genes
+            raw = gene_lift.pool_spots(g) if hasattr(gene_lift, "pool_spots") else gene_lift(raw)
+            genes = gene_lift.genes
 
         # 3. lateral mRNA diffusion, then per-spot composition (lambda)
         diffused = self._diffuse(raw, spot_coords)
@@ -430,12 +494,20 @@ class Visium(Assay):
         # 4-5. batch realization + pluggable count draw + ambient
         label = self.batch_label if self.batch_label is not None else f"visium{self.seed}"
         base_profile = raw.sum(axis=0)                     # pooled expression -> ambient soup
-        self.batch = VisiumBatch(self.hypers, seed=self.seed, label=label).realize(
-            genes, base_profile, spot_coords)
         occupied = (n_cells_arr > 0).astype(float)
+        self.batch = VisiumBatch(self.hypers, seed=self.seed, label=label).realize(
+            genes, base_profile, spot_coords, in_tissue=occupied > 0)
         lib = self.batch.spot_library(occupied=occupied)
         comp = self.batch.composition(probs)
-        counts = self.batch.emit(comp, lib, count_model=self.count_model)
+        bled_in = None
+        if self.hypers.bleed_rate > 0:                     # spot swapping (draws no random numbers)
+            from .visium_background import bleed
+            lib, comp, bled_in = bleed(lib, comp, spot_coords, self.hypers.bleed_rate,
+                                       self.hypers.bleed_distal, self.hypers.bleed_sigma)
+        # the soup is a share of the library, not counts on top of it, so a tissue spot's mean depth
+        # stays mu_counts whatever ambient_frac is
+        soup = min(max(float(self.hypers.ambient_frac), 0.0), 1.0)
+        counts = self.batch.emit(comp, lib * (1.0 - soup), count_model=self.count_model)
         counts = self.batch.add_ambient(counts, lib).astype(int)
 
         # -- store outputs (DataFrames + ground truth) ---------------------------------
@@ -453,13 +525,15 @@ class Visium(Assay):
         obs["n_counts"] = counts.sum(axis=1)
         obs["library"] = lib
         obs["capture_field"] = self.capture_field
+        if bled_in is not None:
+            obs["bled_in"] = bled_in                       # truth: share of the spot's counts from elsewhere
         obs["clone"] = dominant
         obs["clone_frac"] = [max(f.values()) if f else 0.0 for f in clone_fracs]
         obs["row"] = spot_coords[:, 0]
         obs["col"] = spot_coords[:, 1]
         self.obs = obs
         self.clone_fracs = clone_fracs
-        # legacy attributes kept for any caller of the old stub
+        # aliases / CSV-shaped views of the outputs above
         self.spot_umi = self.spot_counts
         self.spot_crd = pd.DataFrame(spot_coords, index=spot_names, columns=["row", "col"])
         self.spot_cell_counts = pd.DataFrame({"n_cells": n_cells_arr}, index=spot_names)
@@ -472,8 +546,8 @@ class Visium(Assay):
 
     # -- outputs -----------------------------------------------------------------------
     def to_anndata(self):
-        """Standard 10x AnnData of the spot grid. Works after :meth:`place_grid` (the placed grid on
-        the H&E, ``X`` all zero — just the placement) or after :meth:`run` (with UMI counts)."""
+        """Standard 10x AnnData of the spot grid. Works after [`place_grid`][iscc.data.Visium.place_grid] (the placed grid on
+        the H&E, ``X`` all zero — just the placement) or after [`run`][iscc.data.Visium.run] (with UMI counts)."""
         import anndata as ad
         if self._grid is None:
             raise ValueError("call place_grid(section) or run(section) before to_anndata()")
@@ -523,7 +597,6 @@ class Visium(Assay):
 
     def write(self, out_path, write_h5ad=True):
         os.makedirs(out_path, exist_ok=True)
-        # CSVs kept for backward compatibility with the previous pipeline / tests
         self.spot_counts.to_csv(os.path.join(out_path, "spot_umi.csv"))
         self.spot_crd.to_csv(os.path.join(out_path, "spot_crd.csv"))
         self.spot_cell_counts.to_csv(os.path.join(out_path, "spot_cell_counts.csv"))

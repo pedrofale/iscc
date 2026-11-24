@@ -1,12 +1,12 @@
-"""Real-genome specification for the fit-to-real / Charm milestone (DESIGN_inference A.5).
+"""Real-genome specification for fitting the engine to real (PCAWG) copy-number data.
 
 iscc's abstract genome (synthetic segments, random driver layout, a single scalar
 ``driver_effects``) is replaced here by a **human chromosome-arm genome**: the ~39 autosomal p/q
 arms become the engine's segments, each sized in proportion to the arm's length, and selection
 acts through a **per-arm copy-number coefficient vector** ``s_arm`` (CINner's arm model) rather
-than the scalar driver effect. The engine itself is unchanged apart from the per-arm selection
-mode added to :class:`iscc.tumor.components.selection.Selection`; this module only assembles the
-configuration it consumes.
+than the scalar driver effect. The engine runs this through the per-arm selection mode of
+:class:`iscc.tumor.components.selection.Selection`; this module only assembles the configuration
+it consumes.
 
 A :class:`GenomeSpec` carries, per arm:
   * ``arm_names`` — e.g. ``"8q"`` (chromosome + p/q),
@@ -19,7 +19,7 @@ A :class:`GenomeSpec` carries, per arm:
 It is built from the derived CSVs under ``validation/data/`` (themselves produced + cited by
 ``validation/data/build_realgenome_data.py``), via :func:`load_default`.
 
-**v1 scope (honest):** SNV drivers are off (``prop_driver=0``) — the arm-CN model is what fits
+**Scope:** SNV drivers are off (``prop_driver=0``) — the arm-CN model is what fits
 PCAWG; per-arm oncogene/TSG counts inform the ``s_arm`` *prior* and the Charm comparison but do
 not place gene drivers in the engine (the arm-CN fitness reads only ``seg_cns``, relative to the
 genome-wide mean ploidy, so a whole-genome doubling is fitness-neutral). Arm length sets

@@ -1,4 +1,4 @@
-"""DNA read-emission adapter (DESIGN_features §C C2/C3, §E `reads/dna.py`, F7).
+"""DNA read-emission adapter.
 
 SISTEM-faithful (Weiner & Bansal 2025): per-cell full reference -> copy-number-scaled
 coverage -> a third-party short-read simulator -> (optional) BAM. Concretely:
@@ -8,10 +8,11 @@ coverage -> a third-party short-read simulator -> (optional) BAM. Concretely:
   2. `build_cell_fasta` applies a cell's **CNAs** (duplicate / delete segment sequence) and
      **SNVs** (substitute bases at mutated loci, allele-aware) -> a per-cell FASTA. Copy-number
      scaling is thus baked into the reference multiplicity exactly as SISTEM does it.
-  3. Coverage REUSES the C1 model in `data/dna.py` (`coverage_budget`) for the per-segment
-     read budget; the allele split is the shared `variants.inject` seam.
+  3. Coverage reuses the copy-number-scaled model in `data/dna.py` (`coverage_budget`) for the
+     per-segment read budget; the allele split is the shared `variants.inject` seam.
   4. A read-simulator adapter (default **DWGSIM**, **ART** alternative) writes the FASTA +
-     coverage, shells out via `run_binary`, collects FASTQ. C3 aligns back (bwa + samtools).
+     coverage, shells out via `run_binary`, collects FASTQ. `align_to_bam` aligns back
+     (bwa + samtools).
 
 Allele-layer consistency with the count model (`data/dna.py`/`batch.py`, the model `estimate_dna`
 inverts). The coverage-layer hypers (`mu_depth`, `kappa`, GC, capture, …) are already shared via
@@ -41,10 +42,9 @@ from . import variants
 from ..dna import genome_bases, genome_features, _gene_base_seed, _alt_for_ref
 
 _BASES = np.array(list("ACGT"))
-# Legacy fixed-transition alt map. SUPERSEDED for SNV identity by the canonical per-locus
-# (ref, alt) genome property `genome_bases` (placed at the variant site of every reference, shared
-# across modalities). Retained only for the per-base SEQUENCING-ERROR floor (flip a base to a
-# different one), which is unrelated to the SNV allele and need not be modality-consistent.
+# Fixed-transition alt map, used only for the per-base SEQUENCING-ERROR floor (flip a base to a
+# different one), which is unrelated to the SNV allele and need not be modality-consistent. SNV
+# identity comes from the canonical per-locus (ref, alt) genome property `genome_bases`.
 _ALT_OF = {"A": "G", "G": "A", "C": "T", "T": "C", "N": "A"}
 
 
@@ -102,10 +102,10 @@ class Reference:
 class SyntheticReference(Reference):
     """Backend (A) — a random per-segment FASTA, deterministic in `seed` (the DEFAULT).
 
-    Works on today's abstract genome (genes `G_{seg}_{pos}`): each locus owns a fixed window
-    of `locus_length` random bases; the segment sequence is those windows concatenated. The
-    lack of real sequence context (benchmark transfer) is RESEARCH_QUESTIONS R5 — handled by
-    the real-genome backend below, behind the same interface.
+    Works on the abstract genome (genes `G_{seg}_{pos}`): each locus owns a fixed window
+    of `locus_length` random bases; the segment sequence is those windows concatenated. It has
+    no real sequence context; the real-genome backend below supplies one behind the same
+    interface.
     """
 
     def __init__(self, genes, seed=20240601, locus_length=60, genome_seed=20240601):
@@ -139,13 +139,12 @@ class SyntheticReference(Reference):
 
 
 class RealGenomeReference(Reference):
-    """Backend (B) — a user-supplied FASTA anchored to the M3b real-genome mode (seam).
+    """Backend (B) — a user-supplied FASTA for the real-genome mode.
 
-    Segments = chromosome arms -> hg38 coordinates (`iscc.inference.genome.GenomeSpec`). The
-    SEAM is real: it ingests a FASTA and maps each arm's loci to coordinates, so a mature
-    real-genome wiring drops in unchanged. The coordinate spreading is a thin default (evenly
-    spaced within each contig) pending the full M3b locus->bp map; supply `locus_coords` to
-    override. Requires a real per-segment FASTA, hence not a synthetic fallback.
+    Segments = chromosome arms -> hg38 coordinates (`iscc.inference.genome.GenomeSpec`). It
+    ingests a FASTA and maps each arm's loci to coordinates. The coordinate spreading is a thin
+    default (evenly spaced within each contig); supply `locus_coords` to override. Requires a
+    real per-segment FASTA, hence not a synthetic fallback.
     """
 
     def __init__(self, fasta_path, genes, seg_to_contig=None, locus_coords=None,
@@ -295,11 +294,11 @@ def effective_alt_fraction(af_row, batch=None, modality="bulk"):
 
 
 # ======================================================================================
-# Coverage (REUSE the C1 copy-number-scaled model in data/dna.py)
+# Coverage (the copy-number-scaled model in data/dna.py)
 # ======================================================================================
 def coverage_budget(cell_data, breadth="wgs", modality="bulk", seed=42,
                     cell_subset=None, **dna_kwargs):
-    """Per-segment read budget from the C1 model (copy-number-scaled, breadth-aware).
+    """Per-segment read budget from the DNA coverage model (copy-number-scaled, breadth-aware).
 
     Runs the existing `bulkDNA` / `scDNA` coverage engine and aggregates per-locus coverage to
     a per-segment ``total`` (∝ copy number) — the read budget a simulator must place. Returns
@@ -387,9 +386,7 @@ class ArtAdapter:
     def emit(self, ref_fa, out_prefix, coverage, **opts):
         args = self.build_command(ref_fa, out_prefix, coverage, **opts)
         run_binary(self.binary, args)
-        # Prefer the declared read files over a glob. DWGSIM also writes a `.bfast.fastq.gz`
-        # holding the SAME reads interleaved, so globbing returns three files: that double-counts
-        # the library and hands `bwa mem` more read files than it accepts.
+        # Prefer the declared read files over a glob, as for DWGSIM.
         expected = self.expected_fastq(out_prefix)
         if expected and all(os.path.exists(p) for p in expected):
             return expected
@@ -400,16 +397,16 @@ SIMULATORS = {"dwgsim": DwgsimAdapter, "art": ArtAdapter}
 
 
 # ======================================================================================
-# C3 — alignment to BAM (bwa + samtools); gated behind C2 (needs FASTQ)
+# Alignment to BAM (bwa + samtools); needs the simulator's FASTQ
 # ======================================================================================
 def align_to_bam(ref_fa, fastqs, out_bam, threads=1):
     """Align FASTQ back to `ref_fa` (bwa mem) + samtools sort/index -> sorted, indexed BAM.
 
-    Gated behind C2: requires the FASTQ produced by a simulator. Raises `MissingBinaryError`
+    Requires the FASTQ produced by a simulator. Raises `MissingBinaryError`
     (via `run_binary`) if bwa/samtools are absent.
     """
     if not fastqs:
-        raise ValueError("align_to_bam needs FASTQ input (run the C2 simulator first)")
+        raise ValueError("align_to_bam needs FASTQ input (run the read simulator first)")
     sam = out_bam + ".sam"
     run_binary("bwa", ["index", ref_fa])
     run_binary("bwa", ["mem", "-t", threads, ref_fa, *fastqs], stdout_path=sam)
@@ -442,7 +439,7 @@ def emit_dna_reads(cell_data, reference=None, simulator="dwgsim", breadth="wgs",
       simulator     "dwgsim" (default) or "art".
       modality      "bulk" (pool cells into one reference) or "sc" (per-cell FASTA + FASTQ).
       mean_coverage uniform fold coverage handed to the simulator (CN scaling already baked
-                    into the FASTA); defaults from the C1 budget if None.
+                    into the FASTA); defaults to the assay's `mu_depth` if None.
       emit_bam      also align the FASTQ to a sorted/indexed BAM (needs bwa + samtools).
 
     Returns a result dict with the FASTA path(s), the per-segment coverage budget, the chosen
@@ -555,7 +552,7 @@ def emit_dna_reads(cell_data, reference=None, simulator="dwgsim", breadth="wgs",
 
 
 class DNAReadEmitter:
-    """`ReadEmitter`-conforming wrapper around `emit_dna_reads` (DESIGN_features §E protocol)."""
+    """`ReadEmitter`-conforming wrapper around `emit_dna_reads`."""
 
     def __init__(self, simulator="dwgsim", breadth="wgs", modality="bulk", **kwargs):
         self.simulator = simulator

@@ -59,7 +59,9 @@ def spatialize(cell_data, section_frac=1.0, jitter=0.5, seed=0):
     keep_labels = labels[keep]
     xy = rc[keep] + rng.uniform(-jitter, jitter, size=(keep.size, 2))
 
-    out = {k: (v.reindex(keep_labels).copy() if hasattr(v, "reindex") else v)
+    # `reindex` already returns a new frame, so no further copy: at cm-scale each of these frames is
+    # gigabytes, and a second copy would double the section's footprint.
+    out = {k: (v.reindex(keep_labels) if hasattr(v, "reindex") else v)
            for k, v in cell_data.items()}
     out["cell_crd"] = pd.DataFrame(xy, index=keep_labels, columns=["row", "col"])
     return out
@@ -74,13 +76,13 @@ def tissue_image(coords, grid_side, px=14, darkness=0.85, sigma_frac=0.32, stain
     ``adata.uns['spatial'][lib]['images']['hires']``.
 
     The density is normalised by a **high percentile** (not the single peak) and clipped, so one
-    unusually dense patch does not wash out the contrast of the rest of the section — that
-    peak-normalisation is what made an earlier version read as structureless.
+    unusually dense patch does not wash out the contrast of the rest of the section (normalising by
+    the peak makes the section read as structureless).
 
     Parameters
     ----------
     coords : array-like, shape (n_cells, 2)
-        Sub-deme cell positions as ``(row, col)`` (e.g. from :func:`spatialize`).
+        Sub-deme cell positions as ``(row, col)`` (e.g. from [`spatialize`][iscc.sample.spatialize]).
     grid_side : int or tuple of int
         Capture-area extent in coordinate units: a scalar for a square area, or ``(rows, cols)``
         to match a non-square spot array (e.g. the 78 x 64 Visium v1 slide).
@@ -93,7 +95,7 @@ def tissue_image(coords, grid_side, px=14, darkness=0.85, sigma_frac=0.32, stain
         Gaussian smoothing sigma as a fraction of ``px``.
     stain : {"he", "grey"}, default "he"
         ``"he"`` gives an eosin-pink stroma with hematoxylin-purple nuclei where dense (the
-        canonical H&E look); ``"grey"`` gives the legacy greyscale (denser → darker).
+        canonical H&E look); ``"grey"`` gives a greyscale (denser → darker).
 
     Returns
     -------

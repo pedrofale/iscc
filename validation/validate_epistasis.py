@@ -30,7 +30,7 @@ THE FINDING — **the observable, not the cohort size, is what decides recovery.
     is recovered perfectly; **fitness** gating leaves the same planted DAG with no trace (panel D).
 
 Panels (figure the paper repo's figures/validation_epistasis.png):
-  A. The ANSWER KEY: the planted E matrix.
+  A. The GROUND TRUTH: the planted E matrix.
   B. THE MECHANISM: planted E vs the realised cancer-cell fraction of the clones carrying the pair —
      a large, monotone dose-response, against the flat binary-presence observable. The fitness clamp
      is marked (a planted |E| above log(b_max/b_0) cannot express itself).
@@ -54,6 +54,7 @@ import numpy as np
 import pandas as pd
 
 from iscc.cohort import Cohort
+from iscc.tumor.models import GenotypeTumor
 from iscc.constants import DEFAULT_LAYOUT_SEED
 from iscc import integrations as ig
 from _paths import figure_path
@@ -119,20 +120,21 @@ def run_cohort(n_patients, epistasis_params, dependency_params=None, seed0=1, st
     sel = {**SELECTION, "epistasis_params": epistasis_params}
     if dependency_params:
         sel["dependency_params"] = dependency_params
-    coh = Cohort(patient_seeds=list(range(seed0, seed0 + n_patients)), genome_params=GENOME,
-                 selection_params=sel, cancer_cell_params=CANCER, deme_params=DEME,
-                 spatial_params=SPATIAL, grow_steps=steps, layout_seed=layout_seed)
-    out = []
-    for i in range(coh.n_patients):
-        t = coh._build_tumor(i)
+
+    def grow(seed, layout_seed):
+        t = GenotypeTumor(seed=seed, layout_seed=layout_seed, genome_params=GENOME,
+                          selection_params=sel, cancer_cell_params=CANCER, deme_params=DEME,
+                          spatial_params=SPATIAL)
         if inject_E is not None:
             net = t.selection.epistasis
             net.E[0, 1] = net.E[1, 0] = inject_E
             net._fitness_cache.clear()
-        t.grow(n_steps=steps, seed=coh.patient_seeds[i])
-        if t.get_cancer_size() > 0:
-            out.append(t)
-    return out
+        t.grow(n_steps=steps, seed=seed)
+        return t
+
+    coh = Cohort(grow, patient_seeds=list(range(seed0, seed0 + n_patients)),
+                 layout_seed=layout_seed).run()
+    return [p.tumor for p in coh.patients if p.tumor.get_cancer_size() > 0]
 
 
 def pair_cell_fraction(tumor, i=0, j=1):
@@ -310,7 +312,7 @@ def compare_tools(strength=1.5, n=40, reps=3):
             ts = run_cohort(n, epi(), seed0=1 + rep * 500, layout_seed=ls, inject_E=Eval)
             if len(ts) < 4:
                 continue
-            X = ig.to_mhn_matrix(ts)                       # binary presence (MHN's input)
+            X = ig.to_mhn_matrix(ts, min_freq=0.0)         # binary presence (MHN's input)
             trees = ig.to_treemhn_trees(ts)                # mutation trees (TreeMHN's input)
             n_pairs = N_EVENTS * (N_EVENTS - 1) // 2
             thetas = {
@@ -362,7 +364,7 @@ def compare_tools_order(n=40, reps=5):
         if not dag:
             continue
         parent, child = dag[0]
-        X = ig.to_mhn_matrix(ts)
+        X = ig.to_mhn_matrix(ts, min_freq=0.0)
         n_child = int(X.values[:, child].sum())
         thetas = {"co-occurrence\n(floor)": ig.cooccurrence_scores(X.values),
                   "MHN\n(binary presence)": run_mhn(X),
@@ -413,7 +415,7 @@ def make_figure(net, strength_df, thr_df, tool_df, order_df, gate_df, out):
     fig, axes = plt.subplots(2, 2, figsize=(13.5, 10.5))
     axA, axB, axC, axD = axes.ravel()
 
-    # -- A: the answer key
+    # -- A: the ground truth
     E = net.true_interaction_matrix()
     lim = max(0.5, np.abs(E).max())
     im = axA.imshow(E, cmap="RdBu_r", vmin=-lim, vmax=lim)
@@ -423,7 +425,7 @@ def make_figure(net, strength_df, thr_df, tool_df, order_df, gate_df, out):
         for j in range(net.n_events):
             if abs(E[i, j]) > 1e-9:
                 axA.text(j, i, f"{E[i, j]:.1f}", ha="center", va="center", fontsize=9)
-    axA.set_title("A. The answer key: E planted on the (E0, E1) pair\n"
+    axA.set_title("A. The ground truth: E planted on the (E0, E1) pair\n"
                   "(the conjunctive DAG is a separate experiment — panel D)")
     fig.colorbar(im, ax=axA, fraction=0.046, label="$E_{ij}$ (log-fitness interaction)")
 

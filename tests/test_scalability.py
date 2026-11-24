@@ -1,8 +1,8 @@
-"""Tests for the spatial-scale scalability features (DESIGN_scalability.md §8-9):
+"""Tests for the spatial-scale scalability features:
 
 - **passenger coarsening** (``coarsen_passengers``): folds neutral passenger mutations during growth
-  so #genotypes tracks distinct CLONES, not cells. OFF by default (byte-identical to the exact
-  per-genotype engine — see test_count_engine / test_tau_leaping, which stay green). ON, it is
+  so #genotypes tracks distinct CLONES, not cells. OFF by default (the exact per-genotype engine,
+  pinned by test_count_engine / test_tau_leaping). ON, it is
   statistically equivalent (clonal selection intact) but not byte-identical, and per-cell passengers
   are reconstructed at materialisation.
 - **assay-memory cap** (``max_cells`` / ``make_cell_data(region=...)``): materialise a representative
@@ -147,10 +147,36 @@ def test_plot_tissue_clone_and_phylogeny_share_driver_colours():
     assert t.plot_tissue(color="clone") is not None
     assert t.plot_tissue(color="stage") is not None      # stage view (shared scheme with the landing hero)
     ax = t.plot_phylogeny()
-    # one node per surviving driver clade (the same basis the by_drivers Muller draws on), no subsampling
+    # one branch per driver clone (the same basis the by_drivers Muller draws on), in the Muller colours
     _, _, _, cols = viz._display_basis(t.traces, t.genotypes_parents,
                                        driver_map=t._driver_signatures(), min_freq=0.02)
-    assert ax is not None and len(ax.collections) == len(cols) and len(ax.lines) > 0
+    colors = viz.functional_clone_colors(t.traces, t.genotypes_parents,
+                                         driver_map=t._driver_signatures(), min_freq=0.02)
+    branches = [line for line in ax.lines if line.get_gid() == "branch"]
+    assert len(branches) == len(cols)
+    assert {tuple(np.round(line.get_color(), 6)) for line in branches} <= \
+        {tuple(np.round(colors[str(c)], 6)) for c in cols}
+    plt.close("all")
+
+
+def test_phylogeny_marks_where_a_lineage_gained_a_trait():
+    """A trait gained by a clone that holds the cells at the end of growth is marked on its branch,
+    at the time the clone arose; a gain below trait_min_freq is not."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    t = _grow(seed=1, coarsen=True, max_cells=200)
+    live = {g: n for g, n in t.genotypes_counts.items() if t._is_cancer(g) and n > 0}
+    big = max(live, key=live.get)
+    for g in t.genotypes:                       # clear any trait, then give one to the largest clone
+        if t._is_cancer(g):
+            t.genotypes[g].evolutionary_parameters["breach"] = 0.0
+    t.genotypes[big].evolutionary_parameters["breach"] = 0.5
+    letters = [x.get_text() for x in t.plot_phylogeny(min_freq=0.02).texts]
+    assert letters.count("B") == 1
+    plt.close("all")
+    letters = [x.get_text() for x in t.plot_phylogeny(min_freq=0.02, trait_min_freq=1.01).texts]
+    assert "B" not in letters
     plt.close("all")
 
 
@@ -178,7 +204,7 @@ def test_region_materialisation_is_dense_and_local():
     G = t.grid_size
     center = (G // 2, G // 2)
     window = t.primary_window(side=8, center=center)
-    cd = t.make_cell_data(region=window)
+    cd = t.make_cell_data(region=window, max_cells=10 ** 6)
     demes = set(cd["cell_deme"]["deme_id"])
     assert demes.issubset(set(window))                      # nothing outside the window
     # full local density: the window's materialised cell count == the true count in those demes
@@ -217,7 +243,7 @@ def test_visium_place_grid_then_run_and_rotation():
     vz.place_grid(section)
     pre = vz.to_anndata()                                       # placed but not assayed
     lib = list(pre.uns["spatial"])[0]
-    assert pre.n_obs == vz._layout(None).shape[0]              # all v1 spots
+    assert pre.n_obs == vz._layout(None).shape[0]              # all spots
     assert float(pre.X.sum()) == 0.0                           # no expression yet — pure placement
     assert 0 < int((pre.obs["in_tissue"] == 1).sum()) < pre.n_obs
     assert pre.uns["spatial"][lib]["images"]["hires"].ndim == 3 and "spatial" in pre.obsm

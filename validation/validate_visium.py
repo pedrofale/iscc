@@ -203,7 +203,7 @@ def main():
         header, true = f"real 10x Visium '{args.sample_id}'", None
     else:
         # SYNTHETIC round-trip: known ground-truth hypers -> observed -> estimate -> re-simulate.
-        obs = Visium(seed=10, spot_pitch=2.0, spot_radius=1.0, count_model="dm", **TRUE).run(
+        obs = Visium(seed=10, count_model="dm", **TRUE).run(       # both at the default v1 geometry
             cell_data, grid_side=grid)
         est = estimate_visium_from_assay(obs)
         sim = Visium(seed=11, count_model="dm", **est.visium_kwargs()).run(cell_data, grid_side=grid)

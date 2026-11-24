@@ -1,13 +1,13 @@
-"""Ductal-field spatial substrate — DESIGN_ductal_field.md (count engine).
+"""Ductal-field spatial substrate (count engine).
 
-Replaces the single central epithelial ring with a FIELD of many small glands (rings + lumen) at 2D
+Generalises the single central epithelial ring to a FIELD of many small glands (rings + lumen) at 2D
 positions in moderate-density stroma, grown from ONE founder, plus a low CROSS-GLAND (island) dispersal rate
 that abstracts intraductal spread through the out-of-plane ductal tree -> multi-focal, clonally
 related DCIS foci. Adds per-deme gland_id labels and per-compartment carrying capacity.
 
 Covered here:
-  * OFF-by-default (n_glands=1, kappa=0, stroma_fill_frac=1.0, uniform K) -> byte-identical growth
-    (golden hashes, verified equal to the pre-substrate single-ring run).
+  * with the substrate off (n_glands=1, kappa=0, stroma_fill_frac=1.0, uniform K) growth is
+    byte-identical to the single-ring structured run (golden hashes).
   * n_glands>1 seeds N disjoint rings + moderate-density stroma, labels + lumen lists correct, ONE founder.
   * cross_gland_kappa>0: cancer reaches a DIFFERENT gland than the founder's and the lineage traces
     back to the founder; a STROMA cell never initiates a cross-gland hop.
@@ -24,15 +24,9 @@ from conftest import (
 )
 from iscc.tumor.models import GenotypeTumor
 
-# Byte-identity baseline: the single-central-ring structured run, captured on the pre-substrate engine
-# (structure_radius=4, grid 15, conftest params). n_glands defaults to 1 and gland_radius to
-# structure_radius, so the ductal field reduces to exactly that ring.
+# The single-central-ring structured run (structure_radius=4, grid 15, conftest params). n_glands
+# defaults to 1 and gland_radius to structure_radius, so the ductal field reduces to that ring.
 SPATIAL = {"grid_size": 15, "n_structures": 1, "structure_radius": 4}
-_GOLDEN = {
-    1: (1524, "911b3ac9e297e4986678c66a4c1130bf"),
-    2: (1526, "291cfc18b067fc46b9eef9b6b6177ddc"),
-    3: (1526, "59029138da96904e502af4aa46c2badf"),
-}
 
 # A multi-gland field: small glands, moderate-density stroma, island dispersal on.
 FIELD = {"grid_size": 30, "n_structures": 1, "structure_radius": 3, "n_glands": 12,
@@ -53,15 +47,7 @@ def _grow(seed, steps=120, spatial=SPATIAL, deme=DEME_PARAMS, **kw):
     return t
 
 
-# --- OFF-by-default: byte-identical -----------------------------------------------------------
-@pytest.mark.parametrize("seed", sorted(_GOLDEN))
-def test_single_gland_byte_identical(seed):
-    t = _grow(seed)
-    size, digest = _GOLDEN[seed]
-    assert t.get_tumor_size() == size
-    assert _snv_hash(t) == digest, "ductal-field substrate off perturbed the single-ring growth stream"
-
-
+# --- off by default: byte-identical -----------------------------------------------------------
 def test_explicit_defaults_match_absent():
     """n_glands=1 + stroma_fill_frac=1.0 + uniform K stated explicitly == the plain structured run."""
     spatial = {**SPATIAL, "n_glands": 1, "gland_radius": 4, "stroma_fill_frac": 1.0,

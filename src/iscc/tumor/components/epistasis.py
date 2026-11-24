@@ -1,11 +1,11 @@
-"""Epistasis / evolutionary-dependency structure in selection (DESIGN_epistasis.md, R14).
+"""Epistasis / evolutionary-dependency structure in selection.
 
 iscc's selection is otherwise **additive**: abstract mode scores the *count* of mutated drivers, so
 the true event x event dependency network is ~empty and a cohort-progression benchmark (MHN, TreeMHN,
 CBN/H-CBN, REVOLVER) could only measure a method's false-positive rate. This module lets a
-**known network be planted** — the answer key those methods are scored against.
+**known network be planted** — the ground truth those methods are scored against.
 
-The three interaction types of DESIGN_epistasis.md §2, all planted:
+Three interaction types, all planted:
 
   * **pairwise epistasis** ``E[i, j]`` — a log-additive interaction term; ``> 0`` synergy /
     co-selection, ``< 0`` antagonism;
@@ -20,12 +20,12 @@ Fitness gains one term on top of the existing additive model::
 
 ``x`` is the genotype's **event vector**, so the term is a pure function of the event set: it caches
 per genotype and is safe under tau-leaping and the exact engine alike. **Off by default** — with no
-events configured, :class:`EpistasisNetwork` is never constructed and selection is bit-identical to
-the additive model.
+events configured, :class:`EpistasisNetwork` is never constructed and selection is the additive
+model.
 
 
-The event alphabet (v1: abstract driver roles)
-----------------------------------------------
+The event alphabet (abstract driver roles)
+-----------------------------------------
 An **event** is a disjoint **module of driver genes** (``event_size`` genes drawn from the shared
 oncogene/TSG pool); it is *acquired* when >= 1 SNV lands anywhere in the module. Modules rather than
 single genes because **MHN/TreeMHN pool many tumours to fit ONE network**, which requires the same
@@ -33,15 +33,17 @@ events to RECUR across patients: with ~10^4 genes and mutation spread genome-wid
 is hit in almost no patient, so a single-gene alphabet yields a cohort with no shared events and
 nothing to recover. A module is the familiar pathway-level event, and ``event_size=1`` recovers the
 single-gene case. ``event_size`` is therefore the knob that sets how fast events accrue — see
-PARAMETERS.md.
+PARAMETERS.md. It is one int for every module, or a list of one int per event so that events can be
+set to different frequencies; either way every module's genes come from one draw of the layout
+sub-stream, cut in event order, so a single size draws the same modules as a list of that size.
 
 Events are **monotone**: once acquired an event never reverts, even if a later deletion removes the
 mutated allele. That is deliberate — it is exactly the generative assumption MHN/CBN/TreeMHN make,
 so the planted network stays the network those models are defined to recover.
 
 
-Ordering: fitness gating vs accessibility gating (DESIGN_epistasis.md §7)
--------------------------------------------------------------------------
+Ordering: fitness gating vs accessibility gating
+------------------------------------------------
 The two are different generative stories, and the progression models assume different ones, so the
 choice is explicit (``gating_mode``) and must be stated in the paper:
 
@@ -58,6 +60,28 @@ Under fitness gating the observed order is noisy (a gated event can be present b
 under accessibility gating it is exact. Benchmarks that score ORDER recovery should say which.
 
 
+Planting an explicit network
+----------------------------
+By default the network is DRAWN at random from the layout stream (``n_interactions``,
+``network_topology``, ``n_exclusive_pairs``, ``n_constraints``, ...). ``epistasis_params["planted"]``
+instead states it exactly, so a benchmark can name every pair before any tumour is grown::
+
+    epistasis_params = {"n_events": 6, "event_size": 10, "lethal_death_rate": 2.5,
+                        "planted": {"effects": 0.05,                  # beta_i, scalar or per event
+                                    "interactions": [(0, 1, 0.4)],    # E[i, j] (log-additive)
+                                    "exclusive": [(2, 3)],            # lethal together
+                                    "constraints": [(4, 5)]}}         # 4 must precede 5
+    dependency_params = {"gating_mode": "accessibility"}
+
+Only the event MODULES are still drawn (from the layout stream, exactly as in the random mode, so the
+same ``event_size`` and ``layout_seed`` give the same modules whichever mode is used); everything else
+is what was planted and nothing more — an event's own effect is 0 unless planted, a pair interacts
+only if listed. Events are indexed from 0 (``event_names()`` calls them ``E0``, ``E1``, ...). An
+exclusive pair is a synthetic-lethal combination (``lethal_death_rate``) with no ``E`` term of its own;
+the order constraints are gated by ``dependency_params["gating_mode"]``. The random-draw knobs cannot
+be combined with ``planted`` (they would be silently ignored), so giving both is an error.
+
+
 Comparability across patients
 -----------------------------
 The network is part of the **shared landscape**, not per-run state: MHN/TreeMHN are only well-posed
@@ -66,7 +90,7 @@ stream (``layout_seed``), in a dedicated sub-stream ``default_rng(layout_seed +
 LAYOUT_OFFSET_EPISTASIS)`` so that changing ``n_interactions`` / ``network_topology`` does not
 reshuffle the oncogene/TSG layout or the gene programs. Same config + same ``layout_seed`` => the
 identical network for every patient and across separate simulations; a different ``layout_seed`` =>
-a different network (for replicate studies). See DESIGN_cohort.md §1.
+a different network (for replicate studies).
 """
 import numpy as np
 
@@ -74,7 +98,8 @@ import numpy as np
 # documented contract in PARAMETERS.md.
 EPISTASIS_DEFAULTS = dict(
     n_events=0,                  # 0 => OFF (no network is built; selection stays additive)
-    event_size=20,               # driver genes per event module; sets how fast events accrue
+    event_size=20,               # driver genes per event module (one int, or one per event);
+                                 # sets how fast events accrue
     event_effect_mean=0.1,       # beta_i ~ N(mean, sd): the event's own marginal log-fitness effect
     event_effect_sd=0.0,
     n_interactions=None,         # number of non-zero E[i, j]; None => use network_sparsity
@@ -106,6 +131,13 @@ DEPENDENCY_DEFAULTS = dict(
 _TOPOLOGIES = ("random", "hub", "chain")
 _GATING_MODES = ("fitness", "accessibility")
 
+# The planted network's keys, and the random-draw knobs it replaces (an error to give alongside it).
+_PLANTED_KEYS = ("effects", "interactions", "exclusive", "constraints")
+_RANDOM_EPISTASIS_KEYS = ("event_effect_mean", "event_effect_sd", "n_interactions", "network_sparsity",
+                          "network_topology", "interaction_strength", "interaction_strength_sd",
+                          "prop_synergy", "mutual_exclusivity_strength", "n_exclusive_pairs")
+_RANDOM_DEPENDENCY_KEYS = ("n_constraints", "dag_depth", "dag_branching")
+
 
 class EpistasisNetwork:
     """The planted event x event network: the ground truth a progression model must recover.
@@ -131,9 +163,12 @@ class EpistasisNetwork:
         self.dependency_params = dp
 
         self.n_events = int(ep["n_events"])
-        self.event_size = int(ep["event_size"])
         if self.n_events <= 0:
             raise ValueError("EpistasisNetwork requires n_events > 0 (it is only built when ON)")
+        # module sizes: one int for every event (as before), or one int per event
+        scalar_size = np.ndim(ep["event_size"]) == 0
+        self.event_sizes = self._module_sizes(ep["event_size"], self.n_events)
+        self.event_size = self.event_sizes[0] if scalar_size else list(self.event_sizes)
         if ep["network_topology"] not in _TOPOLOGIES:
             raise ValueError(f"network_topology must be one of {_TOPOLOGIES}, got {ep['network_topology']!r}")
         if dp["gating_mode"] not in _GATING_MODES:
@@ -141,17 +176,21 @@ class EpistasisNetwork:
         self.gating_mode = dp["gating_mode"]
 
         driver_pool = np.asarray(driver_pool, dtype=int)
-        needed = self.n_events * self.event_size
+        needed = int(sum(self.event_sizes))
         if needed > len(driver_pool):
+            what = (f"{self.n_events} x {self.event_size}" if scalar_size
+                    else " + ".join(str(s) for s in self.event_sizes))
             raise ValueError(
-                f"epistasis needs {self.n_events} x {self.event_size} = {needed} driver genes for its "
+                f"epistasis needs {what} = {needed} driver genes for its "
                 f"event modules but the shared layout only has {len(driver_pool)}; raise prop_driver / "
                 "the genome size, or lower n_events / event_size")
 
         # -- the event alphabet: disjoint modules of driver genes ----------------------------
+        # One draw of every module's genes, cut in event order: with a single size this is the same
+        # draw, with the same stream consumption, as before per-event sizes existed.
         chosen = rng.choice(driver_pool, size=needed, replace=False)
-        self.event_genes = [np.sort(chosen[i * self.event_size:(i + 1) * self.event_size])
-                            for i in range(self.n_events)]
+        cuts = np.concatenate([[0], np.cumsum(self.event_sizes)]).astype(int)
+        self.event_genes = [np.sort(chosen[cuts[i]:cuts[i + 1]]) for i in range(self.n_events)]
 
         # per-segment gene -> event id lookup (-1 = not an event gene), so scoring a mutation is a
         # single fancy-index on the segment's mutation mask.
@@ -163,6 +202,49 @@ class EpistasisNetwork:
                 seg = int(np.searchsorted(self._seg_offsets, g, side="right") - 1)
                 self.event_ids[seg][int(g) - int(self._seg_offsets[seg])] = ev
 
+        self.lethal = bool(ep["mutual_exclusivity_lethal"])
+        self.lethal_death_rate = float(ep["lethal_death_rate"])
+        planted = ep.get("planted")
+        self.planted = planted is not None
+        if self.planted:
+            # An explicit network: nothing below is drawn, so the layout stream is consumed by the
+            # event modules alone (identical to the random mode's modules at the same layout seed).
+            self._plant(planted, epistasis_params or {}, dependency_params or {})
+        else:
+            self._draw(ep, dp, rng)
+        # bitmask of required parents per event, for O(1) gating
+        self._parent_mask = np.zeros(self.n_events, dtype=object)
+        for ev, ps in self.dag_parents.items():
+            m = 0
+            for p in ps:
+                m |= (1 << p)
+            self._parent_mask[ev] = m
+        self._has_dag = bool(self.dag_edges)
+
+        # per-event-set caches (pure functions of the event bitmask => tau-leap safe)
+        self._fitness_cache = {}
+        self._blocked_cache = {}
+
+    @staticmethod
+    def _module_sizes(size, n_events):
+        """``event_size`` as one size per event: a single int (every module that size, as before)
+        or a sequence of ``n_events`` positive ints (module ``i`` has ``size[i]`` genes)."""
+        if np.ndim(size) == 0:
+            return (int(size),) * n_events
+        sizes = list(np.asarray(size, dtype=object).ravel())
+        if len(sizes) != n_events:
+            raise ValueError(f"event_size: give one int or one per event ({n_events}), "
+                             f"got {len(sizes)} sizes")
+        out = []
+        for s in sizes:
+            if isinstance(s, (bool, np.bool_)) or not isinstance(s, (int, np.integer)) or int(s) < 1:
+                raise ValueError(f"event_size: module sizes are positive integers, got {s!r}")
+            out.append(int(s))
+        return tuple(out)
+
+    def _draw(self, ep, dp, rng):
+        """The random network (the default): beta, E, exclusive pairs and the DAG drawn, in that
+        order, from the epistasis layout sub-stream after the event modules."""
         # -- marginal effects beta_i (MHN's diagonal) ----------------------------------------
         self.beta = rng.normal(ep["event_effect_mean"], ep["event_effect_sd"], size=self.n_events)
 
@@ -181,10 +263,8 @@ class EpistasisNetwork:
 
         # -- mutual exclusivity / synthetic lethality: strongly negative edges ----------------
         # Drawn from pairs NOT already carrying an interaction, so the two signals stay distinct in
-        # the answer key (self.exclusive_pairs).
+        # the ground truth (self.exclusive_pairs).
         self.exclusive_pairs = []
-        self.lethal = bool(ep["mutual_exclusivity_lethal"])
-        self.lethal_death_rate = float(ep["lethal_death_rate"])
         n_excl = int(ep["n_exclusive_pairs"])
         mex = float(ep["mutual_exclusivity_strength"])
         if n_excl > 0 and mex > 0:
@@ -202,18 +282,102 @@ class EpistasisNetwork:
         self.dag_parents = {i: () for i in range(self.n_events)}
         self.dag_edges = []
         self._build_dag(dp, rng)
-        # bitmask of required parents per event, for O(1) gating
-        self._parent_mask = np.zeros(self.n_events, dtype=object)
-        for ev, ps in self.dag_parents.items():
-            m = 0
-            for p in ps:
-                m |= (1 << p)
-            self._parent_mask[ev] = m
-        self._has_dag = bool(self.dag_edges)
 
-        # per-event-set caches (pure functions of the event bitmask => tau-leap safe)
-        self._fitness_cache = {}
-        self._blocked_cache = {}
+    def _plant(self, planted, epistasis_params, dependency_params):
+        """The explicit network of ``epistasis_params["planted"]`` (see the module docstring),
+        validated so that what is planted is exactly what was asked for."""
+        if not isinstance(planted, dict):
+            raise ValueError("epistasis_params['planted'] must be a dict with keys "
+                             f"{_PLANTED_KEYS}, got {type(planted).__name__}")
+        unknown = set(planted) - set(_PLANTED_KEYS)
+        if unknown:
+            raise ValueError(f"unknown planted key(s) {sorted(unknown)}; use {_PLANTED_KEYS}")
+        drawn = ([k for k in _RANDOM_EPISTASIS_KEYS if k in epistasis_params]
+                 + [k for k in _RANDOM_DEPENDENCY_KEYS if k in dependency_params])
+        if drawn:
+            raise ValueError(f"a planted network cannot be combined with the random-draw knob(s) "
+                             f"{drawn}, which it would silently ignore; drop them")
+        n = self.n_events
+
+        def event(x, what):
+            if isinstance(x, (bool, np.bool_)) or not isinstance(x, (int, np.integer)):
+                raise ValueError(f"planted {what}: events are integer indices, got {x!r}")
+            if not 0 <= int(x) < n:
+                raise ValueError(f"planted {what}: event {x} is out of range for n_events={n}")
+            return int(x)
+
+        def pair(entry, what, size):
+            if len(entry) != size:
+                raise ValueError(f"planted {what} entries are {size}-tuples, got {tuple(entry)!r}")
+            i, j = event(entry[0], what), event(entry[1], what)
+            if i == j:
+                raise ValueError(f"planted {what}: an event cannot pair with itself ({i})")
+            return i, j
+
+        # -- the events' own effects (MHN's diagonal) ----------------------------------------
+        effects = planted.get("effects", 0.0)
+        if np.ndim(effects) == 0:
+            self.beta = np.full(n, float(effects))
+        else:
+            self.beta = np.asarray(effects, dtype=float)
+            if self.beta.shape != (n,):
+                raise ValueError(f"planted effects: give a scalar or one value per event ({n}), "
+                                 f"got {len(self.beta)}")
+        if not np.all(np.isfinite(self.beta)):
+            raise ValueError("planted effects must be finite")
+
+        # -- pairwise log-additive terms -------------------------------------------------------
+        self.E = np.zeros((n, n))
+        seen = set()
+        for entry in planted.get("interactions", ()):
+            i, j = pair(entry, "interactions", 3)
+            w = float(entry[2])
+            if not np.isfinite(w):
+                raise ValueError(f"planted interaction ({i}, {j}) has a non-finite term {w}")
+            key = (min(i, j), max(i, j))
+            if key in seen:
+                raise ValueError(f"planted interactions: the pair {key} is given twice")
+            seen.add(key)
+            self.E[i, j] = self.E[j, i] = w
+
+        # -- mutual exclusivity: lethal combinations ------------------------------------------
+        self.exclusive_pairs = []
+        for entry in planted.get("exclusive", ()):
+            i, j = pair(entry, "exclusive", 2)
+            key = (min(i, j), max(i, j))
+            if key in seen:
+                raise ValueError(f"planted exclusive pair {key} is also an interaction or given "
+                                 "twice; keep the two signals distinct in the ground truth")
+            seen.add(key)
+            self.exclusive_pairs.append(key)
+        if self.exclusive_pairs and not self.lethal:
+            raise ValueError("planted exclusive pairs act only through lethality; they would do "
+                             "nothing with mutual_exclusivity_lethal=False")
+        if self.exclusive_pairs and not self.lethal_death_rate > 0:
+            raise ValueError(f"lethal_death_rate must be positive, got {self.lethal_death_rate}")
+
+        # -- order constraints: a DAG, parent -> child ----------------------------------------
+        parents = {i: [] for i in range(n)}
+        self.dag_edges = []
+        for entry in planted.get("constraints", ()):
+            parent, child = pair(entry, "constraints", 2)
+            if (parent, child) in self.dag_edges:
+                raise ValueError(f"planted constraint {(parent, child)} is given twice")
+            parents[child].append(parent)
+            self.dag_edges.append((parent, child))
+        self.dag_parents = {i: tuple(sorted(v)) for i, v in parents.items()}
+        # acyclic: repeatedly remove events with no remaining parent (Kahn); any left form a cycle
+        remaining = {i: set(v) for i, v in parents.items()}
+        while True:
+            free = [i for i, ps in remaining.items() if not ps]
+            if not free:
+                break
+            for i in free:
+                del remaining[i]
+            for ps in remaining.values():
+                ps.difference_update(free)
+        if remaining:
+            raise ValueError(f"planted constraints form a cycle among events {sorted(remaining)}")
 
     # ------------------------------------------------------------------ construction helpers
     @staticmethod
@@ -361,7 +525,7 @@ class EpistasisNetwork:
 
     # ------------------------------------------------------------------ ground truth
     def true_interaction_matrix(self):
-        """The planted ``E`` — the answer key for edge precision/recall."""
+        """The planted ``E`` — the ground truth for edge precision/recall."""
         return self.E.copy()
 
     def true_edges(self, threshold=0.0):
@@ -371,7 +535,7 @@ class EpistasisNetwork:
                 if abs(self.E[i, j]) > threshold]
 
     def true_dag_edges(self):
-        """Planted conjunctive constraints as ``(parent, child)`` — the ordering answer key."""
+        """Planted conjunctive constraints as ``(parent, child)`` — the ordering ground truth."""
         return list(self.dag_edges)
 
     def true_order_constraints(self):
@@ -390,12 +554,14 @@ class EpistasisNetwork:
         return dict(n_events=self.n_events,
                     event_names=self.event_names(),
                     event_genes=[g.tolist() for g in self.event_genes],
+                    event_sizes=list(self.event_sizes),
                     beta=self.beta.copy(),
                     E=self.true_interaction_matrix(),
                     edges=self.true_edges(),
                     dag_edges=self.true_dag_edges(),
                     exclusive_pairs=self.true_exclusive_pairs(),
-                    gating_mode=self.gating_mode)
+                    gating_mode=self.gating_mode,
+                    planted=self.planted)
 
 
 def bits_to_events(event_bits, n_events=None):

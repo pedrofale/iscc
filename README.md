@@ -10,14 +10,23 @@
 [![Tests](https://github.com/pedrofale/iscc/actions/workflows/main.yaml/badge.svg)](https://github.com/pedrofale/iscc/actions/workflows/main.yaml)
 [![Docs](https://github.com/pedrofale/iscc/actions/workflows/docs.yml/badge.svg)](https://pedrofale.github.io/iscc/)
 
-`iscc` (in silico cancer center) is a multi-modal tumor evolution data simulator. It grows one
-selection-driven, spatially-structured tumor, optionally treats it, samples it, and generates
-single-cell and bulk DNA, RNA, and spatial data, down to sequencing reads. Because every run knows
-the true clones, mutations, copy numbers, cell states, spatial niches, and lineages, `iscc` provides
-a realistic ground truth for benchmarking computational tumor evolution methods.
+`iscc` (in silico cancer center) is a Python package that simulates a growing tumor and the
+molecular data measured from it. It grows a tumor under copy-number and driver selection in a field
+of glands, stroma and an optional metastatic site, where selection depends on the niche. It then
+carries the same cells through biopsy and dissociation into bulk and single-cell DNA, RNA and spatial
+transcriptomics data, down to sequencing reads, and therapies can be applied during growth. `iscc`
+records the ground truth of every cell, clone and niche, and of where and when each clone arose, so
+that methods that profile tumor heterogeneity, including those that integrate several data layers,
+can be scored against it.
 
 ## Installation
 
 ```bash
 pip install insilico-cancer-center
 ```
+
+## Citing iscc
+
+If you use `iscc`, please cite the preprint that describes it and the release you used. The preprint
+is in preparation, and release v0.4.0 will be archived with a DOI. Both references will be listed here
+when they are available. Until then, the citation of the software is in `CITATION.cff`.

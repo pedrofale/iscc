@@ -14,8 +14,17 @@
 #                   L.csv  genes x clones copy number  (rownames=genes, colnames=clones)
 # Outputs (outdir): clone_probs.csv  cells x clones assignment probabilities
 #                   clone_call.csv    cells -> hard clone call (argmax over clones)
+#                   run.csv           genes and cells dropped before the fit, and the seed that fit
 #
-# Usage: Rscript clonealign_runner.R <indir> <outdir> [max_iter] [n_repeats] [seed]
+# Usage: Rscript clonealign_runner.R <indir> <outdir> [max_iter] [n_repeats] [seed] [preprocess] [K]
+#
+# K (optional) is the dimension of clonealign's latent expression space; left out, the package's default
+# (1 below 100 genes, 6 above).
+#
+# preprocess = 1 applies the package's own preprocess_for_clonealign() with its defaults (genes with more
+# than 20 counts and copy number at most 6, outlying genes and genes with the same copy number in every
+# clone removed, cells with more than 100 counts kept) after the copy-number-0 filter below. Default 0,
+# the behaviour the Fig 5 and validate_clonealign runs had.
 
 # Point reticulate at THIS conda env's python (where tensorflow + tensorflow_probability live),
 # not reticulate's auto-provisioned uv python.
@@ -35,6 +44,8 @@ outdir <- args[2]
 max_iter  <- if (length(args) >= 3) as.integer(args[3]) else 200L
 n_repeats <- if (length(args) >= 4) as.integer(args[4]) else 3L
 seed      <- if (length(args) >= 5) as.integer(args[5]) else 1L
+preprocess <- length(args) >= 6 && as.integer(args[6]) == 1L
+K_arg <- if (length(args) >= 7 && nzchar(args[7]) && args[7] != "NA") as.integer(args[7]) else NULL
 dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
 
 # ---- load inputs ----
@@ -46,18 +57,55 @@ common <- intersect(colnames(Y), rownames(L))
 Y <- Y[, common, drop = FALSE]; storage.mode(Y) <- "double"
 L <- L[common, , drop = FALSE]; storage.mode(L) <- "double"
 
-set.seed(seed)
-tf$compat$v1$set_random_seed(seed)
+# clonealign's likelihood needs every kept cell to have counts on the kept genes ("Some cells have no
+# counts mapping") and a finite log copy number for every gene and clone (a copy number of 0 gives an NA
+# initial ELBO). So genes with no counts or with copy number 0 in any clone are dropped, then cells with
+# no counts on the remaining genes; those cells get uniform probabilities, as nothing assigns them.
+keep_g <- colSums(Y) > 0 & apply(L, 1, function(r) all(is.finite(r)) && all(r > 0))
+keep_c <- rowSums(Y[, keep_g, drop = FALSE]) > 0
+cat(sprintf("clonealign: dropped %d of %d genes (no counts or copy number 0) and %d of %d cells (no counts)\n",
+            sum(!keep_g), length(keep_g), sum(!keep_c), length(keep_c)))
+Yk <- Y[keep_c, keep_g, drop = FALSE]
+Lk <- L[keep_g, , drop = FALSE]
+if (preprocess) {
+  pp <- preprocess_for_clonealign(Yk, Lk)
+  Yk <- pp$gene_expression_data
+  Lk <- as.matrix(pp$copy_number_data)
+  storage.mode(Lk) <- "double"
+  keep_g <- colnames(Y) %in% pp$retained_genes
+  keep_c <- rownames(Y) %in% pp$retained_cells
+  cat(sprintf("clonealign: preprocess_for_clonealign kept %d genes and %d cells\n", ncol(Yk), nrow(Yk)))
+}
 cat(sprintf("clonealign: %d cells x %d genes, %d clones (max_iter=%d, n_repeats=%d)\n",
-            nrow(Y), ncol(Y), ncol(L), max_iter, n_repeats))
+            nrow(Yk), ncol(Yk), ncol(Lk), max_iter, n_repeats))
 
-fit <- run_clonealign(Y, L, initial_shrinks = c(0, 5, 10), n_repeats = n_repeats,
-                      print_elbos = FALSE, max_iter = max_iter, verbose = FALSE)
+# The variational fit can still start from an NA ELBO for an unlucky initialisation: try two more seeds.
+fit <- NULL
+for (s in seed + 0:2) {
+  set.seed(s)
+  tf$compat$v1$set_random_seed(s)
+  fit <- tryCatch(do.call(run_clonealign, c(list(Yk, Lk, initial_shrinks = c(0, 5, 10), n_repeats = n_repeats,
+                                                  print_elbos = FALSE, max_iter = max_iter, verbose = FALSE),
+                                             if (is.null(K_arg)) list() else list(K = K_arg))),
+                  error = function(e) { message(sprintf("clonealign, seed %d: %s", s, conditionMessage(e))); NULL })
+  if (!is.null(fit)) break
+}
+if (is.null(fit)) stop("clonealign failed on every seed")
+write.csv(data.frame(genes_total = length(keep_g), genes_dropped = sum(!keep_g),
+                     cells_total = length(keep_c), cells_dropped = sum(!keep_c), seed_used = s),
+          file.path(outdir, "run.csv"), row.names = FALSE)
 
-probs <- as.data.frame(fit$ml_params$clone_probs)
-colnames(probs) <- colnames(L)
-rownames(probs) <- rownames(Y)
-write.csv(probs, file.path(outdir, "clone_probs.csv"))
-write.csv(data.frame(clone = fit$clone, row.names = rownames(Y)),
-          file.path(outdir, "clone_call.csv"))
+probs <- matrix(1 / ncol(L), nrow(Y), ncol(L), dimnames = list(rownames(Y), colnames(L)))
+probs[keep_c, ] <- fit$ml_params$clone_probs
+call <- rep(NA_character_, nrow(Y))
+call[keep_c] <- as.character(fit$clone)
+write.csv(as.data.frame(probs), file.path(outdir, "clone_probs.csv"))
+# the clones the package names against the columns of its probabilities: they must agree
+named <- as.character(fit$clone)
+by_prob <- colnames(Lk)[apply(fit$ml_params$clone_probs, 1, which.max)]
+ok_name <- named != "unassigned"
+cat(sprintf("clonealign: package clone calls agree with the argmax of its probabilities for %d of %d assigned cells\n",
+            sum(named[ok_name] == by_prob[ok_name]), sum(ok_name)))
+writeLines(colnames(Yk), file.path(outdir, "genes_used.txt"))
+write.csv(data.frame(clone = call, row.names = rownames(Y)), file.path(outdir, "clone_call.csv"))
 cat("clonealign done ->", outdir, "\n")

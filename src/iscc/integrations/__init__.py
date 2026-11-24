@@ -18,12 +18,13 @@ Additive and low-risk: nothing here changes the engine; each optional external d
 """
 from .lineage import LineageTree, to_lineage_tree, to_newick
 from .clones import clones_from_clades, clone_summary
-from .anndata import to_anndata, from_anndata, biological_types
+from .anndata import to_anndata, from_anndata, biological_types, cell_subtypes
 from .petracer import decompose_lineage_spatial, LineageSpatialDecomposition
 from .progression import (
     to_mhn_matrix, to_cell_fraction_matrix, to_mutation_tree, to_treemhn_trees, to_cbn_poset,
     clone_events, event_cell_fractions, patient_event_vector, cooccurrence_scores, top_edges,
-    score_edges, score_order, score_exclusivity,
+    score_edges, score_order, score_exclusivity, DETECTION_LIMIT, TRAIT_EVENTS, trait_table,
+    trait_cell_fractions, to_trait_matrix, to_trait_tree, to_trait_trees, stack_trees,
 )
 from .multiregion import (
     true_origin_counts, region_bulk_profiles, oracle_clone_profiles,
@@ -38,18 +39,21 @@ __all__ = [
     # the shared clone definition: lineage clades with enough sampled cells
     "clones_from_clades", "clone_summary",
     # the whole tumour as one AnnData, and the way back
-    "to_anndata", "from_anndata", "biological_types",
+    "to_anndata", "from_anndata", "biological_types", "cell_subtypes",
     "decompose_lineage_spatial", "LineageSpatialDecomposition",
     # cohort progression models (MHN/TreeMHN/CBN/REVOLVER) vs the planted epistasis network
     "to_mhn_matrix", "to_cell_fraction_matrix", "to_mutation_tree", "to_treemhn_trees",
     "to_cbn_poset", "clone_events", "event_cell_fractions", "patient_event_vector",
     "cooccurrence_scores", "top_edges",
-    "score_edges", "score_order", "score_exclusivity",
+    "score_edges", "score_order", "score_exclusivity", "DETECTION_LIMIT", "stack_trees",
+    # dissemination traits read as events (presence matrix + collapsed clone trees)
+    "TRAIT_EVENTS", "trait_table", "trait_cell_fractions", "to_trait_matrix", "to_trait_tree",
+    "to_trait_trees",
     # multi-region "sample trees are not phylogenies" benchmark
     "true_origin_counts", "region_bulk_profiles", "oracle_clone_profiles",
     "count_spurious_parallel", "multiregion_phylogeny",
     "neighbor_joining", "hamming_nj_tree", "fitch_length", "robinson_foulds",
     "clone_lineage_tree", "ordering_reversal_rate",
-    # W0: iscc's own ligand-receptor database (CellChat/CellPhoneDB), and the W4 clone-correlation axis
+    # iscc's own ligand-receptor database (CellChat/CellPhoneDB), and the clone-correlation axis
     "cci_database", "write_cci_database", "referenced_genes", "clone_correlation",
 ]

@@ -61,15 +61,18 @@ selection_params:
   prop_immune_resistance: 0.02
   # This is a DCIS->IDC sample with NO metastasis and NO treatment, so the met + chemo-resistance
   # traits are turned OFF (they belong to configs/landing.yaml). Otherwise the engine's default
-  # non-zero rates seed latent met_survival / treatment_resistance genes that never get selected here
-  # but would mislabel most clones as "metastatic" / "chemo-resistant" in the stage view.
+  # treatment-resistance rate (0.1) seeds latent treatment_resistance genes that never get selected
+  # here but would mislabel most clones as "chemo-resistant" in the stage view (met_survival is 0 in
+  # the engine too; it is set here explicitly).
   prop_met_survival: 0.0
   prop_treatment_resistance: 0.0
   # BREACH-GATED invasion (see spatial_params.breach_gated_invasion): crossing the basement membrane
   # (duct -> stroma) REQUIRES the breach trait. prop_breach must be high enough that breach genes
-  # actually exist — 0.001 x 600 genes ~= 0.6, i.e. often ZERO breach genes and no invasion gate at
-  # all; 0.02 -> ~12 breach genes. Once a clone breaches, the permissive stroma (low stromal_hazard)
-  # lets it invade; stromal_survival is then selected in the stroma.
+  # actually exist. These values were set for the 600-gene genome (0.02 -> ~12 breach genes); at
+  # today's 6,000 genes 0.02 gives ~120, and with breach_effects 2.8 one hit crosses the wall 64% of
+  # the time, so invasion follows release almost at once. The paper regime uses 0.002 and 1.01
+  # (validation/paper/regime.py). Once a clone breaches, the permissive stroma (low stromal_hazard)
+  # lets it invade; stromal_survival is meant to be selected there, but no setting tried shows it.
   prop_breach: 0.02
   breach_effects: 2.8
   prop_stromal_survival: 0.02
@@ -224,7 +227,7 @@ spatial_params:
     # Generations of distension after that before the wall gives way — a long in-situ phase, which is
     # what in-situ breast disease is. It has to be long because at this (deliberately low) instability
     # a lineage needs time to acquire alterations AND take over the patch: measured on this config, the
-    # patch is at a single dominant altered state by ~1000-1200 generations and is still ONE deme.
-    # Shorter windows leave the founding lineage barely altered and the tumour ends up with no clonal
-    # copy-number layer. Once released, never re-confined.
-    generations: 1200
+    # patch is at a single dominant altered state by ~500-600 generations (1000-1200 tau steps of 0.5)
+    # and is still ONE deme. Shorter windows leave the founding lineage barely altered and the tumour
+    # ends up with no clonal copy-number layer. Once released, never re-confined.
+    generations: 600

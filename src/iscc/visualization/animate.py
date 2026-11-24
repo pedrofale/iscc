@@ -2,7 +2,7 @@
 Create an animation of a tumor growth given a list of outputs from a simulation on a grid.
 
 Two modes:
-  * DEFAULT  — the historical single-grid growth animation (standard Muller), from grid_*.csv +
+  * DEFAULT  — the single-grid growth animation (standard Muller), from grid_*.csv +
                genotype-count/parent CSVs.
   * --compartment — the primary + metastasis COMPOSITE (grids left, centered symmetric Mullers right,
                shared time axis, shared clone colormap), rendered from the compartment trajectory an
@@ -16,7 +16,6 @@ from celluloid import Camera
 
 import click
 import os
-from pathlib import Path
 
 from pymuller import muller
 
@@ -50,6 +49,11 @@ from pymuller import muller
                    "acinus for hundreds of generations — that is where the clonal trunk is built, but "
                    "nothing moves on screen, so a uniform capture cadence spends most of the frames on "
                    "an unchanging duct. Trims frames, traces, cursors and event marks together.")
+@click.option("--pace", default=0, type=int,
+              help="With --compartment: keep one frame per PACE snapshots of the trace "
+                   "(arc.even_pace), so every frame advances the tumour by the same time and the "
+                   "animation runs at one pace through growth, resection and treatment. 0 keeps every "
+                   "captured frame.")
 @click.option("--scale", default=1.0, type=float,
               help="With --compartment: render-dpi multiplier (<1 lightens each frame, so a large "
                    "grid still yields a web-friendly GIF).")
@@ -76,6 +80,7 @@ def main(
     poster,
     scale,
     skip_confinement,
+    pace,
     colormap,
     figw,
     figh,
@@ -89,7 +94,7 @@ def main(
 ):
     if compartment:
         return _render_compartment(grids_dir, splash, output_path, poster, scale=scale,
-                                   skip_confinement=skip_confinement)
+                                   skip_confinement=skip_confinement, pace=pace)
 
     if genotype_counts is None or genotype_parents is None:
         raise click.UsageError(
@@ -125,7 +130,7 @@ def main(
 
 
 def _render_compartment(grids_dir, splash, output_path, poster=False, scale=1.0,
-                        skip_confinement=False):
+                        skip_confinement=False, pace=0):
     """Render the primary+metastasis composite GIF from the isccsim compartment trajectory in
     GRIDS-DIR (the isccsim output directory). Promotes the landing-animation build_figure/centered-
     Muller/GIF logic into the CLI (see iscc.visualization.compartment)."""
@@ -138,6 +143,10 @@ def _render_compartment(grids_dir, splash, output_path, poster=False, scale=1.0,
         traj = arc.trim_confinement(traj)
         click.echo(f"skip-confinement: {n_before} -> {len(traj['frames'])} frames "
                    f"(dropped {n_before - len(traj['frames'])} pre-dispersal)")
+    if pace:
+        n_before = len(traj["frames"])
+        traj = arc.even_pace(traj, pace)
+        click.echo(f"pace {pace}: {n_before} -> {len(traj['frames'])} frames")
 
     # -o is the output GIF path in this mode; a path with no .gif suffix is a directory to drop the
     # default-named GIF into.

@@ -1,4 +1,4 @@
-"""Wire the genotype tumour engine to the ABC engine (DESIGN_inference A.1/A.4.1).
+"""Wire the genotype tumour engine to the ABC engine.
 
 ``TumorSimulator`` turns a parameter dict into a summary vector by running a short
 ``GenotypeTumor`` and compressing it with ``inference.summaries.summary_vector``. It is the
@@ -54,9 +54,8 @@ def default_base_config():
             "snv_prob": 0.5, "cnv_prob": 0.5, "n_snvs_per_allele": 0.5, "amp_prob": 0.5,
         },
         # Seed an established micro-lesion (not a single founder): a one-cell start has
-        # P(extinction) ~ death/division, so ~5-8% of reference/target sims would silently go
-        # extinct and yield all-NaN summaries. The operating-envelope QC (tumor.diagnose) flagged
-        # this founder bottleneck; seeding a small cluster keeps inference sims inside the good region.
+        # P(extinction) ~ death/division, so ~5-8% of reference/target sims would go extinct and
+        # yield all-NaN summaries; seeding a small cluster avoids that founder bottleneck.
         deme_params={"carrying_capacity": 8, "maximum_death_rate": 1.0, "initial_cancer_cells": 5},
         spatial_params={"grid_size": 14, "structure_radius": 0, "immune_density": 0.0},
     )

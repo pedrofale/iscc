@@ -70,10 +70,12 @@ EXPRESSION = {
 
 
 def build_cohort(n_patients=6, steps=15000):
-    from iscc.cohort import Cohort
-    return Cohort(patient_seeds=list(range(1, n_patients + 1)), genome_params=GENOME,
-                  selection_params=SELECTION, cancer_cell_params=CANCER, deme_params=DEME,
-                  spatial_params=SPATIAL, grow_steps=steps, expression_params=EXPRESSION).run()
+    import functools
+    from iscc.cohort import Cohort, grow_tumor
+    grow = functools.partial(grow_tumor, genome_params=GENOME, selection_params=SELECTION,
+                             cancer_cell_params=CANCER, deme_params=DEME, spatial_params=SPATIAL,
+                             grow_steps=steps, expression_params=EXPRESSION)
+    return Cohort(grow, patient_seeds=list(range(1, n_patients + 1))).run()
 
 
 def patient_cn_deviation(cohort):

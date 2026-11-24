@@ -1,4 +1,4 @@
-"""Generic Approximate Bayesian Computation engine (DESIGN_inference A.1).
+"""Generic Approximate Bayesian Computation engine.
 
 Dependency-light (numpy + scikit-learn + scipy; **no JAX, no R**). The engine is model-agnostic:
 you give it priors and a ``simulate(theta) -> summary_vector`` callback (for the tumour model,
@@ -202,7 +202,7 @@ class ABC:
         ``project="rf"`` enables **semi-automatic ABC** (Fearnhead & Prangle 2012): a random
         forest is fit to map summaries -> parameters, and the rejection/regression step runs in
         that low-dimensional *predicted-parameter* space. Each projected coordinate targets one
-        parameter on a comparable scale, so a single clean summary can no longer dominate the
+        parameter on a comparable scale, so a single clean summary cannot dominate the
         distance and starve the others (the failure mode of raw standardised-Euclidean matching
         when parameters are identified by different summaries). ``project=None`` uses the raw
         standardised summaries. The reference table is projected through the forest's

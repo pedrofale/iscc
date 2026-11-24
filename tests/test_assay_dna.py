@@ -1,6 +1,6 @@
-"""Validation tests for the F4 (bulk) + F5 (single-cell) DNA coverage model.
+"""Validation tests for the bulk and single-cell DNA coverage model.
 
-Internal-validation targets from DESIGN_features §C C1 / §G:
+Internal-validation targets:
   * coverage tracks copy number (bulk + single-cell);
   * a large-CN amplicon compositionally reduces other loci's coverage (bulk DM);
   * VAF recovers the true alt fraction at high depth (bulk);
@@ -73,7 +73,7 @@ def make_mixed_pool(n_cancer=400, n_normal=600,
     }
 
 
-# ----------------------------------------------------------------------- BULK (F4) ----
+# ----------------------------------------------------------------------- BULK ---------
 class TestBulkCoverage:
     def test_coverage_tracks_copy_number(self):
         cd = make_cnv_cell_data(amp_cn=8.0)
@@ -129,10 +129,9 @@ class TestBulkCoverage:
 # -------------------------------------------------------- BULK PURITY + GERMLINE ------
 class TestBulkPurity:
     def test_host_is_not_cancer(self):
-        """Regression: the resident parenchyma of a metastatic deposit is NORMAL tissue.
+        """The resident parenchyma of a metastatic deposit is NORMAL tissue.
 
-        It was previously missing from the non-cancer type list, so every host cell was
-        counted as a tumour cell and the purity of any met-bearing sample came out too high.
+        Were it counted as cancer, the purity of any met-bearing sample would come out too high.
         """
         assert biological_type("host") == "host"
         for t in ("immune", "stromal", "epithelial"):
@@ -148,7 +147,7 @@ class TestBulkPurity:
     def test_purity_correct_for_a_met_bearing_sample(self):
         """A pool whose whole normal compartment is host parenchyma (a metastatic deposit).
 
-        Before the fix this reported purity 1.0 — the exact silent failure the flag guards.
+        Counting host cells as cancer would report purity 1.0 here, silently.
         """
         cd = make_mixed_pool(n_cancer=400, n_normal=600, normal_types=("host",))
         assay = bulkDNA(breadth="wgs", seed=1).run(cd)
@@ -266,7 +265,7 @@ class TestBulkGermline:
             self._deep_assay(cd, np.zeros(3, dtype=bool))
 
 
-# ------------------------------------------------------------------ SINGLE-CELL (F5) --
+# ------------------------------------------------------------------ SINGLE-CELL -------
 class TestScDNA:
     def test_coverage_tracks_cn_per_cell(self):
         cd = make_cnv_cell_data(amp_cn=8.0)
@@ -274,7 +273,7 @@ class TestScDNA:
         cov = sc.coverage.values
         amp = cov[:, SEG_OF == 1].mean()
         dip = cov[:, SEG_OF == 0].mean()
-        assert amp / dip > 2.0  # lumpy (low-kappa) but still tracks CN
+        assert amp / dip > 2.0  # each cell's own amplification draw still tracks CN
 
     def test_ado_causes_allele_loss(self):
         """ADO flips heterozygous loci to homozygous (VAF -> 0 or 1) — absent without ADO."""
@@ -354,3 +353,117 @@ class TestMultiBatch:
         a, b = assays
         assert list(a.cells) == list(b.cells)               # shared biology
         assert not np.array_equal(a.coverage.values, b.coverage.values)  # different run
+
+
+# ------------------------------------------------------------ REALISTIC DEFAULTS -------
+# The package's genome has 6,000 loci. The DM's excess per-locus variance is about n_loci / kappa,
+# so a kappa set without its locus count drifts with the genome: the old defaults (bulk kappa 2000,
+# single-cell kappa 5, both used as given) gave a bulk coverage CV of 1.7 and left 99% of each
+# cell's loci without reads at this size. The defaults are now fits on real data with their locus
+# counts (see test_estimate_dna.TestDefaultsAreFits); these tests hold the data they produce.
+N_SEG_G, SZ_G = 40, 150                               # 6,000 loci in 40 segments
+GENES_G = [f"G_{s}_{p}" for s in range(N_SEG_G) for p in range(SZ_G)]
+
+
+def make_genome_cell_data(n_cells=60):
+    """Diploid cells over a 6,000-locus genome, with a few heterozygous loci."""
+    cells = [f"C{i}" for i in range(n_cells)]
+    af = np.zeros((n_cells, len(GENES_G)))
+    af[:, ::50] = 0.5
+    return {
+        "cell_cnv": pd.DataFrame(np.full((n_cells, len(GENES_G)), 2.0), index=cells, columns=GENES_G),
+        "cell_snv": pd.DataFrame(af, index=cells, columns=GENES_G),
+        "cell_type": pd.DataFrame(["cloneA"] * n_cells, index=cells, columns=["cell_id"]),
+    }
+
+
+def _cv(x):
+    x = np.asarray(x, float)
+    return float(x.std() / x.mean())
+
+
+class TestRealisticDefaults:
+    def test_bulk_wgs_coverage_spread_is_like_hg002(self):
+        """GIAB HG002 WGS has a coverage CV of 0.41 at two copies; the fitted default re-simulates
+        about 0.48 at 30x with the GC curve on top (the old default: 1.7, 39% of loci near-empty)."""
+        cd = make_genome_cell_data()
+        for seed in (1, 2):
+            cov = bulkDNA(breadth="wgs", seed=seed).run(cd).observed_data.coverage.values
+            assert 0.3 < _cv(cov) < 0.6
+            assert (cov < 0.1 * cov.mean()).mean() < 0.02
+
+    def test_bulk_spread_does_not_depend_on_genome_size(self):
+        small = make_genome_cell_data()
+        small = {k: v.iloc[:, :1000] if k != "cell_type" else v for k, v in small.items()}
+        big = make_genome_cell_data()
+        cv_small = _cv(bulkDNA(breadth="wgs", seed=3).run(small).observed_data.coverage)
+        cv_big = _cv(bulkDNA(breadth="wgs", seed=3).run(big).observed_data.coverage)
+        assert cv_big == pytest.approx(cv_small, rel=0.15)
+
+    def test_sc_wgs_reads_cover_the_genome(self):
+        """Every cell reads almost every locus (the old default: 99% of loci empty)."""
+        sc = scDNA(n_cells=30, breadth="wgs", seed=4).run(make_genome_cell_data())
+        cov = sc.coverage.values
+        assert np.median((cov == 0).mean(axis=1)) < 0.01
+        assert np.median(cov.std(axis=1) / cov.mean(axis=1)) < 0.6
+
+    def test_sc_wgs_resolves_segment_copy_number(self):
+        """A diploid cell is called diploid segment by segment from its coverage alone."""
+        sc = scDNA(n_cells=30, breadth="wgs", seed=5).run(make_genome_cell_data())
+        cov = sc.coverage.values.astype(float)
+        seg = np.array([int(g.split("_")[1]) for g in sc.genes])
+        segm = np.stack([cov[:, seg == s].mean(1) for s in range(N_SEG_G)], axis=1)
+        cn = 2 * segm / np.median(segm, axis=1, keepdims=True)
+        assert np.abs(cn - 2).max() < 0.5
+
+    def test_kappa_alone_is_used_as_given(self):
+        """The default kappa_loci belongs to the default kappa: a kappa passed on its own is not
+        rescaled, so existing calls that pin a kappa keep their meaning."""
+        assert bulkDNA(kappa=2000.0).hypers.kappa_loci is None
+        assert scDNA(kappa=500.0).hypers.kappa_loci is None
+        assert bulkDNA(kappa=2000.0, kappa_loci=1000).hypers.kappa_loci == 1000
+        assert scDNA(kappa_loci=None).hypers.kappa_loci is None
+        assert isinstance(bulkDNA(kappa_loci=1000.0).hypers.kappa_loci, int)
+
+
+class TestPlatformPresets:
+    def test_dlp_preset_sets_depth_and_dispersion(self):
+        h = scDNA(platform="dlp").hypers
+        assert h.breadth == "wgs" and h.mu_depth == pytest.approx(830.1)
+        assert h.kappa_loci == 5787
+
+    def test_tapestri_preset_is_a_panel(self):
+        sc = scDNA(platform="tapestri")
+        assert sc.breadth == "panel"
+        assert sc.hypers.ado_rate == pytest.approx(0.325)
+        assert sc.hypers.capture_sigma == pytest.approx(0.389)
+
+    def test_explicit_arguments_override_the_preset(self):
+        sc = scDNA(platform="tapestri", breadth="wgs", ado_rate=0.1, mu_depth=10.0)
+        assert sc.breadth == "wgs"
+        assert sc.hypers.ado_rate == 0.1 and sc.hypers.mu_depth == 10.0
+        assert sc.hypers.kappa_loci == 584            # untouched preset fields stay
+
+    def test_aliases_and_unknown_platform(self):
+        assert scDNA(platform="DLP+").platform == "dlp"
+        assert scDNA(platform="Mission Bio").platform == "tapestri"
+        with pytest.raises(ValueError):
+            scDNA(platform="malbac")
+
+    def test_platform_reaches_run_dna_batches(self):
+        cd = make_cnv_cell_data(n_cells=30, amp_cn=4.0)
+        a, b = run_dna_batches(cd, mode="sc", n_batches=2, n_cells=10, platform="tapestri")
+        assert a.breadth == b.breadth == "panel"
+        assert a.hypers.kappa_loci == 584
+
+
+def test_tapestri_preset_reads_the_amplicons_of_its_fitted_panel():
+    """The Tapestri fit is on 584 amplicons; the panel breadth alone reads 30 loci."""
+    from iscc.data import scDNA
+    genes = [f"g{i}" for i in range(6000)]
+    preset = scDNA(platform="tapestri", seed=1)
+    assert len(preset._select_loci(genes)) == 584
+    assert len(scDNA(platform="tapestri", target_genes=0.1, seed=1)._select_loci(genes)) == 600
+    assert len(scDNA(breadth="panel", seed=1)._select_loci(genes)) == 30
+    # an explicit other breadth reads its own loci, not the fitted panel's
+    assert len(scDNA(platform="tapestri", breadth="wgs", seed=1)._select_loci(genes)) == 6000

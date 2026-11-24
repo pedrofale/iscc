@@ -1,4 +1,4 @@
-"""Lineage-tree export (DESIGN_features §I).
+"""Lineage-tree export.
 
 The engine records the clone genealogy as ``tumor.genotypes_parents`` — a flat ``{child_gid ->
 parent_gid}`` map over cancer genotypes (each mutation event spawns a child genotype off its parent
