@@ -333,9 +333,11 @@ def panel_de(fig, ov, nums):
     if stalled.any():
         ax.scatter([], [], s=7, facecolors="white", edgecolors=S.INK, linewidths=0.6, label="stalled")
     lim = max(1.0, 1.05 * float(np.nanmax(df[["field_sp", "field_lin"]].to_numpy())))
-    ax.plot([0, lim], [0, lim], color=S.INK, lw=0.5, ls=":")
-    ax.set_xlim(0, lim)
-    ax.set_ylim(0, lim)
+    # below 0 as far as the data go: stalled neutral tumours reach a lineage autocorrelation of -0.04
+    lo = min(-0.02, 1.3 * float(np.nanmin(df[["field_sp", "field_lin"]].to_numpy())))
+    ax.plot([lo, lim], [lo, lim], color=S.INK, lw=0.5, ls=":")
+    ax.set_xlim(lo, lim)
+    ax.set_ylim(lo, lim)
     ax.set_xlabel("Spatial autocorrelation")
     ax.set_ylabel("Lineage autocorrelation")
     ax.legend(fontsize=SMALL, loc="upper left", frameon=False, borderaxespad=0.2, handletextpad=0.2)
@@ -369,8 +371,9 @@ def panel_de(fig, ov, nums):
         ax.plot([idx[0] - 0.3, idx[1] + 0.3], [y, y], transform=tr, color=S.GREY, lw=0.4, clip_on=False)
         ax.text(sum(idx) / 2, y - 0.4 / R3_H, lab, transform=tr, ha="center", va="top", fontsize=SMALL)
     ax.set_xlim(-0.6, len(groups) - 0.4)
-    # from just below 0: the lineage autocorrelation without glands is about 0 (down to -0.001)
-    ax.set_ylim(-0.04, max(1.0, 1.08 * float(np.nanmax(df[["field_sp", "field_lin"]].to_numpy()))))
+    # from below 0 as far as the data go (stalled neutral tumours reach -0.04)
+    lo = min(-0.02, 1.3 * float(np.nanmin(df[["field_sp", "field_lin"]].to_numpy())))
+    ax.set_ylim(lo, max(1.0, 1.08 * float(np.nanmax(df[["field_sp", "field_lin"]].to_numpy()))))
     ax.set_ylabel("Autocorrelation")
     h = [Line2D([], [], marker=mk, ls="none", mfc="#6F6F6F", mec="none", ms=3.2, label=lab)
          for _, mk, _, lab in MEASURE]

@@ -267,9 +267,14 @@ def panel_d(fig, x, y, levels):
         ax.axhline(1.5, color=S.BG_CELLS, lw=0.5)             # fitted and shared above the sources
         ax.set_title(title, fontsize=FS_SMALL, pad=2)
         ax.set_xlabel(xlabel if k == 0 else f"neighbors from the\n{xlabel}", fontsize=FS_SMALL, labelpad=1)
-        ax.set_xlim(-0.03, 1.03)
-        ax.set_xticks([0, 0.5, 1])
-        ax.set_xticklabels(["0", "0.5", "1"])
+        if key.startswith("ilisi"):                           # scaled to 50 batches: every value is
+            ax.set_xlim(0.045, 0.09)                          # 0.05-0.09, so the shared 0-1 scale hides
+            ax.set_xticks([0.05, 0.07, 0.09])                 # what integration does to it
+            ax.set_xticklabels(["0.05", "0.07", "0.09"])
+        else:
+            ax.set_xlim(-0.03, 1.03)
+            ax.set_xticks([0, 0.5, 1])
+            ax.set_xticklabels(["0", "0.5", "1"])
         S.despine(ax, left=False)
         for ri, lv in enumerate(rows):
             rec = levels.get(lv)
