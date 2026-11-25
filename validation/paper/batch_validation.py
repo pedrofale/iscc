@@ -534,6 +534,7 @@ def stage_tune(ctx, a, work, parts):
     versions = _add_lisi({"real": real}, {"real": emb}, a, work)
     splat, info = _splatter(ctx, a, work)
     image = splat.version()
+    os.makedirs(parts, exist_ok=True)              # the R runner saves the parameters there before any part
     est = splat.estimate(X, params_path=os.path.join(parts, "splat_params.rds"))
     de, de_trace = tune(splat, "de_facLoc", DE_GRID, real["S4"]["silhouette_celltype"], _sil_type,
                         dict(batch_facScale=0.0))
