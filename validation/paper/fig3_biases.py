@@ -239,7 +239,8 @@ def compute_b():
             x, m = VD._gc_curve(o["coverage"].values, o["true_cn"].values, o["gc"].values, nbins=10)
             curves.append(m.tolist())
         gc[str(s)] = dict(gc=x.tolist(), curves=curves)
-    # the CVs match but the shapes do not: HG002 has a spike of near-empty loci that iscc lacks
+    # the share of near-empty loci: HG002 read with AD had a spike of them (13% of sites lose the 300x
+    # Illumina dataset); over all datasets (ADALL, since 2026-11-25) it is 0.14% of sites
     low = {k: float((np.asarray(v) < LOW_COV).mean()) for k, v in hist.items()}
     return dict(_tumour=REG.task_path(*TUMOUR), hist=hist, cv_real=_cv(real), cv_iscc=_cv(sim), low_frac=low,
                 cn_mode=cn_mode, share_loci_at_mode=float(same.mean()),

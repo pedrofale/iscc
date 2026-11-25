@@ -12,8 +12,12 @@ One dataset per DNA regime (chosen as the field's gold standards):
 
   BULK WGS — **GIAB HG002** (NIST Genome-in-a-Bottle, AshkenazimTrio son NA24385).
     The WGS technical gold standard. We stream the small-variant **benchmark VCF** (v4.2.1, GRCh38)
-    and read its per-site `AD` (net allele depths) + `GT`: coverage = ref+alt depth, alt = alt
-    depth, CN = 2 everywhere (a normal diploid genome -> trivial CN-conditioning), het = GT 0/1.
+    and read its per-site `ADALL` (net allele depths across all datasets) + `GT`: coverage = ref+alt
+    depth, alt = alt depth, CN = 2 everywhere (a normal diploid genome -> trivial CN-conditioning),
+    het = GT 0/1. Not `AD`, which counts only the datasets with an unfiltered call at the site: at
+    13% of the first 20,000 sites the 300x Illumina callset is not callable or filtered, so `AD` falls
+    to about a tenth and the coverage becomes a mixture of two depths (CV 0.41 with a mode at 0.1x
+    the median, against 0.30 for `ADALL`). Reduced with `AD` until 2026-11-25.
     Fits: mu_depth, kappa / nb_dispersion (CN=2 coverage dispersion), het BAF. error_rate / GC are
     prior-only (no hom-ref sites / no reference FASTA in the reduction) — flagged honestly.
     Source: https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/release/AshkenazimTrio/
@@ -120,8 +124,9 @@ def _stream_gzip_lines(url, max_bytes=None, timeout=90):
 def parse_giab_record(fields):
     """Parse one GIAB benchmark VCF data line (tab-split) -> (cov, alt, is_het) or None.
 
-    Keeps only PASS biallelic SNVs with an ``AD`` (ref,alt net depth) and ``GT``; coverage is the
-    summed allele depth (consistent with the alt count for a clean BAF), CN is 2 (diploid).
+    Keeps only PASS biallelic SNVs with allele depths and a ``GT``; coverage is the summed allele
+    depth (consistent with the alt count for a clean BAF), CN is 2 (diploid). The depths are
+    ``ADALL`` (across all datasets), or ``AD`` when a record has no ``ADALL``.
     """
     if len(fields) < 10:
         return None
@@ -131,10 +136,11 @@ def parse_giab_record(fields):
     if len(ref) != 1 or len(alt) != 1:               # biallelic SNV only (clean het BAF)
         return None
     d = dict(zip(fmt.split(":"), smp.split(":")))
-    if "AD" not in d or "GT" not in d:
+    key = "ADALL" if "ADALL" in d else "AD"
+    if key not in d or "GT" not in d:
         return None
     try:
-        ad = [int(x) for x in d["AD"].split(",")]
+        ad = [int(x) for x in d[key].split(",")]
     except ValueError:
         return None
     if len(ad) < 2:
@@ -462,7 +468,7 @@ def _write_provenance(built):
         "synthetic round-trip when absent.\n",
         "## Datasets (one per DNA regime)\n",
         "1. **BULK WGS — GIAB HG002** (NIST GiaB, NA24385 son). Small-variant benchmark VCF "
-        f"(v4.2.1, GRCh38); per-site `AD`+`GT` -> coverage/alt, CN=2, het=GT(0/1).\n   `{GIAB_VCF}`\n"
+        f"(v4.2.1, GRCh38); per-site `ADALL`+`GT` -> coverage/alt, CN=2, het=GT(0/1).\n   `{GIAB_VCF}`\n"
         "   Fits mu_depth, kappa/nb_dispersion, het BAF; error_rate/GC prior-only (no hom-ref / "
         "reference FASTA in the reduction). Cite: Zook et al. 2019, Nat Biotechnol.\n",
         "2. **SC PANEL — Mission Bio Tapestri** (KaryoTap exp01 panelv1). `dna_variants` DP/AF/NGT "
