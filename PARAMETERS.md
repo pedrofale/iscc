@@ -589,15 +589,18 @@ Every batch of [`run_scrna_batches`][iscc.data.run_scrna_batches] and [`run_coho
 `batch_kwargs` gives each batch its own settings, and [`atlas_scrna_batches`][iscc.data.atlas_scrna_batches]`(n_batches, seed)` draws them from the estimates for the 26 tumors of the breast cancer atlas of Wu et al. 2021, as the paper's batch model does.
 The estimates are packaged as `src/iscc/data/reference/wu2021_scrna_batches.tsv`, built from the paper's estimates by `validation/data/build_atlas_batches.py`.
 Each batch takes one tumor's `mu_lib`, `sigma_lib`, `dispersion`, `dropout_mid`, `dropout_shape` and `doublet_rate`, an `ambient_frac` drawn between 0.03 and 0.11, and the tumor's dissociation stress, which goes to `Resection.dissociate(stress_strength=...)`.
+In both presets the library of a cell is proportional to the RNA content of the cell (`content_exponent` 1; [`cell_rna_content`][iscc.data.cell_rna_content]), so T and NK cells take about 0.28 of the UMIs of an epithelial cell, as in the Human Breast Cell Atlas, and `sigma_lib` is the spread within a cell type.
 
 ### Visium spots and depth (`iscc.data.Visium`)
 A deme is ~50 µm, so the default [`Visium`][iscc.data.Visium] spot is that of Visium v1, 55 µm across at a 100 µm pitch.
 The capture field is normalized over the tissue spots, so a tissue spot contains `mu_counts` UMIs on average, whatever share of the slide the section covers.
+A section cut with a small `max_cells` leaves one or two cells per spot, where real spots hold several to tens; `Visium` warns (`SparseSpotWarning`) when the median of the tissue spots is below 3.
 
 | Parameter | Default | Valid range | Outside the range |
 |---|---|---|---|
 | `spot_pitch` / `spot_radius` | 2.0 / 0.55 demes | radius below half the pitch (spots apart, as on a slide) | a radius of 1 (a former default) made a spot as wide as the pitch: it pooled three times the cells of a 55 µm spot (~40 at 12 cells per deme) and tiled 91% of the tissue instead of 27% |
 | `mu_counts` | 20,000 UMIs per tissue spot | ~10³–10⁵ | with spot swapping on, it is the depth before swapping, and the tissue keeps a share of it: 0.96 on the 10x breast section (76% of the slide) at the fitted swap, 0.90 for a section on a quarter of the slide, whose distal bleed falls mostly off the tissue. Given a raw matrix with all spots, [`estimate_visium`][iscc.data.estimate_visium.estimate_visium] returns this depth |
+| `content_exponent` | 1 (depth proportional to the summed RNA content of the cells of a spot) | 0–1.5 | at 0 the depth follows the capture field alone and, on the showcase at full density, correlates with the cancer share of a spot the wrong way (Spearman −0.33, against +0.44 in the 10x breast section); 1.5 overshoots (+0.70) |
 | `kappa` (`count_model="dm"`) | 1,400,000 (`HUMAN_VISIUM_KAPPA`) | ≳ 10⁵ | it inflates the variance of every gene by (N + κ)/(1 + κ) at a spot depth N, whatever the gene set, so unlike the DNA concentration it is not rescaled by the number of genes. A former default of 50 inflated it ~390-fold at 20,000 UMIs, and over 6,000 growth genes a spot detected 281 genes instead of ~4,700 and had 77% of its counts in 50 of them |
 
 ---

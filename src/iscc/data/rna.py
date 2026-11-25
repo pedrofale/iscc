@@ -55,11 +55,14 @@ PROTOCOL_PRESETS = {
     # depth, dispersion, ambient RNA and doublets fitted to it, so that the simulated difference between
     # the runs has the real size (batch_validation.py fit-sigma, 2026-11-25: 0.2945). The difference is
     # mostly a factor shared by the cell types, which the named sources do not produce; 0.10 before.
+    # content_exponent 1: a cell's library is proportional to its RNA content (iscc.data.content),
+    # so T cells take about 0.28 of an epithelial cell's counts, as in the Human Breast Cell Atlas, and
+    # sigma_lib is the spread within a cell type (0.346 within the 8 types of PBMC3k, 0.431 pooled).
     "10x": dict(
         sigma_batch=0.29, mu_lib=4000.0, sigma_lib=0.35, dispersion=0.35,
         ambient_frac=0.05, doublet_rate=0.05, dropout_mid=0.0, dropout_shape=1.0,
         well_sigma=0.0, n_wells=0, n_plates=0, plate_sigma=0.0,
-        depth_batch_sigma=0.05, kappa=1500.0,
+        depth_batch_sigma=0.05, kappa=1500.0, content_exponent=1.0,
     ),
     # 5' UMIs suppress amplification noise (low dispersion); plate prep -> low ambient /
     # few doublets, higher sensitivity (deeper). Cells are index-sorted one
@@ -72,7 +75,7 @@ PROTOCOL_PRESETS = {
         sigma_batch=0.10, mu_lib=8000.0, sigma_lib=0.45, dispersion=0.15,
         ambient_frac=0.005, doublet_rate=0.01, dropout_mid=0.0, dropout_shape=1.0,
         well_sigma=0.15, n_wells=384, n_plates=0, plate_sigma=0.0,
-        depth_batch_sigma=0.05, kappa=3500.0,
+        depth_batch_sigma=0.05, kappa=3500.0, content_exponent=1.0,
     ),
 }
 # Hyper-parameters that count things (plates / wells) rather than measuring a magnitude.
@@ -186,6 +189,14 @@ class scRNA(Assay):
         proportions. It inflates the variance of every gene by ``(N + kappa) / (1 + kappa)`` at a
         library of ``N``, whatever the mean of the gene. Default None -> preset (10x: 1,500, fitted
         by moments within the cell types of PBMC3k; smartseq3: 3,500, derived from its dispersion).
+    content_exponent : float, optional
+        How the library of a cell follows the RNA content of the cell
+        ([`cell_rna_content`][iscc.data.cell_rna_content]: the mean counts of the cell type in the
+        Human Breast Cell Atlas relative to the epithelium, doubled for a cancer cell with a doubled
+        genome). The library is multiplied by the content raised to this power, rescaled to keep the
+        batch's mean depth. Default None -> preset (1 for both protocols: the library is proportional
+        to the content, as in the atlas, and ``sigma_lib`` is the spread within a cell type; 0 leaves
+        the content out).
     seed : int, default 42
         RNG seed. Fixes both the technical signature of the batch (per-gene factor, depth,
         ambient soup) and the sampled-cell selection; two instances with the same
@@ -210,7 +221,7 @@ class scRNA(Assay):
                  sigma_batch=None, mu_lib=None, sigma_lib=None,
                  ambient_frac=None, doublet_rate=None, dropout_mid=None, dropout_shape=None,
                  well_sigma=None, n_wells=None, n_plates=None, plate_sigma=None,
-                 depth_batch_sigma=None, kappa=None,
+                 depth_batch_sigma=None, kappa=None, content_exponent=None,
                  seed=42, plate_layout=None):
         super(scRNA, self).__init__(seed=seed, protocol=resolve_protocol(protocol))
         self.n_cells = int(n_cells)
@@ -232,7 +243,7 @@ class scRNA(Assay):
             ambient_frac=ambient_frac, doublet_rate=doublet_rate, dropout_mid=dropout_mid,
             dropout_shape=dropout_shape, well_sigma=well_sigma, n_wells=n_wells,
             n_plates=n_plates, plate_sigma=plate_sigma, depth_batch_sigma=depth_batch_sigma,
-            kappa=kappa,
+            kappa=kappa, content_exponent=content_exponent,
         ).items():
             if val is not None:
                 params[name] = int(val) if name in _INT_PARAMS else float(val)
@@ -326,6 +337,7 @@ class scRNA(Assay):
 
         # biology -> library -> batch (shared), then the pluggable count draw
         lib = self.batch.library_factors(self.n_cells, plates=self.plates)
+        lib = self._content_scaled(lib, cell_data, target_cells)
         comp = self.batch.composition(probs)
         # the ambient soup is a share of the library: the counts of the cell itself take the rest
         counts = self.batch.emit(comp, self.batch.own_library(lib), count_model=self.count_model)
@@ -337,6 +349,13 @@ class scRNA(Assay):
         self.observed_counts = pd.DataFrame(counts, index=target_cells, columns=genes)
         self._build_obs(cell_data, target_cells, counts, is_doublet, label)
         return self
+
+    def _content_scaled(self, lib, cell_data, target_cells):
+        """The libraries scaled by the RNA content of the cells (``content_exponent``; none at 0)."""
+        if not self.hypers.content_exponent:
+            return lib
+        from .content import cell_rna_content
+        return self.batch.scale_by_content(lib, cell_rna_content(cell_data, target_cells).to_numpy())
 
     def _run_human(self, cell_data, target_cells, expr):
         """The ``HumanExpression`` path of [`run`][iscc.data.scRNA.run]: the same batch, library, count, ambient,
@@ -365,6 +384,7 @@ class scRNA(Assay):
         else:
             self.plates = assign_plates(n, self.hypers.n_wells, self.hypers.n_plates)
         lib = self.batch.library_factors(n, plates=self.plates)
+        lib = self._content_scaled(lib, cell_data, target_cells)
         blocks = []
         for lo in cuts:
             act = expr.cell_expression(cell_data, target_cells[lo:lo + expr.chunk])

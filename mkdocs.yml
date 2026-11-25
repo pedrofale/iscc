@@ -172,6 +172,8 @@ nav:
           - atlas_scrna_batches: reference/atlas_scrna_batches.md
           - concat_batches: reference/concat_batches.md
           - morans_i: reference/morans_i.md
+          - cell_rna_content: reference/cell_rna_content.md
+          - rna_content_table: reference/rna_content_table.md
       - Human genome:
           - arm_genome: reference/arm_genome.md
           - HumanGenomeLayer: reference/HumanGenomeLayer.md

@@ -10,7 +10,7 @@ Usage::
     ... make_layer_dataset.py OUT --grow [--scale small] [--target 15000] [--total-genes 6000]
 
 The tumour is sampled as the paper's figures sample it (``common.assays``): one resection, dissociated
-and sliced (``depth_frac`` 0.5) to the tier's ``max_cells``, Visium at the regime's settings
+to the tier's ``max_cells`` and sliced (``depth_frac`` 0.5) without a cap, Visium at the regime's settings
 (``regime.VISIUM``, spot swapping on) over the tumour's grid, scRNA on every dissociated cell, with the
 paper's assay seeds (Visium ``300 + seed``, scRNA ``100 + seed``). Over the human genes Visium takes
 ``HUMAN_VISIUM_KAPPA`` and scRNA ``dropout_mid=0`` at ``--n-reads`` UMIs per cell. Every arm then
@@ -120,8 +120,8 @@ def main():
     ap.add_argument("--section-max-cells", type=int,
                     default=int(os.environ["ISCC_SECTION_MAX_CELLS"]) if os.environ.get("ISCC_SECTION_MAX_CELLS")
                     else None,
-                    help="cells in the Visium section (default $ISCC_SECTION_MAX_CELLS, else --max-cells); "
-                         "Fig 4 uses 50,000, about 5 cells per spot")
+                    help="cells in the Visium section (default regime.SECTION_MAX_CELLS: no cap, "
+                         "so the spots hold the cells of the section)")
     ap.add_argument("--max-log-fold", type=float, default=5.0)
     ap.add_argument("--min-clone-frac", type=float, default=0.03)
     a = ap.parse_args()
@@ -145,7 +145,7 @@ def main():
     max_cells = a.max_cells or RG.T["max_cells"]
     spec = RR.resect(t)
     dis = spec.dissociate(max_cells=max_cells)
-    sec = spec.slice(depth_frac=0.5, max_cells=a.section_max_cells or max_cells)
+    sec = spec.slice(depth_frac=0.5, max_cells=a.section_max_cells or RG.SECTION_MAX_CELLS)
     lap("layer_and_sample")
 
     ready, sizes = [], {}

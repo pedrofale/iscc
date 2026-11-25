@@ -426,6 +426,12 @@ class RNABatchHyperParams:
     kappa : float
         Dirichlet concentration for the "dm" count model only (large kappa ->
         multinomial/Poisson-like, small kappa -> lumpy over-dispersed proportions).
+    content_exponent : float
+        How the library of a cell or a spot follows the RNA content of the cell or the spot
+        ([`cell_rna_content`][iscc.data.cell_rna_content]): the library is multiplied by the
+        content raised to this power, rescaled so that the mean depth of the batch is kept. 1, set by
+        both scRNA presets, makes the depth proportional to it; 0 (the field's default, which the
+        imaging assay keeps) leaves the content out.
     """
     # mu_lib / sigma_lib CALIBRATED to real 10x PBMC3k (`estimate_rna(sc.datasets.pbmc3k())`) — the
     # scale-free library-size magnitudes transfer. `dispersion` is the NB dispersion WITHIN cell types
@@ -448,6 +454,7 @@ class RNABatchHyperParams:
     plate_sigma: float = 0.0    # 0 = no shared plate depth offset (default: off)
     depth_batch_sigma: float = 0.05
     kappa: float = 1500.0
+    content_exponent: float = 0.0
 
     def to_dict(self):
         return asdict(self)
@@ -491,6 +498,22 @@ class Batch:
         self.ambient_profile = amb / tot if tot > 0 else np.full(n, 1.0 / n)
         self._realized = True
         return self
+
+    def scale_by_content(self, lib, content, mask=None):
+        """Libraries times (RNA content / its mean) ** ``content_exponent``, rescaled so that the mean
+        over ``mask`` (default every entry) is kept; an entry without content gets none. Returns
+        ``lib`` unchanged when the exponent is 0 or ``content`` is None."""
+        a = float(getattr(self.h, "content_exponent", 0.0) or 0.0)
+        if a == 0.0 or content is None:
+            return lib
+        c = np.asarray(content, dtype=float)
+        m = (np.ones(len(c), bool) if mask is None else np.asarray(mask, bool)) & (c > 0)
+        if not m.any():
+            return lib
+        f = np.zeros(len(c))
+        f[c > 0] = (c[c > 0] / c[m].mean()) ** a
+        f[m] /= f[m].mean()
+        return np.asarray(lib, dtype=float) * f
 
     def library_factors(self, n_cells, plates=None):
         """Per-cell library size ell_c ~ LogNormal(log mu_lib,b, sigma_lib^2).
@@ -960,6 +983,11 @@ class VisiumBatchHyperParams:
         the number of genes, so a value fitted on one gene set applies to any other.
     nb_dispersion : float
         NB overdispersion phi (var = mu + phi*mu^2; only for count_model="nb").
+    content_exponent : float
+        How the library of a spot follows its RNA content
+        (summed over its cells, [`cell_rna_content`][iscc.data.cell_rna_content]): the library is multiplied by the
+        content raised to this power, rescaled so that the mean depth of the batch is kept. 1 (the
+        default) makes the depth proportional to it; 0 leaves the content out.
     """
     # Defaults CALIBRATED to a real 10x Visium breast-cancer section (estimate_visium on
     # `scanpy.datasets.visium_sge('V1_Breast_Cancer_Block_A_Section_1')`), so out-of-the-box Visium
@@ -991,6 +1019,9 @@ class VisiumBatchHyperParams:
     count_model: str = "dm"
     kappa: float = 1_400_000.0       # technical noise near multinomial; see the note above
     nb_dispersion: float = 0.30
+    # 1: a spot's depth is proportional to the RNA content of its cells, which gives the real breast
+    # section's relation of depth to composition (vault: decision-library-size-from-rna-content)
+    content_exponent: float = 1.0
 
     def to_dict(self):
         return asdict(self)

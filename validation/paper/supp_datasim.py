@@ -10,8 +10,8 @@ statistic function, so a competitor and ``iscc`` are measured identically:
   (b) scDNA: within-cell coverage CV per copy-number state (``fig2_realism._cv_by_state``), against
       DLP+, for CNAsim in count mode with its coverage non-uniformity set from DLP+;
   (c) scRNA: library size, mean against variance and zero fraction (``fig2_realism._count_stats``),
-      against PBMC3k, for Splatter (``splatEstimate``) and scDesign3 (negative binomial by cluster,
-      Gaussian copula);
+      against Fig 3's breast tumour (``fig2_realism.SCRNA_REF``; PBMC3k until 2026-11-25), for Splatter
+      (``splatEstimate``) and scDesign3 (negative binomial by cluster, Gaussian copula);
   (d) Visium: per-spot depth and its Moran's I (``iscc.data.morans_i`` on spot-pitch coordinates),
       against the real breast-cancer section, for SRTsim (``srtsim_fit`` on the section, counts placed
       at the section's own spots by each gene's reference rank). stCNASim is not run (see COMPETITORS).
@@ -22,7 +22,7 @@ to node-local scratch and call this script's reducers there; only the small JSON
 in ``$ISCC_DATASIM_DIR`` (default ``<derived>/datasim``). Each summary records the simulator's
 version and the settings used.
 
-    python validation/paper/supp_datasim.py prep-scrna DIR           # PBMC3k as a MatrixMarket input
+    python validation/paper/supp_datasim.py prep-scrna DIR           # the scRNA reference as a MatrixMarket input
     python validation/paper/supp_datasim.py reduce-scrna MTX NAME    # -> scrna_NAME.json
     python validation/paper/supp_datasim.py prep-visium DIR          # the section's spots and counts
     python validation/paper/supp_datasim.py reduce-visium MTX LOC NAME
@@ -99,17 +99,17 @@ def _mm_read(path):
     return sp.csr_matrix(scipy.io.mmread(path))
 
 
-# --- scRNA: PBMC3k ---------------------------------------------------------------------------------
+# --- scRNA: Fig 3's breast tumour ------------------------------------------------------------------
 def prep_scrna(out):
-    """PBMC3k's raw counts (genes x cells, genes detected in >= MIN_CELLS cells) and a cluster label
-    per cell, for the R simulators. Clusters: k-means (k = 8, the eight PBMC3k cell types of the
-    standard tutorial) on 50 principal components of the normalised log counts."""
+    """The raw counts of Fig 3's scRNA reference (genes x cells, genes detected in >= MIN_CELLS cells)
+    and a cluster label per cell, for the R simulators. Clusters: k-means (k = 8, as for PBMC3k before)
+    on 50 principal components of the normalised log counts."""
     import anndata as ad
     import scanpy as sc
     import scipy.sparse as sp
     from sklearn.cluster import KMeans
     os.makedirs(out, exist_ok=True)
-    real = ad.read_h5ad(os.path.join(REPO, "data", "pbmc3k_raw.h5ad"))
+    real = ad.read_h5ad(_f2().SCRNA_REF)
     X = sp.csr_matrix(real.X)
     keep = np.asarray((X > 0).sum(0)).ravel() >= MIN_CELLS
     dropped = 1.0 - float(X[:, keep].sum() / X.sum())
@@ -121,7 +121,7 @@ def prep_scrna(out):
     lab = KMeans(n_clusters=8, n_init=10, random_state=0).fit_predict(a.obsm["X_pca"])
     _mm_write(os.path.join(out, "counts.mtx"), X[:, keep].T)
     np.savetxt(os.path.join(out, "cluster.txt"), lab, fmt="%d")
-    info = dict(n_cells=int(X.shape[0]), n_genes_kept=int(keep.sum()), n_genes=int(X.shape[1]),
+    info = dict(reference=os.path.basename(_f2().SCRNA_REF), n_cells=int(X.shape[0]), n_genes_kept=int(keep.sum()), n_genes=int(X.shape[1]),
                 umi_frac_dropped=dropped, clusters=np.bincount(lab).tolist())
     json.dump(info, open(os.path.join(out, "prep.json"), "w"))
     print(json.dumps(info))
@@ -379,7 +379,7 @@ def render():
     out["b"] = {lab: d for lab, _, d in src}
     # c. scRNA
     S.panel_letter(fig, "c", 2, 50)
-    S.text_mm(fig, 10, 50, "scRNA: PBMC3k", fontsize=6.5, va="top")
+    S.text_mm(fig, 10, 50, f"scRNA: {_f2().SCRNA_REF_LABEL}", fontsize=6.5, va="top")
     axes = [S.ax_mm(fig, 14 + i * 58, 57, 44, 30) for i in range(3)]
     src = _sources("scrna", d0)
     lo = min(min(d["loglib"]) for _, _, d in src)

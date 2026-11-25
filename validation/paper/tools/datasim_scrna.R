@@ -1,5 +1,6 @@
 #!/usr/bin/env Rscript
-# Splatter or scDesign3 fitted to PBMC3k, for the data-simulator supplement (supp_datasim.py).
+# Splatter or scDesign3 fitted to Fig 3's scRNA reference (a breast tumour of Wu et al. 2021), for the
+# data-simulator supplement (supp_datasim.py).
 #
 # Reads <in>/counts.mtx (genes x cells, written by `supp_datasim.py prep-scrna`) and <in>/cluster.txt,
 # fits the simulator in its own published way and simulates as many cells and genes as the input:

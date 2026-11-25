@@ -39,7 +39,10 @@ def make_cell_data(grid=30, seed=0):
 
 
 TRUE = dict(mu_counts=6000.0, sigma_counts=0.30, field_sigma=0.40,
-            field_lengthscale=6.0, edge_sigma=0.0, kappa=80.0)
+            field_lengthscale=6.0, edge_sigma=0.0, kappa=80.0,
+            # the estimator fits the whole spread of depth, the part from the cells of a spot
+            # included; leaving the content out tests the recovery of the noise parameters alone
+            content_exponent=0.0)
 
 
 def _simulate(seed=7, **over):

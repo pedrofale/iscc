@@ -164,6 +164,11 @@ def met_spatial(scale):
 # pitches, and the edge falloff measured from the tissue's outermost ring.
 VISIUM = {"bleed_rate": 0.31, "bleed_distal": 0.30, "bleed_sigma": 6.5, "ambient_frac": 0.0,
           "edge_sigma": 0.29, "edge_reference": "tissue"}
+# The cells of a Visium section: no cap, so the section keeps half of every deme's column and the depth
+# cut, not a memory budget, sets the cells per spot (about 10 on the showcase, as in real breast tissue).
+# The figures' earlier caps (6,000 to 50,000 cells) left 1 to 6 per spot, so spots behaved as single cells.
+# The dissociated samples (scRNA, scDNA) keep the tier's max_cells, which is a number of cells sequenced.
+SECTION_MAX_CELLS = int(os.environ.get("ISCC_SECTION_MAX_CELLS", 10 ** 8))
 
 # Oxygen. The calibrated programs config supplies O2 uniformly at a rate (0.3) far below consumption
 # (1.5), so every dense deme, normal or cancer, sits near the same equilibrium and the hypoxia field
