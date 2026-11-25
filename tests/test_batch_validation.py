@@ -295,3 +295,59 @@ def test_collect_scores_against_the_size_matched_splatter_and_refuses_mixed_sett
                                           versions={"iscc_s3": _summary(0.41, 0.28)}))
     with pytest.raises(RuntimeError, match="other settings"):
         BV.collect(parts, str(tmp_path / "v2.json"))
+
+
+# ------------------------------------------------------------------ the deviation of 2026-11-25
+def test_tuning_out_of_reach_returns_the_closest_value_when_not_strict():
+    class Fake:
+        def simulate(self, runs, tag):
+            return {r["name"]: (r["batch_facScale"], None, None) for r in runs}
+    # the statistic never gets below 0.7 (Splatter's floor), the target is 0.68
+    x, tr = BV.tune(Fake(), "batch_facScale", (0.0, 0.1, 0.2), 0.68, lambda v, *a: 0.7 + v, {}, strict=False)
+    assert x == 0.0 and tr["matched"] is False and tr["closest_stat"] == pytest.approx(0.7)
+
+
+def test_generic_settings_are_the_cell_weighted_mean_of_the_runs():
+    fits = BV.synthetic_fits()
+    kw, src = BV.generic_settings(fits, 1, {"A": 300, "B": 100})
+    a, _ = BV.iscc_settings(fits, "A", 1)
+    b, _ = BV.iscc_settings(fits, "B", 1)
+    assert kw["mu_lib"] == pytest.approx(0.75 * a["mu_lib"] + 0.25 * b["mu_lib"])
+    assert kw["ambient_frac"] == pytest.approx(0.75 * a["ambient_frac"] + 0.25 * b["ambient_frac"])
+    assert set(src["runs"]) == {"A", "B"}
+
+
+def test_generic_arm_grows_with_its_per_gene_factor():
+    X, genes, obs = BV.synthetic_data(n_genes=600, n_a=400, n_b=300)
+    types, _ = BV.type_set(obs)
+    s0 = {}
+    for sigma in (0.0, 0.4):
+        Xg, bg, tg, settings = BV.iscc_version(X, obs, BV.synthetic_fits(), 1, generic_sigma=sigma)
+        assert settings["A"]["hyperparams"]["mu_lib"] == settings["B"]["hyperparams"]["mu_lib"]
+        s0[sigma] = BV.contrast_stats(Xg, bg, tg, types, curves=False)["summary"]["S0"]
+    assert s0[0.4] > s0[0.0]
+
+
+def test_score_with_the_generic_arm_makes_it_primary_and_keeps_splatter():
+    def v(x):
+        return {"summary": dict(S0=0.2, S1_spearman=x, S1_spread_ratio=1.0, S2_slope_low=0.0, S2_slope_mid=0.0,
+                                S2_slope_high=0.0, S3_median_corr=0.5)}
+    versions = {"real": v(0.3), **{f"iscc_s{s}": v(0.25) for s in BV.SEEDS},
+                **{f"splatter_s{s}": v(0.31) for s in BV.SEEDS}, **{f"generic_s{s}": v(0.0) for s in BV.SEEDS}}
+    sc = BV.score(versions, size_differs=False)
+    assert sc["primary"] == "against_generic"
+    assert sc["against_generic"]["S1"]["summaries"]["S1_spearman"]["iscc_closer"]
+    assert not sc["against_splatter"]["S1"]["summaries"]["S1_spearman"]["iscc_closer"]
+    # sizes that differ no longer stop the scoring when the generic arm is there
+    assert BV.score(versions, size_differs=True)["primary"] == "against_generic"
+
+
+def test_collect_includes_the_generic_part(tmp_path):
+    parts = str(tmp_path / "parts")
+    _write_parts(parts)
+    meta = json.loads(json.dumps(BV._read_part(parts, "tune")["meta"]))
+    BV._write_part(parts, "generic", dict(meta=meta, generic=dict(sigma_batch=0.2, tuning={}),
+                                          versions={f"generic_s{s}": _summary(0.4, 0.1) for s in BV.SEEDS}))
+    res = BV.collect(parts, str(tmp_path / "v.json"))
+    assert res["score"]["primary"] == "against_generic"
+    assert res["generic"]["sigma_batch"] == 0.2 and res["S0"]["generic_median"] == pytest.approx(0.4)
