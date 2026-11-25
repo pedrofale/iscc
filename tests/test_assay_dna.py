@@ -384,8 +384,9 @@ def _cv(x):
 
 class TestRealisticDefaults:
     def test_bulk_wgs_coverage_spread_is_like_hg002(self):
-        """GIAB HG002 WGS has a coverage CV of 0.41 at two copies; the fitted default re-simulates
-        about 0.48 at 30x with the GC curve on top (the old default: 1.7, 39% of loci near-empty)."""
+        """GIAB HG002 WGS has a coverage CV of 0.30 at two copies (298x, allele depths over all its
+        datasets); the fitted default re-simulates about 0.38 at 30x with the GC curve on top (the
+        first default: 1.7, 39% of loci near-empty)."""
         cd = make_genome_cell_data()
         for seed in (1, 2):
             cov = bulkDNA(breadth="wgs", seed=seed).run(cd).observed_data.coverage.values

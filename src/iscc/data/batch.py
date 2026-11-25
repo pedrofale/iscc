@@ -725,7 +725,7 @@ class DNABatchHyperParams:
         Mean per-locus coverage (the depth regime; breadth sets it).
     kappa : float
         DM concentration = amplification regime: the excess per-locus coverage CV^2 is about
-        ``n_loci / kappa`` (large = near-Poisson, small = lumpy). The default 121,241 is the
+        ``n_loci / kappa`` (large = near-Poisson, small = lumpy). The default 230,823 is the
         GIAB HG002 WGS fit, as in [`bulkDNA`][iscc.data.bulkDNA].
     kappa_loci : int, optional
         Number of loci ``kappa`` was fitted on. The DM's excess per-locus coverage variance is
@@ -736,7 +736,7 @@ class DNABatchHyperParams:
         on, so set the two together. [`estimate_dna`][iscc.data.estimate_dna.estimate_dna] sets
         both, and the assays drop the default ``kappa_loci`` when given a ``kappa`` alone.
     nb_dispersion : float
-        NB per-bin overdispersion phi (only for depth_model="nb"). The default 0.165 is the
+        NB per-bin overdispersion phi (only for depth_model="nb"). The default 0.0866 is the
         GIAB HG002 WGS fit.
     gc_curve_sigma : float
         Per-batch GC->coverage curve strength (the GC bias a panel-of-normals fits).
@@ -760,9 +760,9 @@ class DNABatchHyperParams:
     breadth: str = "wgs"
     depth_model: str = "dm"
     mu_depth: float = 30.0
-    kappa: float = 121_241.0             # GIAB HG002 WGS (estimate_dna), on the loci below
+    kappa: float = 230_823.0             # GIAB HG002 WGS (estimate_dna), on the loci below
     kappa_loci: Optional[int] = 20_000
-    nb_dispersion: float = 0.165         # GIAB HG002 WGS (estimate_dna, depth_model="nb")
+    nb_dispersion: float = 0.0866        # GIAB HG002 WGS (estimate_dna, depth_model="nb")
     gc_curve_sigma: float = 0.20
     mappability_sigma: float = 0.10
     capture_sigma: float = 0.0

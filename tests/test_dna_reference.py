@@ -40,6 +40,12 @@ class TestGiabReducer:
     def test_phased_het_recognized(self):
         assert B.parse_giab_record(self._line("C", "T", "0|1", "20,20"))[2] is True
 
+    def test_adall_preferred_over_ad(self):
+        """AD counts only the datasets whose call was unfiltered; ADALL counts them all."""
+        line = "chr1\t100\t.\tA\tG\t50\tPASS\tinfo\tGT:DP:ADALL:AD\t0/1:600:140,160:14,16".split("\t")
+        cov, alt, is_het = B.parse_giab_record(line)
+        assert cov == 300 and alt == 160 and is_het is True
+
     def test_indel_and_nonpass_and_missing_ad_dropped(self):
         assert B.parse_giab_record(self._line("AT", "A", "0/1", "10,10")) is None      # indel
         assert B.parse_giab_record(self._line("A", "G", "0/1", "10,10", filt="fail")) is None

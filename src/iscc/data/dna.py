@@ -56,12 +56,13 @@ _HYPER_KEYS = set(DNABatchHyperParams().to_dict().keys())
 
 # Amplification-regime defaults of each modality. `kappa` / `kappa_loci` and `nb_dispersion` are
 # `estimate_dna` fits on the references in validation/data: bulk on GIAB HG002 WGS (20,000 sites,
-# coverage CV 0.41 at two copies), single-cell on DLP+ OV2295 (5,787 bins of 500 kb, 40 cells).
+# allele depths over all datasets, coverage CV 0.30 at two copies and 298x), single-cell on DLP+ OV2295
+# (5,787 bins of 500 kb, 40 cells).
 # The DM's excess per-locus variance is about n_loci / kappa, so a kappa is only meaningful with
 # the locus count it was fitted on: the depth draw rescales it to the genome it is drawn on.
 # `ado_rate`, `beta_binom_conc` and `doublet_rate` are priors (DLP+ has no allele counts).
 DNA_MODE_DEFAULTS = {
-    "bulk": dict(kappa=121_241.0, kappa_loci=20_000, nb_dispersion=0.165, ado_rate=0.0,
+    "bulk": dict(kappa=230_823.0, kappa_loci=20_000, nb_dispersion=0.0866, ado_rate=0.0,
                  beta_binom_conc=200.0, doublet_rate=0.0),
     "sc":   dict(kappa=204_222.0, kappa_loci=5_787, nb_dispersion=0.026, ado_rate=0.20,
                  beta_binom_conc=30.0, doublet_rate=0.02),
@@ -401,9 +402,10 @@ class bulkDNA(DNA):
 
     Takes no constructor parameters of its own: it pools every sampled cell (there is no
     ``n_cells``). The bulk ``mode_defaults`` set the depth dispersion fitted by
-    [`estimate_dna`][iscc.data.estimate_dna.estimate_dna] on GIAB HG002 WGS (``kappa=121241``
-    fitted on ``kappa_loci=20000`` sites, ``nb_dispersion=0.165``), which gives a coverage CV of
-    about 0.48 at two copies and 30x on any genome size (HG002: 0.41), and leave the single-cell
+    [`estimate_dna`][iscc.data.estimate_dna.estimate_dna] on GIAB HG002 WGS (``kappa=230823``
+    fitted on ``kappa_loci=20000`` sites, ``nb_dispersion=0.0866``, from the allele depths over all
+    datasets of the benchmark), which gives a coverage CV of about 0.38 at two copies and 30x on any
+    genome size (HG002: 0.30 at its 298x), and leave the single-cell
     allele knobs inert (``ado_rate=0``, ``doublet_rate=0``).
 
     After ``run``, ``purity`` holds the pool's TRUE tumour purity (the fraction of pooled
