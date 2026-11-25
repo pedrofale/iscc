@@ -206,12 +206,12 @@ def figure(tumour, variant=None):
         ax.set_yticks(range(len(rows)))
         ax.set_yticklabels([METRIC_LABEL.get(m, m) for m in rows], fontsize=5.5)
         ax.set_ylim(len(rows) - 0.5, -0.5)
-        ax.set_xlabel("KDE z-statistic (lower is closer)", fontsize=5.5)
+        ax.set_xlabel("KDE z-statistic", fontsize=5.5)
         ax.set_title(f"{level}-level metrics", fontsize=6)
         ax.tick_params(labelsize=5.5)
         S.despine(ax)
     from matplotlib.lines import Line2D
-    handles = [Line2D([], [], ls="", marker="o", ms=2.5, color=S.SOURCE["real"], label="13 published simulators"),
+    handles = [Line2D([], [], ls="", marker="o", ms=2.5, color=S.SOURCE["real"], label="13 published configurations"),
                Line2D([], [], ls="", marker="o", ms=3.2, color=S.SOURCE["iscc"], label="iscc"),
                Line2D([], [], ls="", marker="D", ms=3.0, color=S.INK, label="iscc, depth fitted to the section")]
     fig.legend(handles=handles, loc="lower center", ncol=3, fontsize=5.5, frameon=False)
