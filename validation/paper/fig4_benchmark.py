@@ -14,6 +14,8 @@ computes nothing heavy and reads no tumour:
       profiles as the reference; a line joins true and called where the truth arm is above chance
       (``fig4_score.CHANCE_MARGIN``); ``fig4_chain.py`` and ``fig4_diag.py`` outputs in ``$FIG4_OUT`` and
       ``$FIG4_DIAG``;
+  (e) copy-number tree methods against the true genealogy, confined against free growth (a placeholder
+      until ``trees.csv`` of exp-paper1-cn-trees-architecture exists, ``$FIG4_TREES``);
   (d) structure misleads a lineage method: the hypoxia field's lineage and spatial autocorrelation
       side by side by architecture and selection, and the share of tumours each test calls heritable
       (``fig4_lineage.py``: ``$FIG4_DEV/e``); the scatter of one against the other, a separate panel
@@ -58,7 +60,7 @@ TUMOURS = os.environ.get("FIG4_TUMOURS",
 
 # Half a page at full text width: 165 mm by at most 114 mm, included at its true size, so no text is
 # smaller than SMALL (5.5 pt) and the panel letters are 8 pt.
-W_MM, FIG_H = 165, 114
+W_MM, FIG_H = 165, 156                  # 114 before panel E (2026-11-25)
 SMALL = 5.5
 
 # niche colours, validated with the dataviz palette check (all pairs, light): CVD and normal vision pass
@@ -82,6 +84,7 @@ A_ROWS, A_BH = (1.0, 8.2, 15.4, 22.6), 5.2        # the four modality rows of (a
 B_TOP, B_H, B_W, B_X = 35.0, 29.5, 36.0, (86.0, 127.0)
 C_X, C_TOP, C_W, C_H = 12.0, 41.0, 45.5, 21.0
 R3_LETTER, R3_TOP, R3_H = 74.5, 78.0, 27.0
+R4_LETTER, R4_TOP, R4_H = 115.5, 120.0, 26.0      # (e): copy-number trees
 
 
 def _group(task):
@@ -392,6 +395,48 @@ def panel_de(fig, ov, nums):
     nums["lineage"]["called_heritable"] = called
 
 
+# beside the Fig 4 outputs unless given: <parent of $FIG4_DEV>/cn-trees/trees.csv
+TREES = os.environ.get("FIG4_TREES") or os.path.join(os.path.dirname(os.path.normpath(DEV)), "cn-trees", "trees.csv")
+
+
+def panel_trees(fig, nums):
+    """(e) copy-number tree methods against the true genealogy, confined against free growth, from the
+    true and the called copy numbers (``trees.csv`` of exp-paper1-cn-trees-architecture: one row per
+    tumour, method and input, with ``nrf``). A placeholder until the file exists."""
+    S.panel_letter(fig, "e", 0.5, R4_LETTER)
+    ax = S.ax_mm(fig, 11.0, R4_TOP, 152.0, R4_H)
+    if not os.path.exists(TREES):
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for sp in ax.spines.values():
+            sp.set_visible(True)
+            sp.set_color(S.BG_CELLS)
+        ax.text(0.5, 0.5, "pending: copy-number trees against the true genealogy, confined against free growth,\n"
+                "from true and called copy number (Harald, Marzie; exp-paper1-cn-trees-architecture)",
+                ha="center", va="center", fontsize=SMALL, color=S.GREY, transform=ax.transAxes)
+        nums["trees"] = None
+        return
+    df = pd.read_csv(TREES)
+    groups = [(a, sel) for a in ("confined", "free") for sel in ("selected", "neutral")]
+    methods = sorted(df.method.unique())
+    inputs = [i for i in ("true", "called") if i in set(df.input)]
+    width = 0.8 / max(1, len(methods) * len(inputs))
+    for gi, (a, sel) in enumerate(groups):
+        for mi, m in enumerate(methods):
+            for ii, inp in enumerate(inputs):
+                v = df[(df.arch == a) & (df.selection == sel) & (df.method == m) & (df.input == inp)].nrf
+                x = gi - 0.4 + width * (mi * len(inputs) + ii + 0.5)
+                ax.scatter(np.full(len(v), x), v, s=4, color=S.CLONE_FAMILIES[mi][1],
+                           alpha=1.0 if inp == "true" else 0.5, linewidths=0, zorder=3)
+                if len(v):
+                    ax.plot([x - width * 0.4, x + width * 0.4], [v.mean()] * 2, color=S.INK, lw=0.9, zorder=4)
+    ax.set_xticks(range(len(groups)))
+    ax.set_xticklabels([f"{sel}\n{'ductal field' if a == 'confined' else 'without glands'}" for a, sel in groups],
+                       fontsize=SMALL)
+    ax.set_ylabel("Tree distance to the truth")
+    nums["trees"] = df.groupby(["arch", "selection", "method", "input"]).nrf.mean().round(3).to_dict()
+
+
 def main():
     import fig4_score as FS
     S.setup()
@@ -405,6 +450,7 @@ def main():
     c = c[c["resolution"] == "fine"] if len(c) else c
     panel_c(fig, ov, c, nums)
     panel_de(fig, ov, nums)
+    panel_trees(fig, nums)
     path = S.save(fig, "fig4_benchmark")
     os.makedirs(DEV, exist_ok=True)
     with open(os.path.join(DEV, "fig4_benchmark_numbers.json"), "w") as f:

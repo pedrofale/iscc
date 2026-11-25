@@ -88,7 +88,8 @@ def load(out):
                 r = read(os.path.join(d, fn))
                 if r and r.get("level") in BL.LEVELS:          # the batch model's levels only
                     levels[r["level"]] = r
-    return dict(collect=read(os.path.join(out, "collect_summary.json")), levels=levels)
+    real = os.environ.get("ISCC_WU_INTEGRATION") or os.path.join(out, "wu_integration.json")
+    return dict(collect=read(os.path.join(out, "collect_summary.json")), levels=levels, real=read(real))
 
 
 def placeholder(ax, what):
@@ -259,20 +260,26 @@ C_MEASURES = (("ilisi_batch_noncancer", "microenvironment", "batch mixing (iLISI
               ("patient_purity_cancer", "cancer cells", "neighbors from the\nsame patient"))
 
 
-def panel_integration(fig, x, y, levels, w=30.0, h=24.0, gap=12.0):
+def panel_integration(fig, x, y, levels, real=None, h=24.0):
     """The fitted level: per measure, the embedding without batch effect, then no integration, Harmony
-    and scVI, filled for the confounded design and hollow for the balanced one. Every level and the
-    same-clone share are in S14 Fig."""
+    and scVI, filled for the confounded design and hollow for the balanced one; and beside the
+    same-patient share, the real atlas of Wu et al. 2021, where each tumour is its own batch
+    (``real``: wu_integration.json of exp-paper1-wu-atlas-integration; a placeholder until it exists).
+    Every level and the same-clone share are in S13 Fig."""
     rec = levels.get(EMBED_LEVEL)
     cats = ("truth", "none", "harmony", "scvi")
-    names = ("no batch\neffect", "no\nintegration", "Harmony", "scVI")
+    names = ("no batch effect", "no integration", "Harmony", "scVI")
     colour = {"truth": REFERENCE, **TOOL_COLOUR}
-    for k, (key, title, ylab) in enumerate(C_MEASURES):
-        ax = S.ax_mm(fig, x + k * (w + gap), y, w, h)
+    tick = dict(rotation=40, ha="right", rotation_mode="anchor", fontsize=FS_SMALL)
+    boxes = ((x, 21.0), (x + 32.0, 22.0))                # (left, width) of the two simulated measures
+    axes = []
+    for k, ((key, title, ylab), (bx, bw)) in enumerate(zip(C_MEASURES, boxes)):
+        ax = S.ax_mm(fig, bx, y, bw, h)
+        axes.append(ax)
         ax.set_title(title, fontsize=FS, pad=2)
         ax.set_ylabel(ylab, fontsize=FS_SMALL, labelpad=1)
         ax.set_xticks(range(len(cats)))
-        ax.set_xticklabels(names, fontsize=FS_SMALL)
+        ax.set_xticklabels(names, **tick)
         ax.tick_params(axis="y", labelsize=FS_SMALL)
         ax.set_xlim(-0.6, len(cats) - 0.4)
         S.despine(ax, left=False)
@@ -290,11 +297,31 @@ def panel_integration(fig, x, y, levels, w=30.0, h=24.0, gap=12.0):
         if key.startswith("patient"):
             ax.set_ylim(0, 1)
             ax.set_yticks([0, 0.5, 1])
+    # the real atlas, on the same-patient axis
+    axr = S.ax_mm(fig, x + 57.0, y, 17.0, h)
+    axr.set_title("real atlas", fontsize=FS, pad=2)
+    axr.set_ylim(0, 1)
+    axr.set_yticks([0, 0.5, 1])
+    axr.set_yticklabels([])
+    S.despine(axr, left=False)
+    rcats = ("none", "harmony", "scvi")
+    axr.set_xticks(range(len(rcats)))
+    axr.set_xticklabels([names[cats.index(c)] for c in rcats], **tick)
+    axr.set_xlim(-0.6, len(rcats) - 0.4)
+    vals = ((real or {}).get("metrics") or {})
+    if not vals:
+        axr.text(0.5, 0.5, "pending:\nWu et al.\natlas", ha="center", va="center", fontsize=FS_SMALL,
+                 color=S.GREY, transform=axr.transAxes)
+    for ci, c in enumerate(rcats):
+        v = (vals.get(c) or {}).get("patient_purity_cancer")
+        if v is not None:
+            axr.scatter([ci], [v], s=11, marker="o", facecolors=colour[c], edgecolors=colour[c], linewidths=0.7,
+                        zorder=3)
     h_ = [Line2D([], [], marker="o", ls="", mfc=S.INK, mec=S.INK, markersize=3, label="confounded"),
           Line2D([], [], marker="o", ls="", mfc="white", mec=S.INK, markersize=3, label="balanced")]
     W, H = fig.get_size_inches() / S.MM
     fig.legend(handles=h_, loc="upper left", ncol=2, fontsize=FS_SMALL, frameon=False, handletextpad=0.2,
-               bbox_to_anchor=(x / W, 1 - (y + h + 9.0) / H))
+               bbox_to_anchor=(x / W, 1 - (y + h + 12.5) / H))
 
 
 # ------------------------------------------------------------------ D: integration, every level
@@ -621,7 +648,7 @@ def _sc_states(coll):
     return out
 
 
-def panel_scorecard(fig, x, y, coll, lab_w=29.0, col_w=11.0, row_h=5.4):
+def panel_scorecard(fig, x, y, coll, lab_w=28.0, col_w=10.6, row_h=5.4):
     """Per simulated relation (and the order that architecture imposes on the traits, which was not
     simulated) and per tool: recovered (filled), found without the simulated direction (half) or not found
     (open). Each tool's estimates against the pairs of E0 are in S14 Fig."""
@@ -677,9 +704,9 @@ def main():
     heading(fig, "B", "Embeddings of the pooled cells", 2, 38)
     panel_umap(fig, 2, 49, data["levels"])                    # 3 rows of 18.5 mm, legend to about 110
     heading(fig, "C", "Integration", 2, 114)
-    panel_integration(fig, 14, 124, data["levels"])
-    heading(fig, "D", "Progression models", 88, 114)
-    panel_scorecard(fig, 88, 126, data["collect"])
+    panel_integration(fig, 12, 124, data["levels"], real=data.get("real"))
+    heading(fig, "D", "Progression models", 92, 114)
+    panel_scorecard(fig, 92, 126, data["collect"])
     path = S.save(fig, args.name)
     # S14 Fig: integration at every level (A), and each tool's estimates for the simulated network (B) and
     # for the traits (C), which panel D of the figure summarises
