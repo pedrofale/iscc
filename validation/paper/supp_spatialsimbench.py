@@ -12,11 +12,15 @@ The Visium assay holds dense spots x genes tables over the 36,601 human genes, s
 5,000 spots does not fit a laptop; the tumour is sectioned in four windows of 70 x 70 demes, each
 measured separately, and their spots pooled.
 
-    python validation/paper/supp_spatialsimbench.py section --tumour pregrown:ductal
-    python validation/paper/supp_spatialsimbench.py section --tumour R0/seed1
-    python validation/paper/supp_spatialsimbench.py metrics --tumour R0/seed1
-    python validation/paper/supp_spatialsimbench.py section --tumour R0/seed1 --variant depth   # after published
-    python validation/paper/supp_spatialsimbench.py figure --tumour pregrown:ductal   # S15 Fig, both variants
+    python validation/paper/supp_spatialsimbench.py section --tumour pregrown:immune
+    python validation/paper/supp_spatialsimbench.py metrics --tumour pregrown:immune
+    python validation/paper/supp_spatialsimbench.py section --tumour pregrown:immune --variant fitted   # after published
+    python validation/paper/supp_spatialsimbench.py metrics --tumour pregrown:immune --variant fitted
+    python validation/paper/supp_spatialsimbench.py figure --tumour pregrown:immune   # S15 Fig, both variants
+
+S15 Fig uses ``pregrown:immune``, the tumour of the paper's regime with immune cells in the stroma: the
+real section is a breast cancer with them, and the immunoglobulins of its plasma cells carry most of
+its gene variance, which ``pregrown:ductal`` (no immune cells) cannot hold.
 
 The tumour must be on the chromosome-arm genome (the human genes come from ``HumanGenomeLayer``): the
 pregrown tumours are, the registry's 12-segment runs (R0 to R13) are not.
@@ -80,10 +84,27 @@ def _reference_median():
     return float(np.median(np.asarray(m.sum(axis=1)).ravel()))
 
 
+def _reference_fit():
+    """``estimate_visium`` on the reference section: the spread of the spot depth (``sigma_counts``)
+    and the capture field (``field_sigma``, ``field_lengthscale``), with the length scale moved from
+    the reference's spot pitch to iscc's. The depth itself is matched separately, and the count
+    overdispersion is left at iscc's: fitted on 1,000 spatially variable genes it holds their biology."""
+    from iscc.data import Visium, estimate_visium
+    from iscc.data.estimate_visium import _pitch
+    counts = scipy.io.mmread(os.path.join(BENCH, "ref", "breast_counts.mtx")).toarray()
+    xy = pd.read_csv(os.path.join(BENCH, "ref", "breast_spots.csv"))[["row", "col"]].to_numpy(float)
+    h = estimate_visium(counts, coords=xy).hypers
+    pitch = Visium().hypers.spot_pitch
+    return dict(sigma_counts=h.sigma_counts, field_sigma=h.field_sigma,
+                field_lengthscale=h.field_lengthscale / _pitch(xy) * pitch)
+
+
 def section(tumour, variant="published"):
     """``published``: the paper regime's Visium as it stands. ``depth``: the same, with the depth
     (``mu_counts``) scaled so that the median count per spot on the reference's genes matches the
-    reference's, as the simulators SpatialSimBench scores are fitted to the reference."""
+    reference's, as the simulators SpatialSimBench scores are fitted to the reference. ``fitted``:
+    the depth matched in the same way, and the spread of the depth and the capture field fitted to
+    the reference by ``estimate_visium`` (``_reference_fit``)."""
     from iscc.data import Visium
     from iscc.data.human import HumanGenomeLayer
     from iscc.sample import Resection
@@ -93,9 +114,18 @@ def section(tumour, variant="published"):
     ref, cols = _reference_genes(layer.genes.set_index("gene_id"))
     found = [c for c in cols if c is not None]
     settings = dict(RG.VISIUM)
-    if variant == "depth":
+    if variant in ("depth", "fitted"):
         published = pd.read_csv(os.path.join(_out(tumour), "section.csv"), index_col=0).iloc[:, 0]
         scale = _reference_median() / float(published["median_counts_per_spot"])
+        if variant == "fitted":
+            fit = _reference_fit()
+            h = Visium().hypers
+            # the depth and the field are mean-1 lognormals, so their median is exp(-sd^2 / 2) of the
+            # mean: a narrower spread needs a lower mean for the same median
+            scale *= np.exp(0.5 * (fit["sigma_counts"] ** 2 + fit["field_sigma"] ** 2
+                                   - h.sigma_counts ** 2 - h.field_sigma ** 2))
+            settings.update(fit)
+            print("fitted to the reference: " + ", ".join(f"{k} {v:.3f}" for k, v in fit.items()), flush=True)
         settings["mu_counts"] = Visium().hypers.mu_counts * scale
         print(f"depth matched to the reference: mu_counts x {scale:.3f} = {settings['mu_counts']:.0f}", flush=True)
     parts = []
@@ -151,11 +181,11 @@ METRIC_LABEL = {"scaledVar": "scaled variance", "scaledMean": "scaled mean", "pe
 
 def figure(tumour, variant=None):
     """S15 Fig: the KDE z-statistic of every gene- and spot-level metric on SpatialSimBench's breast
-    section, for its 13 published simulator configurations and for iscc as published and with its depth
-    matched to the section (lower is closer to the real section)."""
+    section, for its 13 published simulator configurations and for iscc as published and with its spot
+    depth fitted to the section (lower is closer to the real section)."""
     import style as S
     tables = {v: pd.read_csv(os.path.join(_out(tumour, v), "scale.csv"), index_col=[0, 1])
-              for v in ("published", "depth") if os.path.exists(os.path.join(_out(tumour, v), "scale.csv"))}
+              for v in ("published", "fitted") if os.path.exists(os.path.join(_out(tumour, v), "scale.csv"))}
     pub = next(iter(tables.values())).drop(columns="iscc")
     S.setup()
     fig = S.figure(165, 52)
@@ -166,7 +196,7 @@ def figure(tumour, variant=None):
         for i, m in enumerate(rows):
             others = pub.loc[(level, m)].to_numpy(float)
             ax.scatter(others, np.full(len(others), i), s=6, color=S.SOURCE["real"], zorder=2, linewidths=0)
-            for v, colour, marker in (("published", S.SOURCE["iscc"], "o"), ("depth", S.INK, "D")):
+            for v, colour, marker in (("published", S.SOURCE["iscc"], "o"), ("fitted", S.INK, "D")):
                 if v in tables:
                     z = float(tables[v].loc[(level, m), "iscc"])
                     ax.scatter([z], [i], s=12, color=colour, marker=marker, zorder=3, linewidths=0)
@@ -183,7 +213,7 @@ def figure(tumour, variant=None):
     from matplotlib.lines import Line2D
     handles = [Line2D([], [], ls="", marker="o", ms=2.5, color=S.SOURCE["real"], label="13 published simulators"),
                Line2D([], [], ls="", marker="o", ms=3.2, color=S.SOURCE["iscc"], label="iscc"),
-               Line2D([], [], ls="", marker="D", ms=3.0, color=S.INK, label="iscc, depth matched")]
+               Line2D([], [], ls="", marker="D", ms=3.0, color=S.INK, label="iscc, depth fitted to the section")]
     fig.legend(handles=handles, loc="lower center", ncol=3, fontsize=5.5, frameon=False)
     path = S.save(fig, "supp_simbench")
     with open(os.path.join(os.path.dirname(_out(tumour, "published")), "figure_numbers.json"), "w") as f:
@@ -198,8 +228,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("cmd", choices=["section", "metrics", "figure"])
     ap.add_argument("--tumour", required=True, help="pregrown:<name> or <run>/<task> of the registry")
-    ap.add_argument("--variant", choices=["published", "depth"], default="published",
-                    help="the Visium as published, or with its depth matched to the reference")
+    ap.add_argument("--variant", choices=["published", "depth", "fitted"], default="published",
+                    help="the Visium as published, with its depth matched to the reference, or with its "
+                         "depth and its spread fitted to the reference")
     a = ap.parse_args()
     {"section": section, "metrics": metrics, "figure": figure}[a.cmd](a.tumour, a.variant)
 
