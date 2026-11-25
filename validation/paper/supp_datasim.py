@@ -8,7 +8,9 @@ statistic function, so a competitor and ``iscc`` are measured identically:
       depth (no copy-number change is implanted); iscc's loci are those at its tumour's most common
       copy number (Fig 3b), so every source is scored at one copy-number state;
   (b) scDNA: within-cell coverage CV per copy-number state (``fig2_realism._cv_by_state``), against
-      DLP+, for CNAsim in count mode with its coverage non-uniformity set from DLP+;
+      DLP+, for CNAsim in count mode with its coverage non-uniformity set from DLP+, and for SISTEM's
+      single-cell read counts at DLP+'s depth (uniform coverage: its non-uniform path fails in 1.0.5,
+      ``tools/datasim_sistem.py``);
   (c) scRNA: library size, mean against variance and zero fraction (``fig2_realism._count_stats``),
       against Fig 3's breast tumour (``fig2_realism.SCRNA_REF``; PBMC3k until 2026-11-25), for Splatter
       (``splatEstimate``) and scDesign3 (negative binomial by cluster, Gaussian copula);
@@ -28,6 +30,7 @@ version and the settings used.
     python validation/paper/supp_datasim.py reduce-visium MTX LOC NAME
     python validation/paper/supp_datasim.py prep-cnasim              # DLP+ depth and Lorenz point
     python validation/paper/supp_datasim.py reduce-cnasim DIR NAME
+    python validation/paper/supp_datasim.py reduce-sistem DIR NAME
     python validation/paper/supp_datasim.py hg002-sites BED          # the HG002 sites, re-derived
     python validation/paper/supp_datasim.py reduce-wgs DEPTH BED NAME
     python validation/paper/supp_datasim.py iscc                     # real and iscc from Fig 3
@@ -230,6 +233,26 @@ def reduce_cnasim(out, name, meta):
     _write(f"scdna_{name}", d)
 
 
+def reduce_sistem(out, name, meta):
+    """SISTEM's single-cell read counts (readcounts.tsv) and copy numbers (observed_CNPs.tsv) -> within-cell
+    coverage CV per copy-number state (Fig 3c), as for CNAsim."""
+    import pandas as pd
+    rc = pd.read_csv(os.path.join(out, "readcounts.tsv"), sep="\t")
+    pr = pd.read_csv(os.path.join(out, "observed_CNPs.tsv"), sep="\t").rename(columns={"Cell/Clone": "Cell"})
+    m = rc.merge(pr[["Cell", "Chrom", "Start", "End", "Total CN"]], on=["Cell", "Chrom", "Start", "End"], how="inner")
+    m["reads"] = m["Acount"] + m["Bcount"]
+    cells = sorted(m["Cell"].unique())
+    m["_bin"] = m.groupby("Cell").cumcount()
+    reads = m.pivot(index="Cell", columns="_bin", values="reads").loc[cells].to_numpy(float)
+    cn = m.pivot(index="Cell", columns="_bin", values="Total CN").loc[cells].to_numpy(float)
+    cvs = _f2()._cv_by_state(reads, cn)
+    states, counts = np.unique(np.rint(cn).astype(int), return_counts=True)
+    d = dict(name=name, n_cells=len(cells), n_bins=int(reads.shape[1]), mean_reads=float(reads.mean()),
+             lorenz_y=lorenz_y(reads, np.rint(cn)), cv_by_state={str(k): v for k, v in sorted(cvs.items())},
+             state_frac={str(int(s)): float(c / cn.size) for s, c in zip(states, counts)}, meta=meta)
+    _write(f"scdna_{name}", d)
+
+
 # --- WGS: GIAB HG002 -------------------------------------------------------------------------------
 def hg002_sites(bed):
     """Re-derive the positions of the 20,000 HG002 benchmark sites in the reduction (the reduction
@@ -296,7 +319,7 @@ def collect_iscc():
 
 
 # --- render ----------------------------------------------------------------------------------------
-COMPETITORS = {"wgs": ["VISOR"], "scdna": ["CNAsim"], "scrna": ["Splatter", "scDesign3"],
+COMPETITORS = {"wgs": ["VISOR"], "scdna": ["CNAsim", "SISTEM"], "scrna": ["Splatter", "scDesign3"],
                "visium": ["SRTsim"]}
 # stCNASim is not run: it needs a STARsolo-aligned seed section and took ~5 h per 600-spot run on
 # 2026-11-14. Read from its code (cs/pp.calc_size_factors, not run): spot library sizes are drawn
@@ -430,7 +453,8 @@ def main():
     for name, args in (("prep-scrna", ["dir"]), ("prep-visium", ["dir"]), ("prep-cnasim", []),
                        ("hg002-sites", ["bed"]), ("iscc", []), ("render", []),
                        ("reduce-scrna", ["mtx", "name"]), ("reduce-visium", ["mtx", "loc", "name"]),
-                       ("reduce-cnasim", ["dir", "name"]), ("reduce-wgs", ["depth", "bed", "name"])):
+                       ("reduce-cnasim", ["dir", "name"]), ("reduce-sistem", ["dir", "name"]),
+                       ("reduce-wgs", ["depth", "bed", "name"])):
         p = sub.add_parser(name)
         for a in args:
             p.add_argument(a)
@@ -444,6 +468,7 @@ def main():
      "reduce-scrna": lambda: reduce_scrna(a.mtx, a.name, meta),
      "reduce-visium": lambda: reduce_visium(a.mtx, a.loc, a.name, meta),
      "reduce-cnasim": lambda: reduce_cnasim(a.dir, a.name, meta),
+     "reduce-sistem": lambda: reduce_sistem(a.dir, a.name, meta),
      "reduce-wgs": lambda: reduce_wgs(a.depth, a.bed, a.name, meta)}[a.cmd]()
 
 

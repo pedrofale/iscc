@@ -909,6 +909,10 @@ class MaterialiseMixin:
             evo["n_mut_ss"] = int((snv[ss_idx] > 0).sum())
             evo["n_mut_ms"] = int((snv[ms_idx] > 0).sum())
             evo["n_mut_dt"] = int((snv[dt_idx] > 0).sum())
+            # the mean copy number over the genes, the DNA content of the cell relative to a haploid
+            # genome, which sets the RNA content of a cancer cell (iscc.data.content)
+            sizes = np.asarray(rep.segment_sizes, dtype=float)
+            evo["mean_cn"] = float(np.dot(rep.genome_summary["seg_cns"], sizes) / sizes.sum())
             evo_cache[gid] = evo
 
         # Microenvironment: per-deme expression modifier (None -> layer off). The CCI ligand/receptor

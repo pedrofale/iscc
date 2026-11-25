@@ -192,8 +192,8 @@ class scRNA(Assay):
     content_exponent : float, optional
         How the library of a cell follows the RNA content of the cell
         ([`cell_rna_content`][iscc.data.cell_rna_content]: the mean counts of the cell type in the
-        Human Breast Cell Atlas relative to the epithelium, doubled for a cancer cell with a doubled
-        genome). The library is multiplied by the content raised to this power, rescaled to keep the
+        Human Breast Cell Atlas relative to the epithelium, times the mean copy number of the cell
+        over two for a cancer cell). The library is multiplied by the content raised to this power, rescaled to keep the
         batch's mean depth. Default None -> preset (1 for both protocols: the library is proportional
         to the content, as in the atlas, and ``sigma_lib`` is the spread within a cell type; 0 leaves
         the content out).

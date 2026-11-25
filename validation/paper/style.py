@@ -54,7 +54,7 @@ TOOL = {
     "TreeMHN": "#E7298A", "RCTD": "#1B9E77", "cell2location": "#7570B3", "PyClone-VI": "#66A61E",
     # the other data simulators (supp_datasim)
     "VISOR": "#D95F02", "CNAsim": "#E6AB02", "Splatter": "#A50026", "scDesign3": "#7B3294",
-    "SRTsim": "#01665E",
+    "SRTsim": "#01665E", "SISTEM": "#CC79A7",
 }
 
 # Clone colours: one hue family per founding lineage, subclones from dark to light.

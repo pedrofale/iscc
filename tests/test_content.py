@@ -42,12 +42,18 @@ def test_content_table_is_the_atlas_relative_to_the_epithelium():
     assert t["host"] == t["stromal"]
 
 
-def test_cancer_cells_take_the_epithelium_and_double_with_the_genome():
-    cd = {"cell_type": pd.DataFrame({"cell_id": ["epithelial", "immune", "c3", "c3"]}, index=list("abcd")),
-          "cell_wgd": pd.DataFrame({"is_wgd": [False, False, False, True]}, index=list("abcd"))}
+def test_cancer_cells_take_the_epithelium_times_their_dna_content():
+    cd = {"cell_type": pd.DataFrame({"cell_id": ["epithelial", "immune", "c3", "c4"]}, index=list("abcd")),
+          "cell_evo": pd.DataFrame({"mean_cn": [2.0, 2.0, 2.6, 4.0]}, index=list("abcd"))}
     c = cell_rna_content(cd)
-    assert c.tolist() == pytest.approx([1.0, rna_content_table()["immune"], 1.0, 2.0])
+    assert c.tolist() == pytest.approx([1.0, rna_content_table()["immune"], 1.3, 2.0])
     assert cell_rna_content(cd, cells=["d", "a"]).tolist() == pytest.approx([2.0, 1.0])
+
+
+def test_tables_without_the_copy_number_double_with_the_genome():
+    cd = {"cell_type": pd.DataFrame({"cell_id": ["epithelial", "c3", "c3"]}, index=list("abc")),
+          "cell_wgd": pd.DataFrame({"is_wgd": [False, False, True]}, index=list("abc"))}
+    assert cell_rna_content(cd).tolist() == pytest.approx([1.0, 1.0, 2.0])
 
 
 def test_scrna_library_follows_the_content_of_the_cell_type():

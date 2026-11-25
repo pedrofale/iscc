@@ -43,7 +43,7 @@ immune). See `src/iscc/tumor/tumorconfigs/genotype.yaml`.
 | `cell_snv.csv` | genes | SNV VAF / indicator per gene |
 | `cell_cnv.csv` | genes | copy number per gene (total) |
 | `cell_exp.csv` | genes | transcriptional activity per gene |
-| `cell_evo.csv` | evolutionary params + driver tallies | division/death/dispersal rates, resistances, `n_mut_*` |
+| `cell_evo.csv` | evolutionary params + driver tallies | division/death/dispersal rates, resistances, `n_mut_*`, `mean_cn` (mean copy number over the genes) |
 | `cell_crd.csv` | `row`, `col` | deme coordinates on the grid |
 | `cell_type.csv` | `cell_id` | genotype id (cancer) or cell type (normal) |
 | `cell_deme.csv` | `deme_id` | which deme the cell is in |
