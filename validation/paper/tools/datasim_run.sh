@@ -3,11 +3,12 @@
 # JSON summary. Meant to run inside a Slurm job from the repository root:
 #
 #   ISCC_TOOLS_DIR=<images> ISCC_DATASIM_DIR=<summaries> [ISCC_PYTHON=..] [CNASIM=..] \
-#     validation/paper/tools/datasim_run.sh <visor|cnasim|splatter|scdesign3|srtsim> [threads]
+#     validation/paper/tools/datasim_run.sh <visor|cnasim|sistem|splatter|scdesign3|srtsim> [threads]
 #
 # Raw output (reads, BAMs, count matrices) goes to node-local scratch ($SNIC_TMP, else $TMPDIR) and is
 # deleted at the end. Images: visor.sif and datasim-r.sif in $ISCC_TOOLS_DIR (recipes in images/).
 # CNASIM is the cnasim executable of an environment with CNAsim 1.3.4 (its python sits beside it).
+# SISTEM_PY is the python of an environment with SISTEM 1.0.5.
 set -euo pipefail
 SIM=$1; N=${2:-${SLURM_CPUS_PER_TASK:-4}}
 PY=${ISCC_PYTHON:-python}
@@ -76,6 +77,19 @@ cnasim)
   $S reduce-cnasim "$T/out" CNAsim --meta "version=CNAsim 1.3.4 (git f034398)" "args=$ARGS" \
     "fit=Lorenz point (0.5, $Y) and mean depth from DLP+ (reads/cn per 500 kb bin, median over cells); W 1 Mb, I 3 at defaults" \
     "karyotype=-w -v -c 3 -i 10: whole-genome doubling and arm/chromosome events over several states, as DLP+ OV2295 (mean cn 4)" ;;
+sistem)
+  # SISTEM's single-cell read counts per 500 kb bin, at DLP+'s reads per bin and copy: SISTEM draws
+  # region_len * (coverage / 2) / (2 * read_len) reads per region and copy, so coverage is
+  # 4 * 150 * (DLP+'s mean reads / its mean copy number) / 500 kb. Uniform coverage (see datasim_sistem.py).
+  : "${SISTEM_PY:?set SISTEM_PY to the python of a SISTEM 1.0.5 environment}"
+  P=$($S prep-cnasim); echo "DLP+: $P"
+  C=$(echo "$P" | $PY -c "import sys,json; d=json.load(sys.stdin); print(round(4*150*d['mean_reads']/d['mean_cn']/500000, 5))")
+  echo "coverage $C"
+  "$SISTEM_PY" -I validation/paper/tools/datasim_sistem.py "$T/out" "$C" 1 > "$T/sistem.log" 2>&1 || { tail -20 "$T/sistem.log"; exit 1; }
+  $S reduce-sistem "$T/out" SISTEM --meta "version=SISTEM $("$SISTEM_PY" -c 'import importlib.metadata as m; print(m.version("sistem"))')" \
+    "args=one site, quickstart driver-region selection, 5,000 detectable cells, 100 sampled, region_len = bin_size = 500 kb, coverage $C, seed 1" \
+    "fit=reads per bin and copy from DLP+ (mean reads / mean copy number per 500 kb bin)" \
+    "coverage=uniform (lorenz_y 0.5): the non-uniform path of gen_readcounts_singlecell raises TypeError in 1.0.5" ;;
 splatter|scdesign3|srtsim)
   IMG=$ISCC_TOOLS_DIR/datasim-r.sif
   RS=(apptainer exec --cleanenv -B "$PWD" -B "$SCR" --env OMP_NUM_THREADS=1 "$IMG" /opt/conda/bin/Rscript)
