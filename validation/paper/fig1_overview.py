@@ -1,27 +1,25 @@
-"""Figure 1 and S9 Fig: one structured tumour, many modalities, one ground truth.
+"""Figure 1: one structured tumour, many modalities, one ground truth.
 
-Both figures show the showcase tumour (registry R0/seed1: a 170 x 170 primary field with a 170 x 170
-metastatic lattice appended). Fig 1 is drawn at the text width and at most half the text height
-(165 x 114 mm), so that its text keeps its size in the paper:
+Figure 1 shows the showcase tumour (registry R0/seed1: a 170 x 170 primary field with a 170 x 170
+metastatic lattice appended), 165 x 186 mm so that with its caption it fits the page at its true size:
   (a) the workflow, as one row: the tissue setup (glands in stroma, the metastatic site and its
       vessel); the grown tumour coloured by clone, with the metastasis as an inset; the sampling (the
-      resected primary bisected into a dissociated and a sectioned half, and four multi-region blocks
-      with their clone fractions); and a thumbnail of what each assay returns (a WGS depth track, an
-      scDNA copy-number heatmap, an scRNA embedding, a Visium spot map);
-  (b) selection depends on the niche, as one row: a schematic of the gland, the stroma and the
-      metastasis with the rule of each, and the rules that hold in every niche. The regime's values and
-      the share of cancer cells carrying each trait in each compartment go to the render numbers.
-S9 Fig follows one clone through every modality, on its own page (165 mm wide):
-  (a) its true copy-number profile against the tumour's modal profile;
-  (b) a WGS track, drawn over the copies of the cells it pools so that the clone's segments enter at
+      resected primary cut through its largest clone into a sectioned and a dissociated part, and four
+      multi-region blocks with their clone fractions); and a thumbnail of what each assay returns (a WGS
+      depth track, an scDNA copy-number heatmap, an scRNA embedding, a Visium spot map);
+  (b-h) one clone through every modality (``render_s9``; S9 Fig until 2026-11-25):
+  (b) its true copy-number profile against the tumour's modal profile;
+  (c) a WGS track, drawn over the copies of the cells it pools so that the clone's segments enter at
       its cell fraction (on the multi-region block where the clone is largest; the dissociated half,
       where it is 2% of the cells, is reported in the render numbers);
-  (c) the scDNA heatmap with its cells boxed and the calls against the truth;
-  (d) the scRNA expression shift along the genome against the dosage law on its true copies;
-  (e) the scRNA embedding with its cells highlighted;
-  (f) the Visium map of its true fraction per spot;
-  (g) its place in the genealogy, with the copy-number events on its path and the clones' cells in the
+  (d) the scDNA heatmap with its cells boxed and the calls against the truth;
+  (e) the scRNA expression shift along the genome against the dosage law on its true copies;
+  (f) the scRNA embedding with its cells highlighted;
+  (g) the Visium map of its true fraction per spot, in the square window of the section;
+  (h) its place in the genealogy, with the copy-number events on its path and the clones' cells in the
       metastasis.
+Selection in each niche (``render_b``), Figure 1B until 2026-11-25, is Figure 2A, drawn by
+``fig2_niche.py`` from this module's tissue cache.
 The strip of measurement biases that Fig 1 used to carry is S2 Fig (``supp_biases.py``).
 
 Definitions:
@@ -50,13 +48,13 @@ Definitions:
 
 Each part is computed once, in its own process, into small caches under
 ``<OUT>/derived/fig1/fig1_<part>.{json,npz}``; the render reads only the caches and writes every number
-it draws (Fig 1 under "a" and "b", S9 Fig under "s9") to ``fig1_render_numbers.json`` beside them.
+it draws (Fig 1 under "a" and "s9") to ``fig1_render_numbers.json`` beside them.
 
 Usage (from the iscc repository root, with ISCC_PAPER_OUT and ISCC_PAPER_TIER set as for the registry):
     python validation/paper/fig1_overview.py --part tissue          # counts only, about a minute
     python validation/paper/fig1_overview.py --part dissociated     # WGS, scDNA, scRNA of one half
     python validation/paper/fig1_overview.py --part section         # Visium of the other half
-    python validation/paper/fig1_overview.py                        # render Fig 1 and S9 Fig from the caches
+    python validation/paper/fig1_overview.py                        # render Figure 1 from the caches
 """
 import argparse
 import json
@@ -88,7 +86,7 @@ NORMAL_COLOUR = {"stromal": "#CDBFA8", "epithelial": S.COMPARTMENT["epithelium"]
                  "host": "#9DB7CC"}
 N_BLOCKS, BLOCK_HALF = 4, 8              # as in Fig 3a: 17 x 17 demes, about 1 mm at the cm scale
 FS = 5.5                                 # the smallest text in the paper's figures, in points
-FIG1_SIZE = (165, 84)                    # mm: the text width, and at most half the text height (114 mm)
+FIG1_SIZE = (165, 186)                   # mm: the text width; the workflow over one clone in every modality
 S9_SIZE = (165, 135)                     # mm: S9 Fig at the text width, so that its text keeps its size
 MET_BLUE, VESSEL_RED = "#3E7CB1", "#B2182B"
 
@@ -935,14 +933,13 @@ def _visium(ax, Vz, T, mode="clone", k=None, colour=None, square=False):
         o = np.argsort(f)
         sc = ax.scatter(xy[on, 1][o], xy[on, 0][o], s=d_pt ** 2, c=f[o], cmap=cmap, vmin=0, vmax=1, marker="h",
                         lw=0, rasterized=True)
-        return sc
     ax.set_xlim(c0, c1)
     ax.set_ylim(r1, r0)
     ax.set_aspect("equal", adjustable="box")
-    return window
+    return sc if mode != "clone" else window
 
 
-# --- Fig 1B: selection depends on the niche, as one row ----------------------------------------------
+# --- Figure 2A: selection depends on the niche, as one row (render_b) ----------------------------------------------
 NICHE_X, NICHE_SIDE = (4.0, 58.0, 112.0), 22.0
 NICHE_RULES = (
     ("Gland", (("Founding acinus", "closed at first"),
@@ -979,9 +976,9 @@ def _niche_ax(fig, x, y, background):
     return ax
 
 
-def render_b(fig, y0, T, nums):
+def render_b(fig, y0, T, nums, letter="b"):
     from matplotlib.patches import Circle, Ellipse, FancyArrowPatch, FancyBboxPatch, Rectangle
-    S.panel_letter(fig, "b", 1, y0)
+    S.panel_letter(fig, letter, 1, y0)
     S.text_mm(fig, 5, y0 + 1.5, "Selection in each niche", fontsize=6.5, fontweight="bold", va="center")
     col = dict(zip(T["labels"], T["colours"]))
     can = [col["clone 1"], col["clone 3"], col["clone 2"]]
@@ -1047,12 +1044,12 @@ def render_b(fig, y0, T, nums):
     return yb + 5.6
 
 
-# --- S9 Fig: one clone in every modality -------------------------------------------------------------
+# --- Figure 1B-H: one clone in every modality -------------------------------------------------------------
 S9_X0, S9_W0 = 17.0, 92.0                 # the genome-aligned column (A to D)
 S9_XR = 121.0                             # the right column (E, F)
 # (top, height) in mm of the axes of each panel of S9 Fig; letters and keys sit above them
 S9_ROW = dict(a=(9.0, 10.0), b=(25.5, 11.5), c=(45.0, 30.0), d=(82.5, 12.5), g=(109.0, 19.0),
-              e=(7.5, 35.0), f=(52.5, 37.5))
+              e=(7.5, 35.0), f=(52.5, 30.0))
 
 
 def _key(ax, entries, **kw):
@@ -1065,7 +1062,9 @@ def _key(ax, entries, **kw):
     return ax.legend([h for h, _ in entries], [lab for _, lab in entries], **opts)
 
 
-def render_s9(fig, T, D, Dz, V, Vz, nums):
+def render_s9(fig, T, D, Dz, V, Vz, nums, y0=0.0, letters="abcdefg"):
+    """One clone in every modality. Drawn as its own figure (``y0`` 0, letters a-g) or inside Figure 1,
+    below the workflow (``y0`` the top of the block in mm, ``letters`` b-h)."""
     from matplotlib.cm import ScalarMappable
     from matplotlib.lines import Line2D
     from matplotlib.patches import Patch, Rectangle
@@ -1075,6 +1074,7 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
     ck = col[k]
     li = {lab: i for i, lab in enumerate(labels)}
     X0, W0, XR = S9_X0, S9_W0, S9_XR
+    L = dict(zip("abcdefg", letters))
     Wf, Hf = fig.get_size_inches() / S.MM
     cons, modal = np.asarray(T["consensus"][k]), np.asarray(T["modal"])
     altered = np.nonzero(cons != modal)[0]
@@ -1091,7 +1091,7 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
 
     def _row(p, width=W0):
         """(top, width, height) of panel ``p``'s axes, for ``S.ax_mm`` after its left edge."""
-        return S9_ROW[p][0], width, S9_ROW[p][1]
+        return S9_ROW[p][0] + y0, width, S9_ROW[p][1]
 
     def row_key(ax, entries, y):
         """A key at ``y`` mm, from the left edge of the genome column."""
@@ -1099,7 +1099,7 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
                     bbox_transform=fig.transFigure)
 
     # (A) the true copy-number profile
-    S.panel_letter(fig, "a", 1, 1)
+    S.panel_letter(fig, L["a"], 1, y0 + 1)
     ax = S.ax_mm(fig, X0, *_row("a"))
     _genome_axis(ax, T, labels=True, top=True)
     shade(ax)
@@ -1111,7 +1111,7 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
     ylab(ax, "True copy\nnumber")
     S.despine(ax, True, False)
     row_key(ax, [(Line2D([], [], color=ck, lw=1.6), f"consensus profile of {k}"),
-                 (Line2D([], [], color=S.GREY, lw=0.8, ls=(0, (2, 1))), "modal profile of the tumor")], 3.0)
+                 (Line2D([], [], color=S.GREY, lw=0.8, ls=(0, (2, 1))), "modal profile of the tumor")], y0 + 3.0)
 
     if Dz is None:
         for p in "bcd":
@@ -1137,7 +1137,7 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
             scale = np.average(w["seg_true"], weights=sizes)            # the pool's mean copy number
             return np.array([rel[lseg == s_].mean() for s_ in range(len(sizes))]) * scale, scale
 
-        S.panel_letter(fig, "b", 1, S9_ROW["b"][0] - 4.0)
+        S.panel_letter(fig, L["b"], 1, S9_ROW["b"][0] + y0 - 4.0)
         wb = D["wgs_block"]
         normal, oth, kk = parts(wb)
         obs, scale = observed(wb, Dz["wgs_block_rel"].astype(float))
@@ -1178,8 +1178,8 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
             reference=wb["reference"], mu_depth=wb["mu_depth"], kappa=wb["kappa"])
 
         # (C) scDNA: integer calls, its cells boxed, scored against the truth
-        yc, hc = S9_ROW["c"]
-        S.panel_letter(fig, "c", 1, yc - 6.5)
+        yc, hc = S9_ROW["c"][0] + y0, S9_ROW["c"][1]
+        S.panel_letter(fig, L["c"], 1, yc - 6.5)
         calls, ploidy = call_cn(Dz["sc_rel"].astype(float))
         truth = np.rint(Dz["sc_true"])
         dbl = Dz["sc_doublet"].astype(bool)
@@ -1235,7 +1235,7 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
                            reference=D["scdna"]["reference"], mu_depth=D["scdna"]["mu_depth"])
 
         # (D) scRNA: the expression shift on its altered segments
-        S.panel_letter(fig, "d", 1, S9_ROW["d"][0] - 4.5)
+        S.panel_letter(fig, L["d"], 1, S9_ROW["d"][0] + y0 - 4.5)
         ax = S.ax_mm(fig, X0, *_row("d"))
         _genome_axis(ax, T, labels=True)
         shade(ax)
@@ -1271,7 +1271,7 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
                            cn_log2_ratio={str(s + 1): round(float(cn_ratio[s]), 3) for s in altered})
 
         # (E) the scRNA embedding with its cells highlighted
-        S.panel_letter(fig, "e", XR - 4.0, 1)
+        S.panel_letter(fig, L["e"], XR - 4.0, y0 + 1)
         ax = S.ax_mm(fig, XR, *_row("e", S9_SIZE[0] - 2.0 - XR))
         xy, rc = Dz["umap"], Dz["rna_code"].astype(int)
         m = rc == li[k]
@@ -1282,19 +1282,15 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
         nd["umap"] = dict(cells=int(len(m)), choice_cells=int(m.sum()))
 
     # (F) Visium: its true fraction per spot
-    yf, hf = S9_ROW["f"]
-    S.panel_letter(fig, "f", XR - 4.0, yf - 5.5)
+    yf, hf = S9_ROW["f"][0] + y0, S9_ROW["f"][1]
+    S.panel_letter(fig, L["f"], XR - 4.0, yf - 5.5)
     if Vz is None:
         _pending(S.ax_mm(fig, XR + 6.0, yf, 30.0, hf), "pending: --part section")
     else:
         ax = S.ax_mm(fig, XR + 6.0, yf, 30.0, hf)
-        sc = _visium(ax, Vz, T, mode="fraction", colour=ck)
+        sc = _visium(ax, Vz, T, mode="fraction", colour=ck, square=True)    # sets the window's limits
         n = Vz["n_cells"]
         on = n > 0
-        xy = Vz["coords"]
-        ax.set_xlim(xy[on, 1].min() - 2, xy[on, 1].max() + 2)
-        ax.set_ylim(xy[on, 0].max() + 2, xy[on, 0].min() - 2)
-        ax.set_aspect("equal", adjustable="box")
         _frame(ax, "none")
         ax.set_title(f"Visium: {k}", fontsize=6.0, color=S.MODALITY["spatial"], pad=1.5)
         cax = S.ax_mm(fig, XR + 12.0, yf + hf + 3.0, 18.0, 1.1)
@@ -1309,7 +1305,7 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
                             median_cells_per_spot=float(np.median(n[on])), section_cells=V["n_section_cells"])
 
     # (G) its place in the genealogy
-    S.panel_letter(fig, "g", 1, S9_ROW["g"][0] - 5.0)
+    S.panel_letter(fig, L["g"], 1, S9_ROW["g"][0] + y0 - 5.0)
     ax = S.ax_mm(fig, X0, *_row("g", 133.0))
     nd["genealogy"] = _genealogy(ax, T, k, ck)
     nums["s9"] = nd
@@ -1420,18 +1416,15 @@ def render():
     V, Vz = _read_json("fig1_section.json"), _read_npz("fig1_section.npz")
     nums = dict(source=T["source"], a={}, caches=dict(tissue=cache_path("fig1_tissue.json"),
                                                        dissociated=D is not None, section=V is not None))
-    # Fig 1: the workflow (A) over the niches (B), at the text width and at most half the text height
+    # Fig 1: the workflow (A) over one clone in every modality (B-H, S9 Fig before 2026-11-25); the
+    # selection in each niche (B before) is Figure 2A, drawn by fig2_niche.py with render_b
     fig = S.figure(*FIG1_SIZE)
     render_a(fig, T, Z, D, Dz, V, Vz, nums)
-    render_b(fig, BELOW + 12.0, T, nums)
+    render_s9(fig, T, D, Dz, V, Vz, nums, y0=BELOW + 13.0, letters="bcdefgh")
     path = S.save(fig, "fig1_overview")
-    # S9 Fig: one clone in every modality
-    fig = S.figure(*S9_SIZE)
-    render_s9(fig, T, D, Dz, V, Vz, nums)
-    path9 = S.save(fig, "supp_clone_modalities")
     with open(cache_path("fig1_render_numbers.json"), "w") as f:
         json.dump(nums, f, indent=1, default=float)
-    print("wrote", path, path9, "and", cache_path("fig1_render_numbers.json"))
+    print("wrote", path, "and", cache_path("fig1_render_numbers.json"))
 
 
 PARTS = {"tissue": compute_tissue, "dissociated": compute_dissociated, "section": compute_section}

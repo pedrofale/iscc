@@ -14,9 +14,12 @@ computes nothing heavy and reads no tumour:
       profiles as the reference; a line joins true and called where the truth arm is above chance
       (``fig4_score.CHANCE_MARGIN``); ``fig4_chain.py`` and ``fig4_diag.py`` outputs in ``$FIG4_OUT`` and
       ``$FIG4_DIAG``;
+  (e) copy-number tree methods against the true genealogy, confined against free growth (a placeholder
+      until ``trees.csv`` of exp-paper1-cn-trees-architecture exists, ``$FIG4_TREES``);
   (d) structure misleads a lineage method: the hypoxia field's lineage and spatial autocorrelation
-      side by side by architecture and selection (``fig4_lineage.py``: ``$FIG4_DEV/e``); the scatter
-      of one against the other, a separate panel before 2026-11-25, repeated the same numbers.
+      side by side by architecture and selection, and the share of tumours each test calls heritable
+      (``fig4_lineage.py``: ``$FIG4_DEV/e``); the scatter of one against the other, a separate panel
+      before 2026-11-25, repeated the same numbers.
 
 The per-spot clone-fraction error of Clonalscope with and without the DNA prior, and the map of one
 ductal-field tumour (Fig 4d and 4e(i) before the half-page layout), are S12 Fig, drawn by
@@ -57,7 +60,7 @@ TUMOURS = os.environ.get("FIG4_TUMOURS",
 
 # Half a page at full text width: 165 mm by at most 114 mm, included at its true size, so no text is
 # smaller than SMALL (5.5 pt) and the panel letters are 8 pt.
-W_MM, FIG_H = 165, 114
+W_MM, FIG_H = 165, 156                  # 114 before panel E (2026-11-25)
 SMALL = 5.5
 
 # niche colours, validated with the dataviz palette check (all pairs, light): CVD and normal vision pass
@@ -76,9 +79,12 @@ ARCH = {"ductal": ("ductal field", S.CLONE_FAMILIES[0][1]), "free": ("without gl
 
 # Layout in mm from the top-left corner. Row 1: (a). Row 2: (b) and (c). Row 3: (d).
 A_ROWS, A_BH = (1.0, 8.2, 15.4, 22.6), 5.2        # the four modality rows of (a) and their box height
-B_TOP, B_H, B_W, B_X = 35.0, 29.5, 36.0, (28.0, 69.0)
-C_X, C_TOP, C_W, C_H = 118.0, 41.0, 45.5, 21.0
+# (b) is clonealign on the left, (c) the single-modality calls on the right (swapped on 2026-11-25, so the
+# chain from DNA into RNA comes first, as in the text)
+B_TOP, B_H, B_W, B_X = 35.0, 29.5, 36.0, (86.0, 127.0)
+C_X, C_TOP, C_W, C_H = 12.0, 41.0, 45.5, 21.0
 R3_LETTER, R3_TOP, R3_H = 74.5, 78.0, 27.0
+R4_LETTER, R4_TOP, R4_H = 115.5, 120.0, 26.0      # (e): copy-number trees
 
 
 def _group(task):
@@ -171,7 +177,7 @@ def panel_a(fig, ov):
     _box(ov, 106, A_ROWS[2], 17, A_BH, "clonealign", pale[RNA], ec=RNA)
     _arrow(ov, 102, mid[1] + 1.2, 106, mid[2] - 0.6, color=DNA)
     _box(ov, 95, A_ROWS[0], 28, A_BH, "lineage and space\nin the hypoxia field", "white", ec=S.GREY)
-    for x, m, lab in ((TX + TW + 1.2, mid[2], "B"), (TX + TW + 1.2, mid[3], "B"), (124.2, mid[2], "C"),
+    for x, m, lab in ((TX + TW + 1.2, mid[2], "C"), (TX + TW + 1.2, mid[3], "C"), (124.2, mid[2], "B"),
                       (124.2, mid[0], "D")):
         ov.text(x, m, lab, fontsize=6, fontweight="bold", color=S.GREY, va="center")
     # the ground truth, scored against every link
@@ -214,7 +220,7 @@ def _numbers_b_all(df, nums):
 
 
 def panel_b(fig, ov, nums):
-    S.panel_letter(fig, "b", 0.5, 30.0)
+    S.panel_letter(fig, "c", 59.5, 30.0)
     files = [os.path.join(DEV, "b", f"{RUN}_{t}", "scores.csv") for t in TUMOURS]
     have = [pd.read_csv(f).assign(tumour=os.path.basename(os.path.dirname(f))) for f in files if os.path.exists(f)]
     df = pd.concat(have, ignore_index=True) if have else pd.DataFrame()
@@ -224,7 +230,7 @@ def panel_b(fig, ov, nums):
     # the AUC axis reaches below the lowest niche AUC (0.403) and past 1, so no dot is cut at an edge
     for col, (metric, xlab, lim, ticks) in enumerate(
             (("auc", "Malignancy AUC", (0.35, 1.02), (0.4, 0.6, 0.8, 1.0)),
-             ("cn_r", "Copy number correlation per chromosome arm", (-0.2, 1.0), (0.0, 0.5, 1.0)))):
+             ("cn_r", "Copy number correlation\nper chromosome arm", (-0.2, 1.0), (0.0, 0.5, 1.0)))):
         ax = S.ax_mm(fig, B_X[col], B_TOP, B_W, B_H)
         for i, (assay, tool, lab) in enumerate(ROWS_B):
             y = n - 1 - i
@@ -255,7 +261,7 @@ def panel_b(fig, ov, nums):
         if col == 0:
             # the modality of each block of rows, left of the tool names
             tr = ax.get_yaxis_transform()
-            x = -(B_X[0] - 2.6) / B_W
+            x = -25.4 / B_W                    # the modality, left of the tools' names
             ax.text(x, 6.5, "scRNA", transform=tr, rotation=90, ha="center", va="center", fontsize=6,
                     color=S.MODALITY["RNA"], fontweight="bold")
             ax.text(x, 2.0, "Visium", transform=tr, rotation=90, ha="center", va="center", fontsize=6,
@@ -270,7 +276,7 @@ def panel_b(fig, ov, nums):
 
 
 def panel_c(fig, ov, c, nums):
-    S.panel_letter(fig, "c", 106.5, 30.0)
+    S.panel_letter(fig, "b", 0.5, 30.0)
     ax = S.ax_mm(fig, C_X, C_TOP, C_W, C_H)
     DNA = S.MODALITY["DNA"]
     nums["c"] = {}
@@ -307,7 +313,7 @@ def panel_c(fig, ov, c, nums):
                 label="true profiles of scDNA clones"),
          Line2D([], [], marker="D", ls="none", mfc="#BDBDBD", mec="white", ms=3.0,
                 label="best-correlated true profile")]
-    fig.legend(handles=h, loc="upper left", bbox_to_anchor=(110.0 / W_MM, 1 - 30.2 / FIG_H), fontsize=SMALL,
+    fig.legend(handles=h, loc="upper left", bbox_to_anchor=(4.0 / W_MM, 1 - 30.2 / FIG_H), fontsize=SMALL,
                frameon=False, ncol=2, borderaxespad=0, columnspacing=0.8, handletextpad=0.3)
 
 
@@ -322,7 +328,7 @@ def panel_de(fig, ov, nums):
     if not len(df):
         nums["lineage"] = {}
         return
-    ax = S.ax_mm(fig, 11.0, R3_TOP, 132.0, R3_H)
+    ax = S.ax_mm(fig, 11.0, R3_TOP, 92.0, R3_H)
     groups = [("R1", "ductal", None, "dispersal sweep"), ("R3", "ductal", "selected", "selected"),
               ("R3", "ductal", "neutral", "neutral"), ("R3", "free", "selected", "selected"),
               ("R3", "free", "neutral", "neutral")]
@@ -359,9 +365,76 @@ def panel_de(fig, ov, nums):
          for _, mk, _, lab in MEASURE]
     h.append(Line2D([], [], marker="o", ls="none", mfc="white", mec="#6F6F6F", mew=0.6, ms=3.2, label="stalled"))
     h.append(Line2D([], [], color=S.INK, lw=0.9, label="mean"))
-    ax.legend(handles=h, fontsize=SMALL, loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False,
+    ax.legend(handles=h, fontsize=SMALL, loc="upper left", bbox_to_anchor=(1.01, 1.0), frameon=False,
               borderaxespad=0, handletextpad=0.3)
+    # what each test concludes: the share of tumours whose field it calls heritable, by a permutation
+    # test of the lineage autocorrelation alone (p < 0.05) and by comparing it with the spatial one
+    ax2 = S.ax_mm(fig, 132.0, R3_TOP, 31.0, R3_H)
+    arch_groups = [("ductal", "ductal field"), ("free", "without glands")]
+    tests = (("permutation", "permutation test", S.INK), ("compare", "lineage above spatial", "#BDBDBD"))
+    called = {}
+    for gi, (arch, lab) in enumerate(arch_groups):
+        sub = df[df.arch == arch]
+        if not len(sub):
+            continue
+        share = {"permutation": float((sub.perm_p < 0.05).mean()),
+                 "compare": float((sub.field_lin >= sub.field_sp).mean())}
+        called[arch] = dict(n=int(len(sub)), **share)
+        for ti, (key, _, col) in enumerate(tests):
+            ax2.bar(gi + (ti - 0.5) * 0.36, share[key], width=0.34, color=col, lw=0)
+    ax2.set_xticks(range(len(arch_groups)))
+    ax2.set_xticklabels([lab.replace(" ", "\n", 1) for _, lab in arch_groups], fontsize=SMALL)
+    ax2.set_xlim(-0.6, len(arch_groups) - 0.4)
+    ax2.set_ylim(0, 1.4)                                  # headroom for the key, inside the axes
+    ax2.set_yticks([0, 0.5, 1])
+    ax2.set_ylabel("Tumors called heritable")
+    ax2.legend(handles=[Line2D([], [], marker="s", ls="none", mfc=col, mec="none", ms=3.2, label=lab)
+                        for _, lab, col in tests], fontsize=SMALL, loc="upper left", frameon=False,
+               borderaxespad=0.1, handletextpad=0.3)
     nums["lineage"] = FL.summary(DEV)
+    nums["lineage"]["called_heritable"] = called
+
+
+# beside the Fig 4 outputs unless given: <parent of $FIG4_DEV>/cn-trees/trees.csv
+TREES = os.environ.get("FIG4_TREES") or os.path.join(os.path.dirname(os.path.normpath(DEV)), "cn-trees", "trees.csv")
+
+
+def panel_trees(fig, nums):
+    """(e) copy-number tree methods against the true genealogy, confined against free growth, from the
+    true and the called copy numbers (``trees.csv`` of exp-paper1-cn-trees-architecture: one row per
+    tumour, method and input, with ``nrf``). A placeholder until the file exists."""
+    S.panel_letter(fig, "e", 0.5, R4_LETTER)
+    ax = S.ax_mm(fig, 11.0, R4_TOP, 152.0, R4_H)
+    if not os.path.exists(TREES):
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for sp in ax.spines.values():
+            sp.set_visible(True)
+            sp.set_color(S.BG_CELLS)
+        ax.text(0.5, 0.5, "pending: copy-number trees against the true genealogy, confined against free growth,\n"
+                "from true and called copy number (Harald, Marzie; exp-paper1-cn-trees-architecture)",
+                ha="center", va="center", fontsize=SMALL, color=S.GREY, transform=ax.transAxes)
+        nums["trees"] = None
+        return
+    df = pd.read_csv(TREES)
+    groups = [(a, sel) for a in ("confined", "free") for sel in ("selected", "neutral")]
+    methods = sorted(df.method.unique())
+    inputs = [i for i in ("true", "called") if i in set(df.input)]
+    width = 0.8 / max(1, len(methods) * len(inputs))
+    for gi, (a, sel) in enumerate(groups):
+        for mi, m in enumerate(methods):
+            for ii, inp in enumerate(inputs):
+                v = df[(df.arch == a) & (df.selection == sel) & (df.method == m) & (df.input == inp)].nrf
+                x = gi - 0.4 + width * (mi * len(inputs) + ii + 0.5)
+                ax.scatter(np.full(len(v), x), v, s=4, color=S.CLONE_FAMILIES[mi][1],
+                           alpha=1.0 if inp == "true" else 0.5, linewidths=0, zorder=3)
+                if len(v):
+                    ax.plot([x - width * 0.4, x + width * 0.4], [v.mean()] * 2, color=S.INK, lw=0.9, zorder=4)
+    ax.set_xticks(range(len(groups)))
+    ax.set_xticklabels([f"{sel}\n{'ductal field' if a == 'confined' else 'without glands'}" for a, sel in groups],
+                       fontsize=SMALL)
+    ax.set_ylabel("Tree distance to the truth")
+    nums["trees"] = df.groupby(["arch", "selection", "method", "input"]).nrf.mean().round(3).to_dict()
 
 
 def main():
@@ -377,6 +450,7 @@ def main():
     c = c[c["resolution"] == "fine"] if len(c) else c
     panel_c(fig, ov, c, nums)
     panel_de(fig, ov, nums)
+    panel_trees(fig, nums)
     path = S.save(fig, "fig4_benchmark")
     os.makedirs(DEV, exist_ok=True)
     with open(os.path.join(DEV, "fig4_benchmark_numbers.json"), "w") as f:
