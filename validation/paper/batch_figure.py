@@ -32,18 +32,21 @@ import style as S  # noqa: E402
 
 # One colour per entity for the whole paper: iscc and real from style.SOURCE; Splatter's is the
 # data-simulator supplement's (style.TOOL["Splatter"]).
-COL = {"real": S.SOURCE["real"], "iscc": S.SOURCE["iscc"], "splatter": S.TOOL.get("Splatter", "#A50026"),
-       "splatteriscc": S.TOOL.get("Splatter", "#A50026")}
+COL = {"real": S.SOURCE["real"], "iscc": S.SOURCE["iscc"], "generic": S.CLONE_FAMILIES[0][2],
+       "splatter": S.TOOL.get("Splatter", "#A50026"), "splatteriscc": S.TOOL.get("Splatter", "#A50026")}
 # Labels follow the paper's style for text inside figures (no parentheticals or settings: the caption
 # names the data set and how Splatter was matched).
-LABEL = {"real": "real", "iscc": "iscc", "splatter": "Splatter", "splatteriscc": "Splatter at iscc's size"}
-TICK = {"real": "real", "iscc": "iscc", "splatter": "Splatter", "splatteriscc": "Splatter at\niscc's size"}
+LABEL = {"real": "real", "iscc": "iscc", "generic": "per-gene factor", "splatter": "Splatter",
+         "splatteriscc": "Splatter at iscc's size"}
+TICK = {"real": "real", "iscc": "iscc", "generic": "per-gene\nfactor", "splatter": "Splatter",
+        "splatteriscc": "Splatter at\niscc's size"}
+ORDER = ("real", "iscc", "generic", "splatter", "splatteriscc")
 
 
 def _versions(v):
     names = list(v["versions_stats"])
     groups = {"real": ["real"]}
-    for pre in ("iscc", "splatter", "splatteriscc"):
+    for pre in ORDER[1:]:
         g = sorted(n for n in names if n.startswith(pre + "_s"))
         if g:
             groups[pre] = g
@@ -66,7 +69,7 @@ def draw_s1(ax, v, key):
     ("mean_log2fc" or "sd_log2fc"), real against every seed of iscc and Splatter. Shared with
     ``fig5_figure.py``; the summary statistics are in validation.json and the text, not on the axes."""
     vs, groups = v["versions_stats"], _versions(v)
-    for pre in ("splatteriscc", "splatter", "iscc"):
+    for pre in ORDER[:0:-1]:
         for i, n in enumerate(groups.get(pre, [])):
             x, y = _decile_curve(vs[n], key)
             ax.plot(x, y, color=COL[pre], lw=0.6, alpha=0.75, ls=("--" if pre == "splatteriscc" else "-"),
@@ -83,7 +86,7 @@ def draw_s3(ax, v):
     """S3 on ``ax``: the correlation of the log2 fold changes between pairs of cell types, every
     pair of every seed, with the median of the seeds' medians. Shared as :func:`draw_s1`."""
     vs, groups = v["versions_stats"], _versions(v)
-    order = [g for g in ("real", "iscc", "splatter", "splatteriscc") if g in groups]
+    order = [g for g in ORDER if g in groups]
     rng = np.random.default_rng(0)
     for xi, g in enumerate(order):
         vals = [c for n in groups[g] for c in vs[n]["S3_pairs"].values()]
@@ -146,7 +149,7 @@ def _strip(ax, v, key, order, labels):
 def supp_panel(v):
     S.setup()
     groups = _versions(v)
-    order = [g for g in ("real", "iscc", "splatter", "splatteriscc") if g in groups]
+    order = [g for g in ORDER if g in groups]
     strip_h = 4.0 * len(order) + 1.0
     y_ac, h_ac = 7, 30                               # A-C, then the rows D-E, F and G
     y_rows = [y_ac + h_ac + 20]

@@ -71,6 +71,24 @@ as reproduced only when iscc is closer on every one. S0 of iscc is reported agai
 when they differ by more than a factor of 1.5 the primary comparison is with a Splatter version
 matched to iscc's S0, and the version matched to the real S0 is reported beside it; if that version
 cannot be tuned, the run stops. S4 has no expectation.
+
+**Deviation (2026-11-25, before the run that scores).** Splatter cannot be tuned to the real S0:
+with no batch factor its own sampling noise gives an S0 of 0.708 against the real 0.678 (Arrhenius
+job 5733270), because ``splatEstimate`` fits one library-size spread (log sd 0.80) and one dispersion
+to the pooled cell types, which makes every type noisier than the real one. The registered comparison
+therefore cannot be made as registered. It is replaced, before any version is scored, by:
+
+* **generic**, the primary comparison: ``iscc`` on the same cells, with one set of technical
+  parameters for both batches (the cell-weighted mean of the two runs' vectors, as
+  :func:`generic_settings` makes them), so that the batches differ only by the per-gene factor
+  (``sigma_batch``), tuned to the real S0 as Splatter's was (grid, finer grid, interpolation, at the
+  tuning seed). It is the generic batch model on ``iscc``'s within-type noise, so the comparison
+  isolates the batch model;
+* Splatter at the batch factor whose S0 is closest to the real one (0, its floor), reported beside
+  it and marked as not matched (``tune(..., strict=False)``); the same holds for the version matched
+  to iscc's size.
+
+The registered criterion is unchanged with ``generic`` in Splatter's place.
 """
 import argparse
 import json
@@ -103,6 +121,7 @@ SIGMA_BATCH = 0.10
 SIZE_FACTOR = 1.5
 DE_GRID = (0.02, 0.05, 0.1, 0.2, 0.3, 0.45, 0.6, 0.8, 1.0, 1.3, 1.7, 2.2, 3.0)
 BATCH_GRID = (0.0, 0.01, 0.02, 0.04, 0.07, 0.1, 0.15, 0.2, 0.3, 0.45, 0.7)
+GENERIC_GRID = (0.0, 0.02, 0.05, 0.1, 0.15, 0.2, 0.3, 0.45, 0.7)
 N_REFINE = 4
 SUMMARIES = {"S1": ("S1_spearman", "S1_spread_ratio"),
              "S2": ("S2_slope_low", "S2_slope_mid", "S2_slope_high"),
@@ -272,8 +291,18 @@ def iscc_settings(fits, run, seed):
     return {k: float(v) for k, v in kw.items()}, src
 
 
-def iscc_version(X, obs, fits, seed):
-    """iscc's A-B contrast: per-type mean profiles, each run's cells and fitted parameters."""
+def generic_settings(fits, seed, n_cells):
+    """The generic arm's one parameter vector for both batches: the cell-weighted mean of the two
+    runs' vectors at this seed (``iscc_settings``), so that only the per-gene factor differs."""
+    kws = {r: iscc_settings(fits, r, seed) for r in ("A", "B")}
+    w = {r: n_cells[r] / (n_cells["A"] + n_cells["B"]) for r in ("A", "B")}
+    kw = {k: float(w["A"] * kws["A"][0][k] + w["B"] * kws["B"][0][k]) for k in kws["A"][0]}
+    return kw, dict(generic="cell-weighted mean of the runs' vectors", runs={r: kws[r][1] for r in kws})
+
+
+def iscc_version(X, obs, fits, seed, generic_sigma=None):
+    """iscc's A-B contrast: per-type mean profiles, each run's cells and fitted parameters. With
+    ``generic_sigma``, both batches take :func:`generic_settings` and that per-gene factor."""
     from iscc.data import scRNA
     lib = np.asarray(X.sum(1)).ravel().astype(float)
     comp = sp.diags(1.0 / np.maximum(lib, 1.0)) @ X
@@ -285,7 +314,12 @@ def iscc_version(X, obs, fits, seed):
         sel = np.flatnonzero(obs["run"].to_numpy() == r)
         names = [f"{r}{i}" for i in range(len(sel))]
         exp = pd.DataFrame(np.vstack([profiles[t] for t in ctype[sel]]), index=names, columns=cols)
-        kw, src = iscc_settings(fits, r, seed)
+        if generic_sigma is None:
+            kw, src = iscc_settings(fits, r, seed)
+        else:
+            n = {q: int((obs["run"] == q).sum()) for q in ("A", "B")}
+            kw, src = generic_settings(fits, seed, n)
+            kw["sigma_batch"] = float(generic_sigma)
         a = scRNA(protocol="10x", n_cells=len(sel), batch_label=r, seed=1000 * seed + off, **kw)
         a.run({"cell_exp": exp}, cell_subset=names)
         parts.append(sp.csr_matrix(a.observed_counts.loc[names].to_numpy()))
@@ -384,9 +418,10 @@ def _interp(xs, ys, target):
     return None, None
 
 
-def tune(splat, name, grid, target, stat, fixed):
-    """Grid, a finer grid inside the bracket, linear interpolation; returns (value, trace). Raises when
-    the target is outside what the grid reaches: the registered comparison needs the tuned version."""
+def tune(splat, name, grid, target, stat, fixed, strict=True):
+    """Grid, a finer grid inside the bracket, linear interpolation; returns (value, trace). When the
+    target is outside what the grid reaches it raises, or with ``strict=False`` returns the grid value
+    whose statistic is closest to the target, marked as not matched (the deviation of 2026-11-25)."""
     trace = []
 
     def evaluate(values, tag):
@@ -401,13 +436,35 @@ def tune(splat, name, grid, target, stat, fixed):
     pts = sorted(trace, key=lambda d: d["value"])
     x, br = _interp([d["value"] for d in pts], [d["stat"] for d in pts], target)
     if x is None:
-        raise RuntimeError(f"Splatter cannot be tuned: {name} on {list(grid)} gives "
-                           f"{[round(d['stat'], 4) for d in pts]}, never {target:.4f}")
+        msg = (f"Splatter cannot be tuned: {name} on {list(grid)} gives "
+               f"{[round(d['stat'], 4) for d in pts]}, never {target:.4f}")
+        if strict:
+            raise RuntimeError(msg)
+        best = min(pts, key=lambda d: abs(d["stat"] - target))
+        print(f"[tune {name}] not matched; closest {best['value']} -> {best['stat']:.4f}", flush=True)
+        return float(best["value"]), dict(target=target, trace=trace, matched=False, reason=msg,
+                                          closest_stat=best["stat"])
     fine = np.linspace(br[0], br[1], N_REFINE + 2)[1:-1]
     evaluate(fine, f"{name}_f")
     pts = sorted(trace, key=lambda d: d["value"])
     x2, br2 = _interp([d["value"] for d in pts], [d["stat"] for d in pts], target)
     return (x2 if x2 is not None else x), dict(target=target, trace=trace, matched=True, bracket=br2 or br)
+
+
+class IsccGeneric:
+    """``tune``'s simulator for the generic arm: iscc on the real cells with :func:`generic_settings`
+    and the per-gene factor of each run dict (``sigma_batch``) at its seed."""
+
+    def __init__(self, ctx):
+        self.ctx = ctx
+
+    def simulate(self, runs, tag):
+        out = {}
+        for r in runs:
+            Xg, bg, tg, _ = iscc_version(self.ctx["X"], self.ctx["obs"], self.ctx["fits"], r["seed"],
+                                         generic_sigma=r["sigma_batch"])
+            out[r["name"]] = (Xg, bg, tg)
+        return out
 
 
 # ------------------------------------------------------------------ run, in stages
@@ -422,7 +479,9 @@ def tune(splat, name, grid, target, stat, fixed):
 #   splatter  Splatter's five evaluation seeds at the tuned values, simulated in one call (S0-S4)
 #   size      iscc's S0 against the real one; when they differ by more than SIZE_FACTOR, Splatter's
 #             batch factor tuned to iscc's S0 and its five seeds (S0-S4)
-STAGES = ("tune", "iscc", "splatter", "size")
+#   generic   the deviation's primary comparison: iscc with one parameter vector for both batches and
+#             the per-gene factor tuned to the real S0, and its five seeds (S0-S4)
+STAGES = ("tune", "iscc", "splatter", "size", "generic")
 
 
 def _settings():
@@ -431,7 +490,8 @@ def _settings():
                 "each batch's mean in log2((mB + c) / (mA + c))", normalisation="median library size",
                 min_type_cells=MIN_TYPE_CELLS, k=K, n_pcs=N_PCS, seeds=SEEDS, tune_seed=TUNE_SEED,
                 ambient_seed=AMBIENT_SEED, sigma_batch=SIGMA_BATCH, size_factor=SIZE_FACTOR,
-                de_grid=DE_GRID, batch_grid=BATCH_GRID, n_refine=N_REFINE, summaries=SUMMARIES)
+                de_grid=DE_GRID, batch_grid=BATCH_GRID, generic_grid=GENERIC_GRID, n_refine=N_REFINE,
+                summaries=SUMMARIES)
 
 
 def _context(a):
@@ -539,7 +599,7 @@ def stage_tune(ctx, a, work, parts):
     de, de_trace = tune(splat, "de_facLoc", DE_GRID, real["S4"]["silhouette_celltype"], _sil_type,
                         dict(batch_facScale=0.0))
     bf, bf_trace = tune(splat, "batch_facScale", BATCH_GRID, real["summary"]["S0"], _s0(ctx["types"]),
-                        dict(de_facLoc=de))
+                        dict(de_facLoc=de), strict=False)
     part = dict(meta=_part_meta(ctx, "tune", t0), data=ctx["data"], versions=versions, splatter_image=image,
                 splatter=dict(estimate=est, **info, de_tuning=de_trace, de_facLoc=de, batch_tuning=bf_trace,
                               batch_facScale=bf, params=splat.params, runner_log=splat.log))
@@ -603,7 +663,7 @@ def stage_size(ctx, a, work, parts):
         splat, _ = _splatter(ctx, a, work)
         splat.params = tuned["params"]
         bf2, bf2_trace = tune(splat, "batch_facScale", BATCH_GRID, iscc_s0, _s0(ctx["types"]),
-                              dict(de_facLoc=tuned["de_facLoc"]))
+                              dict(de_facLoc=tuned["de_facLoc"]), strict=False)
         part["splatter"] = dict(batch_tuning_iscc_size=bf2_trace, batch_facScale_iscc_size=bf2)
         part["versions"] = _splatter_seeds(ctx, a, work, splat, tuned["de_facLoc"], bf2, "splatteriscc", "iscc S0")
         part["runner_log"] = splat.log
@@ -612,11 +672,33 @@ def stage_size(ctx, a, work, parts):
     return part
 
 
+def stage_generic(ctx, a, work, parts):
+    """The generic arm: the per-gene factor tuned to the real S0 at the tuning seed, then the five
+    seeds (S0-S4)."""
+    t0 = time.time()
+    real_s0 = _read_part(parts, "tune")["versions"]["real"]["summary"]["S0"]
+    sim = IsccGeneric(ctx)
+    sigma, trace = tune(sim, "sigma_batch", GENERIC_GRID, real_s0, _s0(ctx["types"]), {})
+    out = sim.simulate([dict(name=f"generic_s{s}", seed=s, sigma_batch=sigma) for s in SEEDS], "eval")
+    versions, embeds = {}, {}
+    for name in sorted(out):
+        Xg, bg, tg = out[name]
+        versions[name], embeds[name] = _record(ctx, name, Xg, bg, tg, work,
+                                               dict(generic=dict(sigma_batch=sigma, matched_to="real S0")))
+    del out
+    part = dict(meta=_part_meta(ctx, "generic", t0), versions=_add_lisi(versions, embeds, a, work),
+                generic=dict(sigma_batch=sigma, tuning=trace))
+    _write_part(parts, "generic", part)
+    return part
+
+
 def collect(parts, out):
     """validation.json from the parts: the versions, Splatter's tuning, S0 and the registered score."""
     if os.path.exists(out):
         sys.exit(f"{out} exists; remove it deliberately to rerun")
     names = ["tune"] + [f"iscc_s{s}" for s in SEEDS] + ["splatter", "size"]
+    if os.path.exists(_part_path(parts, "generic")):
+        names.append("generic")
     ps = {n: _read_part(parts, n) for n in names}
     for n, p in ps.items():                          # every part computed with the same inputs and settings
         for key in ("settings", "fits"):
@@ -643,6 +725,9 @@ def collect(parts, out):
                              iscc=getattr(iscc, "__version__", None), splatter_image=tp["splatter_image"]),
                stages={n: p["meta"] for n, p in ps.items()},
                versions_stats=versions, splatter=splatter, S0=s0, score=score(versions, differs))
+    if "generic" in ps:
+        res["generic"] = ps["generic"]["generic"]
+        res["S0"]["generic_median"] = float(np.median([versions[f"generic_s{s}"]["summary"]["S0"] for s in SEEDS]))
     res["wall_s"] = round(sum(p["meta"]["wall_s"] for p in ps.values()), 1)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     with open(out + ".part", "w") as f:
@@ -665,6 +750,8 @@ def stage(a):
             stage_iscc(ctx, a, a.work, a.parts, a.seed)
         elif a.stage == "splatter":
             stage_splatter(ctx, a, a.work, a.parts)
+        elif a.stage == "generic":
+            stage_generic(ctx, a, a.work, a.parts)
         else:
             stage_size(ctx, a, a.work, a.parts)
     finally:
@@ -685,6 +772,7 @@ def run(a):
             stage_iscc(ctx, a, a.work, parts, s)
         stage_splatter(ctx, a, a.work, parts)
         stage_size(ctx, a, a.work, parts)
+        stage_generic(ctx, a, a.work, parts)
         collect(parts, a.out)
     finally:
         shutil.rmtree(a.work, ignore_errors=True)
@@ -733,19 +821,30 @@ def lisi_cmd(listing, out):
 def score(versions, size_differs):
     """The registered criterion, per summary and per statistic. The primary comparison is with the
     Splatter version matched to the real S0, or, when iscc's S0 differs from it by more than a factor
-    of 1.5, with the version matched to iscc's S0; the other is reported beside it."""
+    of 1.5, with the version matched to iscc's S0; the other is reported beside it. With the generic
+    arm (the deviation of 2026-11-25) the primary comparison is with it, and Splatter's versions are
+    reported beside it. ``splatter_median`` and ``splatter_distance`` hold the compared version's."""
     def med(prefix, key):
         vals = [versions[f"{prefix}_s{s}"]["summary"][key] for s in SEEDS if f"{prefix}_s{s}" in versions]
         return float(np.median(vals)) if vals else None
 
-    if size_differs and "splatteriscc_s1" not in versions:
+    generic = "generic_s1" in versions
+    if size_differs and "splatteriscc_s1" not in versions and not generic:
         raise RuntimeError("iscc's S0 differs from the real one by more than 1.5x and there is no Splatter "
                            "version matched to iscc's size: the registered comparison cannot be scored")
-    primary = "splatteriscc" if size_differs else "splatter"
-    out = dict(primary=f"against_{primary}",
-               primary_reason=("iscc's S0 differs from the real one by more than a factor of 1.5: Splatter "
-                               "matched to iscc's size" if size_differs else "Splatter matched to the real S0"))
-    for ref in (["splatteriscc", "splatter"] if size_differs else ["splatter"]):
+    refs = (["splatteriscc", "splatter"] if size_differs else ["splatter"])
+    refs = [r for r in refs if f"{r}_s1" in versions]
+    if generic:
+        primary, reason = "generic", ("the deviation of 2026-11-25: iscc with one parameter vector for both "
+                                      "batches and the per-gene factor tuned to the real S0")
+        refs = ["generic"] + refs
+    elif size_differs:
+        primary, reason = "splatteriscc", ("iscc's S0 differs from the real one by more than a factor of 1.5: "
+                                           "Splatter matched to iscc's size")
+    else:
+        primary, reason = "splatter", "Splatter matched to the real S0"
+    out = dict(primary=f"against_{primary}", primary_reason=reason)
+    for ref in refs:
         per = {}
         for stat, keys in SUMMARIES.items():
             comp = {}
