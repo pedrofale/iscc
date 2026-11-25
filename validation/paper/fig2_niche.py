@@ -1090,18 +1090,19 @@ def _numbers(out, name):
 
 
 def render():
-    """Fig 2 at the paper's half page: 165 mm wide and at most 114 mm tall."""
+    """Fig 2, 165 by 110 mm. B spans the height of C and D together, so that its axis and D's share a
+    baseline (95 mm) and B's legend sits under both."""
     S.setup()
-    fig = S.figure(165, 106)
+    fig = S.figure(165, 110)
     out = {}
     S.panel_letter(fig, "A", 1, 1)
     out["A"] = render_snapshots(fig, 6, 8.5, 23.0, 3.4)
     S.panel_letter(fig, "B", 1, 34)
-    out["B"] = render_traits([S.ax_mm(fig, 15 + i * 23, 41, 20, 38) for i in range(3)], legend_mm=8)
+    out["B"] = render_traits([S.ax_mm(fig, 15 + i * 23, 41, 20, 54) for i in range(3)], legend_mm=8)
     S.panel_letter(fig, "C", 86, 34)
-    out["C"] = render_seeding(S.ax_mm(fig, 99, 41, 22, 23), S.ax_mm(fig, 132, 41, 31, 23))
-    S.panel_letter(fig, "D", 86, 71)
-    out["D"] = render_noble(S.ax_mm(fig, 99, 76, 64, 23))
+    out["C"] = render_seeding(S.ax_mm(fig, 99, 41, 22, 20), S.ax_mm(fig, 132, 41, 31, 20))
+    S.panel_letter(fig, "D", 86, 67)
+    out["D"] = render_noble(S.ax_mm(fig, 99, 72, 64, 23))
     path = S.save(fig, "fig2_niche")
     print("wrote", path)
     _numbers(out, "niche_render_numbers.json")
