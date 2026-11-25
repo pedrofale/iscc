@@ -161,7 +161,9 @@ class TestBreadthAndModelVariants:
         assay = bulkDNA(breadth="panel", seed=3, capture_sigma=0.45, error_rate=0.005,
                         kappa=2000.0).run(cd)
         est = estimate_dna_from_assay(assay)
-        realized = float(np.std(np.log(assay.batch.capture_eff)))
+        # the fit matches the linear spread of the efficiencies (the LogNormal sd with their CV)
+        eff = assay.batch.capture_eff / assay.batch.capture_eff.mean()
+        realized = float(np.sqrt(np.log1p(np.var(eff))))
         assert "capture_sigma" in est.fitted
         assert est.hypers.capture_sigma == pytest.approx(realized, abs=0.1)
 

@@ -63,7 +63,7 @@ _HYPER_KEYS = set(DNABatchHyperParams().to_dict().keys())
 DNA_MODE_DEFAULTS = {
     "bulk": dict(kappa=121_241.0, kappa_loci=20_000, nb_dispersion=0.165, ado_rate=0.0,
                  beta_binom_conc=200.0, doublet_rate=0.0),
-    "sc":   dict(kappa=202_799.0, kappa_loci=5_787, nb_dispersion=0.032, ado_rate=0.20,
+    "sc":   dict(kappa=204_222.0, kappa_loci=5_787, nb_dispersion=0.026, ado_rate=0.20,
                  beta_binom_conc=30.0, doublet_rate=0.02),
 }
 
@@ -73,14 +73,14 @@ DNA_MODE_DEFAULTS = {
 SCDNA_PLATFORM_PRESETS = {
     # DLP+ (Laks et al. 2019, OV2295): reads per 500 kb bin, about one bin per locus of the
     # 6,000-locus genome. No per-bin allele counts, so the allele layer keeps the priors.
-    "dlp": dict(breadth="wgs", mu_depth=830.1, kappa=202_799.0, kappa_loci=5_787,
-                nb_dispersion=0.032),
+    "dlp": dict(breadth="wgs", mu_depth=830.1, kappa=204_222.0, kappa_loci=5_787,
+                nb_dispersion=0.026),
     # Mission Bio Tapestri (Mays et al. 2024, KaryoTap experiment 1): reads per amplicon per
     # cell, with capture spread, allelic dropout and allele overdispersion fitted at germline
-    # heterozygous sites.
+    # heterozygous sites, against copy number called per chromosome arm.
     # target_genes: the 584 amplicons of the fitted panel, where the panel breadth alone reads 30.
-    "tapestri": dict(breadth="panel", target_genes=584, mu_depth=42.7, kappa=4_679.0,
-                     kappa_loci=584, nb_dispersion=0.157, capture_sigma=0.389, ado_rate=0.325,
+    "tapestri": dict(breadth="panel", target_genes=584, mu_depth=42.7, kappa=5_757.0,
+                     kappa_loci=584, nb_dispersion=0.130, capture_sigma=0.326, ado_rate=0.325,
                      beta_binom_conc=4.51),
 }
 _PLATFORM_ALIASES = {
@@ -601,8 +601,8 @@ class scDNA(DNA):
     locus) is a separate Bernoulli layer — the dominant single-cell allele artifact — applied
     before the Beta-Binomial alt-count draw. The single-cell ``mode_defaults`` take the depth
     dispersion fitted by [`estimate_dna`][iscc.data.estimate_dna.estimate_dna] on DLP+
-    single-cell WGS (``kappa=202799`` fitted on ``kappa_loci=5787`` bins,
-    ``nb_dispersion=0.032``) and set the prior allele layer ``ado_rate=0.20``,
+    single-cell WGS (``kappa=204222`` fitted on ``kappa_loci=5787`` bins,
+    ``nb_dispersion=0.026``) and set the prior allele layer ``ado_rate=0.20``,
     ``beta_binom_conc=30``, ``doublet_rate=0.02``. Coverage is ~0.3x the bulk depth of the
     breadth (9 reads per locus at WGS), unless a ``platform`` sets its own.
 

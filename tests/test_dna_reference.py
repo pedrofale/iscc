@@ -12,6 +12,7 @@ import os
 import sys
 
 import numpy as np
+import pandas as pd
 import pytest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -83,6 +84,23 @@ class TestTapestriReducer:
         # missing genotype (cell1, var1) -> zero coverage so it drops out of fits
         assert cov[1, 1] == 0 and alt[1, 1] == 0
         assert np.all(cn >= 0) and np.all(cn <= 8)
+
+    def test_arm_level_calls_share_one_whole_copy_number_per_arm(self):
+        # 4 amplicons on chr1: three on 1p (one noisy), one on 1q; cell 1 gains 1q
+        arms = pd.DataFrame({"arm": ["1p", "1q"], "chrom": ["chr1", "chr1"],
+                             "start": [0, 125_100_000], "end": [121_700_000, 248_956_422]})
+        arm = B.amplicon_arms(["1", "1", "1", "1"], [1_000, 50_000_000, 100_000_000, 200_000_000], arms)
+        assert arm.tolist() == ["1p", "1p", "1p", "1q"]
+        ids = np.array([b"A", b"B", b"C", b"D"])
+        reads = np.array([[100, 100, 100, 100], [100, 140, 100, 250], [100, 100, 100, 100]], float)
+        dp = ngt = np.ones((3, 4), int)
+        af = np.zeros((3, 4))
+        _, _, cn_amp, _ = B.reduce_tapestri(dp, af, ngt, ids, reads, ids)
+        _, _, cn_arm, _ = B.reduce_tapestri(dp, af, ngt, ids, reads, ids, amplicon_arm=arm)
+        assert not np.allclose(cn_amp[1, :3], cn_amp[1, 0])          # per amplicon: the noise shows
+        assert np.all(cn_arm[:, :3] == cn_arm[:, [0]])                 # per arm: one call
+        assert np.all(cn_arm == np.rint(cn_arm))
+        assert cn_arm[1, 3] > cn_arm[1, 0]                             # the 1q gain is kept
 
 
 class TestGermlineHetMask:

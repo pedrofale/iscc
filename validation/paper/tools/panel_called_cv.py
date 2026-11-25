@@ -1,9 +1,12 @@
 """Coverage CV of the simulated Tapestri panel at two copies, by true copy number and by copy number
 called from the coverage as the real panel's was (S11 Fig F).
 
-The real panel's copy number (``validation/data/build_dna_reference.reduce_tapestri``) is 2 x the
-cell's normalised amplicon depth over its median across cells, so it is called from the same reads as
-the coverage, and loci whose coverage strays are called off two copies and leave the CV at two copies.
+Until 2026-11-25 the real panel's copy number (``validation/data/build_dna_reference.reduce_tapestri``)
+was 2 x the cell's normalised amplicon depth over its median across cells, so it was called from the
+same reads as the coverage, and loci whose coverage strays were called off two copies and left the CV at
+two copies. The reference is now called per chromosome arm, so ``cv_real_cn2`` is the arm-level value;
+``cv_true_cn2`` over the sweep is S11 Fig F's comparison, and the called columns keep the per-amplicon
+rule for the record.
 Here the simulated coverage of each locus stands for its amplicon's reads, the same rule calls a copy
 number, and the CV at two copies is taken over the loci called at two, beside the CV at true two
 copies that S11 Fig F shows. Every locus is its own amplicon here, so the coverage and the call share

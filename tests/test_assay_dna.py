@@ -436,7 +436,7 @@ class TestPlatformPresets:
         sc = scDNA(platform="tapestri")
         assert sc.breadth == "panel"
         assert sc.hypers.ado_rate == pytest.approx(0.325)
-        assert sc.hypers.capture_sigma == pytest.approx(0.389)
+        assert sc.hypers.capture_sigma == pytest.approx(0.326)
 
     def test_explicit_arguments_override_the_preset(self):
         sc = scDNA(platform="tapestri", breadth="wgs", ado_rate=0.1, mu_depth=10.0)

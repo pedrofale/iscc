@@ -320,7 +320,7 @@ own is used as given.
 | Parameter | Default | Valid range | Outside the range |
 |---|---|---|---|
 | `bulkDNA(kappa=, kappa_loci=)` | 121,241 on 20,000 loci (GIAB HG002 WGS) | `kappa_loci / kappa` ≲ 0.2 (estimates: 0.03 to 0.17) | coverage CV at two copies 0.48 at 30× on any genome size (HG002: 0.41). A former default of 2,000, used as given, gave 1.7 on 6,000 loci and left 39% of them below a tenth of the mean |
-| `scDNA(kappa=, kappa_loci=)` | 202,799 on 5,787 loci (DLP+ OV2295) | `kappa_loci / kappa` ≲ 0.2 (estimates: 0.03 to 0.17) | at 9 reads per locus, a median within-cell CV of 0.40 and under 0.1% of loci without reads on 6,000 loci. A former default of 5, used as given, left 99% of loci without reads, so segment copy number could not be called |
+| `scDNA(kappa=, kappa_loci=)` | 204,222 on 5,787 loci (DLP+ OV2295) | `kappa_loci / kappa` ≲ 0.2 (estimates: 0.03 to 0.17) | at 9 reads per locus, a median within-cell CV of 0.40 and under 0.1% of loci without reads on 6,000 loci. A former default of 5, used as given, left 99% of loci without reads, so segment copy number could not be called |
 | `nb_dispersion` (`depth_model="nb"`) | 0.165 bulk (HG002), 0.032 single-cell (DLP+) | ≲ 0.2 | the negative-binomial alternative, fitted on the same references |
 | `scDNA(platform=)` | `None` | `"dlp"`, `"tapestri"` | all the estimates on the reference of the platform, including its own depth per locus (DLP+ 830 reads per 500 kb bin, Tapestri 42.7 per amplicon). Tapestri reads the 584 amplicons of its fitted panel, and an explicit other `breadth` reads its own loci. DLP+ has no allele counts, so its allele layer and doublet rate stay at the single-cell priors (`ado_rate` 0.20, `doublet_rate` 0.02). An unknown name raises |
 

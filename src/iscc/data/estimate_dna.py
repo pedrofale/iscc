@@ -186,7 +186,10 @@ def _fit_depth_dispersion(coverage, cn, gc_fit, mappability, depth_model):
 
     This is the DNA analogue of the scRNA estimator's library-size de-biasing of the NB
     dispersion: divide out the part that is really CN (biology) before reading the technical
-    dispersion.
+    dispersion. Only the loci at each sample's modal copy-number state are read: a called copy
+    number is most often wrong at the edges between states, and the coverage there would read the
+    calling error as dispersion. On the Tapestri reference this halves the fitted spread; on HG002
+    (one state) it changes nothing and on DLP+ little.
     """
     eff_shape = np.exp(gc_fit)
     if mappability is not None:
@@ -202,6 +205,9 @@ def _fit_depth_dispersion(coverage, cn, gc_fit, mappability, depth_model):
             continue
         mu = N * pred / sp
         keep = mu > 0
+        state = np.rint(np.asarray(C, dtype=float)).astype(int)
+        if keep.any():
+            keep &= state == np.bincount(state[keep]).argmax()
         if keep.sum() < 5:
             continue
         Xk, muk = X[keep], mu[keep]
@@ -224,45 +230,53 @@ def _fit_depth_dispersion(coverage, cn, gc_fit, mappability, depth_model):
     return max(kappa, 1e-6), {"per_sample_kappa": kappas, "d_index": d_index}
 
 
-def _locus_capture(coverage, cn, gc_fit, mappability):
-    """Per-locus mean coverage per copy, with the GC curve and mappability divided out (NaN where a
-    locus has no coverage): the empirical capture efficiency of each target or amplicon."""
+def _capture_residual(coverage, cn, gc_fit, mappability):
+    """Coverage per copy with the GC curve and mappability divided out, NaN where a locus has no
+    coverage (cells x loci)."""
     eff_shape = np.exp(gc_fit)
     if mappability is not None:
         eff_shape = eff_shape * np.asarray(mappability, dtype=float)
     eff_shape = np.where(eff_shape > 0, eff_shape, np.nan)
     percopy = np.divide(coverage, np.maximum(cn, 1e-9), out=np.zeros_like(coverage), where=cn > 0)
     resid = percopy / eff_shape[None, :]
+    return np.where(resid > 0, resid, np.nan)
+
+
+def _locus_capture(coverage, cn, gc_fit, mappability):
+    """Per-locus mean coverage per copy, with the GC curve and mappability divided out (NaN where a
+    locus has no coverage): the empirical capture efficiency of each target or amplicon."""
     with np.errstate(invalid="ignore"):
-        return np.nanmean(np.where(resid > 0, resid, np.nan), axis=0)
+        return np.nanmean(_capture_residual(coverage, cn, gc_fit, mappability), axis=0)
 
 
 def _fit_capture_sigma(coverage, cn, gc_fit, mappability):
     """Per-target (WES) / per-amplicon (panel) capture LogNormal sd, after removing GC + CN.
 
-    Per locus, the coverage-per-copy with the GC curve (and mappability) divided out is
-    ``capture_eff x depth-noise``; its log-space variance is ``capture_sigma^2 + depth_noise_var``.
-    We subtract a depth-noise floor so the estimate isolates the systematic capture spread. The
-    floor is the delta-method log-variance of a count with the *measured* index of dispersion
-    ``d_index`` (Var(log X) ~ d_index/mu): at the DM overdispersion these data carry, the floor is
-    far above the naive Poisson ``1/mu``. Deep panels make it negligible; for WES it is a genuine
-    de-biasing. A panel-of-normals would pin it exactly; without one this is the honest
-    counts-only estimate.
+    Per locus, the mean coverage per copy with the GC curve (and mappability) divided out is the
+    capture efficiency times the depth noise left in a mean. The fit matches the linear spread of
+    those means, their squared CV less the sampling variance of each mean, to the LogNormal's
+    ``exp(capture_sigma^2) - 1``, because the coverage CV is what the efficiency spread sets. The
+    spread of their logarithms would weigh a tail of weak amplicons that the CV hardly sees, and on
+    the Tapestri reference it gives a capture spread with a CV of 0.40 against 0.37 in the data. The
+    sampling variance is measured across cells; a single bulk sample has none to measure, so it
+    takes the Poisson ``1/mu`` and cannot separate capture from dispersion without a
+    panel-of-normals (its capture_sigma is honestly biased high).
     """
-    locus_mean = _locus_capture(coverage, cn, gc_fit, mappability)
+    resid = _capture_residual(coverage, cn, gc_fit, mappability)
+    with np.errstate(invalid="ignore"):
+        locus_mean = np.nanmean(resid, axis=0)
     ok = np.isfinite(locus_mean) & (locus_mean > 0)
     if ok.sum() < 5:
         return 0.0
-    var_log = float(np.var(np.log(locus_mean[ok])))
-    # Depth-noise floor on log(locus_mean). With S samples/cells the per-locus mean averages out
-    # the depth noise as ~ S/reads (Poisson) — for a single bulk sample this is small relative to a
-    # real per-target capture spread; for single-cell it is averaged over many cells, so the
-    # systematic capture cleanly separates. (A single bulk WES sample cannot fully separate capture
-    # from dispersion without a panel-of-normals, so its capture_sigma is honestly biased high.)
-    n_samp = coverage.shape[0]
-    total_reads = coverage.sum(axis=0)
-    floor = float(np.mean(n_samp / np.maximum(total_reads[ok], 1.0)))
-    return float(np.sqrt(max(var_log - floor, 0.0)))
+    rel = locus_mean[ok] / locus_mean[ok].mean()
+    cv2 = float(np.var(rel))
+    n = np.sum(np.isfinite(resid[:, ok]), axis=0)
+    if coverage.shape[0] > 1 and np.all(n > 1):
+        with np.errstate(invalid="ignore"):
+            floor = float(np.mean(np.nanvar(resid[:, ok], axis=0, ddof=1) / n / locus_mean[ok] ** 2))
+    else:
+        floor = float(np.mean(1.0 / np.maximum(coverage.sum(axis=0)[ok], 1.0)))
+    return float(np.sqrt(np.log1p(max(cv2 - floor, 0.0))))
 
 
 def _fit_error_rate(coverage, alt, homref_mask):

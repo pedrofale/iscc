@@ -24,8 +24,8 @@ One dataset per DNA regime (chosen as the field's gold standards):
     The richest single-cell regime. We read a public Tapestri `.h5` (KaryoTap, Mays et al.) — its
     `dna_variants` layers carry per-cell x per-variant `DP` (depth), `AF` (alt %, 0–100), and `NGT`
     (genotype 0/1/2/3); `dna_read_counts` carries per-amplicon reads for CN. Reduce to
-    coverage = DP, alt = round(AF/100 * DP), CN = amplicon-depth-normalized (2 x reads / median),
-    het = NGT==1. Fits the full single-cell layer: mu_depth (deep), kappa, capture_sigma (per
+    coverage = DP, alt = round(AF/100 * DP), CN = the arm-level call (the median over each arm's
+    amplicons of 2 x reads / median, rounded, as KaryoTap calls aneuploidy), het = NGT==1. Fits the full single-cell layer: mu_depth (deep), kappa, capture_sigma (per
     amplicon), **ado_rate + beta_binom_conc** (the het-collapse layer only single-cell data informs).
     Source: Zenodo 11094529 `tapestri-experiment01-panelv1.h5` (~406 MB; not auto-downloaded).
     Cite: Mays et al. 2024, "KaryoTap Enables Aneuploidy Detection in Thousands of Single Cells",
@@ -171,13 +171,37 @@ def reduce_dlp_records(cell_rows):
     return cov[:, keep], cn[:, keep]
 
 
+def amplicon_arms(chrom, start, arms):
+    """The chromosome arm of each amplicon: ``p`` or ``q`` by the side of the centromere it lies on
+    (``arms`` is the human layer's ``grch38_arms.tsv``; an acrocentric chromosome has only ``q``),
+    and the whole chromosome for one without arms in the table (chrX)."""
+    chrom = np.char.replace(np.asarray(chrom).astype(str), "chr", "")
+    start = np.asarray(start, dtype=float)
+    out = np.empty(len(chrom), dtype=object)
+    for c in np.unique(chrom):
+        m = chrom == c
+        a = arms[arms["chrom"] == f"chr{c}"].set_index("arm")
+        p, q = f"{c}p", f"{c}q"
+        if p in a.index and q in a.index:
+            centre = 0.5 * (a.loc[p, "end"] + a.loc[q, "start"])
+            out[m] = np.where(start[m] < centre, p, q)
+        else:
+            out[m] = a.index[0] if len(a) == 1 else c
+    return out
+
+
 def reduce_tapestri(dp, af_pct, ngt, var_amplicon, amplicon_reads, amplicon_ids,
-                    cn_clip=8.0):
+                    cn_clip=8.0, amplicon_arm=None):
     """Reduce Tapestri DNA-variant + amplicon-read arrays -> (coverage, alt, cn, het_mask).
 
-    coverage = DP; alt = round(AF/100 * DP) (AF is a 0–100 percentage); CN per (cell, variant) from
-    the variant's amplicon: 2 x (per-cell-normalized amplicon depth) / its cross-cell median, clipped
-    to [0, ``cn_clip``]. Missing genotypes (NGT==3) get zero coverage so they drop out of every fit.
+    coverage = DP; alt = round(AF/100 * DP) (AF is a 0–100 percentage). Per amplicon, the copy-number
+    ratio is 2 x (per-cell-normalized amplicon depth) / its cross-cell median. Without
+    ``amplicon_arm`` that ratio is each variant's CN, clipped to [0, ``cn_clip``]: it is read off the
+    amplicon's own reads, so most of its spread is sampling noise, and a coverage fit conditioned on
+    it reads that noise as dispersion. With ``amplicon_arm`` (the arm of each amplicon,
+    ``amplicon_arms``), the CN of every amplicon of an arm is the median ratio over the arm rounded to
+    a whole copy number, the arm-level call with which KaryoTap reads aneuploidy (Mays et al. 2024).
+    Missing genotypes (NGT==3) get zero coverage so they drop out of every fit.
 
     het_mask marks GERMLINE-het LOCI broadcast over all covered cells — NOT the per-cell `NGT==1`
     genotype calls. ADO is exactly the cells where a constitutive het collapses to monoallelic, and
@@ -200,6 +224,12 @@ def reduce_tapestri(dp, af_pct, ngt, var_amplicon, amplicon_reads, amplicon_ids,
     med = np.median(norm, axis=0, keepdims=True)
     med[med == 0] = np.nan
     cn_ampl = 2.0 * norm / med                        # cells x amplicons
+    if amplicon_arm is not None:
+        arm = np.asarray(amplicon_arm, dtype=object)
+        for a in np.unique(arm):
+            m = arm == a
+            with np.errstate(all="ignore"):
+                cn_ampl[:, m] = np.rint(np.nanmedian(cn_ampl[:, m], axis=1, keepdims=True))
     cn = np.clip(np.nan_to_num(cn_ampl[:, col], nan=2.0), 0.0, cn_clip)
     cn[:, col < 0] = 2.0
     missing = ngt == 3
@@ -328,15 +358,19 @@ def fetch_tapestri_sc(h5_path=None, max_cells=800, download=False):
             var_amplicon = dv["ca"]["amplicon"][:][keep]
             reads = rc["layers"]["read_counts"][:nc, :]
             amplicon_ids = rc["ca"]["id"][:]
+            amplicon_chrom = rc["ca"]["CHROM"][:].astype(str)
+            amplicon_start = rc["ca"]["start_pos"][:]
     except Exception as e:
         print(f"[Tapestri h5 read failed: {e}]")
         return None
-    cov, alt, cn, het = reduce_tapestri(dp, af, ngt, var_amplicon, reads, amplicon_ids)
+    from iscc.data.human import load_reference
+    arm = amplicon_arms(amplicon_chrom, amplicon_start, load_reference(snps=False).arms)
+    cov, alt, cn, het = reduce_tapestri(dp, af, ngt, var_amplicon, reads, amplicon_ids, amplicon_arm=arm)
     return dict(
         modality="sc", breadth="panel", depth_model="dm",
         coverage=cov.astype(np.int32), alt=alt.astype(np.int32), cn=cn.astype(np.float32),
         het_mask=het, variant_mask=None,
-        source="Mission Bio Tapestri (KaryoTap exp01 panelv1); Mays et al. 2024, Zenodo 11094529",
+        source="Mission Bio Tapestri (KaryoTap exp01 panelv1), arm-level CN; Mays et al. 2024, Zenodo 11094529",
     )
 
 
@@ -432,7 +466,8 @@ def _write_provenance(built):
         "   Fits mu_depth, kappa/nb_dispersion, het BAF; error_rate/GC prior-only (no hom-ref / "
         "reference FASTA in the reduction). Cite: Zook et al. 2019, Nat Biotechnol.\n",
         "2. **SC PANEL — Mission Bio Tapestri** (KaryoTap exp01 panelv1). `dna_variants` DP/AF/NGT "
-        "+ `dna_read_counts` per-amplicon reads -> coverage/alt/het + amplicon-normalized CN.\n"
+        "+ `dna_read_counts` per-amplicon reads -> coverage/alt/het + arm-level CN (the median "
+        "amplicon-normalized ratio over each arm, rounded).\n"
         f"   `{TAPESTRI_URL}` (~406 MB; not auto-downloaded).\n"
         "   Fits the full single-cell layer incl. **ado_rate + beta_binom_conc** + capture_sigma. "
         "Cite: Mays et al. 2024, Zenodo 10.5281/zenodo.11094529.\n",
