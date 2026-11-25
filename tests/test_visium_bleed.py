@@ -49,8 +49,9 @@ def _digest(vz):
 # Re-pinned (was cdf7ab731f44d5f7) when the capture field became normalised over the tissue spots,
 # the ambient soup became a share of the library rather than counts on top of it, and the default
 # kappa became 300,000 (visium-depth); re-pinned again (was 9572b2c7e5dcecab) when the default kappa became
-# 1,400,000 (visium-kappa-refit).
-DEFAULT_DIGEST = "5f7add0ff4f1470c"
+# 1,400,000 (visium-kappa-refit); and again (was 5f7add0ff4f1470c) when the depth of a spot came to follow
+# the RNA content of its cells by default (content_exponent 1, realism).
+DEFAULT_DIGEST = "cfb1b4e3b2a5632b"
 
 
 def test_kernel_columns_sum_to_one():
@@ -142,8 +143,9 @@ def test_estimate_visium_recovers_bleed_and_edge_from_a_raw_slide():
     """iscc's AnnData of a slide with bleed carries counts outside the tissue, so estimate_visium reads
     it like a raw Space Ranger matrix: the bleed from the spots outside, the edge from the outer ring."""
     from iscc.data import estimate_visium
+    # without the content, so the depth that falls with the cells at the edge is not read as edge_sigma
     true = dict(bleed_rate=0.3, bleed_distal=0.3, bleed_sigma=PITCH, edge_sigma=0.25,
-                edge_reference="tissue", ambient_frac=0.0, field_sigma=0.0)
+                edge_reference="tissue", ambient_frac=0.0, field_sigma=0.0, content_exponent=0.0)
     # an interior 5+ pitches from the edge, dense enough that no spot inside the tissue is left empty
     cd, side = _section(radius=30.0, side=100, density=5.0)
     vz = Visium(seed=7, spot_pitch=PITCH, spot_radius=1.0, **true).run(cd, grid_side=side)

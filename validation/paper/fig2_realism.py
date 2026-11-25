@@ -10,7 +10,7 @@ No PCAWG arm-landscape panel: fitting arm selection to PCAWG is CINner's result,
 law from CINner.
 Bottom row, the data front's tests, each fit on a real reference and re-simulated on the showcase
 tumour (R0):
-  (d) scRNA against PBMC3k: library size, mean-variance, zero fraction;
+  (d) scRNA against a breast tumour of Wu et al. 2021: library size, mean-variance, zero fraction;
   (e) DNA against GIAB HG002 (bulk), Tapestri and DLP+ (single cell): coverage dispersion by copy
       number, and Tapestri allelic dropout;
   (f) Visium against a real breast-cancer section: per-spot depth and its spatial autocorrelation.
@@ -146,20 +146,43 @@ def _count_stats(X):
                 cv_lib=float(lib.std() / lib.mean()))
 
 
-def compute_f():
+# The scRNA reference: the tumour of the breast cancer atlas of Wu et al. 2021 with the most malignant
+# cells (tools/wu_tumour.py writes it), so that a simulated breast tumour is compared with a real one over
+# the same human genes. PBMC3k was the reference until 2026-11-25; its cell types differ less than those
+# of a tumour, and the synthetic genes of the regime have no counterpart of its most expressed genes.
+SCRNA_REF = os.environ.get("ISCC_SCRNA_REF") or os.path.join(REPO, "data", "wu2021_CID4290A.h5ad")
+SCRNA_REF_LABEL = "breast tumor"
+
+
+def scrna_reference():
+    """The real scRNA reference and ``estimate_rna`` on it, within the authors' cell types."""
     import anndata as ad
-    from iscc.data import estimate_rna, scRNA
-    real = ad.read_h5ad(os.path.join(REPO, "data", "pbmc3k_raw.h5ad"))
-    est = estimate_rna(real)
+    from iscc.data import estimate_rna
+    real = ad.read_h5ad(SCRNA_REF)
+    types = real.obs["celltype_major"].astype(str).to_numpy() if "celltype_major" in real.obs else "auto"
+    return real, estimate_rna(real, cell_types=types)
+
+
+def human_expression(t):
+    """The expression of the tumour over the human genes, for ``scRNA(...).run(gene_lift=...)``."""
+    from iscc.data.human import HumanGenomeLayer
+    return HumanGenomeLayer(t, allow_linear=t.genome_params.get("arms") is None).expression(t)
+
+
+def compute_f():
+    from iscc.data import scRNA
+    real, est = scrna_reference()
     real_stats = _count_stats(real.X if sp.issparse(real.X) else sp.csr_matrix(real.X))
     del real
     t = REG.load("R0", "seed1")
     diss = RR.resect(t).dissociate(max_cells=3000)
+    expr = human_expression(t)
     del t
     cells = list(diss["cell_exp"].index)
-    sim = scRNA(n_cells=len(cells), seed=5, **est.scrna_kwargs()).run(diss, cell_subset=cells)
+    sim = scRNA(n_cells=len(cells), seed=5, **est.scrna_kwargs()).run(diss, cell_subset=cells, gene_lift=expr)
     del diss
-    return dict(real=real_stats, iscc=_count_stats(sp.csr_matrix(sim.observed_counts.values)))
+    return dict(real=real_stats, iscc=_count_stats(sp.csr_matrix(sim.observed_counts.values)),
+                reference=os.path.basename(SCRNA_REF))
 
 
 def _cv_by_state(coverage, cn, min_frac=0.05, min_n=20):
@@ -252,7 +275,7 @@ def compute_h():
     X, in_tissue, raw_coords = VB.load_raw(raw_dir)
     est = estimate_visium(X, count_model="dm", coords=raw_coords, in_tissue=in_tissue, bleed_min_dist=1.5)
     t = REG.load("R0", "seed1")
-    sec = RR.resect(t).slice(depth_frac=0.5, max_cells=6000)
+    sec = RR.resect(t).slice(depth_frac=0.5, max_cells=RG.SECTION_MAX_CELLS, layers="visium")
     kw = {**est.visium_kwargs(), **getattr(RG, "VISIUM", {}), "spot_pitch": 2.0, "spot_radius": 1.0}
     sim = Visium(seed=11, count_model="dm", **kw).run(sec, grid_side=t.grid_size)
     zs, cs, tots = VV._log_library_residual(sim)
@@ -273,7 +296,7 @@ def render_f(fig, x, y):
         return None
     lr, ls = np.asarray(d["real"]["loglib"]), np.asarray(d["iscc"]["loglib"])
     bins = np.linspace(min(lr.min(), ls.min()), max(lr.max(), ls.max()), 30)
-    axes[0].hist(lr, bins=bins, density=True, color=S.SOURCE["real"], alpha=0.6, label="PBMC3k")
+    axes[0].hist(lr, bins=bins, density=True, color=S.SOURCE["real"], alpha=0.6, label=SCRNA_REF_LABEL)
     axes[0].hist(ls, bins=bins, density=True, color=S.SOURCE["iscc"], alpha=0.6, label="iscc")
     axes[0].set_xlabel("log$_{10}$ UMIs per cell")
     axes[0].set_ylabel("Density")

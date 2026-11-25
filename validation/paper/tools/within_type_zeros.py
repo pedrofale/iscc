@@ -1,7 +1,8 @@
 """The scRNA zero fraction at gene means of 1 to 3 UMIs per cell, over all cells and within one cell
-type, for the paragraph on Fig 3D: PBMC3k (T cells, monocytes and B cells, typed by marker genes)
-against the showcase tumour at the scRNA settings fitted to PBMC3k, on the cells of Fig 3D
-(``fig2_realism.compute_f``: 3,000 dissociated cells, seed 5).
+type, for the paragraph on Fig 3D: the breast tumour of Fig 3D (``fig2_realism.SCRNA_REF``, typed by
+its authors' ``celltype_major``) against the showcase tumour over the human genes at the scRNA settings
+fitted to it, on the cells of Fig 3D (``fig2_realism.compute_f``: 3,000 dissociated cells, seed 5).
+PBMC3k, typed by marker genes, was the reference until 2026-11-25.
 
 Per group, two statistics:
 
@@ -29,13 +30,13 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 import numpy as np  # noqa: E402
 import scipy.sparse as sp  # noqa: E402
 
+import fig2_realism as F2  # noqa: E402
 import realistic_regime as RR  # noqa: E402
 import registry as REG  # noqa: E402
 
 LO, HI = 1.0, 3.0
 TUMOUR = ("R0", "seed1")
-MARKERS = {"T": ["CD3D", "CD3E", "IL7R"], "B": ["MS4A1", "CD79A", "CD79B"],
-           "monocyte": ["LYZ", "CD14", "S100A8", "S100A9", "FCGR3A", "MS4A7"], "NK": ["GNLY", "NKG7"]}
+N_TYPES = 5                             # the most numerous types of each source
 
 
 def zeros_at(X):
@@ -57,45 +58,28 @@ def zeros_at(X):
                 curve_points=[[round(float(10 ** a), 2), round(float(c), 3)] for a, c in zip(cm[pts], cz[pts])])
 
 
-def pbmc_types(real):
-    """A marker score per type (mean log-normalised expression of its markers); a cell takes the best
-    type only when that score is above 0.5 and 0.5 above the second best, and is untyped otherwise."""
-    X = sp.csr_matrix(real.X).astype(np.float64)
-    lib = np.asarray(X.sum(1)).ravel()
-    L = sp.diags(1e4 / lib) @ X
-    L.data = np.log1p(L.data)
-    names = list(map(str, real.var_names))
-    keys = list(MARKERS)
-    S = np.vstack([np.asarray(L[:, [names.index(g) for g in MARKERS[k] if g in names]].mean(1)).ravel()
-                   for k in keys]).T
-    srt = np.sort(S, 1)
-    clear = (srt[:, -1] > 0.5) & (srt[:, -1] - srt[:, -2] > 0.5)
-    return np.where(clear, np.array(keys)[S.argmax(1)], "untyped")
-
-
 def main(out):
-    import anndata as ad
-    from iscc.data import estimate_rna, scRNA
+    from iscc.data import scRNA
     from iscc.integrations import cell_subtypes
-    real = ad.read_h5ad(os.path.join(REPO, "data", "pbmc3k_raw.h5ad"))
-    est = estimate_rna(real)
-    types = pbmc_types(real)
+    real, est = F2.scrna_reference()
+    types = real.obs["celltype_major"].astype(str).to_numpy()
     res = {"real": {"all": zeros_at(real.X), "counts": {k: int((types == k).sum()) for k in np.unique(types)}}}
-    for k in ("T", "monocyte", "B"):
+    for k, _ in sorted(res["real"]["counts"].items(), key=lambda kv: -kv[1])[:N_TYPES]:
         res["real"][k] = zeros_at(real.X[types == k])
     del real
     t = REG.load(*TUMOUR)
     diss = RR.resect(t).dissociate(max_cells=3000)
+    expr = F2.human_expression(t)
     del t
     cells = list(diss["cell_exp"].index)
-    sim = scRNA(n_cells=len(cells), seed=5, **est.scrna_kwargs()).run(diss, cell_subset=cells)
+    sim = scRNA(n_cells=len(cells), seed=5, **est.scrna_kwargs()).run(diss, cell_subset=cells, gene_lift=expr)
     gid = diss["cell_type"]["cell_id"].astype(str).reindex(sim.observed_counts.index)
     lab = np.asarray(cell_subtypes(gid.to_numpy()), dtype=str)
     X = sp.csr_matrix(sim.observed_counts.values)
     res["iscc"] = {"all": zeros_at(X), "counts": {k: int((lab == k).sum()) for k in np.unique(lab)}}
-    for k, _ in sorted(res["iscc"]["counts"].items(), key=lambda kv: -kv[1])[:5]:
+    for k, _ in sorted(res["iscc"]["counts"].items(), key=lambda kv: -kv[1])[:N_TYPES]:
         res["iscc"][k] = zeros_at(X[lab == k])
-    res["settings"] = dict(gene_mean_umis=[LO, HI], markers=MARKERS, tumour="/".join(TUMOUR),
+    res["settings"] = dict(gene_mean_umis=[LO, HI], reference=F2.SCRNA_REF, tumour="/".join(TUMOUR),
                            tumour_path=REG.task_path(*TUMOUR), n_dissociated=3000, scrna_seed=5,
                            scrna_kwargs={k: (v if isinstance(v, (int, float, str, bool)) else str(v))
                                          for k, v in est.scrna_kwargs().items()})

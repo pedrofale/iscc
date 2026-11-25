@@ -4,6 +4,7 @@ from .dna import (
 )
 from .rna import scRNA, run_scrna_batches, concat_batches, atlas_scrna_batches
 from .visium import Visium, morans_i
+from .content import cell_rna_content, rna_content_table
 from .imaging import scSpatial, IMAGING_PRESETS
 from .batch import (
     Batch, RNABatchHyperParams, COUNT_MODELS,

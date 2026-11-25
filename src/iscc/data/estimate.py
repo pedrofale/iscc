@@ -67,7 +67,7 @@ from .rna import PROTOCOL_PRESETS, resolve_protocol
 # "fit". The plate layout belongs here too: a count matrix does not say how many wells a plate had,
 # how many plates the cells were spread over, or how much depth the cells on one plate shared.
 _PRIOR_ONLY = ("ambient_frac", "doublet_rate", "kappa",
-               "well_sigma", "n_wells", "n_plates", "plate_sigma")
+               "well_sigma", "n_wells", "n_plates", "plate_sigma", "content_exponent")
 
 
 @dataclass
@@ -168,6 +168,26 @@ def _fit_library_size(counts):
     sigma_lib = float(np.std(np.log(lib)))
     cv_lib = float(np.std(lib) / (np.mean(lib) + 1e-12))
     return mu_lib, sigma_lib, cv_lib
+
+
+def _fit_library_within(counts, typings):
+    """sd of log per-cell totals within the cell types of ``typings`` (pooled over the types, averaged
+    over the typings), or None without types. With ``content_exponent`` the simulated library already
+    differs between cell types by their RNA content, so ``sigma_lib`` is the spread within a type: on
+    PBMC3k pooling every cell also holds the difference between T cells and monocytes."""
+    if not typings:
+        return None
+    lib = counts.sum(axis=1).astype(float)
+    ok = lib > 0
+    loglib = np.log(np.where(ok, lib, 1.0))
+    values = []
+    for labels, _ in typings:
+        labels = np.asarray(labels)
+        resid = [loglib[ok & (labels == k)] - loglib[ok & (labels == k)].mean()
+                 for k in np.unique(labels[ok]) if (ok & (labels == k)).sum() >= 5]
+        if resid:
+            values.append(float(np.std(np.concatenate(resid))))
+    return float(np.mean(values)) if values else None
 
 
 def _fit_dispersion(counts, cv_lib):
@@ -486,6 +506,9 @@ def estimate_rna(adata, protocol="10x", batch_key=None, count_model="nb", fit_dr
     dispersion_pooled = _fit_dispersion(counts, cv_lib)
     typings = _cell_typings(counts, _cell_type_labels(adata, cell_types, n_cells), n_types)
     dispersion = _fit_dispersion_within(counts, typings)
+    sigma_within = _fit_library_within(counts, typings)
+    if sigma_within is not None and float(preset.get("content_exponent", 0.0)) > 0:
+        sigma_lib = sigma_within                 # the types' RNA content draws the rest of the spread
     gene_means, gshape, gscale = _fit_mean_expression(counts)
     fitted += ["mu_lib", "sigma_lib", "dispersion"]
 
@@ -533,6 +556,7 @@ def estimate_rna(adata, protocol="10x", batch_key=None, count_model="nb", fit_dr
         plate_sigma=float(preset["plate_sigma"]),       # prior
         depth_batch_sigma=depth_batch_sigma,
         kappa=float(preset["kappa"]),
+        content_exponent=float(preset.get("content_exponent", 0.0)),   # prior (see _PRIOR_ONLY)
     )
     # Honest bookkeeping: everything the preset supplied, plus dropout when it was not fitted.
     carried = list(_PRIOR_ONLY)

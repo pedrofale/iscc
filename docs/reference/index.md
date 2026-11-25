@@ -84,6 +84,8 @@ Generate single-cell and bulk molecular data from the sampled cells.
 | [`iscc.data.atlas_scrna_batches`](atlas_scrna_batches.md) | Batch settings fitted to the tumours of a real scRNA atlas. |
 | [`iscc.data.concat_batches`](concat_batches.md) | The scRNA batches as one labelled AnnData. |
 | [`iscc.data.morans_i`](morans_i.md) | Moran's I, the spatial autocorrelation of a value over spots. |
+| [`iscc.data.cell_rna_content`](cell_rna_content.md) | The relative RNA content of each cell, which scales its library and the depth of its spot. |
+| [`iscc.data.rna_content_table`](rna_content_table.md) | The relative RNA content of each normal cell type, from the Human Breast Cell Atlas. |
 
 Each assay page also lists **technology presets** — the parameter settings that approximate named
 platforms (DLP+ / Tapestri for scDNA, WGS / WES / panel for bulk DNA, and 10x / Smart-seq3

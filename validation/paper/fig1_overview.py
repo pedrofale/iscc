@@ -77,7 +77,7 @@ SHOWCASE = ("R0", "seed1")
 AXIS, DISSOCIATE = "x", "remainder"      # bisect through the largest clone; the right half (the remainder) is dissociated
 MIN_FRAC = 0.04                          # the clone threshold of common.Clones, applied within each half
 N_SCDNA, BIN = 400, 50                   # scDNA cells (cancer, after recovery); loci per heatmap bin
-SECTION_MAX = 50_000                     # cells kept in the Visium section (a binomial subsample per deme)
+SECTION_MAX = RG.SECTION_MAX_CELLS       # cells kept in the Visium section: none dropped (regime.py)
 PLOIDY_SCAN = np.round(np.arange(1.5, 6.0001, 0.01), 2)
 DNA_REF = {name: os.path.join(os.path.dirname(HERE), "data", f + ".npz") for name, f in (
     ("HG002", "dna_ref_hg002_bulk_wgs"), ("DLP+", "dna_ref_dlp_sc_wgs"))}

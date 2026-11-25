@@ -86,6 +86,10 @@ def morans_i(values, coords, lengthscale=None):
     return float((n / Wsum) * (num.item() / denom))
 
 
+class SparseSpotWarning(UserWarning):
+    """A Visium section whose tissue spots hold a median of fewer than three cells."""
+
+
 class Visium(Assay):
     """Visium spatial assay: lays spots over the section, aggregates cells, applies a `VisiumBatch`.
 
@@ -186,6 +190,13 @@ class Visium(Assay):
         at run time instead of using ``spot_pitch``.
     n_spots_y : int, optional
         Alias: request a fixed spot-grid height (see ``n_spots_x``).
+    content_exponent : float, optional
+        How the depth of a spot follows the RNA content of its cells, summed over them
+        ([`cell_rna_content`][iscc.data.cell_rna_content]). The library of a spot is
+        multiplied by that content raised to this power, rescaled so that the mean depth of the
+        tissue spots is kept. Default None -> 1, depth proportional to the content, which gives the
+        relation of depth to composition in a real breast section; 0 leaves the content out (the
+        depth follows the capture field only).
     seed : int, default 42
         RNG seed. Fixes the technical signature (per-gene batch factor, spatial capture field,
         per-spot depth) and is reproducible.
@@ -197,7 +208,7 @@ class Visium(Assay):
                  diffusion_sigma=None, sigma_batch=None, ambient_frac=None,
                  kappa=None, nb_dispersion=None, section_frac=None, placement=None, rotation=0.0,
                  n_spots_x=None, n_spots_y=None, seed=42, edge_reference=None, bleed_rate=None,
-                 bleed_distal=None, bleed_sigma=None):
+                 bleed_distal=None, bleed_sigma=None, content_exponent=None):
         super(Visium, self).__init__(seed=seed, protocol="visium")
         if count_model not in COUNT_MODELS:
             raise ValueError(f"unknown count_model {count_model!r}; choose {sorted(COUNT_MODELS)}")
@@ -217,7 +228,7 @@ class Visium(Assay):
             field_sigma=field_sigma, edge_sigma=edge_sigma, diffusion_sigma=diffusion_sigma,
             sigma_batch=sigma_batch, ambient_frac=ambient_frac, kappa=kappa,
             nb_dispersion=nb_dispersion, bleed_rate=bleed_rate, bleed_distal=bleed_distal,
-            bleed_sigma=bleed_sigma,
+            bleed_sigma=bleed_sigma, content_exponent=content_exponent,
         ).items():
             if val is not None:
                 params[name] = float(val)
@@ -459,6 +470,13 @@ class Visium(Assay):
         clone_labels = ctype.reindex(cell_exp.index).iloc[:, 0].astype(str).values if ctype is not None else None
         n_spots = spot_coords.shape[0]
         n_cells_arr = g["n_cells"]
+        on_tissue = np.asarray(n_cells_arr) > 0
+        if on_tissue.sum() >= 20 and np.median(np.asarray(n_cells_arr)[on_tissue]) < 3:
+            warnings.warn(
+                f"the tissue spots hold a median of {np.median(np.asarray(n_cells_arr)[on_tissue]):g} cells, "
+                "where real Visium spots hold several to tens: the section was likely thinned by a cell "
+                "cap (max_cells), which makes each spot nearly a single cell. Cut the section from a "
+                "smaller region at full density, or raise max_cells.", SparseSpotWarning, stacklevel=2)
         if len(cell_ids) and not np.any(np.asarray(n_cells_arr) > 0):
             warnings.warn(
                 f"no spot of the slide covers a cell of the section ({len(cell_ids):,} cells): the "
@@ -498,6 +516,12 @@ class Visium(Assay):
         self.batch = VisiumBatch(self.hypers, seed=self.seed, label=label).realize(
             genes, base_profile, spot_coords, in_tissue=occupied > 0)
         lib = self.batch.spot_library(occupied=occupied)
+        spot_content = None
+        if self.hypers.content_exponent:
+            from .content import cell_rna_content
+            cc = cell_rna_content(placed, cell_ids).to_numpy()
+            spot_content = np.array([cc[inb].sum() if inb.size else 0.0 for inb in members])
+            lib = self.batch.scale_by_content(lib, spot_content, mask=occupied > 0)
         comp = self.batch.composition(probs)
         bled_in = None
         if self.hypers.bleed_rate > 0:                     # spot swapping (draws no random numbers)
@@ -524,6 +548,8 @@ class Visium(Assay):
         obs["n_cells"] = n_cells_arr
         obs["n_counts"] = counts.sum(axis=1)
         obs["library"] = lib
+        if spot_content is not None:
+            obs["rna_content"] = spot_content              # truth: the summed RNA content of its cells
         obs["capture_field"] = self.capture_field
         if bled_in is not None:
             obs["bled_in"] = bled_in                       # truth: share of the spot's counts from elsewhere

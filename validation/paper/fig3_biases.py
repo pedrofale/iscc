@@ -6,15 +6,15 @@ Figure 3, two rows at the text width. Row 1, each modality against its real refe
   B  WGS: per-locus coverage of GIAB HG002 (two copies) against fitted iscc at the loci of the tumour's
      most common copy number, with the CV of each and the share of near-empty HG002 loci;
   C  scDNA: coverage CV per copy-number state, real against fitted iscc, for DLP+ and Tapestri;
-  D  scRNA: zero fraction against gene mean, PBMC3k against fitted iscc;
-  E  scRNA: log variance against log mean, PBMC3k against fitted iscc;
+  D  scRNA: zero fraction against gene mean, a breast tumour (Wu et al. 2021) against fitted iscc;
+  E  scRNA: log variance against log mean, the breast tumour against fitted iscc;
   F  Visium: per-spot depth of a real breast-cancer section against fitted iscc, with Moran's I of each.
 
 Row 2, one bias per modality swept across the real value:
 
   G  WGS: coverage CV against the depth concentration, with HG002's CV and the fitted value;
   H  scDNA: Tapestri allelic dropout against ``ado_rate``, the real value crossed at the fitted setting;
-  I  scRNA: zero fraction against gene mean across the dropout midpoint, with PBMC3k;
+  I  scRNA: zero fraction against gene mean across the dropout midpoint, with the breast tumour;
   J  Visium: UMIs outside the tissue against distance, across the swapping rate, with the real section.
 
 S11 Fig holds the rest: (A-C) the recovery bias, the dissociation stress and the four blocks on the map;
@@ -28,7 +28,8 @@ JSON under ``$ISCC_FIG3_CACHE`` (default ``<derived>/fig3``); the render step re
 writes both figures. To re-render from another stored tumour, point ``ISCC_PAPER_OUT`` at it and
 recompute every part.
 
-Real references: ``validation/data/dna_ref_*.npz``; ``data/pbmc3k_raw.h5ad`` and
+Real references: ``validation/data/dna_ref_*.npz``; one tumour of Wu et al. 2021 in
+``$ISCC_SCRNA_REF`` (default ``data/wu2021_CID4290A.h5ad``, from ``tools/wu_tumour.py``);
 ``data/V1_Breast_Cancer_Block_A_Section_1`` (scanpy's cache, as Fig 2); the section's raw Space Ranger
 matrix (all 4,992 spots) in ``$ISCC_VISIUM_RAW_DIR`` (default ``data/visium_breast_A1``).
 
@@ -150,7 +151,7 @@ def compute_a():
         gid = cd["cell_type"]["cell_id"].astype(str)
         return [clones.of(g) for g in gid.values if g in t.genotypes and t._is_cancer(g)]
 
-    sec = spec.slice(depth_frac=0.5, max_cells=6000, layers="visium")
+    sec = spec.slice(depth_frac=0.5, max_cells=6000, layers="visium")   # an even subsample keeps the clone shares
     fr["section"] = _clone_frac(cancer_labels(sec), order)
     del sec
     blocks, centres = _blocks(t)
@@ -334,26 +335,27 @@ DROPOUT_MID = (0.0, 0.5, 1.5, 4.0)
 
 
 def compute_d():
-    import anndata as ad
-    from iscc.data import estimate_rna, scRNA
+    from iscc.data import scRNA
     F2 = _f2()
     left = F2.compute_f()
-    real = ad.read_h5ad(os.path.join(REPO, "data", "pbmc3k_raw.h5ad"))
-    est = estimate_rna(real)
+    real, est = F2.scrna_reference()
     del real
     t = _load()
-    diss = RR.resect(t).dissociate(max_cells=3000, layers="scrna")
+    diss = RR.resect(t).dissociate(max_cells=3000)
+    expr = F2.human_expression(t)
     del t
     cells = list(diss["cell_exp"].index)
     presets = {}
     for proto in ("10x", "smartseq3"):
-        X = sp.csr_matrix(scRNA(protocol=proto, n_cells=len(cells), seed=5).run(diss, cell_subset=cells).observed_counts.values)
+        X = sp.csr_matrix(scRNA(protocol=proto, n_cells=len(cells), seed=5).run(
+            diss, cell_subset=cells, gene_lift=expr).observed_counts.values)
         presets[proto] = F2._count_stats(X)
         presets[proto].pop("loglib")
     sweep = {}
     for mid in DROPOUT_MID:
         kw = {**est.scrna_kwargs(), "dropout_mid": mid}
-        X = sp.csr_matrix(scRNA(n_cells=len(cells), seed=5, **kw).run(diss, cell_subset=cells).observed_counts.values)
+        X = sp.csr_matrix(scRNA(n_cells=len(cells), seed=5, **kw).run(
+            diss, cell_subset=cells, gene_lift=expr).observed_counts.values)
         st = F2._count_stats(X)
         st.pop("loglib")
         sweep[str(mid)] = st
@@ -489,7 +491,7 @@ def main_c(ax, d):
 
 def main_d(ax, d):
     real, sim = d["left"]["real"], d["left"]["iscc"]
-    ax.plot(real["curve_m"], real["curve_z"], color=S.SOURCE["real"], lw=1.2, label="PBMC3k")
+    ax.plot(real["curve_m"], real["curve_z"], color=S.SOURCE["real"], lw=1.2, label=_f2().SCRNA_REF_LABEL)
     ax.plot(sim["curve_m"], sim["curve_z"], color=S.SOURCE["iscc"], lw=0.9, label="iscc")
     ax.set_xlabel("log$_{10}$ mean")
     ax.set_ylabel("Zero fraction")
@@ -677,7 +679,7 @@ def supp_g(ax, d):
     lr, ls = np.asarray(real["loglib"]), np.asarray(sim["loglib"])
     bins = np.linspace(min(lr.min(), ls.min()), max(lr.max(), ls.max()), 30)
     hr, _, _ = ax.hist(lr, bins=bins, density=True, color=S.SOURCE["real"], alpha=0.6,
-                       label=f"PBMC3k {real['cv_lib']:.2f}")
+                       label=f"{_f2().SCRNA_REF_LABEL} {real['cv_lib']:.2f}")
     hs, _, _ = ax.hist(ls, bins=bins, density=True, color=S.SOURCE["iscc"], alpha=0.6,
                        label=f"iscc {sim['cv_lib']:.2f}")
     ax.set_ylim(0, 1.45 * max(hr.max(), hs.max()))
@@ -689,7 +691,7 @@ def supp_g(ax, d):
 
 def supp_h(ax, d):
     real, sim = d["left"]["real"], d["left"]["iscc"]
-    ax.plot(real["curve_m"], real["curve_v"], color=S.SOURCE["real"], lw=1.2, label="PBMC3k")
+    ax.plot(real["curve_m"], real["curve_v"], color=S.SOURCE["real"], lw=1.2, label=_f2().SCRNA_REF_LABEL)
     ax.plot(sim["curve_m"], sim["curve_v"], color=S.SOURCE["iscc"], lw=0.9, label="iscc")
     xs = np.linspace(min(real["curve_m"]), max(real["curve_m"]), 10)
     ax.plot(xs, xs, color=S.INK, lw=0.5, ls=":", zorder=0, label="Poisson")
@@ -700,7 +702,7 @@ def supp_h(ax, d):
 
 def supp_i(ax, d):
     real = d["left"]["real"]
-    ax.plot(real["curve_m"], real["curve_z"], color=S.SOURCE["real"], lw=1.2, label="PBMC3k")
+    ax.plot(real["curve_m"], real["curve_z"], color=S.SOURCE["real"], lw=1.2, label=_f2().SCRNA_REF_LABEL)
     for (proto, st), ls in zip(d["presets"].items(), ("-", "--")):
         ax.plot(st["curve_m"], st["curve_z"], color=S.SOURCE["iscc"], lw=0.9, ls=ls,
                 label={"10x": "iscc, 10x", "smartseq3": "iscc, Smart-seq3"}[proto])
@@ -711,7 +713,7 @@ def supp_i(ax, d):
 
 def supp_j(ax, d):
     real = d["left"]["real"]
-    ref = ax.plot(real["curve_m"], real["curve_z"], color=S.SOURCE["real"], lw=1.2, label="PBMC3k")
+    ref = ax.plot(real["curve_m"], real["curve_z"], color=S.SOURCE["real"], lw=1.2, label=_f2().SCRNA_REF_LABEL)
     mids = []
     for k, (mid, st) in enumerate(d["sweep"].items()):
         mids += ax.plot(st["curve_m"], st["curve_z"], color=SWEEP[k], lw=0.9, label=f"{float(mid):g}")

@@ -34,7 +34,8 @@ spatial analogue of the scRNA estimator's library-size de-biasing of the dispers
 
 The ``_PRIOR_ONLY`` escape (as in ``estimate_rna``/``estimate_dna``) carries the fields
 that one section cannot identify from the preset: ``ambient_frac`` (needs off-tissue/background
-spots), ``edge_sigma`` and ``diffusion_sigma`` (confounded with biology in a single section), and
+spots), ``edge_sigma`` and ``diffusion_sigma`` (confounded with biology in a single section),
+``content_exponent`` (needs the cells under each spot), and
 ``sigma_batch`` on single-section data (the per-gene factor is constant within a section, so it is
 confounded with the true expression — identifiable only across >=2 sections, exactly as the scRNA
 estimator needs >=2 batches).
@@ -65,7 +66,7 @@ from .batch import VisiumBatchHyperParams
 
 # Fields a single-section counts+coords estimate cannot identify; carried from the preset, never
 # claimed as "fit" — the spatial analogue of estimate_rna()'s ambient/doublet escape.
-_PRIOR_ONLY = ("ambient_frac", "edge_sigma", "diffusion_sigma")
+_PRIOR_ONLY = ("ambient_frac", "edge_sigma", "diffusion_sigma", "content_exponent")
 
 
 @dataclass

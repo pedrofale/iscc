@@ -66,11 +66,12 @@ N_DNA = 1500                # single-cell WGS libraries, a DLP+ run's order of m
 RNA_MAX_CELLS = 3000        # tumour cells handed to clonealign
 RNA_GENES = 4000            # at most this many genes, the most expressed of the informative ones
 COARSE_K = 4                # --coarse: the ground truth's clones in this many copy-number groups
-# The Visium section's cell cap. The tier's max_cells (8,000) leaves about 1.4 cells per spot, so nearly
-# every spot holds one clone; 50,000, Fig 1's section, gives about 5. The dissociated sample (scDNA,
-# scRNA) keeps the tier's cap. The section is materialised with only the frames Visium and the allele
-# counts read (expression, and expression per homolog).
-SECTION_MAX_CELLS = int(os.environ.get("ISCC_SECTION_MAX_CELLS", 50_000))
+# The Visium section's cell cap: none, as regime.SECTION_MAX_CELLS (not imported here, so that the module
+# loads without the regime), so the spots hold the cells of the section; the tier's max_cells (8,000)
+# left about 1.4 cells per spot and 50,000 2.3 to 6.1. The dissociated sample (scDNA, scRNA) keeps the
+# tier's cap. The section is materialised with only the frames Visium and the allele counts read
+# (expression, and expression per homolog).
+SECTION_MAX_CELLS = int(os.environ.get("ISCC_SECTION_MAX_CELLS", 10 ** 8))
 SECTION_LAYERS = ("cell_exp", "cell_exp_p", "cell_exp_m")
 CLONEALIGN = dict(max_iter=200, n_repeats=2, seed=1, preprocess=1)   # Fig 5's settings + the package's
                                                                       # preprocess_for_clonealign
@@ -860,7 +861,7 @@ def main():
     ap.add_argument("--rna-cells", type=int, default=RNA_MAX_CELLS)
     ap.add_argument("--rna-genes", type=int, default=RNA_GENES)
     ap.add_argument("--section-max-cells", type=int, default=SECTION_MAX_CELLS,
-                    help="cells in the Visium section (default $ISCC_SECTION_MAX_CELLS or 50,000)")
+                    help="cells in the Visium section (default $ISCC_SECTION_MAX_CELLS, else no cap)")
     ap.add_argument("--dosage", choices=("regime", "proportional"), default="regime",
                     help="dna-rna: the regime's buffered dosage, or every gene proportional to copy number (the "
                          "counterfactual of exp-paper1-dosage-counterfactual), written to OUT/c_proportional")

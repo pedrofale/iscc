@@ -131,7 +131,7 @@ def _samples(t):
     rc = np.array([t.deme_coords[d] for d in lower], dtype=float)
     centre = tuple(int(round(x)) for x in (rc * w[:, None]).sum(axis=0) / max(w.sum(), 1.0))
     lesion = sorted(set(t.primary_window(side=WINDOW, center=centre)) & lower_set)
-    section = specimen.slice(lesion, depth_frac=0.5, max_cells=100_000, layers="visium")
+    section = specimen.slice(lesion, depth_frac=0.5, max_cells=RG.SECTION_MAX_CELLS, layers="visium")
     genes = specimen.dissociate(upper, max_cells=10, seed=0)["cell_exp"].columns
     stress_genes = list(np.random.default_rng(0).choice(genes, size=round(0.05 * len(genes)), replace=False))
     return specimen, upper, section, stress_genes, lesion
