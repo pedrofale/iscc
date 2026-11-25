@@ -20,7 +20,7 @@ possessives, and every axis on the measured quantity's own scale, compared value
 Everything else is in the caption.
 
 A. The cohort: 50 patients, each grown to its own size; the two pooling designs (confounded,
-   balanced); the planted network of event modules E0-E6 with each module's size (genes) and the
+   balanced); the simulated network of event modules E0-E6 with each module's size (genes) and the
    share of patients carrying it at 5% of the cancer cells.
 B. The batch effect between two 10x runs of one blood sample (real), and as made by iscc and by
    Splatter: the mean and the s.d. of the log2 fold change between batches within a cell type against
@@ -30,8 +30,8 @@ C. Embeddings of the pooled cells at the fitted batch level, without integration
 D. Integration at the fitted and shared levels and with one technical source at a time: iLISI of the
    microenvironment cells, and the share of neighbours from the same patient and from the same clone
    among cancer cells, each beside its value in the embedding without batch effect (grey diamond).
-E. The planted network from the DNA: each tool's estimate for the planted relations against the six
-   pairs of E0 (grey band: their magnitudes); filled, a relation recovered (planted sign and a
+E. The simulated network from the DNA: each tool's estimate for the simulated relations against the six
+   pairs of E0 (grey band: their magnitudes); filled, a relation recovered (simulated sign and a
    magnitude above every E0 pair; for the order, a larger effect of E5 on E6 than of E6 on E5, above
    every E0 pair); the rank among the 21 pairs beside each column; CBN as the edges it returns.
 F. Architecture against the mix of stages: the order of breach and the survival traits in the true
@@ -148,7 +148,7 @@ def panel_a(fig, x, y, coll, w=176):
                                     fc=pal[p], ec="none"))
         ax.text(49.6, y0 + 3.4, "…", fontsize=FS, va="center")
         ax.text(53.5, y0 + 3.4, "50 batches", fontsize=FS_SMALL, color=S.GREY, va="center")
-    # the planted network, right-aligned in the panel so that E6 stays inside it
+    # the simulated network, right-aligned in the panel so that E6 stays inside it
     x0 = w - 89
     cohort = (coll or {}).get("cohort", {})
     sizes = cohort.get("sizes")
@@ -527,7 +527,7 @@ def panel_f(fig, x, y, coll):
 
 
 def main():
-    """Fig 5 at the text width (A cohort, B integration, C planted network, D architecture), and the two
+    """Fig 5 at the text width (A cohort, B integration, C simulated network, D architecture), and the two
     panels the half-page layout moved out: S13 Fig (the batch effect against real data) and S14 Fig
     (the embeddings at the fitted level)."""
     import argparse
@@ -540,13 +540,13 @@ def main():
     data = load(out, args.batchval)
     S.setup()
     fig = S.figure(165, 136)
-    heading(fig, "A", "Cohort and planted network", 2, 2)
+    heading(fig, "A", "Cohort and simulated network", 2, 2)
     panel_a(fig, 4, 8, data["collect"], w=158)
     heading(fig, "B", "Integration", 2, 43)
     panel_d(fig, 4, 52, data["levels"])
     heading(fig, "D", "Architecture", 84, 43)
     panel_f(fig, 84, 51, data["collect"])
-    heading(fig, "C", "Planted network", 2, 98)
+    heading(fig, "C", "Simulated network", 2, 98)
     panel_e(fig, 4, 107, data["collect"])
     path = S.save(fig, args.name)
     fig13 = S.figure("double", 34)
