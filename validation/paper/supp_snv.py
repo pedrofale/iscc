@@ -612,7 +612,7 @@ LABEL = {"10x": "10x", "smartseq3": "Smart-seq3", "smartseq3_10xdepth": "Smart-s
          "scdna_bin": "scDNA (bin reads, as emitted)"}
 DRAWN = ("10x", "smartseq3", "smartseq3_10xdepth", "visium", "bulk", "scdna_site")
 CELL_DRAWN = ("10x", "smartseq3", "smartseq3_10xdepth", "visium", "scdna_site")
-TASK_ORDER = ("seed1", "seed2", "disp0.1_seed1", "disp0.9_seed1", "disp0.9_seed2")
+TASK_ORDER = ("seed1", "seed2", "disp0.1_seed1", "disp0.1_seed2", "disp0.9_seed1", "disp0.9_seed2")   # as Fig 4C
 
 
 def _colours():

@@ -429,7 +429,7 @@ def _clone_bars(ax, d):
             ax.barh(i, v, left=left, color=d["clone_colour"][k], height=0.7)
             left += v
     ax.set_yticks(range(len(rows)))
-    ax.set_yticklabels([r.replace("tumour", "tumor") for r in rows])
+    ax.set_yticklabels([r.replace("whole tumour", "whole primary") for r in rows])
     ax.tick_params(axis="y", length=0)
     ax.spines["left"].set_visible(False)
     ax.invert_yaxis()

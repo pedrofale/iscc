@@ -84,7 +84,7 @@ PLOIDY_SCAN = np.round(np.arange(1.5, 6.0001, 0.01), 2)
 DNA_REF = {name: os.path.join(os.path.dirname(HERE), "data", f + ".npz") for name, f in (
     ("HG002", "dna_ref_hg002_bulk_wgs"), ("DLP+", "dna_ref_dlp_sc_wgs"))}
 NORMALS = ("epithelial", "stromal", "immune", "host")
-NORMAL_COLOUR = {"stromal": "#CDBFA8", "epithelial": S.COMPARTMENT["epithelium"], "immune": "#9E9E9E",
+NORMAL_COLOUR = {"stromal": "#CDBFA8", "epithelial": S.COMPARTMENT["epithelium"], "immune": "#5E5E5E",
                  "host": "#9DB7CC"}
 N_BLOCKS, BLOCK_HALF = 4, 8              # as in Fig 3a: 17 x 17 demes, about 1 mm at the cm scale
 FS = 5.5                                 # the smallest text in the paper's figures, in points
@@ -1199,8 +1199,8 @@ def render_s9(fig, T, D, Dz, V, Vz, nums):
         err = 1 - ok.mean(1)
         axe.imshow(err[order][:, None], aspect="auto", cmap="Greys", vmin=0, vmax=0.5, interpolation="nearest")
         _frame(axe, "none")
-        axe.text(3.8, 1.0, "Error", transform=axe.transAxes, fontsize=FS, ha="center", va="top",
-                 rotation=90, color=S.GREY)
+        axe.text(0.5, -0.02, "Error", transform=axe.transAxes, fontsize=FS, ha="center", va="top",
+                 rotation=90, color=S.GREY)              # below the strip: beside it, it met panel F's letter
         for i in np.nonzero(dbl[order])[0]:
             axe.plot([1.4], [i], marker="<", ms=2.0, color=S.INK, mew=0, clip_on=False)
         ylab(ax, "scDNA\ncells", S.MODALITY["DNA"])
