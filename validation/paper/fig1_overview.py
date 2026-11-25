@@ -822,18 +822,21 @@ def render_a(fig, T, Z, D, Dz, V, Vz, nums):
     x2 = STAGE_X["sampling"]
     ax = S.ax_mm(fig, x2, MAP_Y, MAP, MAP)
     ax.imshow(0.55 * grown + 0.45, interpolation="nearest")
-    half = int(0.5 * G)
+    # the cut runs through the centre of the largest clone (``_halves``), not down the middle: the
+    # sectioned demes are the columns left of it
+    cut = int((Z["where"].reshape(G, G) == 2).any(axis=0).sum())
     c_sec, c_dis = S.MODALITY["spatial"], S.MODALITY["DNA"]
-    ax.add_patch(Rectangle((-0.5, -0.5), half, G, fill=False, ec=c_sec, lw=0.9))
-    ax.add_patch(Rectangle((half - 0.5, -0.5), G - half, G, fill=False, ec=c_dis, lw=0.9, ls=(0, (2, 1))))
+    ax.add_patch(Rectangle((-0.5, -0.5), cut, G, fill=False, ec=c_sec, lw=0.9))
+    ax.add_patch(Rectangle((cut - 0.5, -0.5), G - cut, G, fill=False, ec=c_dis, lw=0.9, ls=(0, (2, 1))))
     for b, (r, c) in enumerate(T["block_centres"]):
         h = T["block_half"]
         ax.add_patch(Rectangle((c - h - 0.5, r - h - 0.5), 2 * h + 1, 2 * h + 1, fill=False, ec=S.INK, lw=0.6))
         ax.text(c + h + 2, r - h, str(b + 1), fontsize=FS, color=S.INK, va="top", ha="left")
     _frame(ax, "none")
-    S.text_mm(fig, x2 + MAP / 4, MAP_Y - 0.4, "section", fontsize=FS, color=c_sec, ha="center", va="bottom")
-    S.text_mm(fig, x2 + 3 * MAP / 4, MAP_Y - 0.4, "dissociated", fontsize=FS, color=c_dis, ha="center",
-              va="bottom")
+    S.text_mm(fig, x2, MAP_Y - 0.4, "section", fontsize=FS, color=c_sec, ha="left", va="bottom")
+    S.text_mm(fig, x2 + MAP * (cut + G) / (2 * G), MAP_Y - 0.4, "dissociated", fontsize=FS, color=c_dis,
+              ha="center", va="bottom")
+    nums["a"]["section_columns"] = [0, cut - 1]
     # the blocks' clone fractions (truth, from the counts)
     nb = len(T["block_centres"])
     for b in range(nb):
@@ -861,12 +864,12 @@ def render_a(fig, T, Z, D, Dz, V, Vz, nums):
     S.text_mm(fig, x3, MAP_Y - 0.3, "WGS: depth along the genome", color=S.MODALITY["DNA"], **title)
     row2, h2 = MAP_Y + 13.5, 19.0
     S.text_mm(fig, x3, row2 - 0.7, "scDNA: copy number", color=S.MODALITY["DNA"], **title)
-    S.text_mm(fig, x3 + 22.5, row2 - 0.7, "scRNA: cells", color=S.MODALITY["RNA"], **title)
-    S.text_mm(fig, x3 + 43.5, row2 - 0.7, "Visium: spots", color=S.MODALITY["spatial"], **title)
+    S.text_mm(fig, x3 + 22.0, row2 - 0.7, "scRNA: cells", color=S.MODALITY["RNA"], **title)
+    S.text_mm(fig, x3 + 38.0, row2 - 0.7, "Visium: spots", color=S.MODALITY["spatial"], **title)
     axw = S.ax_mm(fig, x3 + 5.0, MAP_Y + 0.6, right - x3 - 5.0, 7.4)
     axd = S.ax_mm(fig, x3 + 1.6, row2, 17.0, h2)
-    axr = S.ax_mm(fig, x3 + 22.5, row2, 18.5, h2)
-    axv = S.ax_mm(fig, x3 + 44.5, row2, right - x3 - 44.5, h2)
+    axr = S.ax_mm(fig, x3 + 22.0, row2, 14.0, h2)
+    axv = S.ax_mm(fig, x3 + 38.0, row2, right - x3 - 38.0, h2)      # about square: a window of the section
     if Dz is None:
         for ax_ in (axw, axd, axr):
             _pending(ax_, "pending")
@@ -892,18 +895,27 @@ def render_a(fig, T, Z, D, Dz, V, Vz, nums):
     if Vz is None:
         _pending(axv, "pending")
     else:
-        _visium(axv, Vz, T, mode="clone")
+        nums["a"]["visium_window"] = _visium(axv, Vz, T, mode="clone", square=True)
         _frame(axv, "none")
     nums["a"].update(cancer=T["cancer"], generations=round(T["time"], 1), met_cells=n_met, glands=T["n_glands"],
                      grid=G, met_grid=MG, clone_sizes=T["sizes"])
 
 
-def _visium(ax, Vz, T, mode="clone", k=None, colour=None):
+def _visium(ax, Vz, T, mode="clone", k=None, colour=None, square=False):
     """The Visium spots of the section: by dominant clone (alpha by cancer share) or by the true fraction
-    of clone ``k`` among the spot's cells. Off-tissue spots are left out."""
+    of clone ``k`` among the spot's cells. Off-tissue spots are left out. The section is half the tissue,
+    twice as tall as it is wide; ``square`` keeps the square window as wide as the section that holds the
+    most cancer cells, and returns its first and last deme row."""
     from matplotlib.colors import LinearSegmentedColormap
     xy, n = Vz["coords"], Vz["n_cells"]
     on = n > 0
+    window = None
+    if square:
+        w = xy[on, 1].max() - xy[on, 1].min()
+        rows, cancer = xy[on, 0], Vz["n_cancer"][on]
+        top = max(np.unique(rows), key=lambda r: cancer[(rows >= r) & (rows <= r + w)].sum())
+        on = on & (xy[:, 0] >= top) & (xy[:, 0] <= top + w)
+        window = [int(top), int(top + w)]
     c0, c1 = xy[on, 1].min() - 2, xy[on, 1].max() + 2
     r0, r1 = xy[on, 0].min() - 2, xy[on, 0].max() + 2
     pos, (fw, fh) = ax.get_position(), ax.figure.get_size_inches() / S.MM
@@ -927,6 +939,7 @@ def _visium(ax, Vz, T, mode="clone", k=None, colour=None):
     ax.set_xlim(c0, c1)
     ax.set_ylim(r1, r0)
     ax.set_aspect("equal", adjustable="box")
+    return window
 
 
 # --- Fig 1B: selection depends on the niche, as one row ----------------------------------------------

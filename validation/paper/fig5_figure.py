@@ -377,7 +377,7 @@ def _e_cbn_rows(sc):
 
 def panel_e(fig, x, y, coll):
     tools = ("cooc", "mhn", "treemhn")
-    lab_w, w, gap, h, wc = 24, 13.5, 4.6, 19, 8
+    lab_w, w, gap, h, wc = 22, 12.2, 4.2, 19, 8           # 79 mm: beside panel B
     res = None
     if coll:
         res = next((r for r in coll["results"] if r["panel"] == "d" and r["threshold"] == A.DETECTION), None)
@@ -445,7 +445,8 @@ def panel_f(fig, x, y, coll):
     if coll:
         res = next((r for r in coll["results"] if r["panel"] == "e" and r["threshold"] == A.DETECTION), None)
     # the truth: which trait the genealogy of each tumour acquired first
-    ax = S.ax_mm(fig, x + lab_w, y, 26, 6.5)
+    # the truth's bars on the left, the tools on the right: one row along the bottom of the figure
+    ax = S.ax_mm(fig, x + lab_w, y + 5, 24, 6.5)
     orders = ((coll or {}).get("truth") or {}).get("orders")
     if not orders:
         placeholder(ax, "genealogies")
@@ -469,12 +470,12 @@ def panel_f(fig, x, y, coll):
         ax.set_xticks([0, 0.5, 1])
         ax.set_xticklabels(["0", "0.5", "1"], fontsize=FS_SMALL)
         ax.set_xlabel("share of tumors", fontsize=FS_SMALL, labelpad=1)
-    yt = y + 17
+    yt, xf = y, x + 68
     if res is None:
-        placeholder(S.ax_mm(fig, x + lab_w, yt, 3 * (w + gap) + wc, h), "trait scores")
+        placeholder(S.ax_mm(fig, xf + lab_w, yt, 3 * (w + gap) + wc, h), "trait scores")
         return
     for ti, tool in enumerate(tools):
-        ax = S.ax_mm(fig, x + lab_w + ti * (w + gap), yt, w, h)
+        ax = S.ax_mm(fig, xf + lab_w + ti * (w + gap), yt, w, h)
         fit = res["fits"].get(tool) or {}
         rows, band = _f_rows(res["scores"].get(tool), fit)
         if rows is None:
@@ -482,7 +483,7 @@ def panel_f(fig, x, y, coll):
             continue
         _forest(ax, rows, band, tool, show_labels=(ti == 0))
         ax.set_xlabel("log odds" if tool == "cooc" else "Θ", fontsize=FS_SMALL, labelpad=1)
-    ax = S.ax_mm(fig, x + lab_w + 3 * (w + gap), yt, wc, h)
+    ax = S.ax_mm(fig, xf + lab_w + 3 * (w + gap), yt, wc, h)
     cbn = res["scores"].get("cbn")
     if cbn and cbn.get("kind") == "cbn":
         _edges(ax, _f_cbn_rows(cbn), "cbn", show_labels=False)
@@ -507,10 +508,10 @@ def main():
     panel_a(fig, 4, 8, data["collect"], w=158)
     heading(fig, "B", "Integration", 2, 43)
     panel_d(fig, 4, 52, data["levels"])
-    heading(fig, "D", "Architecture", 84, 43)
-    panel_f(fig, 84, 51, data["collect"])
-    heading(fig, "C", "Simulated network", 2, 98)
-    panel_e(fig, 4, 107, data["collect"])
+    heading(fig, "C", "Simulated network", 84, 43)
+    panel_e(fig, 84, 54, data["collect"])
+    heading(fig, "D", "Architecture", 2, 98)
+    panel_f(fig, 2, 107, data["collect"])
     path = S.save(fig, args.name)
     fig14 = S.figure(92, 36)
     panel_c(fig14, 6, 8, data["levels"])
