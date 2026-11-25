@@ -164,6 +164,12 @@ def _runs():
     runs["R14"] = [(task, dict(kw, selection={**kw["selection"], **RG.IMMUNE_SELECTION},
                                spatial=dict(RG.IMMUNE_SPATIAL), immune=dict(RG.IMMUNE)))
                    for task, kw in runs["R11"]]
+    # R15: R3's design (architecture x selection, ten seeds) on R11's chromosome-arm genome, for the copy
+    # number tree benchmark (vault: exp-paper1-cn-trees-architecture): 39 segments give tree methods the
+    # features that R3's 12 do not. Neutral keeps prop_driver 0 on the arm genome's selection.
+    runs["R15"] = [(task, dict(kw, cancer=dict(arm_rates), genome=ag["genome_params"],
+                               selection={**ag["selection_params"], **kw["selection"]}))
+                   for task, kw in runs["R3"]]
     return runs
 
 
