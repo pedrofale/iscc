@@ -687,7 +687,7 @@ def fit(a):
             computed_from_cells_recovered=["doublet_rate (10x multiplet table)"],
             drawn_from_range=["recovery per patient and type (logit-normal, sd 0.5)"]
             + ([f"ambient_frac of {needs} (range to be registered)"] if (needs["wu"] or needs["ding"]) else []),
-            fixed=dict(sigma_batch=0.10, depth_batch_sigma="0 wherever mu_lib is drawn per batch"))
+            fixed=dict(sigma_batch=0.29, depth_batch_sigma="0 wherever mu_lib is drawn per batch"))
     finally:
         shutil.rmtree(a.work, ignore_errors=True)
     out["wall_s"] = round(time.time() - t0, 1)

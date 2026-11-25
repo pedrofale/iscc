@@ -22,7 +22,7 @@ The rules, as registered:
   levels refuse to be made (``batch_fits.require_ambient_range``).
 * **fitted:** every batch its own drawn vector (``mu_lib``, ``sigma_lib``, ``dispersion``,
   ``ambient_frac``, ``dropout_mid``/``dropout_shape``, ``doublet_rate``), every patient its own
-  stress; ``sigma_batch`` 0.10.
+  stress; ``sigma_batch`` the 10x preset (0.29).
 * **shared:** every batch the median fitted vector, every patient the median stress; batches then
   differ only by their realisation (the old 10x level at the atlas's median).
 * **attribution arms** (``depth``, ``dispersion``, ``ambient``, ``dropout``, ``doublets``,
@@ -30,7 +30,8 @@ The rules, as registered:
   the fitted level, i.e. from the same draws.
 * **reference:** the same cells, with their recovery, without the stress signature, in one batch
   without a batch effect (``sigma_batch`` 0, ``depth_batch_sigma`` 0) at the median vector.
-* ``sigma_batch`` is 0.10 (the 10x preset) at every level but the reference. ``depth_batch_sigma``
+* ``sigma_batch`` is the 10x preset (0.29, fitted on two 10x runs of one blood sample; 0.10 before
+  2026-11-25) at every level but the reference. ``depth_batch_sigma``
   is 0 wherever ``mu_lib`` is drawn per batch (fitted, depth), so depth is not counted twice, and
   the 10x preset (0.05) where every batch shares the median ``mu_lib``.
 * Recovery is the patient's own draw (fits.json ``recovery``, keyed by the cohort index) at every
@@ -54,7 +55,9 @@ for p in (os.path.join(REPO, "src"), HERE):
 
 import numpy as np  # noqa: E402
 
-SIGMA_BATCH = 0.10
+from iscc.data.rna import PROTOCOL_PRESETS  # noqa: E402
+
+SIGMA_BATCH = PROTOCOL_PRESETS["10x"]["sigma_batch"]    # fitted on two 10x runs of one sample (0.29)
 TECH = ("mu_lib", "sigma_lib", "dispersion", "ambient_frac", "dropout_mid", "dropout_shape", "doublet_rate")
 SOURCES = {"depth": ("mu_lib", "sigma_lib"), "dispersion": ("dispersion",), "ambient": ("ambient_frac",),
            "dropout": ("dropout_mid", "dropout_shape"), "doublets": ("doublet_rate",)}
@@ -65,7 +68,6 @@ DRAW_SEED = 20261117
 
 
 def preset_depth_batch_sigma():
-    from iscc.data.rna import PROTOCOL_PRESETS
     return float(PROTOCOL_PRESETS["10x"]["depth_batch_sigma"])
 
 

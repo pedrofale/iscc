@@ -1,17 +1,15 @@
 """Fig 5: one atlas-sized cohort of 50 patients, and what tools read from it.
 
 Draws ``figures/paper1/fig5_cohort.pdf`` at the text width (panels A, D, E and F below, lettered A to D
-in the paper), and the two panels the half-page layout moved out, ``supp_batch_validation.pdf`` (B, S13
-Fig) and ``supp_cohort_embeddings.pdf`` (C, S14 Fig), through ``validation/_paths.py``
-(``ISCC_PAPER_DIR`` picks the paper checkout), from summaries only:
+in the paper), and panel C, which the half-page layout moved out, as ``supp_cohort_embeddings.pdf``
+(S14 Fig), through ``validation/_paths.py`` (``ISCC_PAPER_DIR`` picks the paper checkout), from
+summaries only. Panel B, the batch validation, became S13 Fig and is drawn by ``batch_figure.py``.
+
 
 * ``collect_summary.json`` (``fig5_atlas.py collect``; panels A, E, F) and
   ``integrate/level_<L>.json`` (``batch_cohort.py integrate``; panels C, D) under ``$ISCC_FIG5_OUT``
   (or ``--out``), at the levels of ``batch_levels.LEVELS``; summaries of the first design's 10x /
-  intermediate / strong levels, if present, are ignored;
-* ``validation.json`` (``batch_validation.py run``; panel B), ``--batchval`` (default
-  ``$ISCC_BATCHVAL``, else ``<out>/../../batchval/validation.json``), drawn by ``batch_figure.py``'s
-  own ``draw_s1`` / ``draw_s3``.
+  intermediate / strong levels, if present, are ignored.
 
 A panel whose summaries are missing is drawn as a placeholder that says so (a preview only: the
 figure goes into the paper once its summaries exist). Text inside the figure follows the paper's
@@ -22,9 +20,6 @@ Everything else is in the caption.
 A. The cohort: 50 patients, each grown to its own size; the two pooling designs (confounded,
    balanced); the simulated network of event modules E0-E6 with each module's size (genes) and the
    share of patients carrying it at 5% of the cancer cells.
-B. The batch effect between two 10x runs of one blood sample (real), and as made by iscc and by
-   Splatter: the mean and the s.d. of the log2 fold change between batches within a cell type against
-   mean expression, and the correlation of the fold changes between cell types.
 C. Embeddings of the pooled cells at the fitted batch level, without integration and after Harmony
    and scVI, in both designs: microenvironment cells coloured by batch, cancer cells by patient.
 D. Integration at the fitted and shared levels and with one technical source at a time: iLISI of the
@@ -47,7 +42,6 @@ import numpy as np  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 from matplotlib.patches import Circle, FancyArrowPatch, FancyBboxPatch  # noqa: E402
 
-import batch_figure as BFIG  # noqa: E402
 import batch_levels as BL  # noqa: E402
 import fig5_atlas as A  # noqa: E402
 import style as S  # noqa: E402
@@ -78,7 +72,7 @@ def palette50():
     return cols[:50]
 
 
-def load(out, batchval=None):
+def load(out):
     def read(p):
         if not p or not os.path.exists(p):
             return None
@@ -92,10 +86,7 @@ def load(out, batchval=None):
                 r = read(os.path.join(d, fn))
                 if r and r.get("level") in BL.LEVELS:          # the batch model's levels only
                     levels[r["level"]] = r
-    bv = batchval or os.environ.get("ISCC_BATCHVAL") or os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(out))), "batchval", "validation.json")
-    return dict(collect=read(os.path.join(out, "collect_summary.json")), levels=levels,
-                batchval=read(bv), batchval_path=bv)
+    return dict(collect=read(os.path.join(out, "collect_summary.json")), levels=levels)
 
 
 def placeholder(ax, what):
@@ -170,33 +161,6 @@ def panel_a(fig, x, y, coll, w=176):
                                  lw=0.8, color=S.INK))
     ax.text(x0 + 7, yc + 4.0, "genes", fontsize=FS_SMALL, color=S.GREY, va="top", ha="right")
     ax.text(x0 + 7, yc + 6.8, "patients", fontsize=FS_SMALL, color=S.GREY, va="top", ha="right")
-
-
-# ------------------------------------------------------------------ B: the batch effect, validated
-def panel_b(fig, x, y, v):
-    """Real, iscc and Splatter side by side, drawn by batch_figure's own functions."""
-    boxes = [(x + 10, y + 5, 44, 23), (x + 70, y + 5, 44, 23), (x + 132, y + 5, 40, 23)]
-    axes = [S.ax_mm(fig, *b) for b in boxes]
-    if v is None:
-        for ax in axes:
-            placeholder(ax, "batch validation")
-        return
-    BFIG.draw_s1(axes[0], v, "mean_log2fc")
-    BFIG.draw_s1(axes[1], v, "sd_log2fc")
-    BFIG.draw_s3(axes[2], v)
-    for ax in axes:
-        ax.xaxis.label.set_size(FS)
-        ax.yaxis.label.set_size(FS)
-        ax.tick_params(labelsize=FS_SMALL)
-    groups = BFIG._versions(v)
-    handles = [Line2D([], [], color=S.INK, lw=1.2, marker="o", ms=2.2, label=BFIG.LABEL["real"])]
-    for pre in ("iscc", "splatter", "splatteriscc"):
-        if pre in groups:
-            handles.append(Line2D([], [], color=BFIG.COL[pre], lw=0.8, ls=("--" if pre == "splatteriscc" else "-"),
-                                  label=BFIG.LABEL[pre]))
-    H = fig.get_size_inches()[1] / S.MM
-    fig.legend(handles=handles, loc="upper left", ncol=len(handles), fontsize=FS_SMALL, frameon=False,
-               bbox_to_anchor=((x + 10) / S.WIDTH_MM["double"], 1 - (y - 0.6) / H))
 
 
 # ------------------------------------------------------------------ C: embeddings at the fitted level
@@ -533,11 +497,10 @@ def main():
     import argparse
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--out", default=None, help="summary directory (as fig5_atlas.py)")
-    ap.add_argument("--batchval", default=None, help="batch_validation.py's validation.json")
     ap.add_argument("--name", default="fig5_cohort")
     args = ap.parse_args()
     out = args.out or os.environ.get("ISCC_FIG5_OUT") or os.path.join(A.REG.OUT, "fig5-atlas")
-    data = load(out, args.batchval)
+    data = load(out)
     S.setup()
     fig = S.figure(165, 136)
     heading(fig, "A", "Cohort and simulated network", 2, 2)
@@ -549,15 +512,11 @@ def main():
     heading(fig, "C", "Simulated network", 2, 98)
     panel_e(fig, 4, 107, data["collect"])
     path = S.save(fig, args.name)
-    fig13 = S.figure("double", 34)
-    panel_b(fig13, 4, 4, data["batchval"])
-    path13 = S.save(fig13, "supp_batch_validation")
     fig14 = S.figure(92, 36)
     panel_c(fig14, 6, 8, data["levels"])
     path14 = S.save(fig14, "supp_cohort_embeddings")
-    print(f"[fig5] {path}, {path13}, {path14} (levels: {sorted(data['levels'])}, collect: "
-          f"{data['collect'] is not None}, batch validation: {data['batchval'] is not None} from "
-          f"{data['batchval_path']})")
+    print(f"[fig5] {path}, {path14} (levels: {sorted(data['levels'])}, collect: "
+          f"{data['collect'] is not None})")
 
 
 if __name__ == "__main__":

@@ -33,14 +33,14 @@ import style as S  # noqa: E402
 # One colour per entity for the whole paper: iscc and real from style.SOURCE; Splatter's is the
 # data-simulator supplement's (style.TOOL["Splatter"]).
 COL = {"real": S.SOURCE["real"], "iscc": S.SOURCE["iscc"], "generic": S.CLONE_FAMILIES[0][2],
-       "splatter": S.TOOL.get("Splatter", "#A50026"), "splatteriscc": S.TOOL.get("Splatter", "#A50026")}
+       "splatter": S.TOOL.get("Splatter", "#A50026")}
 # Labels follow the paper's style for text inside figures (no parentheticals or settings: the caption
 # names the data set and how Splatter was matched).
-LABEL = {"real": "real", "iscc": "iscc", "generic": "per-gene factor", "splatter": "Splatter",
-         "splatteriscc": "Splatter at iscc's size"}
-TICK = {"real": "real", "iscc": "iscc", "generic": "per-gene\nfactor", "splatter": "Splatter",
-        "splatteriscc": "Splatter at\niscc's size"}
-ORDER = ("real", "iscc", "generic", "splatter", "splatteriscc")
+LABEL = {"real": "real", "iscc": "iscc", "generic": "per-gene factor", "splatter": "Splatter"}
+TICK = {"real": "real", "iscc": "iscc", "generic": "per-gene\nfactor", "splatter": "Splatter"}
+# Splatter matched to iscc's size (``splatteriscc``) stays in validation.json for the registered score,
+# but is not drawn: with the refitted 10x factor iscc's size is the real one, which Splatter cannot reach.
+ORDER = ("real", "iscc", "generic", "splatter")
 
 
 def _versions(v):
@@ -72,8 +72,7 @@ def draw_s1(ax, v, key):
     for pre in ORDER[:0:-1]:
         for i, n in enumerate(groups.get(pre, [])):
             x, y = _decile_curve(vs[n], key)
-            ax.plot(x, y, color=COL[pre], lw=0.6, alpha=0.75, ls=("--" if pre == "splatteriscc" else "-"),
-                    label=(LABEL[pre] if i == 0 else None))
+            ax.plot(x, y, color=COL[pre], lw=0.6, alpha=0.75, label=(LABEL[pre] if i == 0 else None))
     x, y = _decile_curve(vs["real"], key)
     ax.plot(x, y, color=S.INK, lw=1.2, marker="o", ms=2.2, label=LABEL["real"], zorder=5)
     ax.set_xlabel("log$_{10}$ mean expression")
@@ -113,8 +112,7 @@ ROWS = [
            ("S2_slope_high", "Highest tercile of mean", "slope of detection change\non log$_2$ fold change")]),
     ("G", [("silhouette_batch", "Batches", "silhouette"),
            ("silhouette_celltype", "Cell types", "silhouette"),
-           ("ilisi_batch", "Batches", "iLISI"),
-           ("clisi_celltype", "Cell types", "cLISI")]),
+           ("ilisi_batch", "Batches", "iLISI")]),
 ]
 # Drawn at the text width, so that it is included at its true size (no text below 5.5 pt) and leaves
 # room on the page for the caption.
@@ -137,7 +135,7 @@ def _strip(ax, v, key, order, labels):
             ax.scatter(vals, [i], marker="D", s=9, color=S.INK, zorder=5)
             continue
         ax.scatter(vals, i + np.linspace(-0.18, 0.18, len(vals)), s=6, linewidths=0.6,
-                   facecolors=("none" if g == "splatteriscc" else COL[g]), edgecolors=COL[g], zorder=4)
+                   facecolors=COL[g], edgecolors=COL[g], zorder=4)
         ax.vlines(np.nanmedian(vals), i - 0.32, i + 0.32, color=S.INK, lw=1.0, zorder=5)
     ax.set_ylim(len(order) - 0.5, -0.5)
     ax.set_yticks(range(len(order)))
@@ -151,7 +149,7 @@ def supp_panel(v):
     groups = _versions(v)
     order = [g for g in ORDER if g in groups]
     strip_h = 4.0 * len(order) + 1.0
-    y_ac, h_ac = 7, 30                               # A-C, then the rows D-E, F and G
+    y_ac, h_ac = 11, 30                              # the legend, A-C, then the rows D-E, F and G
     y_rows = [y_ac + h_ac + 20]
     for _ in range(2):
         y_rows.append(y_rows[-1] + strip_h + 19)
@@ -161,9 +159,12 @@ def supp_panel(v):
     axA, axB, axC = S.ax_mm(fig, 13, y_ac, 38, h_ac), S.ax_mm(fig, 64, y_ac, 38, h_ac), S.ax_mm(fig, 117, y_ac, 46, h_ac)
     draw_s1(axA, v, "mean_log2fc")
     draw_s1(axB, v, "sd_log2fc")
+    # one legend row above A-B, clear of the curves
     hl = dict(zip(*axA.get_legend_handles_labels()[::-1]))
     names = [LABEL[g] for g in order if LABEL[g] in hl]
-    axA.legend([hl[n] for n in names], names, loc="best")
+    H = fig.get_size_inches()[1] / S.MM
+    fig.legend([hl[n] for n in names], names, loc="lower left", ncol=len(names), frameon=False,
+               bbox_to_anchor=(13 / W_MM, 1 - (y_ac - 5.5) / H))
     draw_s3(axC, v)
     for letter, x in (("A", 1), ("B", 53), ("C", 104)):
         S.panel_letter(fig, letter, x, y_ac - 4)
@@ -179,10 +180,9 @@ def supp_panel(v):
             if letter:
                 S.panel_letter(fig, letter, (1 if j == 0 else x - 6), y - 5)
     w3, g3 = (RIGHT - LEFT - 2 * 8) / 3, 8
-    w4, g4 = (RIGHT - LEFT - 3 * 6) / 4, 6
     row(y_rows[0], ROWS[0][1] + ROWS[1][1], w3, g3, ["D", "E", None])
     row(y_rows[1], ROWS[2][1], w3, g3, ["F", None, None])
-    row(y_rows[2], ROWS[3][1], w4, g4, ["G", None, None, None])
+    row(y_rows[2], ROWS[3][1], w3, g3, ["G", None, None])
     return S.save(fig, "supp_batch_validation")
 
 
