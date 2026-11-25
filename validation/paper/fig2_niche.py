@@ -1090,19 +1090,25 @@ def _numbers(out, name):
 
 
 def render():
-    """Fig 2, 165 by 110 mm. B spans the height of C and D together, so that its axis and D's share a
-    baseline (95 mm) and B's legend sits under both."""
+    """Fig 2, 165 by 146 mm: the selection in each niche (A, Figure 1B before 2026-11-25, drawn by
+    fig1_overview.render_b from Figure 1's tissue cache) over the panels that were A-D. C spans the
+    height of D and E together, so that its axis and E's share a baseline and C's legend sits under both."""
+    import fig1_overview as F1
     S.setup()
-    fig = S.figure(165, 110)
+    fig = S.figure(165, 146)
     out = {}
-    S.panel_letter(fig, "A", 1, 1)
-    out["A"] = render_snapshots(fig, 6, 8.5, 23.0, 3.4)
-    S.panel_letter(fig, "B", 1, 34)
-    out["B"] = render_traits([S.ax_mm(fig, 15 + i * 23, 41, 20, 54) for i in range(3)], legend_mm=8)
-    S.panel_letter(fig, "C", 86, 34)
-    out["C"] = render_seeding(S.ax_mm(fig, 99, 41, 22, 20), S.ax_mm(fig, 132, 41, 31, 20))
-    S.panel_letter(fig, "D", 86, 67)
-    out["D"] = render_noble(S.ax_mm(fig, 99, 72, 64, 23))
+    T1 = F1._read_json("fig1_tissue.json")
+    if T1 is not None:
+        F1.render_b(fig, 1.0, T1, out.setdefault("A", {}), letter="A")
+    dy = 36.0
+    S.panel_letter(fig, "B", 1, dy + 1)
+    out["B"] = render_snapshots(fig, 6, dy + 8.5, 23.0, 3.4)
+    S.panel_letter(fig, "C", 1, dy + 34)
+    out["C"] = render_traits([S.ax_mm(fig, 15 + i * 23, dy + 41, 20, 54) for i in range(3)], legend_mm=8)
+    S.panel_letter(fig, "D", 86, dy + 34)
+    out["D"] = render_seeding(S.ax_mm(fig, 99, dy + 41, 22, 20), S.ax_mm(fig, 132, dy + 41, 31, 20))
+    S.panel_letter(fig, "E", 86, dy + 67)
+    out["E"] = render_noble(S.ax_mm(fig, 99, dy + 72, 64, 23))
     path = S.save(fig, "fig2_niche")
     print("wrote", path)
     _numbers(out, "niche_render_numbers.json")
