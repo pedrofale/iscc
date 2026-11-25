@@ -180,14 +180,23 @@ TYPE_LABEL = {"cancer": "cancer", "epithelial": "epithelial", "stromal": "fibrob
 # type, every cell by batch (in the confounded design each patient is its own batch), cancer cells by
 # patient. The reference is coloured by the confounded design's batches.
 UMAP_METHODS = ("none", "harmony", "scvi")
-UMAP_ROWS = (("cell type", "type"), ("batch", "batch"), ("patient", "patient"))
+HIGHLIGHT = ("#1F77B4", "#FF7F0E", "#2CA02C", "#D62728", "#9467BD", "#8C564B")
+UMAP_ROWS = (("cell type", "type"), ("six batches", "batch"), ("six patients", "patient"))
 
 
 def panel_umap(fig, x, y, levels, side=18.5, gap=1.0, dgap=3.0):
     """The pooled cells at the fitted level, a column per embedding and a row per colouring."""
-    pal = palette50()
     emb = (levels.get(EMBED_LEVEL) or {}).get("embeddings")
     lab_w = 8.0
+    # 50 colours cannot show which cells belong together, so six patients are coloured (the six with the
+    # most cancer cells among those shown) and every other cell is grey; in the confounded design patient p
+    # is batch p, so the batch row colours the same six there
+    shown = []
+    if emb:
+        pat = np.asarray([int(p) for p in emb["labels"]["patient"]])
+        canc = np.asarray(emb["labels"]["cell_type"]) == "cancer"
+        ids, n = np.unique(pat[canc], return_counts=True)
+        shown = [int(v) for v in ids[np.argsort(-n, kind="stable")][:len(HIGHLIGHT)]]
     cols = [("truth", "none", "no batch\neffect")] + [(d, m, TOOL_LABEL[m]) for d in DESIGNS for m in UMAP_METHODS]
     col_x = [x + lab_w]
     for k in range(1, len(cols)):
@@ -226,13 +235,13 @@ def panel_umap(fig, x, y, levels, side=18.5, gap=1.0, dgap=3.0):
             if how == "batch":
                 by = "confounded" if design == "truth" else design
                 lab = np.asarray([int(str(b).replace("batch", "")) for b in emb["labels"]["batch"][by]])
-                fg = np.ones(len(xy), bool)
+                fg = np.isin(lab, shown)
             else:
                 lab = np.asarray([int(p) for p in emb["labels"]["patient"]])
-                fg = types == "cancer"
+                fg = (types == "cancer") & np.isin(lab, shown)
             ax.scatter(xy[~fg, 0], xy[~fg, 1], s=0.25, c=S.BG_CELLS, rasterized=True, linewidths=0)
             o = order[fg[order]]
-            ax.scatter(xy[o, 0], xy[o, 1], s=0.25, c=[pal[v % len(pal)] for v in lab[o]], rasterized=True,
+            ax.scatter(xy[o, 0], xy[o, 1], s=0.6, c=[HIGHLIGHT[shown.index(v)] for v in lab[o]], rasterized=True,
                        linewidths=0)
     # the cell types' legend under the grid
     present = [t for t in TYPE_COLOUR if emb and t in set(emb["labels"]["cell_type"])]
@@ -243,6 +252,49 @@ def panel_umap(fig, x, y, levels, side=18.5, gap=1.0, dgap=3.0):
         fig.legend(handles=handles, loc="upper left", ncol=len(handles), fontsize=FS_SMALL, frameon=False,
                    handletextpad=0.1, columnspacing=0.8,
                    bbox_to_anchor=(col_x[0] / W, 1 - (y + 3 * (side + gap) + 0.3) / H))
+
+
+# ------------------------------------------------------------------ C: integration at the fitted level
+C_MEASURES = (("ilisi_batch_noncancer", "microenvironment", "batch mixing (iLISI)"),
+              ("patient_purity_cancer", "cancer cells", "neighbors from the\nsame patient"))
+
+
+def panel_integration(fig, x, y, levels, w=30.0, h=24.0, gap=12.0):
+    """The fitted level: per measure, the embedding without batch effect, then no integration, Harmony
+    and scVI, filled for the confounded design and hollow for the balanced one. Every level and the
+    same-clone share are in S14 Fig."""
+    rec = levels.get(EMBED_LEVEL)
+    cats = ("truth", "none", "harmony", "scvi")
+    names = ("no batch\neffect", "no\nintegration", "Harmony", "scVI")
+    colour = {"truth": REFERENCE, **TOOL_COLOUR}
+    for k, (key, title, ylab) in enumerate(C_MEASURES):
+        ax = S.ax_mm(fig, x + k * (w + gap), y, w, h)
+        ax.set_title(title, fontsize=FS, pad=2)
+        ax.set_ylabel(ylab, fontsize=FS_SMALL, labelpad=1)
+        ax.set_xticks(range(len(cats)))
+        ax.set_xticklabels(names, fontsize=FS_SMALL)
+        ax.tick_params(axis="y", labelsize=FS_SMALL)
+        ax.set_xlim(-0.6, len(cats) - 0.4)
+        S.despine(ax, left=False)
+        if not rec:
+            continue
+        for ci, c in enumerate(cats):
+            for di, d in enumerate(DESIGNS):
+                v = ((rec.get("truth") or {}).get(d) or {}).get(key) if c == "truth" else \
+                    ((rec["runs"].get(f"{d}/{c}") or {}).get("metrics") or {}).get(key)
+                if v is None:
+                    continue
+                ax.scatter([ci + (di - 0.5) * 0.28], [v], s=11, marker="D" if c == "truth" else "o",
+                           facecolors=colour[c] if d == "confounded" else "white", edgecolors=colour[c],
+                           linewidths=0.7, zorder=3)
+        if key.startswith("patient"):
+            ax.set_ylim(0, 1)
+            ax.set_yticks([0, 0.5, 1])
+    h_ = [Line2D([], [], marker="o", ls="", mfc=S.INK, mec=S.INK, markersize=3, label="confounded"),
+          Line2D([], [], marker="o", ls="", mfc="white", mec=S.INK, markersize=3, label="balanced")]
+    W, H = fig.get_size_inches() / S.MM
+    fig.legend(handles=h_, loc="upper left", ncol=2, fontsize=FS_SMALL, frameon=False, handletextpad=0.2,
+               bbox_to_anchor=(x / W, 1 - (y + h + 9.0) / H))
 
 
 # ------------------------------------------------------------------ D: integration, every level
@@ -532,6 +584,82 @@ def panel_f(fig, x, y, coll):
         placeholder(ax, "CBN")
 
 
+# ------------------------------------------------------------------ D: what each tool recovers
+SC_TOOLS = ("cooc", "mhn", "treemhn", "cbn")
+SC_ROWS = (("E1–E2 synergy", "synergy"), ("E3–E4 redundancy", "redundancy"), ("E5 before E6", "order"),
+           ("breach before\nmetastatic survival", "trait"))
+SPURIOUS = "#B2182B"
+
+
+def _sc_states(coll):
+    """{(row, tool): 2 recovered (with the simulated direction where there is one), 1 found without it
+    (an undirected score, a CBN edge for a symmetric relation, or the reversed order), 0 not found}, by
+    the rule of the Methods (above every pair of E0), at the 5% detection threshold. The last row was not
+    simulated: there 2 is a dependency reported with a direction, 1 without."""
+    res = {r["panel"]: r for r in (coll or {}).get("results", []) if r["threshold"] == A.DETECTION}
+    out = {}
+    d, e = res.get("d"), res.get("e")
+    for tool in SC_TOOLS:
+        sd = (d or {}).get("scores", {}).get(tool) if d else None
+        se = (e or {}).get("scores", {}).get(tool) if e else None
+        if sd and sd.get("kind") == "cbn":
+            out["synergy", tool] = 1 if sd["synergy_edge"] else 0
+            out["redundancy", tool] = 1 if sd["redundancy_edge"] else 0
+            out["order", tool] = 2 if sd["order_edge"] else (1 if sd["reverse_edge"] else 0)
+        elif sd:
+            rel = sd["relations"]
+            out["synergy", tool] = 2 if rel["synergy"]["recovered"] else 0
+            out["redundancy", tool] = 2 if rel["redundancy"]["recovered"] else 0
+            o = rel["order"]
+            out["order", tool] = 2 if o["recovered"] else (
+                1 if o["recovered"] is None and o["strength"] > sd["e0_max_strength"] else 0)
+        if se and se.get("kind") == "cbn":
+            out["trait", tool] = 2 if se["breach_to_met"] else (1 if se["met_to_breach"] else 0)
+        elif se:
+            o, pair = se["order"]["breach<met"], se["trait_pairs"]["breach-met"]
+            out["trait", tool] = 2 if (o["order_ok"] and o["above_e0"]) else (1 if pair["above_e0"] else 0)
+    return out
+
+
+def panel_scorecard(fig, x, y, coll, lab_w=29.0, col_w=11.0, row_h=5.4):
+    """Per simulated relation (and the order that architecture imposes on the traits, which was not
+    simulated) and per tool: recovered (filled), found without the simulated direction (half) or not found
+    (open). Each tool's estimates against the pairs of E0 are in S14 Fig."""
+    states = _sc_states(coll)
+    for ti, tool in enumerate(SC_TOOLS):
+        S.text_mm(fig, x + lab_w + (ti + 0.5) * col_w, y - 1.0, TOOL_LABEL[tool], ha="center", fontsize=FS_SMALL)
+    ax = S.ax_mm(fig, x + lab_w, y, len(SC_TOOLS) * col_w, len(SC_ROWS) * row_h + 2.0)
+    ax.set_xlim(-0.5, len(SC_TOOLS) - 0.5)
+    ax.set_ylim(len(SC_ROWS) - 0.5 + 0.38, -0.5)
+    ax.axis("off")
+    for ri, (label, key) in enumerate(SC_ROWS):
+        yy = ri + (0.38 if key == "trait" else 0.0)
+        ax.text(-0.62, yy, label, ha="right", va="center", fontsize=FS_SMALL, linespacing=1.0)
+        col = SPURIOUS if key == "trait" else S.INK
+        for ti, tool in enumerate(SC_TOOLS):
+            st = states.get((key, tool))
+            if st is None:
+                continue
+            kw = dict(marker="o", ms=4.6, mew=0.8, mec=col if st else S.GREY, ls="")
+            if st == 2:
+                ax.plot([ti], [yy], mfc=col, **kw)
+            elif st == 1:
+                ax.plot([ti], [yy], fillstyle="left", mfc=col, markerfacecoloralt="white", **kw)
+            else:
+                ax.plot([ti], [yy], mfc="white", **kw)
+    # the not-simulated row, set apart
+    ax.axhline(2.5 + 0.19, color=S.BG_CELLS, lw=0.5, xmin=-0.45, clip_on=False)
+    ax.text(-0.62, 2.5 + 0.33, "not simulated", ha="right", va="top", fontsize=FS_SMALL - 0.6, color=S.GREY)
+    hs = [Line2D([], [], marker="o", ls="", mfc=S.INK, mec=S.INK, ms=4, label="recovered"),
+          Line2D([], [], marker="o", ls="", fillstyle="left", mfc=S.INK, markerfacecoloralt="white", mec=S.INK,
+                 ms=4, label="no or reversed direction"),
+          Line2D([], [], marker="o", ls="", mfc="white", mec=S.GREY, ms=4, label="not found"),
+          Line2D([], [], marker="o", ls="", mfc=SPURIOUS, mec=SPURIOUS, ms=4, label="reported, not simulated")]
+    W, H = fig.get_size_inches() / S.MM
+    fig.legend(handles=hs, loc="upper left", ncol=2, fontsize=FS_SMALL, frameon=False, handletextpad=0.2,
+               columnspacing=0.8, bbox_to_anchor=((x + 6) / W, 1 - (y + len(SC_ROWS) * row_h + 5.0) / H))
+
+
 def main():
     """Fig 5 (A cohort, B embeddings, C integration, D simulated network, E architecture) and S14 Fig
     (integration at every batch level)."""
@@ -543,22 +671,25 @@ def main():
     out = args.out or os.environ.get("ISCC_FIG5_OUT") or os.path.join(A.REG.OUT, "fig5-atlas")
     data = load(out)
     S.setup()
-    # 165 by 188 mm: with its caption it fits the 229 mm text height at its true size
-    fig = S.figure(165, 188)
+    fig = S.figure(165, 166)
     heading(fig, "A", "Cohort and simulated network", 2, 2)
     panel_a(fig, 4, 8, data["collect"], w=158)
     heading(fig, "B", "Embeddings of the pooled cells", 2, 38)
     panel_umap(fig, 2, 49, data["levels"])                    # 3 rows of 18.5 mm, legend to about 110
     heading(fig, "C", "Integration", 2, 114)
-    panel_d(fig, 4, 123, data["levels"], rows=("fitted", "shared", "depth"), row_h=5.0, legend_cols=6)
-    heading(fig, "D", "Simulated network", 84, 114)
-    panel_e(fig, 84, 124, data["collect"])
-    heading(fig, "E", "Architecture", 2, 153)
-    panel_f(fig, 2, 160, data["collect"])
+    panel_integration(fig, 14, 124, data["levels"])
+    heading(fig, "D", "Progression models", 88, 114)
+    panel_scorecard(fig, 88, 126, data["collect"])
     path = S.save(fig, args.name)
-    # S14 Fig: integration at every level (before 2026-11-25 S14 held the embeddings, now panel B)
-    fig14 = S.figure(92, 52)
-    panel_d(fig14, 2, 6, data["levels"])
+    # S14 Fig: integration at every level (A), and each tool's estimates for the simulated network (B) and
+    # for the traits (C), which panel D of the figure summarises
+    fig14 = S.figure(165, 92)
+    heading(fig14, "A", "Integration at every level", 2, 2)
+    panel_d(fig14, 2, 12, data["levels"])
+    heading(fig14, "B", "Simulated network", 84, 2)
+    panel_e(fig14, 84, 13, data["collect"])
+    heading(fig14, "C", "Architecture", 2, 58)
+    panel_f(fig14, 2, 65, data["collect"])
     path14 = S.save(fig14, "supp_integration_levels")
     print(f"[fig5] {path}, {path14} (levels: {sorted(data['levels'])}, collect: "
           f"{data['collect'] is not None})")
