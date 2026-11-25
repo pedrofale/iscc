@@ -890,7 +890,7 @@ def render_a(fig, T, Z, D, Dz, V, Vz, nums):
         _frame(axs, "none")
         xy, rc = Dz["umap"], Dz["rna_code"]
         cc = [colours[c] if c >= 0 else NORMAL_COLOUR[NORMALS[-1 - c]] for c in rc]
-        axr.scatter(xy[:, 0], xy[:, 1], s=0.12, c=cc, lw=0, rasterized=True)
+        axr.scatter(xy[:, 0], xy[:, 1], s=0.5, c=cc, lw=0, rasterized=True)
         _frame(axr, "none")
     if Vz is None:
         _pending(axv, "pending")

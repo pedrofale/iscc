@@ -14,9 +14,9 @@ computes nothing heavy and reads no tumour:
       profiles as the reference; a line joins true and called where the truth arm is above chance
       (``fig4_score.CHANCE_MARGIN``); ``fig4_chain.py`` and ``fig4_diag.py`` outputs in ``$FIG4_OUT`` and
       ``$FIG4_DIAG``;
-  (d, e) structure misleads a lineage method: (d) the hypoxia field's spatial against lineage
-      autocorrelation per tumour, (e) the lineage and the spatial autocorrelation side by side by
-      architecture and selection (``fig4_lineage.py``: ``$FIG4_DEV/e``).
+  (d) structure misleads a lineage method: the hypoxia field's lineage and spatial autocorrelation
+      side by side by architecture and selection (``fig4_lineage.py``: ``$FIG4_DEV/e``); the scatter
+      of one against the other, a separate panel before 2026-11-25, repeated the same numbers.
 
 The per-spot clone-fraction error of Clonalscope with and without the DNA prior, and the map of one
 ductal-field tumour (Fig 4d and 4e(i) before the half-page layout), are S12 Fig, drawn by
@@ -24,7 +24,7 @@ ductal-field tumour (Fig 4d and 4e(i) before the half-page layout), are S12 Fig,
 
 Writes ``figures/paper1/fig4_benchmark.{pdf,png}`` through ``_paths`` (``ISCC_PAPER_DIR`` picks the
 checkout) and every number it draws to ``$FIG4_DEV/fig4_benchmark_numbers.json``. The stalled tumours of
-(d, e) come from the registry records under ``$ISCC_PAPER_OUT``; without it none is found.
+(d) come from the registry records under ``$ISCC_PAPER_OUT``; without it none is found.
 
     FIG4_OUT=.../fig4-v4 FIG4_DIAG=.../fig4-v4-diag FIG4_DEV=.../fig4-dev/v4 ISCC_PAPER_OUT=.../paper-v4 \\
         ISCC_PAPER_DIR=... python validation/paper/fig4_benchmark.py
@@ -71,10 +71,10 @@ ROWS_B = [("scrna", "copykat", "CopyKAT, no reference"), ("scrna", "copykat-ref"
           ("visium", "copykat", "CopyKAT, no reference"), ("visium", "copykat-ref", "CopyKAT, reference"),
           ("visium", "calicost", "CalicoST"), ("visium", "clonalscope", "Clonalscope"),
           ("visium", "cancerfinder", "Cancer-Finder")]
-# the architectures of (d, e): ductal field and growth without glands
+# the architectures of (d): ductal field and growth without glands
 ARCH = {"ductal": ("ductal field", S.CLONE_FAMILIES[0][1]), "free": ("without glands", S.CLONE_FAMILIES[2][1])}
 
-# Layout in mm from the top-left corner. Row 1: (a). Row 2: (b) and (c). Row 3: (d) and (e).
+# Layout in mm from the top-left corner. Row 1: (a). Row 2: (b) and (c). Row 3: (d).
 A_ROWS, A_BH = (1.0, 8.2, 15.4, 22.6), 5.2        # the four modality rows of (a) and their box height
 B_TOP, B_H, B_W, B_X = 35.0, 29.5, 36.0, (28.0, 69.0)
 C_X, C_TOP, C_W, C_H = 118.0, 41.0, 45.5, 21.0
@@ -165,14 +165,14 @@ def panel_a(fig, ov):
     _box(ov, TX, A_ROWS[3], TW, A_BH, "CopyKAT, CalicoST,\nClonalscope, Cancer-Finder", pale[SP], ec=SP)
     for m in mid[1:]:
         _arrow(ov, MX + 14, m, TX, m)
-    # the chain from DNA into RNA (c) and the lineage analysis (d, e)
+    # the chain from DNA into RNA (c) and the lineage analysis (d)
     _box(ov, 84, A_ROWS[1], 18, A_BH, "DNA clones\nand profiles", "white", ec=DNA)
     _arrow(ov, TX + TW, mid[1], 84, mid[1])
     _box(ov, 106, A_ROWS[2], 17, A_BH, "clonealign", pale[RNA], ec=RNA)
     _arrow(ov, 102, mid[1] + 1.2, 106, mid[2] - 0.6, color=DNA)
     _box(ov, 95, A_ROWS[0], 28, A_BH, "lineage and space\nin the hypoxia field", "white", ec=S.GREY)
     for x, m, lab in ((TX + TW + 1.2, mid[2], "B"), (TX + TW + 1.2, mid[3], "B"), (124.2, mid[2], "C"),
-                      (124.2, mid[0], "D, E")):
+                      (124.2, mid[0], "D")):
         ov.text(x, m, lab, fontsize=6, fontweight="bold", color=S.GREY, va="center")
     # the ground truth, scored against every link
     KX, KW = 133.0, 31.5
@@ -312,37 +312,17 @@ def panel_c(fig, ov, c, nums):
 
 
 def panel_de(fig, ov, nums):
-    """(d) the spatial against the lineage autocorrelation of the hypoxia field per tumour; (e) the two side by
-    side per architecture and selection. Open markers are the tumours that stalled before their target size."""
+    """(d) the lineage and the spatial autocorrelation of the hypoxia field per tumour side by side, by
+    architecture and selection. Open markers are the tumours that stalled before their target size; the
+    lines are the means of the others, since a stalled tumour is a different population. The scatter of
+    one against the other, (d) before 2026-11-25, showed the same two numbers again and was dropped."""
     import fig4_lineage as FL
     df = FL.load(DEV)
     S.panel_letter(fig, "d", 0.5, R3_LETTER)
-    S.panel_letter(fig, "e", 48.0, R3_LETTER)
     if not len(df):
         nums["lineage"] = {}
         return
-    ax = S.ax_mm(fig, 11.0, R3_TOP, 30.0, R3_H)
-    stalled = df["stalled"].astype(bool) if "stalled" in df else pd.Series(False, index=df.index)
-    for arch, (lab, col) in ARCH.items():
-        sub = df[(df.arch == arch) & ~stalled]
-        # the counts per architecture and of stalled tumours are in the numbers file, not the legend
-        ax.scatter(sub.field_sp, sub.field_lin, s=5, color=col, edgecolors=S.INK, linewidths=0.2,
-                   label=lab, zorder=3)
-        st = df[(df.arch == arch) & stalled]
-        ax.scatter(st.field_sp, st.field_lin, s=7, facecolors="white", edgecolors=col, linewidths=0.6, zorder=4)
-    if stalled.any():
-        ax.scatter([], [], s=7, facecolors="white", edgecolors=S.INK, linewidths=0.6, label="stalled")
-    lim = max(1.0, 1.05 * float(np.nanmax(df[["field_sp", "field_lin"]].to_numpy())))
-    # below 0 as far as the data go: stalled neutral tumours reach a lineage autocorrelation of -0.04
-    lo = min(-0.02, 1.3 * float(np.nanmin(df[["field_sp", "field_lin"]].to_numpy())))
-    ax.plot([lo, lim], [lo, lim], color=S.INK, lw=0.5, ls=":")
-    ax.set_xlim(lo, lim)
-    ax.set_ylim(lo, lim)
-    ax.set_xlabel("Spatial autocorrelation")
-    ax.set_ylabel("Lineage autocorrelation")
-    ax.legend(fontsize=SMALL, loc="upper left", frameon=False, borderaxespad=0.2, handletextpad=0.2)
-
-    ax = S.ax_mm(fig, 59.0, R3_TOP, 84.0, R3_H)
+    ax = S.ax_mm(fig, 11.0, R3_TOP, 132.0, R3_H)
     groups = [("R1", "ductal", None, "dispersal sweep"), ("R3", "ductal", "selected", "selected"),
               ("R3", "ductal", "neutral", "neutral"), ("R3", "free", "selected", "selected"),
               ("R3", "free", "neutral", "neutral")]
@@ -359,9 +339,9 @@ def panel_de(fig, ov, nums):
                        alpha=0.9 if sel != "neutral" else 0.55, edgecolors="none", zorder=3)
             ax.scatter(x[st], v[st], s=6, marker=mk, facecolors="white", edgecolors=ARCH[arch][1],
                        linewidths=0.6, zorder=4)
-            if len(sub):
-                ax.plot([k + off - 0.14, k + off + 0.14], [float(np.nanmean(v))] * 2, color=S.INK, lw=0.9,
-                        zorder=4)
+            if (~st).any():
+                ax.plot([k + off - 0.14, k + off + 0.14], [float(np.nanmean(v[~st]))] * 2, color=S.INK,
+                        lw=0.9, zorder=4)
     # two rows of labels: the selection under each group, the architecture under a bracket
     ax.set_xticks(range(len(groups)))
     ax.set_xticklabels([g[3] for g in groups], fontsize=SMALL)
@@ -377,6 +357,7 @@ def panel_de(fig, ov, nums):
     ax.set_ylabel("Autocorrelation")
     h = [Line2D([], [], marker=mk, ls="none", mfc="#6F6F6F", mec="none", ms=3.2, label=lab)
          for _, mk, _, lab in MEASURE]
+    h.append(Line2D([], [], marker="o", ls="none", mfc="white", mec="#6F6F6F", mew=0.6, ms=3.2, label="stalled"))
     h.append(Line2D([], [], color=S.INK, lw=0.9, label="mean"))
     ax.legend(handles=h, fontsize=SMALL, loc="upper left", bbox_to_anchor=(1.02, 1.0), frameon=False,
               borderaxespad=0, handletextpad=0.3)

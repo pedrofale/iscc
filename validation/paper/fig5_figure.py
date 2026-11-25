@@ -1,13 +1,12 @@
 """Fig 5: one atlas-sized cohort of 50 patients, and what tools read from it.
 
-Draws ``figures/paper1/fig5_cohort.pdf`` at the text width (panels A, D, E and F below, lettered A to D
-in the paper), and panel C, which the half-page layout moved out, as ``supp_cohort_embeddings.pdf``
-(S14 Fig), through ``validation/_paths.py`` (``ISCC_PAPER_DIR`` picks the paper checkout), from
-summaries only. Panel B, the batch validation, became S13 Fig and is drawn by ``batch_figure.py``.
+Draws ``figures/paper1/fig5_cohort.pdf`` at 165 by 188 mm, so that with its caption it fits the text
+height at its true size, and S14 Fig (``supp_integration_levels.pdf``: integration at every batch
+level), through ``validation/_paths.py`` (``ISCC_PAPER_DIR`` picks the paper checkout), from summaries
+only. The batch validation is S13 Fig, drawn by ``batch_figure.py``. The inputs:
 
-
-* ``collect_summary.json`` (``fig5_atlas.py collect``; panels A, E, F) and
-  ``integrate/level_<L>.json`` (``batch_cohort.py integrate``; panels C, D) under ``$ISCC_FIG5_OUT``
+* ``collect_summary.json`` (``fig5_atlas.py collect``; panels A, D, E) and
+  ``integrate/level_<L>.json`` (``batch_cohort.py integrate``; panels B, C) under ``$ISCC_FIG5_OUT``
   (or ``--out``), at the levels of ``batch_levels.LEVELS``; summaries of the first design's 10x /
   intermediate / strong levels, if present, are ignored.
 
@@ -17,20 +16,23 @@ style: bold uppercase panel letters, short panel titles, no settings, parentheti
 possessives, and every axis on the measured quantity's own scale, compared values side by side.
 Everything else is in the caption.
 
-A. The cohort: 50 patients, each grown to its own size; the two pooling designs (confounded,
-   balanced); the simulated network of event modules E0-E6 with each module's size (genes) and the
-   share of patients carrying it at 5% of the cancer cells.
-C. Embeddings of the pooled cells at the fitted batch level, without integration and after Harmony
-   and scVI, in both designs: microenvironment cells coloured by batch, cancer cells by patient.
-D. Integration at the fitted and shared levels and with one technical source at a time: iLISI of the
-   microenvironment cells, and the share of neighbours from the same patient and from the same clone
-   among cancer cells, each beside its value in the embedding without batch effect (grey diamond).
-E. The simulated network from the DNA: each tool's estimate for the simulated relations against the six
-   pairs of E0 (grey band: their magnitudes); filled, a relation recovered (simulated sign and a
-   magnitude above every E0 pair; for the order, a larger effect of E5 on E6 than of E6 on E5, above
+A (``panel_a``). The cohort: 50 patients, each grown to its own size; the two pooling designs
+   (confounded, balanced); the simulated network of event modules E0-E6 with each module's size (genes)
+   and the share of patients carrying it at 5% of the cancer cells.
+B (``panel_umap``). The pooled cells at the fitted batch level, embedded without batch effect, then in
+   each design without integration and after Harmony and scVI: every cell by type, every cell by batch,
+   cancer cells by patient.
+C (``panel_d``). Integration at the fitted and shared levels and with depth varied, the one technical
+   source that moved the scores (S14 Fig: every level): iLISI of the microenvironment cells, and the share
+   of neighbours from the same patient and from the same clone among cancer cells, each beside its value
+   in the embedding without batch effect (grey diamond).
+D (``panel_e``). The simulated network from the DNA: each tool's estimate for the simulated relations
+   against the six pairs of E0 (grey band: their magnitudes); filled, a relation recovered (simulated sign
+   and a magnitude above every E0 pair; for the order, a larger effect of E5 on E6 than of E6 on E5, above
    every E0 pair); the rank among the 21 pairs beside each column; CBN as the edges it returns.
-F. Architecture against the mix of stages: the order of breach and the survival traits in the true
-   genealogies, and each tool's dependencies among the traits against those between E0 and each trait.
+E (``panel_f``). Architecture against the mix of stages: the order of breach and the survival traits in
+   the true genealogies, and each tool's dependencies among the traits against those between E0 and each
+   trait.
 """
 import json
 import os
@@ -164,47 +166,83 @@ def panel_a(fig, x, y, coll, w=176):
 
 
 # ------------------------------------------------------------------ C: embeddings at the fitted level
-def panel_c(fig, x, y, levels):
-    w, gap, dgap = 12.2, 0.8, 2.6
-    methods = ("none", "harmony", "scvi")
+# ------------------------------------------------------------------ B: the embeddings, in the figure
+# cell types on hues apart from the 50 batch and patient colours' role: cancer red, the epithelium of
+# Fig 1, stromal tan, vessel browns, immune greys and greens
+TYPE_COLOUR = {"cancer": "#B2182B", "epithelial": S.COMPARTMENT["epithelium"], "stromal": "#CDBFA8",
+               "endothelial": "#A6761D", "pvl": "#E6AB02", "immune": "#5E5E5E", "myeloid": "#1B9E77",
+               "bplasma": "#66A61E"}
+TYPE_LABEL = {"cancer": "cancer", "epithelial": "epithelial", "stromal": "fibroblasts",
+              "endothelial": "endothelial", "pvl": "perivascular", "immune": "T and NK", "myeloid": "myeloid",
+              "bplasma": "B and plasma"}
+# columns: the reference without batch effect (its counts are the same in both designs, so it is
+# embedded once), then each design without integration and after Harmony and scVI; rows: every cell by
+# type, every cell by batch (in the confounded design each patient is its own batch), cancer cells by
+# patient. The reference is coloured by the confounded design's batches.
+UMAP_METHODS = ("none", "harmony", "scvi")
+UMAP_ROWS = (("cell type", "type"), ("batch", "batch"), ("patient", "patient"))
+
+
+def panel_umap(fig, x, y, levels, side=18.5, gap=1.0, dgap=3.0):
+    """The pooled cells at the fitted level, a column per embedding and a row per colouring."""
     pal = palette50()
-    col_x = {(d, m): x + di * (3 * w + 2 * gap + dgap) + mi * (w + gap)
-             for di, d in enumerate(DESIGNS) for mi, m in enumerate(methods)}
-    for di, d in enumerate(DESIGNS):
-        cx = x + di * (3 * w + 2 * gap + dgap) + (3 * w + 2 * gap) / 2
-        S.text_mm(fig, cx, y - 4.4, d, ha="center", fontsize=FS)
-        for m in methods:
-            S.text_mm(fig, col_x[(d, m)] + w / 2, y - 1.0, TOOL_LABEL[m], ha="center", fontsize=FS_SMALL)
     emb = (levels.get(EMBED_LEVEL) or {}).get("embeddings")
-    for ri, how in enumerate(("batch", "patient")):
-        yy = y + ri * (w + gap)
-        S.text_mm(fig, x - 1.0, yy + w / 2, how, rotation=90, ha="center", va="center", fontsize=FS_SMALL,
-                  color=S.GREY)
-        for d in DESIGNS:
-            for m in methods:
-                ax = S.ax_mm(fig, col_x[(d, m)], yy, w, w)
-                ax.set_xticks([])
-                ax.set_yticks([])
-                for sp in ax.spines.values():
-                    sp.set_visible(True)
-                    sp.set_color(S.BG_CELLS)
-                    sp.set_linewidth(0.4)
-                key = f"{d}/{m}"
-                if not emb or key not in emb["xy"]:
-                    ax.text(0.5, 0.5, "not yet\nrun", ha="center", va="center", fontsize=FS_SMALL,
-                            color=S.GREY, transform=ax.transAxes)
-                    continue
-                xy = np.asarray(emb["xy"][key])
-                cancer = np.asarray(emb["labels"]["cell_type"]) == "cancer"
-                if how == "batch":
-                    lab = np.asarray([int(str(b).replace("batch", "")) for b in emb["labels"]["batch"][d]])
-                    fg = ~cancer
-                else:
-                    lab = np.asarray([int(p) for p in emb["labels"]["patient"]])
-                    fg = cancer
-                ax.scatter(xy[~fg, 0], xy[~fg, 1], s=0.12, c=S.BG_CELLS, rasterized=True, linewidths=0)
-                ax.scatter(xy[fg, 0], xy[fg, 1], s=0.12, c=[pal[v % len(pal)] for v in lab[fg]],
-                           rasterized=True, linewidths=0)
+    lab_w = 8.0
+    cols = [("truth", "none", "no batch\neffect")] + [(d, m, TOOL_LABEL[m]) for d in DESIGNS for m in UMAP_METHODS]
+    col_x = [x + lab_w]
+    for k in range(1, len(cols)):
+        col_x.append(col_x[-1] + side + (dgap if k in (1, 4) else gap))
+    S.text_mm(fig, col_x[0] + side / 2, y - 1.0, cols[0][2], ha="center", fontsize=FS_SMALL, linespacing=1.0)
+    for di, d in enumerate(DESIGNS):
+        a, b = col_x[1 + 3 * di], col_x[3 + 3 * di] + side
+        S.text_mm(fig, (a + b) / 2, y - 5.0, d, ha="center", fontsize=FS)
+        for mi, m in enumerate(UMAP_METHODS):
+            S.text_mm(fig, col_x[1 + 3 * di + mi] + side / 2, y - 1.0, TOOL_LABEL[m], ha="center",
+                      fontsize=FS_SMALL)
+    for ri, (rlab, how) in enumerate(UMAP_ROWS):
+        yy = y + ri * (side + gap)
+        S.text_mm(fig, x + lab_w - 1.8, yy + side / 2, rlab, rotation=90, ha="center", va="center",
+                  fontsize=FS_SMALL, color=S.GREY)
+        for ci, (design, method, _) in enumerate(cols):
+            ax = S.ax_mm(fig, col_x[ci], yy, side, side)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            for sp in ax.spines.values():
+                sp.set_visible(True)
+                sp.set_color(S.BG_CELLS)
+                sp.set_linewidth(0.4)
+            key = f"{design}/{method}"
+            if not emb or key not in emb["xy"]:
+                ax.text(0.5, 0.5, "not yet\nrun", ha="center", va="center", fontsize=FS_SMALL, color=S.GREY,
+                        transform=ax.transAxes)
+                continue
+            xy = np.asarray(emb["xy"][key])
+            types = np.asarray(emb["labels"]["cell_type"])
+            order = np.random.default_rng(0).permutation(len(xy))        # no colour drawn last everywhere
+            if how == "type":
+                c = np.asarray([TYPE_COLOUR.get(t, S.GREY) for t in types])
+                ax.scatter(xy[order, 0], xy[order, 1], s=0.25, c=c[order], rasterized=True, linewidths=0)
+                continue
+            if how == "batch":
+                by = "confounded" if design == "truth" else design
+                lab = np.asarray([int(str(b).replace("batch", "")) for b in emb["labels"]["batch"][by]])
+                fg = np.ones(len(xy), bool)
+            else:
+                lab = np.asarray([int(p) for p in emb["labels"]["patient"]])
+                fg = types == "cancer"
+            ax.scatter(xy[~fg, 0], xy[~fg, 1], s=0.25, c=S.BG_CELLS, rasterized=True, linewidths=0)
+            o = order[fg[order]]
+            ax.scatter(xy[o, 0], xy[o, 1], s=0.25, c=[pal[v % len(pal)] for v in lab[o]], rasterized=True,
+                       linewidths=0)
+    # the cell types' legend under the grid
+    present = [t for t in TYPE_COLOUR if emb and t in set(emb["labels"]["cell_type"])]
+    handles = [Line2D([], [], marker="o", ls="", mfc=TYPE_COLOUR[t], mec="none", markersize=3,
+                      label=TYPE_LABEL[t]) for t in present]
+    if handles:
+        W, H = fig.get_size_inches() / S.MM
+        fig.legend(handles=handles, loc="upper left", ncol=len(handles), fontsize=FS_SMALL, frameon=False,
+                   handletextpad=0.1, columnspacing=0.8,
+                   bbox_to_anchor=(col_x[0] / W, 1 - (y + 3 * (side + gap) + 0.3) / H))
 
 
 # ------------------------------------------------------------------ D: integration, every level
@@ -214,12 +252,14 @@ D_COLUMNS = (("ilisi_batch_noncancer", "iLISI", "microenvironment"),
 D_OFFSET = {"none": -0.26, "harmony": 0.0, "scvi": 0.26}
 
 
-def panel_d(fig, x, y, levels):
+def panel_d(fig, x, y, levels, rows=None, row_h=3.3, w=16, gap=2.6, legend_cols=3):
     """A row per level (fitted, shared, then one technical source at a time), a line within it per
     tool, and a column per measure on its own scale: filled for the confounded design, hollow for the
-    balanced one, and the value of the embedding without batch effect beside them (grey diamond)."""
-    rows = ("fitted", "shared") + BL.ARMS
-    lab_w, w, gap, row_h = 19, 16, 2.6, 3.3
+    balanced one, and the value of the embedding without batch effect beside them (grey diamond). The
+    figure shows the fitted and shared levels and depth, the one source that moved the scores; S14 Fig
+    every level."""
+    rows = rows or (("fitted", "shared") + BL.ARMS)
+    lab_w = 19
     h = row_h * len(rows)
     axes = [S.ax_mm(fig, x + lab_w + k * (w + gap), y, w, h) for k in range(len(D_COLUMNS))]
     for k, (ax, (key, xlabel, title)) in enumerate(zip(axes, D_COLUMNS)):
@@ -228,7 +268,8 @@ def panel_d(fig, x, y, levels):
         ax.set_yticklabels([LEVEL_LABEL[r] for r in rows] if k == 0 else [], fontsize=FS_SMALL)
         ax.tick_params(axis="y", length=0)
         ax.tick_params(axis="x", labelsize=FS_SMALL)
-        ax.axhline(1.5, color=S.BG_CELLS, lw=0.5)             # fitted and shared above the sources
+        if len(rows) > 2:
+            ax.axhline(1.5, color=S.BG_CELLS, lw=0.5)         # fitted and shared above the sources
         ax.set_title(title, fontsize=FS_SMALL, pad=2)
         ax.set_xlabel(xlabel if k == 0 else f"neighbors from the\n{xlabel}", fontsize=FS_SMALL, labelpad=1)
         if key.startswith("ilisi"):                           # scaled to 50 batches: every value is
@@ -266,8 +307,8 @@ def panel_d(fig, x, y, levels):
                          label="no batch effect"),
                   Line2D([], [], marker="o", ls="", mfc=S.INK, mec=S.INK, markersize=3, label="confounded"),
                   Line2D([], [], marker="o", ls="", mfc="white", mec=S.INK, markersize=3, label="balanced")])
-    axes[0].legend(handles=handles, loc="upper left", ncol=3, fontsize=FS_SMALL, handletextpad=0.2,
-                   columnspacing=0.9, bbox_to_anchor=(-lab_w / w, -0.36), borderaxespad=0)
+    axes[0].legend(handles=handles, loc="upper left", ncol=legend_cols, fontsize=FS_SMALL, handletextpad=0.2,
+                   columnspacing=0.7, bbox_to_anchor=(-lab_w / w, -9.0 / h), borderaxespad=0)
 
 
 # ------------------------------------------------------------------ E, F: tools against E0
@@ -440,7 +481,7 @@ def _f_cbn_rows(sc):
 
 def panel_f(fig, x, y, coll):
     tools = ("cooc", "mhn", "treemhn")
-    lab_w, w, gap, h, wc = 29, 11.8, 2.4, 21, 8
+    lab_w, w, gap, h, wc = 29, 11.8, 2.4, 19, 8
     res = None
     if coll:
         res = next((r for r in coll["results"] if r["panel"] == "e" and r["threshold"] == A.DETECTION), None)
@@ -492,9 +533,8 @@ def panel_f(fig, x, y, coll):
 
 
 def main():
-    """Fig 5 at the text width (A cohort, B integration, C simulated network, D architecture), and the two
-    panels the half-page layout moved out: S13 Fig (the batch effect against real data) and S14 Fig
-    (the embeddings at the fitted level)."""
+    """Fig 5 (A cohort, B embeddings, C integration, D simulated network, E architecture) and S14 Fig
+    (integration at every batch level)."""
     import argparse
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--out", default=None, help="summary directory (as fig5_atlas.py)")
@@ -503,19 +543,23 @@ def main():
     out = args.out or os.environ.get("ISCC_FIG5_OUT") or os.path.join(A.REG.OUT, "fig5-atlas")
     data = load(out)
     S.setup()
-    fig = S.figure(165, 136)
+    # 165 by 188 mm: with its caption it fits the 229 mm text height at its true size
+    fig = S.figure(165, 188)
     heading(fig, "A", "Cohort and simulated network", 2, 2)
     panel_a(fig, 4, 8, data["collect"], w=158)
-    heading(fig, "B", "Integration", 2, 43)
-    panel_d(fig, 4, 52, data["levels"])
-    heading(fig, "C", "Simulated network", 84, 43)
-    panel_e(fig, 84, 54, data["collect"])
-    heading(fig, "D", "Architecture", 2, 98)
-    panel_f(fig, 2, 107, data["collect"])
+    heading(fig, "B", "Embeddings of the pooled cells", 2, 38)
+    panel_umap(fig, 2, 49, data["levels"])                    # 3 rows of 18.5 mm, legend to about 110
+    heading(fig, "C", "Integration", 2, 114)
+    panel_d(fig, 4, 123, data["levels"], rows=("fitted", "shared", "depth"), row_h=5.0, legend_cols=6)
+    heading(fig, "D", "Simulated network", 84, 114)
+    panel_e(fig, 84, 124, data["collect"])
+    heading(fig, "E", "Architecture", 2, 153)
+    panel_f(fig, 2, 160, data["collect"])
     path = S.save(fig, args.name)
-    fig14 = S.figure(92, 36)
-    panel_c(fig14, 6, 8, data["levels"])
-    path14 = S.save(fig14, "supp_cohort_embeddings")
+    # S14 Fig: integration at every level (before 2026-11-25 S14 held the embeddings, now panel B)
+    fig14 = S.figure(92, 52)
+    panel_d(fig14, 2, 6, data["levels"])
+    path14 = S.save(fig14, "supp_integration_levels")
     print(f"[fig5] {path}, {path14} (levels: {sorted(data['levels'])}, collect: "
           f"{data['collect'] is not None})")
 
