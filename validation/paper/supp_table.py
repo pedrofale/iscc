@@ -17,9 +17,8 @@ time exceeds its CPU time there waited on memory, which leaves its CPU time as m
 cluster nodes a node crowded with other jobs inflates CPU time (on v4, up to 21-fold): a tumour whose
 wall time exceeds its CPU time by more than 10% ran on such a node, it is regrown alone elsewhere, which
 reproduces it exactly, and its CPU time there is listed in ``retimed.json`` beside the registry
-(``{"<run>/<task>": {"cpu_s", "node", "job"}}``). ``runs_tumours.csv`` keeps the recorded ``cpu_s`` and
-adds ``cpu_retimed_s``; the CPU columns of ``runs.csv`` use the re-timed value where there is one, and
-count those tumours in ``retimed``.
+(``{"<run>/<task>": {"cpu_s", "node", "job"}}``), and the CPU columns of ``runs.csv`` use it. The v5
+registry grew on the laptop and has none, so the files carry no re-timing columns.
 Run:  python validation/paper/supp_table.py
 """
 import csv
@@ -38,24 +37,22 @@ from _paths import paper_dir  # noqa: E402
 # What each run changes against the paper regime, and where it is used (kept beside the registry's
 # definitions; a run added there without a row here is reported, not silently dropped).
 ROWS = {
-    "R0": ("Showcase tumour with immune cells and a metastatic lattice, spatial history every 2 steps",
-           "Figs 1, 2a, 2e, 3"),
+    "R0": ("Showcase tumor with immune cells and a metastatic lattice, spatial history every 2 steps",
+           "Figs 1, 2A, 3; S5, S9, S10 (A, E) and S11 Fig"),
     "R1": ("Cancer dispersal probability " + ", ".join(f"{d:g}" for d in REG.R1_DISPERSAL),
-           "Figs 2f, 4e"),
-    "R2": ("Selection on or off (driver effect 1.0), passengers not folded",
-           "Fig 2f; supplementary copy-number figure"),
-    "R3": ("Ductal field or free growth, selection on or off", "Figs 2d, 2f, 4e"),
+           "Figs 2D, 4D-E"),
+    "R2": ("Selection on or off (driver effect 1.0), passengers not folded", "Fig 2D; S16 Fig"),
+    "R3": ("Ductal field or free growth, selection on or off", "Figs 2D, 4D-E; S10 Fig D"),
     "R4": ("Copy-number rate 0, 0.05, 0.15, 0.3; SNV burden 0.05, 0.2, 0.5 at copy-number rate 0.05",
-           "Fig 2f; supplementary benchmark-difficulty figure"),
-    "R5": ("Whole-genome duplication rate " + ", ".join(f"{w:g}" for w in REG.R5_WGD), "Fig 2f"),
+           "Fig 2D"),
+    "R5": ("Whole-genome duplication rate " + ", ".join(f"{w:g}" for w in REG.R5_WGD), "S10 Fig F"),
     "R6": ("Six patients with immune cells sharing one configuration", "S8 Fig"),
-    "R10": ("Compartment barriers on or off, spatial history every 8 steps",
-            "Fig 2b; supplementary cell-state figure"),
-    "R11": ("Arm-homologous growth genome, copy-number events scaled by 39/12",
-            "Methods (the arm genome against the 12 segments)"),
-    "R14": ("R11 with immune cells", "Figs 3, 4b-d; supplementary SNV figure"),
-    "R12": ("Metastatic lattice, twenty seeds", "Fig 2c, 2e"),
-    "R13": ("Metastatic lattice with the selection on one trait switched off per arm", "Fig 2c"),
+    "R10": ("Compartment barriers on or off, spatial history every 8 steps", "S10 Fig B-C"),
+    "R11": ("Chromosome-arm genome, copy-number events scaled by 39/12",
+            "Methods (the chromosome-arm genome against the 12 segments)"),
+    "R14": ("R11 with immune cells", "Fig 4A-C; S6 and S12 Fig"),
+    "R12": ("Metastatic lattice, twenty seeds", "Fig 2B-C"),
+    "R13": ("Metastatic lattice with the selection on one trait switched off per arm", "Fig 2B"),
 }
 
 
@@ -96,23 +93,21 @@ def main():
         runs.append([run, ROWS[run][0], "; ".join(f"{s} {t}" for s, t in sizes), len(REG.tasks(run)), len(m),
                      sum(bool(r.get("reached_target")) for r in m.values()),
                      f"{np.median(cpu):.1f}", f"{cpu.min():.1f}", f"{cpu.max():.1f}",
-                     sum((run, t) in rt for t in m),
                      max(r.get("peak_mb", 0) for r in m.values()),
                      " ".join(sorted({str(r.get("commit")) for r in m.values()})), ROWS[run][1]])
         for task, r in m.items():
             kw = r["kwargs"]
             tumours.append([run, task, kw.get("seed"), kw.get("scale"), kw.get("target_cancer"), r.get("cancer"),
-                            r.get("time"), r.get("cpu_s"), rt.get((run, task), {}).get("cpu_s", ""),
-                            r.get("wall_s"), r.get("peak_mb"), bool(r.get("reached_target")), r.get("commit")])
+                            r.get("time"), r.get("cpu_s"), r.get("wall_s"), r.get("peak_mb"), bool(r.get("reached_target")), r.get("commit")])
     with open(os.path.join(root, "runs.csv"), "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["run", "variant", "scale_target", "tumours_planned", "tumours_grown", "reached_target",
-                    "cpu_median_s", "cpu_min_s", "cpu_max_s", "retimed", "peak_mb_max", "commits", "used_in"])
+                    "cpu_median_s", "cpu_min_s", "cpu_max_s", "peak_mb_max", "commits", "used_in"])
         w.writerows(runs)
     with open(os.path.join(root, "runs_tumours.csv"), "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["run", "task", "seed", "scale", "target_cancer", "cancer_reached", "time_generations",
-                    "cpu_s", "cpu_retimed_s", "wall_s", "peak_mb", "reached_target", "commit"])
+                    "cpu_s", "wall_s", "peak_mb", "reached_target", "commit"])
         w.writerows(tumours)
     print("wrote", os.path.join(root, "runs.csv"), "and runs_tumours.csv:", len(runs), "runs,", len(tumours), "tumours")
 
