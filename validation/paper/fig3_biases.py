@@ -1,20 +1,25 @@
-"""Figure 3 (every measurement step adds a bias that is fitted and tunable) and S11 Fig (its sweeps).
+"""Figure 3 (every measurement step adds a bias that is fitted and tunable) and S11 Fig (the rest).
 
-Figure 3 is one row at half a page: one panel per step or modality against its reference, and one
-example of tuning a bias.
+Figure 3, two rows at the text width. Row 1, each modality against its real reference:
 
   A  sampling: clone shares of the whole primary, a section, a dissociated sample and four blocks;
   B  WGS: per-locus coverage of GIAB HG002 (two copies) against fitted iscc at the loci of the tumour's
      most common copy number, with the CV of each and the share of near-empty HG002 loci;
   C  scDNA: coverage CV per copy-number state, real against fitted iscc, for DLP+ and Tapestri;
   D  scRNA: zero fraction against gene mean, PBMC3k against fitted iscc;
-  E  Visium: per-spot depth of a real breast-cancer section against fitted iscc, with Moran's I of each;
-  F  tuning: Tapestri allelic dropout against ``ado_rate``, the real value crossed at the fitted setting.
+  E  scRNA: log variance against log mean, PBMC3k against fitted iscc;
+  F  Visium: per-spot depth of a real breast-cancer section against fitted iscc, with Moran's I of each.
+
+Row 2, one bias per modality swept across the real value:
+
+  G  WGS: coverage CV against the depth concentration, with HG002's CV and the fitted value;
+  H  scDNA: Tapestri allelic dropout against ``ado_rate``, the real value crossed at the fitted setting;
+  I  scRNA: zero fraction against gene mean across the dropout midpoint, with PBMC3k;
+  J  Visium: UMIs outside the tissue against distance, across the swapping rate, with the real section.
 
 S11 Fig holds the rest: (A-C) the recovery bias, the dissociation stress and the four blocks on the map;
-(D, E) the WGS depth concentration and GC-bias sweeps; (F) the scDNA amplification sweep; (G-J) the
-scRNA library size, mean-variance, protocol presets and dropout-midpoint sweep; (K) the Visium spot
-swapping across its rate.
+(D) the WGS GC-bias sweep; (E) the scDNA amplification sweep; (F, G) the scRNA library size and the
+protocol presets.
 
 Parts c-e reuse Fig 2's data-front loops (``fig2_realism.compute_g/f/h``) as they are. Every part is
 computed in its own process (``--part a|b|c|d|e``) on the stored showcase tumour
@@ -396,11 +401,8 @@ def compute_e():
 # Figure 3 is one row at half a page (165 mm wide): the five fits against a real reference (A-E) and one
 # tunability example (F, the scDNA allelic dropout against its setting: one line, linear axes, and the
 # real value crossed at the fitted setting). Every other sweep and statistic is S11 Fig (render_supp).
-MAIN_W, MAIN_H = 165, 48
-MAIN_Y, MAIN_AX_H = 9, 29
-# per panel: (letter x, axes x, axes width), in mm
-MAIN_SLOTS = {"a": (1, 14.5, 15.5), "b": (32, 38.5, 17.5), "c": (58.5, 66, 17.5), "d": (85.5, 93, 17.5),
-              "e": (113, 119.5, 17.5), "f": (139.5, 147, 16)}
+MAIN_W, MAIN_H = 165, 96
+ROW1_Y, ROW2_Y, MAIN_AX_H = 9, 58, 29
 
 
 def _cached(part):
@@ -532,22 +534,39 @@ def main_f(ax, d):
                 ado_sweep=dict(zip(d["ado_rates"], r["ado_sweep"])))
 
 
+def main_panels():
+    """Figure 3's panels: (letter, cache part, title, draw, letter x, axes x, axes y, axes width), in mm.
+    Row 1 compares each modality with its real reference; row 2 tunes one bias per modality across the
+    real value. Row 2 and the mean-variance panel were S11 Fig D, H, J and K before 2026-11-25."""
+    return [
+        ("a", "a", "Sampling", main_a, 1, 14.5, ROW1_Y, 15.5),
+        ("b", "b", "WGS", main_b, 32, 38.5, ROW1_Y, 17.5),
+        ("c", "c", "scDNA", main_c, 58.5, 66, ROW1_Y, 17.5),
+        ("d", "d", "scRNA zeros", main_d, 85.5, 93, ROW1_Y, 17.5),
+        ("e", "d", "scRNA variance", supp_h, 113, 119.5, ROW1_Y, 17.5),
+        ("f", "e", "Visium", main_e, 139.5, 147, ROW1_Y, 16),
+        ("g", "b", "WGS depth", supp_d, 1, 11, ROW2_Y, 24),
+        ("h", "c", "scDNA allelic dropout", main_f, 40, 50, ROW2_Y, 24),
+        ("i", "d", "scRNA dropout", supp_j, 79, 88, ROW2_Y, 24),
+        ("j", "e", "Visium spot swapping", supp_k, 115, 125, ROW2_Y, 19),
+    ]
+
+
 def render_main():
     S.setup()
     fig = S.figure(MAIN_W, MAIN_H)
-    parts = {"a": ("a", "Sampling", main_a), "b": ("b", "WGS", main_b), "c": ("c", "scDNA", main_c),
-             "d": ("d", "scRNA", main_d), "e": ("e", "Visium", main_e), "f": ("c", "scDNA tuning", main_f)}
     out = {}
-    for L, (part, title, fn) in parts.items():
-        lx, ax_x, ax_w = MAIN_SLOTS[L]
-        S.panel_letter(fig, L, lx, 1.5)
-        ax = S.ax_mm(fig, ax_x, MAIN_Y, ax_w, MAIN_AX_H)
+    for L, part, title, fn, lx, ax_x, ax_y, ax_w in main_panels():
+        S.panel_letter(fig, L, lx, ax_y - 7.5)
+        ax = S.ax_mm(fig, ax_x, ax_y, ax_w, MAIN_AX_H)
         ax.set_title(title)
         d = _cached(part)
         if d is None:
             pending(ax)
             continue
-        out[L] = fn(ax, d)
+        res = fn(ax, d)
+        if res is not None:
+            out[L] = res
     path = S.save(fig, "fig3_biases")
     print("wrote", path)
     for k, v in out.items():
@@ -556,8 +575,8 @@ def render_main():
 
 # --- render: S11 Fig, the sweeps and the further statistics -----------------------------------------
 # drawn at the text width (165 mm), as the supplement includes it, so its text keeps its true size
-SUPP_W, SUPP_H = 165, 200
-SUPP_ROWS = (8, 58, 108, 158)      # top of the axes in each row, in mm
+SUPP_W, SUPP_H = 165, 150
+SUPP_ROWS = (8, 58, 108)           # top of the axes in each row, in mm
 SUPP_AX_H = 32
 
 
@@ -730,25 +749,22 @@ def supp_k(ax, d):
 def render_supp():
     S.setup()
     fig = S.figure(SUPP_W, SUPP_H)
-    y1, y2, y3, y4 = SUPP_ROWS
+    y1, y2, y3 = SUPP_ROWS
     h = SUPP_AX_H
-    # per panel: (cache part, title, draw, axes box x, y, w, h in mm)
+    # per panel: (cache part, title, draw, axes box x, y, w, h in mm); the WGS depth, the scRNA mean and
+    # variance, the scRNA dropout and the Visium spot swapping moved to Figure 3 (E, G, I, J)
     panels = [
         ("a", "Recovery bias", supp_a, (13, y1, 36, h - 6)),
         ("a", "Dissociation stress", supp_b, (63, y1, 38, h)),
         ("a", "Blocks of Figure 3A", supp_c, (122, y1, h, h)),
-        ("b", "WGS depth", supp_d, (10, y2, 35, h)),
-        ("b", "WGS GC bias", supp_e, (59, y2, 35, h)),
-        ("c", "scDNA amplification", supp_f, (109, y2, 54, h)),
+        ("b", "WGS GC bias", supp_e, (10, y2, 35, h)),
+        ("c", "scDNA amplification", supp_f, (59, y2, 54, h)),
         ("d", "scRNA library size", supp_g, (10, y3, 29, h)),
-        ("d", "scRNA mean and variance", supp_h, (51, y3, 29, h)),
-        ("d", "scRNA protocols", supp_i, (92, y3, 29, h)),
-        ("d", "scRNA dropout", supp_j, (133, y3, 29, h)),
-        ("e", "Visium spot swapping", supp_k, (20, y4, 80, h)),
+        ("d", "scRNA protocols", supp_i, (51, y3, 29, h)),
     ]
     out = {}
     for k, (part, title, fn, (x, y, w, hh)) in enumerate(panels):
-        L = "abcdefghijk"[k]
+        L = "abcdefg"[k]
         S.panel_letter(fig, L, max(x - 10, 1), y - 6.5)
         ax = S.ax_mm(fig, x, y, w, hh)
         ax.set_title(title)

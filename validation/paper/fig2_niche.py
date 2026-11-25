@@ -636,6 +636,9 @@ def _frame(ax, colour=S.GREY, lw=0.4):
         sp.set_color(colour)
 
 
+ZOOM = 24                                    # demes on the side of a zoomed snapshot
+
+
 def render_snapshots(fig, x, y, size, gap):
     """Fig 2A: the showcase at five moments coloured by clone, and its metastasis at the last, as one
     row of ``size`` mm maps from (x, y). The rings and the dotted box are explained in the caption."""
@@ -647,23 +650,51 @@ def render_snapshots(fig, x, y, size, gap):
         for ax in axes + [axm]:
             pending(ax, "pending: R0")
         return None
-    r0, r1, c0, c1 = a["crop"]
     G = a["grid"]
+    tis = np.asarray(a["tissue"])
+
+    def window(r, c, side=ZOOM):
+        rs = int(min(max(round(r) - side // 2, 0), G - side))
+        cs = int(min(max(round(c) - side // 2, 0), G - side))
+        return [rs, rs + side, cs, cs + side]
+
+    # Until the tumour spreads it fills the glands and little else, so the whole field looks the same from
+    # the acinus opening to invasive growth. The closed acinus is cropped to the founding gland, the first
+    # invasion to its breach and invasive growth to the stroma demes holding cancer then (the invasion
+    # that grew, near another gland: the first breach did not persist); the whole field at the acinus
+    # opening marks the three crops.
+    names = [m["name"] for m in a["maps"]]
+    crops = {0: a["crop"]}
+    if a.get("breach_demes") and "first breach" in names:
+        crops[names.index("first breach")] = window(*divmod(a["breach_demes"][0], G))
+    if "invasive growth" in names:
+        k = names.index("invasive growth")
+        d = np.asarray([dd for dd, _, _ in a["maps"][k]["primary"] if tis[dd] == 0], dtype=int)
+        if len(d):
+            rr, cc = np.divmod(d, G)
+            crops[k] = window(rr.mean(), cc.mean())
     # each map is titled with the state it shows: the second is a snapshot after the acinus opened, so
     # it reads "acinus open", not "opens"; the first breach is what the text calls the first invasion
     state = {"acinus opens": "acinus open", "first breach": "first invasion"}
     for i, (ax, m) in enumerate(zip(axes, a["maps"])):
         img = _rgb(a, m["primary"])
-        ax.imshow(img[r0:r1, c0:c1] if i == 0 else img, interpolation="nearest")
+        r0, r1, c0, c1 = crops.get(i, [0, G, 0, G])
+        ax.imshow(img[r0:r1, c0:c1], interpolation="nearest")
         _frame(ax)
         ax.set_title(f"{state.get(m['name'], m['name'])}\n{m['time']:.0f} generations", linespacing=1.1)
+        if i in crops:
+            ax.text(0.04, 0.96, str(i + 1), transform=ax.transAxes, ha="left", va="top", fontsize=SMALL,
+                    color=S.INK)
         if i == 0:                                    # the closed acinus: ring its cancer demes
             rr, cc = np.divmod(np.asarray([d for d, _, _ in m["primary"]], dtype=int), G)
             ax.scatter(cc - c0, rr - r0, s=18, facecolors="none", edgecolors=S.INK, lw=0.6)
         if m["name"] == "first breach" and a.get("breach_demes"):
             rr, cc = np.divmod(np.asarray(a["breach_demes"]), G)
-            ax.scatter(cc, rr, s=12, facecolors="none", edgecolors=LINE["stroma"], lw=0.6)
-    axes[1].add_patch(Rectangle((c0 - 0.5, r0 - 0.5), c1 - c0, r1 - r0, fill=False, lw=0.4, ec=S.INK, ls=":"))
+            ax.scatter(cc - c0, rr - r0, s=18, facecolors="none", edgecolors=LINE["stroma"], lw=0.6)
+    for i, (q0, q1, p0, p1) in crops.items():
+        axes[1].add_patch(Rectangle((p0 - 0.5, q0 - 0.5), p1 - p0, q1 - q0, fill=False, lw=0.4, ec=S.INK,
+                                    ls=":"))
+        axes[1].text(p1 + 1, q0, str(i + 1), ha="left", va="top", fontsize=SMALL, color=S.INK)
     if a["met_grid"]:
         axm.imshow(_rgb(a, a["maps"][-1]["met"], primary=False), interpolation="nearest")
         _frame(axm, LINE["met"], 0.6)
@@ -1059,18 +1090,19 @@ def _numbers(out, name):
 
 
 def render():
-    """Fig 2 at the paper's half page: 165 mm wide and at most 114 mm tall."""
+    """Fig 2, 165 by 110 mm. B spans the height of C and D together, so that its axis and D's share a
+    baseline (95 mm) and B's legend sits under both."""
     S.setup()
-    fig = S.figure(165, 106)
+    fig = S.figure(165, 110)
     out = {}
     S.panel_letter(fig, "A", 1, 1)
     out["A"] = render_snapshots(fig, 6, 8.5, 23.0, 3.4)
     S.panel_letter(fig, "B", 1, 34)
-    out["B"] = render_traits([S.ax_mm(fig, 15 + i * 23, 41, 20, 38) for i in range(3)], legend_mm=8)
+    out["B"] = render_traits([S.ax_mm(fig, 15 + i * 23, 41, 20, 54) for i in range(3)], legend_mm=8)
     S.panel_letter(fig, "C", 86, 34)
-    out["C"] = render_seeding(S.ax_mm(fig, 99, 41, 22, 23), S.ax_mm(fig, 132, 41, 31, 23))
-    S.panel_letter(fig, "D", 86, 71)
-    out["D"] = render_noble(S.ax_mm(fig, 99, 76, 64, 23))
+    out["C"] = render_seeding(S.ax_mm(fig, 99, 41, 22, 20), S.ax_mm(fig, 132, 41, 31, 20))
+    S.panel_letter(fig, "D", 86, 67)
+    out["D"] = render_noble(S.ax_mm(fig, 99, 72, 64, 23))
     path = S.save(fig, "fig2_niche")
     print("wrote", path)
     _numbers(out, "niche_render_numbers.json")
