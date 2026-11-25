@@ -62,13 +62,13 @@ BIASES = [
     Bias("library", ("scDNA",), "doublets", "doublet_rate", "0.02", SET, None,
          (f"{_D}:67",), (f"{_ED}:63",)),                              # estimate_dna _PRIOR_ONLY
     Bias("library", ("scRNA",), "count overdispersion", "dispersion", "0.35", FIT, None,
-         (f"{_R}:55",), (f"{_ER}:488",)),
+         (f"{_R}:59",), (f"{_ER}:488",)),
     Bias("library", ("scRNA",), "dropout", "dropout_mid", "0 (off)", COND, "fit_dropout=True",
-         (f"{_R}:56", f"{_R}:69"), (f"{_ER}:528",)),
+         (f"{_R}:60", f"{_R}:73"), (f"{_ER}:528",)),
     Bias("library", ("scRNA",), "ambient RNA", "ambient_frac", "0.05", SET, None,
-         (f"{_R}:56",), (f"{_ER}:69",)),                               # estimate_rna _PRIOR_ONLY
+         (f"{_R}:60",), (f"{_ER}:69",)),                               # estimate_rna _PRIOR_ONLY
     Bias("library", ("scRNA",), "doublets", "doublet_rate", "0.05", SET, None,
-         (f"{_R}:56",), (f"{_ER}:69",)),
+         (f"{_R}:60",), (f"{_ER}:69",)),
     Bias("library", ("Visium",), "count overdispersion", "kappa", "1,400,000", FIT, None,
          (f"{_B}:992",), (f"{_EV}:675",)),
     Bias("library", ("Visium",), "ambient RNA", "ambient_frac", "0.05", SET, None,
@@ -83,7 +83,7 @@ BIASES = [
     Bias("sequencing", ("WGS", "scDNA"), "base errors", "error_rate", "0.001", COND, "needs variant mask",
          (f"{_B}:746",), (f"{_ED}:127",)),
     Bias("sequencing", ("scRNA",), "library size", "mu_lib, sigma_lib", "4000, 0.35", FIT, None,
-         (f"{_R}:55",), (f"{_ER}:111",)),
+         (f"{_R}:59",), (f"{_ER}:111",)),
     Bias("sequencing", ("Visium",), "spot depth", "mu_counts, sigma_counts", "20000, 0.45", FIT, None,
          (f"{_B}:979", f"{_B}:980"), (f"{_EV}:658",)),
     # --- spatial: Visium only (the dissociated assays lose cell positions) ----------------------------
@@ -98,12 +98,12 @@ BIASES = [
     # --- batch: what differs between two runs of the same assay ---------------------------------------
     Bias("batch", ("WGS", "scDNA"), "depth shift", "depth_batch_sigma", "0.05", COND, ">=2 batches",
          (f"{_B}:747",), (f"{_ED}:524",)),
-    Bias("batch", ("scRNA",), "per-gene factor", "sigma_batch", "0.10", COND, ">=2 batches",
-         (f"{_R}:55",), (f"{_ER}:503",)),
+    Bias("batch", ("scRNA",), "per-gene factor", "sigma_batch", "0.29", COND, ">=2 batches",
+         (f"{_R}:59",), (f"{_ER}:503",)),
     Bias("batch", ("scRNA",), "depth shift", "depth_batch_sigma", "0.05", COND, ">=2 batches",
-         (f"{_R}:58",), (f"{_ER}:504",)),
+         (f"{_R}:62",), (f"{_ER}:504",)),
     Bias("batch", ("scRNA",), "plate depth", "plate_sigma, well_sigma", "0, 0.15 (Smart-seq3)", SET, None,
-         (f"{_R}:70",), (f"{_ER}:70",)),
+         (f"{_R}:74",), (f"{_ER}:70",)),
     Bias("batch", ("Visium",), "per-gene factor", "sigma_batch", "0.10", COND, ">=2 sections",
          (f"{_B}:989",), (f"{_EV}:685",)),
 ]
@@ -138,6 +138,7 @@ PLAIN = {
     ("spot swapping", "bleed_rate", "0 (off)"): "rate 0",
     ("lateral diffusion", "diffusion_sigma", "0"): "kernel SD 0",
     ("depth shift", "depth_batch_sigma", "0.05"): "log-normal SD 0.05",
+    ("per-gene factor", "sigma_batch", "0.29"): "log-normal SD 0.29",
     ("per-gene factor", "sigma_batch", "0.10"): "log-normal SD 0.10",
     ("plate depth", "plate_sigma, well_sigma", "0, 0.15 (Smart-seq3)"): "plate SD 0, well SD 0.15 in Smart-seq3",
     ("gene capture", "visium_platform", "per gene, Wu et al. 2021"): "factor per human gene, fitted on real tumors",

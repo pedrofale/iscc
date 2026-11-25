@@ -320,11 +320,12 @@ class TestPlateNestedDepth:
         tenx = scRNA(protocol="10x", n_cells=600, seed=1).run(cd).observed_counts.values
         # Re-pinned when the ambient soup became a share of the library instead of counts on top
         # of it, and the 10x preset took the PBMC3k fit (dispersion 0.30 -> 0.35) and dropped its
-        # hand-set dropout (midpoint 1.5 -> 0).
+        # hand-set dropout (midpoint 1.5 -> 0). The 10x hash was re-pinned again when the preset's
+        # per-gene factor took its fit on two 10x runs of one sample (sigma_batch 0.10 -> 0.29).
         assert (_counts_hash(ss3), int(ss3.sum())) == (
             "5640d61df1b41e078a9616648ef5581ca46738c205257764b5c194195c56d39b", 4446386)
         assert (_counts_hash(tenx), int(tenx.sum())) == (
-            "a5b0b61683ed5e0bb6164937da4bced9ab39b2cc3c8a00f728a4810d75217852", 2289045)
+            "07c66cfc6c39920a94b48994f8a6c0e99253dc1537385a9a18e89f3c2e3f8bdd", 2289016)
 
 
 class TestCallerPlateLayout:

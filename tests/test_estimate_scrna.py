@@ -279,14 +279,16 @@ class TestDispersionWithinCellTypes:
     def test_refit_reproduces_zeros_against_mean(self):
         """Fit the default 10x counts of the typed cells, re-simulate the same cells: the zero
         fraction stays within 0.02 of the data in every bin of mean count from 0.1 to 10 UMIs. The
-        pooled fit exceeds it by more than 0.04 in some bin (the excess zeros of PBMC3k refits)."""
+        pooled fit exceeds it by more than 0.04 in some bin (the excess zeros of PBMC3k refits).
+        The per-gene batch factor is off in both runs, which would otherwise differ by a second
+        run's factor (0.29) that moves genes between the bins."""
         cd, _ = _typed_cell_data(n_per=200, seed=1)
-        X = scRNA(protocol="10x", n_cells=800, seed=1).run(cd).observed_counts.values
+        X = scRNA(protocol="10x", n_cells=800, seed=1, sigma_batch=0.0).run(cd).observed_counts.values
         ref = _zero_by_mean(X)
         diff = {}
         for name, kw in (("types", {}), ("pooled", dict(cell_types=None))):
             est = estimate_rna(X, **kw)
-            Y = scRNA(n_cells=800, seed=9, **est.scrna_kwargs()).run(cd).observed_counts.values
+            Y = scRNA(n_cells=800, seed=9, **{**est.scrna_kwargs(), "sigma_batch": 0.0}).run(cd).observed_counts.values
             diff[name] = _zero_by_mean(Y) - ref
         assert np.all(np.isfinite(diff["types"]))
         assert np.nanmax(np.abs(diff["types"])) < 0.02

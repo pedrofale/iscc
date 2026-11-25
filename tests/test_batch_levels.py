@@ -1,7 +1,7 @@
 """Fig 5's batch levels (validation/paper/batch_levels.py) follow the registered rules.
 
 exp-paper1-fig5-cohort, "Amendment, 2026-11-16 night": whole fitted vectors drawn with replacement
-and recorded; fitted / shared / six attribution arms / reference; sigma_batch 0.10 everywhere but
+and recorded; fitted / shared / six attribution arms / reference; sigma_batch the 10x preset everywhere but
 the reference; depth_batch_sigma 0 where mu_lib is drawn per batch; recovery the patient's own at
 every level.
 """
@@ -66,7 +66,7 @@ def test_fitted_level_takes_whole_vectors_and_records_the_draws():
             assert kw[p] == pytest.approx(v[p])
         if v["dropout_mid"] > 0:
             assert kw["dropout_shape"] == pytest.approx(v["dropout_shape"])
-        assert kw["sigma_batch"] == 0.10 and kw["depth_batch_sigma"] == 0.0
+        assert kw["sigma_batch"] == BL.SIGMA_BATCH and kw["depth_batch_sigma"] == 0.0
     # drawn with replacement, reproducibly, and recorded
     again = BL.level_settings(f, PATIENTS, "balanced", "fitted", n_balanced_batches=15)
     assert again["batch_tumours"] == s["batch_tumours"]
@@ -97,7 +97,7 @@ def test_shared_level_is_the_median_everywhere():
     kw = s["batches"][0]
     for p in ("mu_lib", "sigma_lib", "dispersion", "ambient_frac", "doublet_rate", "dropout_mid"):
         assert kw[p] == pytest.approx(med[p])
-    assert kw["sigma_batch"] == 0.10
+    assert kw["sigma_batch"] == BL.SIGMA_BATCH
     assert kw["depth_batch_sigma"] == PROTOCOL_PRESETS["10x"]["depth_batch_sigma"]   # mu_lib not drawn
     assert all(v["stress_strength"] == pytest.approx(med["stress_strength"]) for v in s["patients"].values())
     # the shape's median is over the tumours that have dropout
@@ -117,7 +117,7 @@ def test_each_arm_varies_only_its_source_from_the_fitted_draws(arm):
             if p == "dropout_shape" and kw["dropout_mid"] == 0:
                 continue                                      # unused without dropout
             assert kw[p] == pytest.approx(kf[p] if p in own else ks[p]), (arm, p)
-        assert kw["sigma_batch"] == 0.10
+        assert kw["sigma_batch"] == BL.SIGMA_BATCH
         assert kw["depth_batch_sigma"] == (0.0 if arm == "depth" else ks["depth_batch_sigma"])
     # patients keep the shared (median) stress in the technical arms
     assert {p: v["stress_strength"] for p, v in s["patients"].items()} == \
@@ -206,4 +206,4 @@ def test_the_overrides_drive_run_scrna_batches():
                                batch_kwargs=s["batches"])
     for a, kw in zip(assays, s["batches"]):
         assert a.hypers.mu_lib == pytest.approx(kw["mu_lib"])
-        assert a.hypers.depth_batch_sigma == 0.0 and a.hypers.sigma_batch == 0.10
+        assert a.hypers.depth_batch_sigma == 0.0 and a.hypers.sigma_batch == BL.SIGMA_BATCH

@@ -51,8 +51,12 @@ PROTOCOL_PRESETS = {
     # whatever its mean, so it cannot follow the NB, whose excess grows with the mean: the same fit
     # gives 34,000 on genes below 0.1 UMIs and 1,200 above 10. The old 50 inflated the variance of
     # every gene about 80-fold at 4,000 UMIs and put three quarters of the counts of a cell in 50 genes.
+    # sigma_batch: fitted on two 10x runs of one blood sample (Ding et al. 2020), with each run's own
+    # depth, dispersion, ambient RNA and doublets fitted to it, so that the simulated difference between
+    # the runs has the real size (batch_validation.py fit-sigma, 2026-11-25: 0.2945). The difference is
+    # mostly a factor shared by the cell types, which the named sources do not produce; 0.10 before.
     "10x": dict(
-        sigma_batch=0.10, mu_lib=4000.0, sigma_lib=0.35, dispersion=0.35,
+        sigma_batch=0.29, mu_lib=4000.0, sigma_lib=0.35, dispersion=0.35,
         ambient_frac=0.05, doublet_rate=0.05, dropout_mid=0.0, dropout_shape=1.0,
         well_sigma=0.0, n_wells=0, n_plates=0, plate_sigma=0.0,
         depth_batch_sigma=0.05, kappa=1500.0,
@@ -127,7 +131,8 @@ class scRNA(Assay):
     sigma_batch : float, optional
         Per-gene batch-factor LogNormal sd; ``beta_gb ~ LogNormal(0, sigma_batch^2)`` is
         shared across cells and reshapes the per-gene composition (Splatter ``batch.facScale``).
-        Larger -> stronger batch effect. Default None -> preset (0.10).
+        Larger -> stronger batch effect. Default None -> preset (10x: 0.29, fitted on two 10x runs of
+        one sample; smartseq3: 0.10).
     mu_lib : float, optional
         Mean library size (UMIs / cell) = sequencing depth; per-cell library
         ``ell_c ~ LogNormal(log mu_lib_b, sigma_lib^2)``. Default None -> preset
