@@ -16,6 +16,10 @@ measured separately, and their spots pooled.
     python validation/paper/supp_spatialsimbench.py section --tumour R0/seed1
     python validation/paper/supp_spatialsimbench.py metrics --tumour R0/seed1
     python validation/paper/supp_spatialsimbench.py section --tumour R0/seed1 --variant depth   # after published
+    python validation/paper/supp_spatialsimbench.py figure --tumour pregrown:ductal   # S15 Fig, both variants
+
+The tumour must be on the chromosome-arm genome (the human genes come from ``HumanGenomeLayer``): the
+pregrown tumours are, the registry's 12-segment runs (R0 to R13) are not.
 
 ``ISCC_SIMBENCH_DIR`` holds the reference (``ref/breast_counts.mtx``, ``ref/breast_genes.txt``) and the
 published table (``data/spatialsimbenchV1.csv``); outputs go to ``<ISCC_SIMBENCH_DIR>/iscc/<tumour>/``.
@@ -139,14 +143,65 @@ def metrics(tumour, variant="published"):
     print(table.round(2).to_string())
 
 
+METRIC_LABEL = {"scaledVar": "scaled variance", "scaledMean": "scaled mean", "pearson": "correlation",
+                "MeanVar": "mean and variance", "MeanFrac": "mean and zero fraction", "fracZero": "zero fraction",
+                "TMM": "TMM factor", "libsize": "library size", "libFracZero": "library size and zeros",
+                "EffLibsize": "effective library size"}
+
+
+def figure(tumour, variant=None):
+    """S15 Fig: the KDE z-statistic of every gene- and spot-level metric on SpatialSimBench's breast
+    section, for its 13 published simulator configurations and for iscc as published and with its depth
+    matched to the section (lower is closer to the real section)."""
+    import style as S
+    tables = {v: pd.read_csv(os.path.join(_out(tumour, v), "scale.csv"), index_col=[0, 1])
+              for v in ("published", "depth") if os.path.exists(os.path.join(_out(tumour, v), "scale.csv"))}
+    pub = next(iter(tables.values())).drop(columns="iscc")
+    S.setup()
+    fig = S.figure(165, 52)
+    out = {}
+    for k, level in enumerate(("gene", "spot")):
+        rows = [m for m in pub.loc[level].index]
+        ax = S.ax_mm(fig, 30 + k * 82, 6, 48, 4.2 * len(rows))
+        for i, m in enumerate(rows):
+            others = pub.loc[(level, m)].to_numpy(float)
+            ax.scatter(others, np.full(len(others), i), s=6, color=S.SOURCE["real"], zorder=2, linewidths=0)
+            for v, colour, marker in (("published", S.SOURCE["iscc"], "o"), ("depth", S.INK, "D")):
+                if v in tables:
+                    z = float(tables[v].loc[(level, m), "iscc"])
+                    ax.scatter([z], [i], s=12, color=colour, marker=marker, zorder=3, linewidths=0)
+                    rank = int((others < z).sum()) + 1
+                    out.setdefault(v, {})[f"{level}/{m}"] = dict(z=round(z, 2), rank=rank, of=len(others) + 1)
+        ax.set_xscale("symlog", linthresh=1.0)
+        ax.set_yticks(range(len(rows)))
+        ax.set_yticklabels([METRIC_LABEL.get(m, m) for m in rows], fontsize=5.5)
+        ax.set_ylim(len(rows) - 0.5, -0.5)
+        ax.set_xlabel("KDE z-statistic (lower is closer)", fontsize=5.5)
+        ax.set_title(f"{level}-level metrics", fontsize=6)
+        ax.tick_params(labelsize=5.5)
+        S.despine(ax)
+    from matplotlib.lines import Line2D
+    handles = [Line2D([], [], ls="", marker="o", ms=2.5, color=S.SOURCE["real"], label="13 published simulators"),
+               Line2D([], [], ls="", marker="o", ms=3.2, color=S.SOURCE["iscc"], label="iscc"),
+               Line2D([], [], ls="", marker="D", ms=3.0, color=S.INK, label="iscc, depth matched")]
+    fig.legend(handles=handles, loc="lower center", ncol=3, fontsize=5.5, frameon=False)
+    path = S.save(fig, "supp_simbench")
+    with open(os.path.join(os.path.dirname(_out(tumour, "published")), "figure_numbers.json"), "w") as f:
+        import json
+        json.dump(out, f, indent=1)
+    print(path)
+    for v, d in out.items():
+        print(v, {k: (r["z"], f'{r["rank"]}/{r["of"]}') for k, r in d.items()})
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("cmd", choices=["section", "metrics"])
+    ap.add_argument("cmd", choices=["section", "metrics", "figure"])
     ap.add_argument("--tumour", required=True, help="pregrown:<name> or <run>/<task> of the registry")
     ap.add_argument("--variant", choices=["published", "depth"], default="published",
                     help="the Visium as published, or with its depth matched to the reference")
     a = ap.parse_args()
-    {"section": section, "metrics": metrics}[a.cmd](a.tumour, a.variant)
+    {"section": section, "metrics": metrics, "figure": figure}[a.cmd](a.tumour, a.variant)
 
 
 if __name__ == "__main__":
