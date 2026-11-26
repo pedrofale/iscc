@@ -60,12 +60,12 @@ TUMOURS = os.environ.get("FIG4_TUMOURS",
 
 # Half a page at full text width: 165 mm by at most 114 mm, included at its true size, so no text is
 # smaller than SMALL (5.5 pt) and the panel letters are 8 pt.
-W_MM, FIG_H = 165, 156                  # 114 before panel E (2026-11-25)
+W_MM, FIG_H = 165, 168                  # 114 before panel E (2026-11-25), 156 before (d) took the control
 SMALL = 5.5
 
 # niche colours, validated with the dataviz palette check (all pairs, light): CVD and normal vision pass
-NICHE = {"duct_wall": ("duct wall", "#7570B3"), "hypoxic_core": ("hypoxic core", "#D95F02"),
-         "stroma": ("stroma", "#1B9E77")}
+NICHE = {"duct_wall": ("duct wall", "#E7298A"), "hypoxic_core": ("hypoxic core", "#A6761D"),
+         "stroma": ("stroma", "#666666")}      # hues no modality uses (the modalities are purple, orange, green)
 # the tools that take a normal reference are given the sample's non-epithelial normals (Visium: the spots of
 # such normals only), and every tool is scored on the epithelial-lineage barcodes (fig4_tools.py)
 # (CopyKAT runs twice: "copykat" without a reference, "copykat-ref" given the microenvironment normals)
@@ -83,8 +83,8 @@ A_ROWS, A_BH = (1.0, 8.2, 15.4, 22.6), 5.2        # the four modality rows of (a
 # chain from DNA into RNA comes first, as in the text)
 B_TOP, B_H, B_W, B_X = 35.0, 29.5, 36.0, (86.0, 127.0)
 C_X, C_TOP, C_W, C_H = 12.0, 41.0, 45.5, 21.0
-R3_LETTER, R3_TOP, R3_H = 74.5, 78.0, 27.0
-R4_LETTER, R4_TOP, R4_H = 115.5, 120.0, 26.0      # (e): copy-number trees
+R3_LETTER, R3_TOP, R3_H = 74.5, 84.0, 30.0       # (d) with its legends above the axes
+R4_LETTER, R4_TOP, R4_H = 127.5, 132.0, 26.0      # (e): copy-number trees
 
 
 def _group(task):
@@ -317,80 +317,138 @@ def panel_c(fig, ov, c, nums):
                frameon=False, ncol=2, borderaxespad=0, columnspacing=0.8, handletextpad=0.3)
 
 
+def _rs_frame(df):
+    """The row-standardised statistics of each cached tumour as columns (caches from 2026-11-26 on)."""
+    if "rs" not in df:
+        return df.iloc[0:0]
+    df = df[df["rs"].map(lambda r: isinstance(r, dict))].copy()
+    for k in ("field_lin", "field_sp", "control_lin", "control_sp", "field_perm_p", "control_perm_p"):
+        df[f"{k}_rs"] = df["rs"].map(lambda r, k=k: r[k])
+    return df
+
+
+PETRACER = os.environ.get("FIG4_PETRACER") or os.path.join(DEV, "petracer", "summary.json")
+
+
 def panel_de(fig, ov, nums):
-    """(d) the lineage and the spatial autocorrelation of the hypoxia field per tumour side by side, by
-    architecture and selection. Open markers are the tumours that stalled before their target size; the
-    lines are the means of the others, since a stalled tumour is a different population. The scatter of
-    one against the other, (d) before 2026-11-25, showed the same two numbers again and was dropped."""
+    """(d) Lineage autocorrelation is no evidence of heritability in spatially structured tumours. Left:
+    per architecture and selection, the lineage and spatial autocorrelation (row-standardised Moran's I,
+    ``fig4_lineage``) of the hypoxia field, environmental by construction, and of a trait heritable by
+    construction (Brownian motion along the true genotype tree), one marker per tumour, the line the mean
+    of the tumours that reached their size. Middle: the same in a real tumour, the 4T1 tumour traced with
+    PEtracer (``fig4_petracer.py``): the distance to the tumour and to the lung boundary, which no cell
+    inherits, and a trait simulated along its real tree, one marker per section. Right: the share of
+    tumours each test calls heritable, a permutation test of the lineage autocorrelation alone and the
+    comparison of the lineage with the spatial autocorrelation, for the field and for the control."""
     import fig4_lineage as FL
-    df = FL.load(DEV)
+    df = _rs_frame(FL.load(DEV))
     S.panel_letter(fig, "d", 0.5, R3_LETTER)
     if not len(df):
         nums["lineage"] = {}
         return
-    ax = S.ax_mm(fig, 11.0, R3_TOP, 92.0, R3_H)
-    groups = [("R1", "ductal", None, "dispersal sweep"), ("R3", "ductal", "selected", "selected"),
+    ax = S.ax_mm(fig, 11.0, R3_TOP, 74.0, R3_H)
+    groups = [("R1", "ductal", None, "dispersal\nsweep"), ("R3", "ductal", "selected", "selected"),
               ("R3", "ductal", "neutral", "neutral"), ("R3", "free", "selected", "selected"),
               ("R3", "free", "neutral", "neutral")]
-    # the lineage (circles) and the spatial (triangles) autocorrelation of each tumour side by side per
-    # group, instead of the share I_lineage / (I_lineage + I_spatial) the two make up
-    MEASURE = (("field_lin", "o", -0.19, "lineage"), ("field_sp", "^", 0.19, "spatial"))
+    MEASURE = (("field_lin_rs", "o", -0.27, True), ("field_sp_rs", "^", -0.09, True),
+               ("control_lin_rs", "o", 0.09, False), ("control_sp_rs", "^", 0.27, False))
     for k, (run, arch, sel, _) in enumerate(groups):
         sub = df[(df.run == run) & (df.arch == arch) & (df.selection.astype(str) == str(sel))]
         st = sub["stalled"].astype(bool).to_numpy() if "stalled" in sub else np.zeros(len(sub), bool)
-        for m, (key, mk, off, _) in enumerate(MEASURE):
-            x = k + off + np.random.default_rng(10 * k + m).uniform(-0.09, 0.09, len(sub))
+        for m, (key, mk, off, field) in enumerate(MEASURE):
+            x = k + off + np.random.default_rng(10 * k + m).uniform(-0.05, 0.05, len(sub))
             v = sub[key].to_numpy(dtype=float)
-            ax.scatter(x[~st], v[~st], s=4, marker=mk, color=ARCH[arch][1],
-                       alpha=0.9 if sel != "neutral" else 0.55, edgecolors="none", zorder=3)
-            ax.scatter(x[st], v[st], s=6, marker=mk, facecolors="white", edgecolors=ARCH[arch][1],
-                       linewidths=0.6, zorder=4)
+            if field:
+                ax.scatter(x, v, s=4, marker=mk, color=ARCH[arch][1], edgecolors="none", zorder=3,
+                           alpha=0.9 if sel != "neutral" else 0.55)
+            else:
+                ax.scatter(x, v, s=4.5, marker=mk, facecolors="white", edgecolors=S.GREY, linewidths=0.5,
+                           zorder=3)
             if (~st).any():
-                ax.plot([k + off - 0.14, k + off + 0.14], [float(np.nanmean(v[~st]))] * 2, color=S.INK,
-                        lw=0.9, zorder=4)
-    # two rows of labels: the selection under each group, the architecture under a bracket
+                ax.plot([k + off - 0.08, k + off + 0.08], [float(np.nanmean(v[~st]))] * 2, color=S.INK, lw=0.9,
+                        zorder=4)
     ax.set_xticks(range(len(groups)))
     ax.set_xticklabels([g[3] for g in groups], fontsize=SMALL)
     tr = ax.get_xaxis_transform()
-    y = -4.0 / R3_H
+    y = -6.5 / R3_H
     for lab, idx in ((ARCH["ductal"][0], (0, 2)), (ARCH["free"][0], (3, 4))):
-        ax.plot([idx[0] - 0.3, idx[1] + 0.3], [y, y], transform=tr, color=S.GREY, lw=0.4, clip_on=False)
+        ax.plot([idx[0] - 0.35, idx[1] + 0.35], [y, y], transform=tr, color=S.GREY, lw=0.4, clip_on=False)
         ax.text(sum(idx) / 2, y - 0.4 / R3_H, lab, transform=tr, ha="center", va="top", fontsize=SMALL)
-    ax.set_xlim(-0.6, len(groups) - 0.4)
-    # from below 0 as far as the data go (stalled neutral tumours reach -0.04)
-    lo = min(-0.02, 1.3 * float(np.nanmin(df[["field_sp", "field_lin"]].to_numpy())))
-    ax.set_ylim(lo, max(1.0, 1.08 * float(np.nanmax(df[["field_sp", "field_lin"]].to_numpy()))))
+    ax.set_xlim(-0.55, len(groups) - 0.45)
+    ax.set_ylim(-0.1, 1.05)
+    ax.set_yticks([0, 0.5, 1])
     ax.set_ylabel("Autocorrelation")
-    h = [Line2D([], [], marker=mk, ls="none", mfc="#6F6F6F", mec="none", ms=3.2, label=lab)
-         for _, mk, _, lab in MEASURE]
-    h.append(Line2D([], [], marker="o", ls="none", mfc="white", mec="#6F6F6F", mew=0.6, ms=3.2, label="stalled"))
-    h.append(Line2D([], [], color=S.INK, lw=0.9, label="mean"))
-    ax.legend(handles=h, fontsize=SMALL, loc="upper left", bbox_to_anchor=(1.01, 1.0), frameon=False,
-              borderaxespad=0, handletextpad=0.3)
-    # what each test concludes: the share of tumours whose field it calls heritable, by a permutation
-    # test of the lineage autocorrelation alone (p < 0.05) and by comparing it with the spatial one
-    ax2 = S.ax_mm(fig, 132.0, R3_TOP, 31.0, R3_H)
-    arch_groups = [("ductal", "ductal field"), ("free", "without glands")]
-    tests = (("permutation", "permutation test", S.INK), ("compare", "lineage above spatial", "#BDBDBD"))
+    h = [Line2D([], [], marker="o", ls="none", mfc="#6F6F6F", mec="none", ms=3.2, label="lineage"),
+         Line2D([], [], marker="^", ls="none", mfc="#6F6F6F", mec="none", ms=3.2, label="spatial"),
+         Line2D([], [], marker="s", ls="none", mfc="#6F6F6F", mec="none", ms=3.2, label="hypoxia field"),
+         Line2D([], [], marker="s", ls="none", mfc="white", mec=S.GREY, mew=0.6, ms=3.2, label="heritable trait"),
+         Line2D([], [], color=S.INK, lw=0.9, label="mean")]
+    ax.legend(handles=h, fontsize=SMALL, loc="lower left", bbox_to_anchor=(0.0, 1.01), ncol=5, frameon=False,
+              borderaxespad=0, handletextpad=0.2, columnspacing=0.8)
+    # the real tumour
+    axr = S.ax_mm(fig, 99.0, R3_TOP, 27.0, R3_H)
+    axr.set_title("real tumor", fontsize=SMALL, pad=2)
+    real = json.load(open(PETRACER)) if os.path.exists(PETRACER) else None
+    cats = (("tumor_boundary_dist", "tumor\nboundary", True), ("lung_boundary_dist", "lung\nboundary", True),
+            ("heritable_control", "heritable\ntrait", False))
+    nums["petracer"] = {}
+    if real:
+        for ci, (key, _, field) in enumerate(cats):
+            for si, (sec, rec) in enumerate(real["sections"].items()):
+                f = rec["fields"][key]
+                for off, val, mk in ((-0.14, f["lin_rs"], "o"), (0.14, f["sp_rs"], "^")):
+                    if field:
+                        axr.scatter([ci + off + (si - 1) * 0.04], [val], s=5, marker=mk, color=S.INK,
+                                    edgecolors="none", zorder=3)
+                    else:
+                        axr.scatter([ci + off + (si - 1) * 0.04], [val], s=5.5, marker=mk, facecolors="white",
+                                    edgecolors=S.GREY, linewidths=0.5, zorder=3)
+            nums["petracer"][key] = {sec: rec["fields"][key] for sec, rec in real["sections"].items()}
+    else:
+        axr.text(0.5, 0.5, "pending", ha="center", va="center", transform=axr.transAxes, fontsize=SMALL,
+                 color=S.GREY)
+    axr.set_xticks(range(len(cats)))
+    axr.set_xticklabels([c[1] for c in cats], fontsize=SMALL)
+    axr.set_xlim(-0.5, len(cats) - 0.5)
+    axr.set_ylim(-0.1, 1.05)
+    axr.set_yticks([0, 0.5, 1])
+    axr.set_yticklabels([])
+    # what each test concludes, for the field and for the control
+    ax2 = S.ax_mm(fig, 137.0, R3_TOP, 26.0, R3_H)
+    arch_groups = [("ductal", "ductal\nfield"), ("free", "without\nglands")]
+    bars = (("field_perm_p_rs", "perm", True, S.INK, "permutation test"),
+            ("control_perm_p_rs", "perm", False, "white", None),
+            ("field", "compare", True, "#BDBDBD", "lineage above spatial"),
+            ("control", "compare", False, "white", None))
     called = {}
-    for gi, (arch, lab) in enumerate(arch_groups):
+    for gi, (arch, _) in enumerate(arch_groups):
         sub = df[df.arch == arch]
         if not len(sub):
             continue
-        share = {"permutation": float((sub.perm_p < 0.05).mean()),
-                 "compare": float((sub.field_lin >= sub.field_sp).mean())}
-        called[arch] = dict(n=int(len(sub)), **share)
-        for ti, (key, _, col) in enumerate(tests):
-            ax2.bar(gi + (ti - 0.5) * 0.36, share[key], width=0.34, color=col, lw=0)
+        n = len(sub)
+        rec = {}
+        for bi, (key, test, field, col, _) in enumerate(bars):
+            if test == "perm":
+                c = int((sub[key] < 0.05).sum())
+            else:
+                c = int((sub[f"{key}_lin_rs"] > sub[f"{key}_sp_rs"]).sum())
+            rec[f"{'field' if field else 'control'}_{test}"] = c
+            x = gi + (bi - 1.5) * 0.2
+            ax2.bar(x, c / n, width=0.18, color=col, edgecolor=S.INK if col == "white" else col, lw=0.5)
+            ax2.text(x, c / n + 0.02, f"{c}/{n}", ha="center", va="bottom", fontsize=SMALL - 0.5, rotation=90)
+        called[arch] = dict(n=n, **rec)
     ax2.set_xticks(range(len(arch_groups)))
-    ax2.set_xticklabels([lab.replace(" ", "\n", 1) for _, lab in arch_groups], fontsize=SMALL)
-    ax2.set_xlim(-0.6, len(arch_groups) - 0.4)
-    ax2.set_ylim(0, 1.4)                                  # headroom for the key, inside the axes
+    ax2.set_xticklabels([lab for _, lab in arch_groups], fontsize=SMALL)
+    ax2.set_xlim(-0.55, len(arch_groups) - 0.45)
+    ax2.set_ylim(0, 1.32)
     ax2.set_yticks([0, 0.5, 1])
-    ax2.set_ylabel("Tumors called heritable")
-    ax2.legend(handles=[Line2D([], [], marker="s", ls="none", mfc=col, mec="none", ms=3.2, label=lab)
-                        for _, lab, col in tests], fontsize=SMALL, loc="upper left", frameon=False,
-               borderaxespad=0.1, handletextpad=0.3)
+    ax2.set_ylabel("Called heritable", labelpad=1)
+    ax2.legend(handles=[Line2D([], [], marker="s", ls="none", mfc=col, mec=col, ms=3.2, label=lab)
+                        for _, _, _, col, lab in bars if lab]
+               + [Line2D([], [], marker="s", ls="none", mfc="white", mec=S.INK, mew=0.5, ms=3.2,
+                         label="open: heritable trait")],
+               fontsize=SMALL, loc="lower left", bbox_to_anchor=(-0.35, 1.01), frameon=False, borderaxespad=0,
+               handletextpad=0.2, labelspacing=0.15)
     nums["lineage"] = FL.summary(DEV)
     nums["lineage"]["called_heritable"] = called
 
