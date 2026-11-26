@@ -70,9 +70,9 @@ BIASES = [
     Bias("library", ("scRNA",), "doublets", "doublet_rate", "0.05", SET, None,
          (f"{_R}:63",), (f"{_ER}:69",)),
     Bias("library", ("Visium",), "count overdispersion", "kappa", "1,400,000", FIT, None,
-         (f"{_B}:1020",), (f"{_EV}:676",)),
+         (f"{_B}:1021",), (f"{_EV}:676",)),
     Bias("library", ("Visium",), "ambient RNA", "ambient_frac", "0.05", SET, None,
-         (f"{_B}:1018",), (f"{_EV}:69",)),                              # estimate_visium _PRIOR_ONLY
+         (f"{_B}:1019",), (f"{_EV}:69",)),                              # estimate_visium _PRIOR_ONLY
     Bias("library", ("Visium",), "gene capture", "visium_platform", "per gene, Wu et al. 2021", FIT, None,
          (f"{_HX}:105",), None),                                # load_visium_platform_factor
     # --- sequencing: depth and its dispersion -----------------------------------------------------------
@@ -87,18 +87,18 @@ BIASES = [
     Bias("sequencing", ("scRNA",), "RNA content", "content_exponent", "1", SET, None,
          (f"{_R}:65",), (f"{_ER}:70",)),                               # estimate_rna _PRIOR_ONLY
     Bias("sequencing", ("Visium",), "spot depth", "mu_counts, sigma_counts", "20000, 0.45", FIT, None,
-         (f"{_B}:1007", f"{_B}:1008"), (f"{_EV}:659",)),
-    Bias("sequencing", ("Visium",), "RNA content", "content_exponent", "1", SET, None,
-         (f"{_B}:1024",), (f"{_EV}:69",)),                             # estimate_visium _PRIOR_ONLY
+         (f"{_B}:1008", f"{_B}:1009"), (f"{_EV}:659",)),
+    Bias("sequencing", ("Visium",), "RNA content", "content_exponent", "0.5", SET, None,
+         (f"{_B}:1028",), (f"{_EV}:69",)),                             # estimate_visium _PRIOR_ONLY
     # --- spatial: Visium only (the dissociated assays lose cell positions) ----------------------------
     Bias("spatial", ("Visium",), "capture field", "field_sigma, field_lengthscale", "0.70, 18", FIT, None,
-         (f"{_B}:1010", f"{_B}:1009"), (f"{_EV}:661", f"{_EV}:664")),
+         (f"{_B}:1011", f"{_B}:1010"), (f"{_EV}:661", f"{_EV}:664")),
     Bias("spatial", ("Visium",), "edge falloff", "edge_sigma", "0.30", COND, "needs off-tissue spots",
-         (f"{_B}:1011",), (f"{_EV}:623",)),
+         (f"{_B}:1012",), (f"{_EV}:623",)),
     Bias("spatial", ("Visium",), "spot swapping", "bleed_rate", "0 (off)", COND, "needs off-tissue spots",
-         (f"{_B}:1014",), (f"{_EV}:616",)),
+         (f"{_B}:1015",), (f"{_EV}:616",)),
     Bias("spatial", ("Visium",), "lateral diffusion", "diffusion_sigma", "0", SET, None,
-         (f"{_B}:1013",), (f"{_EV}:69",)),
+         (f"{_B}:1014",), (f"{_EV}:69",)),
     # --- batch: what differs between two runs of the same assay ---------------------------------------
     Bias("batch", ("WGS", "scDNA"), "depth shift", "depth_batch_sigma", "0.05", COND, ">=2 batches",
          (f"{_B}:770",), (f"{_ED}:524",)),
@@ -109,7 +109,7 @@ BIASES = [
     Bias("batch", ("scRNA",), "plate depth", "plate_sigma, well_sigma", "0, 0.15 (Smart-seq3)", SET, None,
          (f"{_R}:77",), (f"{_ER}:70",)),
     Bias("batch", ("Visium",), "per-gene factor", "sigma_batch", "0.10", COND, ">=2 sections",
-         (f"{_B}:1017",), (f"{_EV}:686",)),
+         (f"{_B}:1018",), (f"{_EV}:686",)),
 ]
 
 
@@ -137,7 +137,8 @@ PLAIN = {
     ("base errors", "error_rate", "0.001"): "rate 0.001",
     ("library size", "mu_lib, sigma_lib", "4000, 0.35"): "mean 4000, log-normal SD 0.35",
     ("spot depth", "mu_counts, sigma_counts", "20000, 0.45"): "mean 20000, log-normal SD 0.45",
-    ("RNA content", "content_exponent", "1"): "depth proportional to the RNA content of the cells",
+    ("RNA content", "content_exponent", "1"): "library proportional to the RNA content of the cell",
+    ("RNA content", "content_exponent", "0.5"): "depth follows the square root of the RNA content of the cells",
     ("capture field", "field_sigma, field_lengthscale", "0.70, 18"): "strength 0.70, length scale 18",
     ("edge falloff", "edge_sigma", "0.30"): "strength 0.30",
     ("spot swapping", "bleed_rate", "0 (off)"): "rate 0",
