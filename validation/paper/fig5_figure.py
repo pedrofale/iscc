@@ -352,9 +352,17 @@ def panel_d(fig, x, y, levels, rows=None, row_h=3.3, w=16, gap=2.6, legend_cols=
         ax.set_title(title, fontsize=FS_SMALL, pad=2)
         ax.set_xlabel(xlabel if k == 0 else f"neighbors from the\n{xlabel}", fontsize=FS_SMALL, labelpad=1)
         if key.startswith("ilisi"):                           # scaled to 50 batches: every value is
-            ax.set_xlim(0.045, 0.09)                          # 0.05-0.09, so the shared 0-1 scale hides
-            ax.set_xticks([0.05, 0.07, 0.09])                 # what integration does to it
-            ax.set_xticklabels(["0.05", "0.07", "0.09"])
+            # below 0.09, so the shared 0-1 scale hides what integration does to it; the axis starts at
+            # 0.045 unless a value lies below it (no integration in the confounded design at 10x's
+            # sigma_batch), and then at 0, so that no point falls outside it
+            vals = [v for lv in rows for rec in [levels.get(lv) or {}]
+                    for v in [((rec.get("truth") or {}).get(d) or {}).get(key) for d in DESIGNS]
+                    + [(r.get("metrics") or {}).get(key) for r in (rec.get("runs") or {}).values()]
+                    if v is not None]
+            ticks = [0.05, 0.07, 0.09] if min(vals, default=0.05) >= 0.045 else [0, 0.03, 0.06, 0.09]
+            ax.set_xlim(0.045 if ticks[0] else -0.003, 0.09)
+            ax.set_xticks(ticks)
+            ax.set_xticklabels([f"{t:g}" for t in ticks])
         else:
             ax.set_xlim(-0.03, 1.03)
             ax.set_xticks([0, 0.5, 1])
