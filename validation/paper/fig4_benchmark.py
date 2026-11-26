@@ -297,7 +297,8 @@ def panel_c(fig, ov, c, nums):
             ax.text(i, 0.99, "true clones\nat chance", fontsize=SMALL, color=S.GREY, ha="center", va="top",
                     linespacing=1.05)
         nums["c"][task] = {k: (round(float(r[k]), 3) if isinstance(r[k], (float, np.floating)) else r[k])
-                           for k in ("bal_true", "bal_dna", "bal_oracle_set", "bal_corr", "chance", "above_chance",
+                           for k in ("bal_true", "bal_dna", "bal_oracle_set", "bal_proportional", "bal_corr", "chance",
+                                     "above_chance",
                                      "acc_true", "acc_dna", "majority", "n_true_clones", "n_called_clones",
                                      "hmmcopy_concordance_scaled")}
     tumour_axis(ax, TUMOURS, C_H)
@@ -312,7 +313,9 @@ def panel_c(fig, ov, c, nums):
          Line2D([], [], marker="o", ls="none", mfc="white", mec=S.INK, mew=0.6, ms=3.4,
                 label="true profiles of scDNA clones"),
          Line2D([], [], marker="D", ls="none", mfc="#BDBDBD", mec="white", ms=3.0,
-                label="best-correlated true profile")]
+                label="best-correlated true profile"),
+         Line2D([], [], marker="s", ls="none", mfc="white", mec=S.INK, mew=0.6, ms=3.2,
+                label="true clones, proportional dosage")]
     fig.legend(handles=h, loc="upper left", bbox_to_anchor=(4.0 / W_MM, 1 - 30.2 / FIG_H), fontsize=SMALL,
                frameon=False, ncol=2, borderaxespad=0, columnspacing=0.8, handletextpad=0.3)
 

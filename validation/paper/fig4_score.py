@@ -140,6 +140,16 @@ def _oracle_set(out_dir, tag):
                 cells_in_found=r.get("share_of_cells_in_found", np.nan))
 
 
+def _proportional(out_dir, tag):
+    """clonealign given the true clones with every gene proportional to copy number, its own law
+    (``fig4_chain.py dna-rna --dosage proportional``, in OUT/c_proportional; NaN when absent)."""
+    p = os.path.join(out_dir, "c_proportional", tag, "score.json")
+    if not os.path.exists(p):
+        return dict(acc_proportional=np.nan, bal_proportional=np.nan)
+    x = json.load(open(p)).get("fine", {}).get("truth_arm", {})
+    return dict(acc_proportional=x.get("accuracy", np.nan), bal_proportional=x.get("balanced_accuracy", np.nan))
+
+
 def collect(out_dir, diag_dir=None):
     rows_c, rows_d = [], []
     for f in sorted(glob.glob(os.path.join(out_dir, "c", "*", "score.json"))):
@@ -150,6 +160,7 @@ def collect(out_dir, diag_dir=None):
             rows_c.append(dict(tumour=f"{r['run']}_{r['task']}", resolution=res,
                                **_tumour(out_dir, f"{r['run']}_{r['task']}"),
                                **(_oracle_set(out_dir, f"{r['run']}_{r['task']}") if res == "fine" else {}),
+                               **(_proportional(out_dir, f"{r['run']}_{r['task']}") if res == "fine" else {}),
                                **(_reference(diag_dir, f"{r['run']}_{r['task']}") if res == "fine" else {}),
                                n_rna_cells=r["n_rna_cells"],
                                n_true_clones=x["n_true_clones"], n_called_clones=d.get("n_called_clones"),
@@ -204,6 +215,9 @@ def _panel_c(ax, c, order, short, S, DNA, metric):
         a_o = r.get(f"{metric}_oracle_set", np.nan)
         if np.isfinite(a_o):
             ax.plot(i - 0.14, a_o, "o", ms=3.4, mfc="white", mec=S.INK, mew=0.6, zorder=2)
+        a_p = r.get(f"{metric}_proportional", np.nan)
+        if np.isfinite(a_p):                      # the true clones with every gene proportional to copy number
+            ax.plot(i + 0.14, a_p, "s", ms=3.2, mfc="white", mec=S.INK, mew=0.6, zorder=2)
         ax.text(i + 0.1, (a_t + a_d) / 2, f"{a_d - a_t:+.2f}".replace("-", "\u2212"), fontsize=4.6,
                 color=S.INK, va="center")
     ax.set_xticks(range(len(order)))
