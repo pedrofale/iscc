@@ -708,12 +708,50 @@ def write_prior(prior_dir, dna_clones_tsv, layer):
     return U0, states
 
 
+def cn_oracle(X, gene_ids, layer, true_prof, reference, min_counts=20, pseudo=0.1):
+    """The copy-number oracle of 4d: each spot takes the true clone whose copy-number profile its expression
+    follows best, given the true profiles (no clone discovery). Per spot and segment, the mean over the
+    segment's informative genes of log((count per 10,000 + pseudo) / (the reference spots' mean + pseudo));
+    per clone, log2 copy number; each centred over the segments whose copy number differs between clones,
+    and the clone with the highest Pearson correlation taken. Informative genes: on such a segment, with
+    more than ``min_counts`` counts over the spots. ``X`` spots x genes (counts), ``reference`` the boolean
+    mask of the reference spots. Returns the clone per spot and the number of segments and genes used."""
+    seg_of = dict(zip(layer.genes["gene_id"].astype(str), layer.genes["segment"].to_numpy()))
+    gseg = np.array([seg_of.get(str(g), -1) for g in gene_ids])
+    prof = true_prof.to_numpy(float)
+    segs = np.flatnonzero((prof.std(axis=0) > 0) & (prof.min(axis=0) > 0))
+    X = np.asarray(X, dtype=float)
+    lib = X.sum(axis=1, keepdims=True)
+    N = 1e4 * X / np.maximum(lib, 1.0)
+    base = N[reference].mean(axis=0) if reference.any() else N.mean(axis=0)
+    expressed = X.sum(axis=0) > min_counts
+    R = np.log((N + pseudo) / (base + pseudo))
+    cols, used = [], []
+    for k in segs:
+        g = np.flatnonzero((gseg == k) & expressed)
+        if g.size:
+            cols.append(R[:, g].mean(axis=1))
+            used.append(k)
+    if len(used) < 2:
+        return np.array([true_prof.index[0]] * X.shape[0], dtype=object), dict(n_segments=len(used), n_genes=0)
+    E = np.column_stack(cols)
+    E = E - E.mean(axis=1, keepdims=True)
+    C = np.log2(prof[:, used])
+    C = C - C.mean(axis=1, keepdims=True)
+    En = E / np.maximum(np.linalg.norm(E, axis=1, keepdims=True), 1e-12)
+    Cn = C / np.maximum(np.linalg.norm(C, axis=1, keepdims=True), 1e-12)
+    pick = np.argmax(En @ Cn.T, axis=1)
+    n_genes = int(sum(((gseg == k) & expressed).sum() for k in used))
+    return np.asarray(list(true_prof.index), dtype=object)[pick], dict(n_segments=len(used), n_genes=n_genes)
+
+
 def run_spatial(a):
     import regime as RG
     from iscc.data import Visium
     from iscc.data.human import HUMAN_VISIUM_KAPPA, write_visium
     tag = f"{a.run}_{a.task}"
-    out = os.path.join(a.out, "d", tag)
+    bleed = getattr(a, "bleed", "regime")
+    out = os.path.join(a.out, "d" if bleed == "regime" else f"d_{bleed}", tag)
     os.makedirs(out, exist_ok=True)
     work = os.path.join(a.work, f"d_{tag}")
     os.makedirs(work, exist_ok=True)
@@ -727,8 +765,9 @@ def run_spatial(a):
     del dis
     t0 = _lap(wall, "truth", t0)
     expr = layer.expression(t)
-    vz = Visium(seed=300 + a.seed, kappa=HUMAN_VISIUM_KAPPA, **RG.VISIUM).run(sec, grid_side=t.grid_size,
-                                                                                 gene_lift=expr)
+    vkw = dict(RG.VISIUM) if bleed == "regime" else {**RG.VISIUM, "bleed_rate": 0.0}   # off: no spot swapping
+    vz = Visium(seed=300 + a.seed, kappa=HUMAN_VISIUM_KAPPA, **vkw).run(sec, grid_side=t.grid_size,
+                                                                           gene_lift=expr)
     av = layer.visium_allele_counts(vz, t, seed=a.seed)
     ds = os.path.join(work, "visium")
     write_visium(ds, vz, layer, allele=av, tumor=t, seed=a.seed)
@@ -761,6 +800,9 @@ def run_spatial(a):
     spots["n_normal_epithelium"] = [int((cls[members_of_spot[s]] == 1).sum()) for s in keep]
     spots["reference"] = ref
     clustered = ref == 0
+    oracle_calls, oracle_info = cn_oracle(vz.spot_counts.to_numpy()[keep], list(vz.spot_counts.columns), layer,
+                                          true_prof, np.asarray(ref, bool))
+    print("copy-number oracle:", json.dumps(oracle_info), flush=True)
     protocol = dict(kind="microenvironment normals: the spots holding only non-epithelial normal cells; "
                          "every other spot clustered (fig4_chain.visium_reference)",
                     n_reference=int(ref.sum()), n_clustered=int(clustered.sum()),
@@ -771,7 +813,8 @@ def run_spatial(a):
 
     # the tools (all of them, or --only), CalicoST in the background since it is the slowest; a tool not
     # redone keeps its stored labels, which needs the rebuilt truth to be the stored one
-    only = list(SPATIAL_TOOLS) if not getattr(a, "only", None) else a.only.split(",")
+    only = list(SPATIAL_TOOLS) if not getattr(a, "only", None) else \
+        ([] if a.only == "none" else a.only.split(","))          # none: only the oracle, every tool kept
     unknown = set(only) - set(SPATIAL_TOOLS)
     if unknown:
         sys.exit(f"--only: unknown spatial tools {sorted(unknown)} (of {SPATIAL_TOOLS})")
@@ -831,8 +874,10 @@ def run_spatial(a):
         else:
             info[name] = dict(failed=True, exit=status[name],
                               log_tail=open(os.path.join(work, f"{name}.log")).read()[-3000:])
+    spots["call:oracle_cn"] = oracle_calls
+    info["oracle_cn"] = oracle_info
     spots.to_csv(os.path.join(out, "spots.tsv.gz"), sep="\t", index=False)
-    rec = dict(run=a.run, task=a.task, commit=_commit(), paper_out=os.environ.get("ISCC_PAPER_OUT"),
+    rec = dict(run=a.run, task=a.task, commit=_commit(), bleed=bleed, paper_out=os.environ.get("ISCC_PAPER_OUT"),
                tier=os.environ.get("ISCC_PAPER_TIER"), seed=a.seed, true_clones=members,
                section_max_cells=int(a.section_max_cells), n_section_cells=int(len(placed["cell_exp"])),
                n_spots=int(len(spots)), n_tumour_spots=int((spots["n_tumour"] > 0).sum()),
@@ -865,11 +910,13 @@ def main():
     ap.add_argument("--dosage", choices=("regime", "proportional"), default="regime",
                     help="dna-rna: the regime's buffered dosage, or every gene proportional to copy number (the "
                          "counterfactual of exp-paper1-dosage-counterfactual), written to OUT/c_proportional")
+    ap.add_argument("--bleed", choices=("regime", "off"), default="regime",
+                    help="spatial: the regime's spot swapping, or none (bleed_rate 0), written to OUT/d_off")
     ap.add_argument("--coarse", action="store_true",
                     help="also run clonealign on the copy-number groups of the true clones (a diagnostic)")
     ap.add_argument("--only", default=None,
                     help="spatial: comma-separated tools to redo (of clonalscope, clonalscope_dna, calicost); the "
-                         "others keep their stored labels (default: all)")
+                         "others keep their stored labels (default: all; none: only the copy-number oracle)")
     a = ap.parse_args()
     warnings.filterwarnings("ignore", category=FutureWarning)
     try:

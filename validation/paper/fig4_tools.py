@@ -147,8 +147,9 @@ def build(a, work):
 
     # Visium of the section, as fig4_chain.run_spatial draws it
     expr = layer.expression(t)
-    vz = Visium(seed=300 + a.seed, kappa=HUMAN_VISIUM_KAPPA, **RG.VISIUM).run(sec, grid_side=t.grid_size,
-                                                                                 gene_lift=expr)
+    vkw = dict(RG.VISIUM) if a.bleed == "regime" else {**RG.VISIUM, "bleed_rate": 0.0}   # off: no spot swapping
+    vz = Visium(seed=300 + a.seed, kappa=HUMAN_VISIUM_KAPPA, **vkw).run(sec, grid_side=t.grid_size,
+                                                                           gene_lift=expr)
     av = layer.visium_allele_counts(vz, t, seed=a.seed)
     ds_vis = os.path.join(work, "visium")
     write_visium(ds_vis, vz, layer, allele=av, tumor=t, seed=a.seed)
@@ -273,9 +274,11 @@ def main():
     ap.add_argument("--cores", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", 1)))
     ap.add_argument("--only", default=None, help="comma-separated run names (default all)")
     ap.add_argument("--rescore", action="store_true", help="score the persisted runs again, nothing else")
+    ap.add_argument("--bleed", choices=("regime", "off"), default="regime",
+                    help="the regime's spot swapping on Visium, or none (bleed_rate 0), written to OUT/b_off")
     a = ap.parse_args()
     tag = f"{a.run}_{a.task}"
-    out = os.path.join(a.out, "b", tag)
+    out = os.path.join(a.out, "b" if a.bleed == "regime" else f"b_{a.bleed}", tag)
     if a.rescore:
         with pd.option_context("display.width", 200, "display.max_columns", 20):
             print(score_dir(out).round(3).to_string(index=False))

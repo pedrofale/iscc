@@ -33,6 +33,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 TOOLS_D = {"clonalscope": "Clonalscope", "clonalscope_dna": "Clonalscope, DNA prior", "calicost": "CalicoST"}
+# the copy-number oracle of fig4_chain.cn_oracle: the true clone profiles given, no clone discovery
+ORACLE_D = {"oracle_cn": "copy-number oracle"}
 # 4c: a tumour's truth arm counts as above chance when clonealign's balanced accuracy given the true clones
 # exceeds chance by at least this much; the DNA step's cost (the gap) is read only there
 CHANCE_MARGIN = 0.10
@@ -97,7 +99,7 @@ def _score_spots(spots, c_dir=None, group_of=None):
         dna = pd.read_csv(os.path.join(c_dir, "dna_clones.tsv"), sep="\t", index_col=0)
     if group_of is not None and dna is not None:
         dna = dna.assign(true_clone=dna["true_clone"].map(group_of))
-    for tool in TOOLS_D:
+    for tool in list(TOOLS_D) + list(ORACLE_D):
         col = f"call:{tool}"
         if col not in spots:
             continue
