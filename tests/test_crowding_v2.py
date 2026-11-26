@@ -122,6 +122,29 @@ def test_displacement_empties_tumour_nests_of_immune_cells():
     assert immune_in_nests(on) < immune_in_nests(off)
 
 
+def test_retained_immune_cells_stay_in_the_demes_cancer_fills():
+    """``immune_retained`` keeps that share of a deme's seeded immune cells however many cancer births
+    push against them: the tumour-infiltrating lymphocytes."""
+    t = _tumour(K=10, spatial={"immune_density": 0.4, "immune_retained": 0.5}, update_mode="tau", tau=1.0)
+    d = next(i for i, x in enumerate(t.demes) if x.get("immune") == 4 and sum(x.values()) == 4)
+    cancer = next(g for g in t.genotypes if t._is_cancer(g))
+    t._add(d, cancer, 20)                               # far above K
+    t._displace_immune(d, 20, np.random.default_rng(0))
+    assert t.demes[d]["immune"] == 2                    # round(0.5 * 4) kept
+    on, off = (_tumour(K=10, spatial={"immune_density": 0.4, "immune_retained": r}, update_mode="tau", tau=1.0)
+               for r in (0.5, 0.0))
+    for x in (on, off):
+        x.grow(n_steps=40, seed=1)
+        _assert_cap(x)
+    assert min(dm.get("immune", 0) for i, dm in enumerate(on.demes) if i in on._immune_floor) >= 2
+    assert off._immune_floor == {}                      # 0 keeps none, the default
+
+
+def test_immune_retained_is_a_share():
+    with pytest.raises(ValueError, match="immune_retained"):
+        _tumour(K=10, spatial={"immune_density": 0.4, "immune_retained": 1.5}, update_mode="tau", tau=1.0)
+
+
 # --------------------------------------------------------------------------- the lottery competes
 def _two_clone_deme(seed, b_fast=0.9, b_slow=0.45, K=200, gens=30):
     """One isolated full deme seeded 50/50 with a fast and a 2x-slower clone; returns the fast

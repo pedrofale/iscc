@@ -111,10 +111,12 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
           ``immune_duct_density`` (the same per duct-wall deme, the intraepithelial lymphocytes;
           default 0, the stroma only) and ``immune_composition`` (the shares of the immune subtypes,
           ``{"immune": T and NK cells, "myeloid": ..., "bplasma": B and plasma cells}``; default all
-          T and NK cells), and ``immune_displaceable`` (default True: each cancer birth that leaves a
+          T and NK cells), ``immune_displaceable`` (default True: each cancer birth that leaves a
           deme above its carrying capacity pushes one immune cell out, so tumour nests lose them while
-          the stroma and the invasive front keep them). Empty lumens get none, and only T and NK
-          cells kill.
+          the stroma and the invasive front keep them) and ``immune_retained`` (the share of a deme's
+          seeded immune cells that cancer cannot push out, kept in the demes it fills as
+          tumour-infiltrating lymphocytes; default 0, every one pushed out). Empty lumens get none,
+          and only T and NK cells kill.
         - Ductal field: ``structure_radius`` (default 0, no glands), ``n_glands`` (default 1),
           ``gland_radius`` (default ``structure_radius``), ``min_gland_sep`` (the minimum
           distance between gland centres), ``stroma_fill_frac`` (stromal cells seeded per stroma
@@ -591,6 +593,12 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
             raise ValueError(f"immune_composition takes non-negative shares of {list(IMMUNE_SUBTYPES)} "
                              f"that sum to 1, got {composition}")
         self.immune_composition = composition
+        # The share of each deme's seeded immune cells that cancer cannot push out (_displace_immune):
+        # the lymphocytes a tumour keeps among its cells. 0 pushes every one out.
+        retained = float(p.spatial.get("immune_retained", 0.0))
+        if not 0.0 <= retained <= 1.0:
+            raise ValueError(f"immune_retained is a share in [0, 1], got {retained}")
+        self._immune_floor = {}
         if self.immune_density > 0 or self.immune_duct_density > 0:
             lumen = (set(i for demes in self.gland_lumen_demes for i in demes)
                      if self.gland_id is not None else set())
@@ -606,6 +614,8 @@ class GenotypeTumor(TissueMixin, MetastasisMixin, TherapyMixin, MaterialiseMixin
                 n_immune = int(round((self.immune_duct_density if duct else self.immune_density) * cap))
                 if n_immune <= 0:
                     continue
+                if retained > 0:
+                    self._immune_floor[i] = int(round(retained * n_immune))
                 counts = split.multinomial(n_immune, shares) if split is not None else [n_immune]
                 for name, k in zip(names, counts):
                     if k > 0:

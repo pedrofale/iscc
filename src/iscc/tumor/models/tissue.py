@@ -422,8 +422,9 @@ class TissueMixin:
 
     def _displace_immune(self, deme_idx, n_births, rng):
         """Push immune cells out of a deme that cancer is taking over: each of ``n_births`` cancer
-        births that leaves the deme above its carrying capacity displaces one immune cell, while any
-        remain, drawn across the immune genotypes in proportion to their counts. The crowding law
+        births that leaves the deme above its carrying capacity displaces one immune cell, while more
+        than the deme's floor remain (``immune_retained`` of its seeded immune cells, 0 by default),
+        drawn across the immune genotypes in proportion to their counts. The crowding law
         holds a full deme near its carrying capacity, well below the slot cap where `_evict` acts,
         so this is the step that removes immune cells from tumour nests. Returns the number removed;
         draws no random number when it removes none or the deme holds one immune genotype."""
@@ -436,6 +437,11 @@ class TissueMixin:
         gids = sorted((g for g in deme if self.genotypes[g].type == "immune"), key=lambda g: self.genotypes[g].ord)
         if not gids:
             return 0
+        floor = getattr(self, "_immune_floor", None)
+        if floor:
+            n = min(n, sum(deme[g] for g in gids) - floor.get(deme_idx, 0))
+            if n <= 0:
+                return 0
         if len(gids) == 1:
             k = min(n, deme[gids[0]])
             self._remove(deme_idx, gids[0], k)
