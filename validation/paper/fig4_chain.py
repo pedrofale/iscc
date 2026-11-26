@@ -750,8 +750,7 @@ def run_spatial(a):
     from iscc.data import Visium
     from iscc.data.human import HUMAN_VISIUM_KAPPA, write_visium
     tag = f"{a.run}_{a.task}"
-    bleed = getattr(a, "bleed", "regime")
-    out = os.path.join(a.out, "d" if bleed == "regime" else f"d_{bleed}", tag)
+    out = os.path.join(a.out, "d", tag)
     os.makedirs(out, exist_ok=True)
     work = os.path.join(a.work, f"d_{tag}")
     os.makedirs(work, exist_ok=True)
@@ -765,9 +764,8 @@ def run_spatial(a):
     del dis
     t0 = _lap(wall, "truth", t0)
     expr = layer.expression(t)
-    vkw = dict(RG.VISIUM) if bleed == "regime" else {**RG.VISIUM, "bleed_rate": 0.0}   # off: no spot swapping
-    vz = Visium(seed=300 + a.seed, kappa=HUMAN_VISIUM_KAPPA, **vkw).run(sec, grid_side=t.grid_size,
-                                                                           gene_lift=expr)
+    vz = Visium(seed=300 + a.seed, kappa=HUMAN_VISIUM_KAPPA, **RG.VISIUM).run(sec, grid_side=t.grid_size,
+                                                                                 gene_lift=expr)
     av = layer.visium_allele_counts(vz, t, seed=a.seed)
     ds = os.path.join(work, "visium")
     write_visium(ds, vz, layer, allele=av, tumor=t, seed=a.seed)
@@ -877,7 +875,7 @@ def run_spatial(a):
     spots["call:oracle_cn"] = oracle_calls
     info["oracle_cn"] = oracle_info
     spots.to_csv(os.path.join(out, "spots.tsv.gz"), sep="\t", index=False)
-    rec = dict(run=a.run, task=a.task, commit=_commit(), bleed=bleed, paper_out=os.environ.get("ISCC_PAPER_OUT"),
+    rec = dict(run=a.run, task=a.task, commit=_commit(), paper_out=os.environ.get("ISCC_PAPER_OUT"),
                tier=os.environ.get("ISCC_PAPER_TIER"), seed=a.seed, true_clones=members,
                section_max_cells=int(a.section_max_cells), n_section_cells=int(len(placed["cell_exp"])),
                n_spots=int(len(spots)), n_tumour_spots=int((spots["n_tumour"] > 0).sum()),
@@ -910,8 +908,6 @@ def main():
     ap.add_argument("--dosage", choices=("regime", "proportional"), default="regime",
                     help="dna-rna: the regime's buffered dosage, or every gene proportional to copy number (the "
                          "counterfactual of exp-paper1-dosage-counterfactual), written to OUT/c_proportional")
-    ap.add_argument("--bleed", choices=("regime", "off"), default="regime",
-                    help="spatial: the regime's spot swapping, or none (bleed_rate 0), written to OUT/d_off")
     ap.add_argument("--coarse", action="store_true",
                     help="also run clonealign on the copy-number groups of the true clones (a diagnostic)")
     ap.add_argument("--only", default=None,
