@@ -823,7 +823,7 @@ def render_a(fig, T, Z, D, Dz, V, Vz, nums):
     # the cut runs through the centre of the largest clone (``_halves``), not down the middle: the
     # sectioned demes are the columns left of it
     cut = int((Z["where"].reshape(G, G) == 2).any(axis=0).sum())
-    c_sec, c_dis = S.MODALITY["spatial"], S.MODALITY["DNA"]
+    c_sec, c_dis = S.INK, S.INK          # the parts in ink: green and purple already name clones and modalities
     ax.add_patch(Rectangle((-0.5, -0.5), cut, G, fill=False, ec=c_sec, lw=0.9))
     ax.add_patch(Rectangle((cut - 0.5, -0.5), G - cut, G, fill=False, ec=c_dis, lw=0.9, ls=(0, (2, 1))))
     for b, (r, c) in enumerate(T["block_centres"]):
@@ -1208,18 +1208,18 @@ def render_s9(fig, T, D, Dz, V, Vz, nums, y0=0.0, letters="abcdefg"):
         axs.imshow(np.array([_hexrgb(colours[c]) for c in code[order]])[:, None, :], aspect="auto",
                    interpolation="nearest")
         _frame(axs, "none")
-        axe = S.ax_mm(fig, X0 + W0 + 0.6, yc, 1.6, hc)
+        axe = S.ax_mm(fig, X0 + W0 + 0.6, yc, 2.6, hc)
         err = 1 - ok.mean(1)
         axe.imshow(err[order][:, None], aspect="auto", cmap="Greys", vmin=0, vmax=0.5, interpolation="nearest")
         _frame(axe, "none")
         axe.text(0.5, -0.02, "Error", transform=axe.transAxes, fontsize=FS, ha="center", va="top",
                  rotation=90, color=S.GREY)              # below the strip: beside it, it met panel F's letter
         for i in np.nonzero(dbl[order])[0]:
-            axe.plot([1.4], [i], marker="<", ms=2.0, color=S.INK, mew=0, clip_on=False)
+            axe.plot([1.9], [i], marker="<", ms=3.2, color=S.INK, mew=0, clip_on=False)
         ylab(ax, "scDNA\ncells", S.MODALITY["DNA"])
         ax.yaxis.labelpad = 4.5
         row_key(ax, [(Patch(fill=False, ec=ck, lw=1.1), k),
-                     (Line2D([], [], ls="none", marker="<", ms=2.0, color=S.INK, mew=0), "doublet")], yc - 4.7)
+                     (Line2D([], [], ls="none", marker="<", ms=3.2, color=S.INK, mew=0), "doublet")], yc - 4.7)
         cax = S.ax_mm(fig, X0 + W0 - 22.0, yc - 5.3, 22.0, 1.1)
         cb = fig.colorbar(ScalarMappable(norm=norm, cmap=S.DIVERGING), cax=cax, orientation="horizontal")
         cb.set_ticks([0, 2, 4, 6])

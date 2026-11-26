@@ -47,7 +47,16 @@ def panel_a(fig, d, nums):
         base = g[g["tool"] == "one clone everywhere"]["error"]
         if len(base):
             ax.plot([i - 0.4, i + 0.4], [base.iat[0]] * 2, color=S.GREY, lw=0.6, ls=":", zorder=1)
+        # the floor of a caller of one clone per spot, and the copy-number oracle given the true profiles
+        floor = g[g["tool"] == "dominant clone in every spot"]["error"]
+        if len(floor):
+            ax.plot([i - 0.4, i + 0.4], [floor.iat[0]] * 2, color=S.INK, lw=0.6, zorder=1)
+        orc = g[g["tool"] == "copy-number oracle"]["error"]
+        if len(orc):
+            ax.plot(i + 2 * w, orc.iat[0], "D", ms=3.2, mfc="white", mec=S.INK, mew=0.7, zorder=3)
         rec = {"largest_clone_everywhere": round(float(base.iat[0]), 3) if len(base) else None,
+               "dominant_clone_floor": round(float(floor.iat[0]), 3) if len(floor) else None,
+               "copy_number_oracle": round(float(orc.iat[0]), 3) if len(orc) else None,
                "mixed_spots": round(float(g["mixed_spots"].iat[0]), 3)}
         for j, n in enumerate(names):
             v = g[g["tool"] == n]["error"]
@@ -68,7 +77,10 @@ def panel_a(fig, d, nums):
     ax.set_yticks((0, 0.5, 1.0))
     ax.set_ylabel("Per-spot clone-fraction error")
     h = [Line2D([], [], marker="o", ls="none", mfc=TOOL_D[n], mec="white", ms=4, label=n) for n in names]
+    h.append(Line2D([], [], marker="D", ls="none", mfc="white", mec=S.INK, mew=0.7, ms=3.2,
+                    label="copy-number oracle, true profiles"))
     h.append(Line2D([], [], color=S.GREY, lw=0.6, ls=":", label="largest clone in every spot"))
+    h.append(Line2D([], [], color=S.INK, lw=0.6, label="dominant clone in every spot"))
     fig.legend(handles=h, loc="upper left", bbox_to_anchor=(14.0 / W_MM, 1 - 0.8 / FIG_H), fontsize=SMALL,
                frameon=False, ncol=2, borderaxespad=0, columnspacing=1.2, handletextpad=0.3)
 

@@ -185,8 +185,10 @@ HIGHLIGHT = ("#1F77B4", "#FF7F0E", "#2CA02C", "#D62728", "#9467BD", "#8C564B")
 UMAP_ROWS = (("cell type", "type"), ("six batches", "batch"), ("six patients", "patient"))
 
 
-def panel_umap(fig, x, y, levels, side=18.5, gap=1.0, dgap=3.0):
-    """The pooled cells at the fitted level, a column per embedding and a row per colouring."""
+def panel_umap(fig, x, y, levels, side=18.5, gap=1.0, dgap=3.0, designs=DESIGNS, rows=None, legend=True):
+    """The pooled cells at the fitted level, a column per embedding and a row per colouring. Figure 5B draws
+    the confounded design with the batch and patient rows; S13 Fig D draws every design and row."""
+    rows = rows or UMAP_ROWS
     emb = (levels.get(EMBED_LEVEL) or {}).get("embeddings")
     lab_w = 8.0
     # 50 colours cannot show which cells belong together, so six patients are coloured (the six with the
@@ -198,18 +200,18 @@ def panel_umap(fig, x, y, levels, side=18.5, gap=1.0, dgap=3.0):
         canc = np.asarray(emb["labels"]["cell_type"]) == "cancer"
         ids, n = np.unique(pat[canc], return_counts=True)
         shown = [int(v) for v in ids[np.argsort(-n, kind="stable")][:len(HIGHLIGHT)]]
-    cols = [("truth", "none", "no batch\neffect")] + [(d, m, TOOL_LABEL[m]) for d in DESIGNS for m in UMAP_METHODS]
+    cols = [("truth", "none", "no batch\neffect")] + [(d, m, TOOL_LABEL[m]) for d in designs for m in UMAP_METHODS]
     col_x = [x + lab_w]
     for k in range(1, len(cols)):
         col_x.append(col_x[-1] + side + (dgap if k in (1, 4) else gap))
     S.text_mm(fig, col_x[0] + side / 2, y - 1.0, cols[0][2], ha="center", fontsize=FS_SMALL, linespacing=1.0)
-    for di, d in enumerate(DESIGNS):
+    for di, d in enumerate(designs):
         a, b = col_x[1 + 3 * di], col_x[3 + 3 * di] + side
         S.text_mm(fig, (a + b) / 2, y - 5.0, d, ha="center", fontsize=FS)
         for mi, m in enumerate(UMAP_METHODS):
             S.text_mm(fig, col_x[1 + 3 * di + mi] + side / 2, y - 1.0, TOOL_LABEL[m], ha="center",
                       fontsize=FS_SMALL)
-    for ri, (rlab, how) in enumerate(UMAP_ROWS):
+    for ri, (rlab, how) in enumerate(rows):
         yy = y + ri * (side + gap)
         S.text_mm(fig, x + lab_w - 1.8, yy + side / 2, rlab, rotation=90, ha="center", va="center",
                   fontsize=FS_SMALL, color=S.GREY)
@@ -248,15 +250,15 @@ def panel_umap(fig, x, y, levels, side=18.5, gap=1.0, dgap=3.0):
     present = [t for t in TYPE_COLOUR if emb and t in set(emb["labels"]["cell_type"])]
     handles = [Line2D([], [], marker="o", ls="", mfc=TYPE_COLOUR[t], mec="none", markersize=3,
                       label=TYPE_LABEL[t]) for t in present]
-    if handles:
+    if handles and legend and any(how == "type" for _, how in rows):
         W, H = fig.get_size_inches() / S.MM
         fig.legend(handles=handles, loc="upper left", ncol=len(handles), fontsize=FS_SMALL, frameon=False,
                    handletextpad=0.1, columnspacing=0.8,
-                   bbox_to_anchor=(col_x[0] / W, 1 - (y + 3 * (side + gap) + 0.3) / H))
+                   bbox_to_anchor=(col_x[0] / W, 1 - (y + len(rows) * (side + gap) + 0.3) / H))
 
 
 # ------------------------------------------------------------------ C: integration at the fitted level
-C_MEASURES = (("ilisi_batch_noncancer", "microenvironment", "batch mixing (iLISI)"),
+C_MEASURES = (("ilisi_batch_noncancer", "microenvironment", "batch mixing (iLISI),\nrelative to no batch effect"),
               ("patient_purity_cancer", "cancer cells", "neighbors from the\nsame patient"))
 
 
@@ -291,11 +293,18 @@ def panel_integration(fig, x, y, levels, real=None, h=24.0):
                     ((rec["runs"].get(f"{d}/{c}") or {}).get("metrics") or {}).get(key)
                 if v is None:
                     continue
+                if key.startswith("ilisi"):
+                    # iLISI over 50 batches cannot approach 1 with 30 neighbours (shuffled batches give the
+                    # value of the embedding without batch effect), so it is shown relative to that value
+                    ref = ((rec.get("truth") or {}).get(d) or {}).get(key)
+                    v = v / ref if ref else None
+                    if v is None:
+                        continue
                 ax.scatter([ci + (di - 0.5) * 0.28], [v], s=11, marker="D" if c == "truth" else "o",
                            facecolors=colour[c] if d == "confounded" else "white", edgecolors=colour[c],
                            linewidths=0.7, zorder=3)
-        if key.startswith("patient"):
-            ax.set_ylim(0, 1)
+        if key.startswith("patient") or key.startswith("ilisi"):
+            ax.set_ylim(0, 1.05 if key.startswith("ilisi") else 1)
             ax.set_yticks([0, 0.5, 1])
     # the real atlas, on the same-patient axis
     axr = S.ax_mm(fig, x + 57.0, y, 17.0, h)
@@ -325,7 +334,7 @@ def panel_integration(fig, x, y, levels, real=None, h=24.0):
 
 
 # ------------------------------------------------------------------ D: integration, every level
-D_COLUMNS = (("ilisi_batch_noncancer", "iLISI", "microenvironment"),
+D_COLUMNS = (("ilisi_batch_noncancer", "iLISI, relative to\nno batch effect", "microenvironment"),
              ("patient_purity_cancer", "same patient", "cancer cells"),
              ("clone_purity_cancer", "same clone", "cancer cells"))
 D_OFFSET = {"none": -0.26, "harmony": 0.0, "scvi": 0.26}
@@ -351,10 +360,10 @@ def panel_d(fig, x, y, levels, rows=None, row_h=3.3, w=16, gap=2.6, legend_cols=
             ax.axhline(1.5, color=S.BG_CELLS, lw=0.5)         # fitted and shared above the sources
         ax.set_title(title, fontsize=FS_SMALL, pad=2)
         ax.set_xlabel(xlabel if k == 0 else f"neighbors from the\n{xlabel}", fontsize=FS_SMALL, labelpad=1)
-        if key.startswith("ilisi"):                           # scaled to 50 batches: every value is
-            ax.set_xlim(0.045, 0.09)                          # 0.05-0.09, so the shared 0-1 scale hides
-            ax.set_xticks([0.05, 0.07, 0.09])                 # what integration does to it
-            ax.set_xticklabels(["0.05", "0.07", "0.09"])
+        if key.startswith("ilisi"):                           # relative to the embedding without batch
+            ax.set_xlim(-0.03, 1.08)                          # effect, as Figure 5C (scaled to 50 batches,
+            ax.set_xticks([0, 0.5, 1])                        # iLISI cannot approach 1 with 30 neighbours)
+            ax.set_xticklabels(["0", "0.5", "1"])
         else:
             ax.set_xlim(-0.03, 1.03)
             ax.set_xticks([0, 0.5, 1])
@@ -364,16 +373,23 @@ def panel_d(fig, x, y, levels, rows=None, row_h=3.3, w=16, gap=2.6, legend_cols=
             rec = levels.get(lv)
             if not rec:
                 continue
+            refs = {d: ((rec.get("truth") or {}).get(d) or {}).get(key) for d in DESIGNS}
+            rel = key.startswith("ilisi")
             for d in DESIGNS:
-                ref = ((rec.get("truth") or {}).get(d) or {}).get(key)
+                ref = refs[d]
                 if ref is not None:
-                    ax.scatter([ref], [ri], s=9, marker="D", facecolors=REFERENCE if d == "confounded" else "white",
+                    ax.scatter([1.0 if rel else ref], [ri], s=9, marker="D",
+                               facecolors=REFERENCE if d == "confounded" else "white",
                                edgecolors=REFERENCE, linewidths=0.55, zorder=2)
             for run, r in rec["runs"].items():
                 d, m = run.split("/")
                 v = (r.get("metrics") or {}).get(key)
                 if v is None or m not in D_OFFSET:
                     continue
+                if rel:
+                    if not refs.get(d):
+                        continue
+                    v = v / refs[d]
                 ax.scatter([v], [ri + D_OFFSET[m]], s=7, marker="o",
                            facecolors=TOOL_COLOUR[m] if d == "confounded" else "white",
                            edgecolors=TOOL_COLOUR[m], linewidths=0.55, zorder=3)
@@ -676,12 +692,12 @@ def panel_scorecard(fig, x, y, coll, lab_w=28.0, col_w=10.6, row_h=5.4):
                 ax.plot([ti], [yy], mfc="white", **kw)
     # the not-simulated row, set apart
     ax.axhline(2.5 + 0.19, color=S.BG_CELLS, lw=0.5, xmin=-0.45, clip_on=False)
-    ax.text(-0.62, 2.5 + 0.33, "not simulated", ha="right", va="top", fontsize=FS_SMALL - 0.6, color=S.GREY)
+    ax.text(-0.62, 2.5 + 0.33, "imposed by the tissue", ha="right", va="top", fontsize=FS_SMALL - 0.6, color=S.GREY)
     hs = [Line2D([], [], marker="o", ls="", mfc=S.INK, mec=S.INK, ms=4, label="recovered"),
           Line2D([], [], marker="o", ls="", fillstyle="left", mfc=S.INK, markerfacecoloralt="white", mec=S.INK,
                  ms=4, label="no or reversed direction"),
           Line2D([], [], marker="o", ls="", mfc="white", mec=S.GREY, ms=4, label="not found"),
-          Line2D([], [], marker="o", ls="", mfc=SPURIOUS, mec=SPURIOUS, ms=4, label="reported, not simulated")]
+          Line2D([], [], marker="o", ls="", mfc=SPURIOUS, mec=SPURIOUS, ms=4, label="reported as a dependency, imposed by the tissue")]
     W, H = fig.get_size_inches() / S.MM
     fig.legend(handles=hs, loc="upper left", ncol=2, fontsize=FS_SMALL, frameon=False, handletextpad=0.2,
                columnspacing=0.8, bbox_to_anchor=((x + 6) / W, 1 - (y + len(SC_ROWS) * row_h + 5.0) / H))
@@ -701,8 +717,11 @@ def main():
     fig = S.figure(165, 166)
     heading(fig, "A", "Cohort and simulated network", 2, 2)
     panel_a(fig, 4, 8, data["collect"], w=158)
-    heading(fig, "B", "Embeddings of the pooled cells", 2, 38)
-    panel_umap(fig, 2, 49, data["levels"])                    # 3 rows of 18.5 mm, legend to about 110
+    heading(fig, "B", "Embeddings of the pooled cells, confounded design", 2, 38)
+    # two rows of 29 mm (batch among the microenvironment cells, patient among the cancer cells), the
+    # balanced design and the cell types in S13 Fig D
+    panel_umap(fig, 2, 49, data["levels"], side=29.0, designs=("confounded",),
+               rows=[r for r in UMAP_ROWS if r[1] != "type"])
     heading(fig, "C", "Integration", 2, 114)
     panel_integration(fig, 12, 124, data["levels"], real=data.get("real"))
     heading(fig, "D", "Progression models", 92, 114)
@@ -710,13 +729,15 @@ def main():
     path = S.save(fig, args.name)
     # S14 Fig: integration at every level (A), and each tool's estimates for the simulated network (B) and
     # for the traits (C), which panel D of the figure summarises
-    fig14 = S.figure(165, 92)
+    fig14 = S.figure(165, 172)
     heading(fig14, "A", "Integration at every level", 2, 2)
     panel_d(fig14, 2, 12, data["levels"])
     heading(fig14, "B", "Simulated network", 84, 2)
     panel_e(fig14, 84, 13, data["collect"])
     heading(fig14, "C", "Architecture", 2, 58)
     panel_f(fig14, 2, 65, data["collect"])
+    heading(fig14, "D", "Embeddings of the pooled cells, both designs", 2, 98)
+    panel_umap(fig14, 2, 109, data["levels"])
     path14 = S.save(fig14, "supp_integration_levels")
     print(f"[fig5] {path}, {path14} (levels: {sorted(data['levels'])}, collect: "
           f"{data['collect'] is not None})")

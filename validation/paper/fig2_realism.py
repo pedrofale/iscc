@@ -66,11 +66,22 @@ def panel_a(ax):
             cov[k] = float((Delaunay(sim[[nc, dc]].to_numpy()).find_simplex(e) >= 0).mean())
         except Exception:
             cov[k] = float("nan")
-    ax.scatter(sim.n0, sim.D0, s=4, facecolors="none", edgecolors=S.SOURCE["iscc"], lw=0.3, alpha=0.5,
-               label="iscc, full census")
-    ax.scatter(sim.nd, sim.Dd, s=4, color=S.SOURCE["iscc"], alpha=0.8,
-               label="iscc, 5% detection")
-    ax.scatter(emp.n, emp.D, s=6, color=S.SOURCE["real"], edgecolors=S.INK, lw=0.3, label="real tumors")
+    # the simulated tumours light and small, the real ones on top (reader review, 2026-11-26: 360 iscc
+    # points hid the 43 real ones), and the region the detected ones span outlined
+    ax.scatter(sim.n0, sim.D0, s=2.5, facecolors="none", edgecolors=S.SOURCE["iscc"], lw=0.3, alpha=0.3,
+               label="iscc, full census", zorder=1)
+    ax.scatter(sim.nd, sim.Dd, s=2.5, color=S.SOURCE["iscc"], alpha=0.45, lw=0,
+               label="iscc, 5% detection", zorder=2)
+    try:
+        from scipy.spatial import ConvexHull
+        pts = np.column_stack([sim.nd.to_numpy(float), np.log10(sim.Dd.to_numpy(float))])
+        hull = ConvexHull(pts)
+        ring = np.append(hull.vertices, hull.vertices[0])
+        ax.plot(pts[ring, 0], 10 ** pts[ring, 1], color=S.SOURCE["iscc"], lw=0.6, zorder=2,
+                label="span of iscc, 5% detection")
+    except Exception:
+        pass
+    ax.scatter(emp.n, emp.D, s=9, color=S.SOURCE["real"], edgecolors=S.INK, lw=0.4, label="real tumors", zorder=3)
     ax.set_yscale("log")
     ax.set_xlabel("Drivers per cell, n")
     ax.set_ylabel("Clonal diversity, D")

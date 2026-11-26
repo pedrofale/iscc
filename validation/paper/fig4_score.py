@@ -33,6 +33,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 TOOLS_D = {"clonalscope": "Clonalscope", "clonalscope_dna": "Clonalscope, DNA prior", "calicost": "CalicoST"}
+# the copy-number oracle of fig4_chain.cn_oracle: the true clone profiles given, no clone discovery
+ORACLE_D = {"oracle_cn": "copy-number oracle"}
 # 4c: a tumour's truth arm counts as above chance when clonealign's balanced accuracy given the true clones
 # exceeds chance by at least this much; the DNA step's cost (the gap) is read only there
 CHANCE_MARGIN = 0.10
@@ -97,7 +99,7 @@ def _score_spots(spots, c_dir=None, group_of=None):
         dna = pd.read_csv(os.path.join(c_dir, "dna_clones.tsv"), sep="\t", index_col=0)
     if group_of is not None and dna is not None:
         dna = dna.assign(true_clone=dna["true_clone"].map(group_of))
-    for tool in TOOLS_D:
+    for tool in list(TOOLS_D) + list(ORACLE_D):
         col = f"call:{tool}"
         if col not in spots:
             continue
@@ -138,6 +140,16 @@ def _oracle_set(out_dir, tag):
                 cells_in_found=r.get("share_of_cells_in_found", np.nan))
 
 
+def _proportional(out_dir, tag):
+    """clonealign given the true clones with every gene proportional to copy number, its own law
+    (``fig4_chain.py dna-rna --dosage proportional``, in OUT/c_proportional; NaN when absent)."""
+    p = os.path.join(out_dir, "c_proportional", tag, "score.json")
+    if not os.path.exists(p):
+        return dict(acc_proportional=np.nan, bal_proportional=np.nan)
+    x = json.load(open(p)).get("fine", {}).get("truth_arm", {})
+    return dict(acc_proportional=x.get("accuracy", np.nan), bal_proportional=x.get("balanced_accuracy", np.nan))
+
+
 def collect(out_dir, diag_dir=None):
     rows_c, rows_d = [], []
     for f in sorted(glob.glob(os.path.join(out_dir, "c", "*", "score.json"))):
@@ -148,6 +160,7 @@ def collect(out_dir, diag_dir=None):
             rows_c.append(dict(tumour=f"{r['run']}_{r['task']}", resolution=res,
                                **_tumour(out_dir, f"{r['run']}_{r['task']}"),
                                **(_oracle_set(out_dir, f"{r['run']}_{r['task']}") if res == "fine" else {}),
+                               **(_proportional(out_dir, f"{r['run']}_{r['task']}") if res == "fine" else {}),
                                **(_reference(diag_dir, f"{r['run']}_{r['task']}") if res == "fine" else {}),
                                n_rna_cells=r["n_rna_cells"],
                                n_true_clones=x["n_true_clones"], n_called_clones=d.get("n_called_clones"),
@@ -164,15 +177,21 @@ def collect(out_dir, diag_dir=None):
                                dna_noise=d.get("n_noise"), commit=r.get("commit")))
     for f in sorted(glob.glob(os.path.join(out_dir, "d", "*", "spots.tsv.gz"))):
         tag = os.path.basename(os.path.dirname(f))
-        sc = score_spots(pd.read_csv(f, sep="\t", dtype={c: str for c in
-                                                          ("call:clonalscope", "call:clonalscope_dna", "call:calicost")}),
-                         os.path.join(out_dir, "c", tag))
+        sp = pd.read_csv(f, sep="\t", dtype={c: str for c in ("call:clonalscope", "call:clonalscope_dna",
+                                                              "call:calicost", "call:oracle_cn")})
+        sc = score_spots(sp, os.path.join(out_dir, "c", tag))
         for res, r in sc.items():
             base = dict(tumour=tag, resolution=res, **_tumour(out_dir, tag), n_spots=r["n_spots_scored"],
                         n_true_clones=r["n_true_clones"],
                         mixed_spots=r["mixed_spots"])
             rows_d.append(dict(base, tool="one clone everywhere", **r["one_clone_everywhere"]))
-            for tool, name in TOOLS_D.items():
+            if res == "fine":
+                # the floor of any caller of one clone per spot: the dominant clone of every spot
+                cnt = sp[[c for c in sp.columns if c.startswith("n:")]].to_numpy(float)
+                cnt = cnt[cnt.sum(axis=1) > 0]
+                rows_d.append(dict(base, tool="dominant clone in every spot",
+                                   error=float(np.mean(1.0 - cnt.max(axis=1) / cnt.sum(axis=1)))))
+            for tool, name in list(TOOLS_D.items()) + list(ORACLE_D.items()):
                 if tool in r:
                     rows_d.append(dict(base, tool=name, **r[tool]))
     c = pd.DataFrame(rows_c)
@@ -196,6 +215,9 @@ def _panel_c(ax, c, order, short, S, DNA, metric):
         a_o = r.get(f"{metric}_oracle_set", np.nan)
         if np.isfinite(a_o):
             ax.plot(i - 0.14, a_o, "o", ms=3.4, mfc="white", mec=S.INK, mew=0.6, zorder=2)
+        a_p = r.get(f"{metric}_proportional", np.nan)
+        if np.isfinite(a_p):                      # the true clones with every gene proportional to copy number
+            ax.plot(i + 0.14, a_p, "s", ms=3.2, mfc="white", mec=S.INK, mew=0.6, zorder=2)
         ax.text(i + 0.1, (a_t + a_d) / 2, f"{a_d - a_t:+.2f}".replace("-", "\u2212"), fontsize=4.6,
                 color=S.INK, va="center")
     ax.set_xticks(range(len(order)))
