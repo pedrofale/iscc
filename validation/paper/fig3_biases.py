@@ -413,6 +413,26 @@ def _cached(part):
     return json.load(open(p)) if os.path.exists(p) else None
 
 
+def _holdout():
+    """The held-out references of ``fig3_holdout.py`` (other tumours of the atlas, other sections), or None."""
+    p = os.path.join(CACHE, "holdout.json")
+    return json.load(open(p)) if os.path.exists(p) else None
+
+
+def _envelope(ax, key):
+    """The band between the lowest and the highest curve of the held-out tumours (``key``: curve_z or
+    curve_v), over the means they all cover; returns the band's handle, or None without held-out data."""
+    h = _holdout()
+    if not h:
+        return None
+    T = list(h["scrna"]["tumours"].values())
+    lo, hi = max(min(t["curve_m"]) for t in T), min(max(t["curve_m"]) for t in T)
+    g = np.linspace(lo, hi, 60)
+    Y = np.array([np.interp(g, t["curve_m"], t[key]) for t in T])
+    return ax.fill_between(g, Y.min(0), Y.max(0), color=S.BG_CELLS, lw=0, zorder=0,
+                           label=f"{len(T)} breast tumors")
+
+
 def pending(ax, msg="pending"):
     ax.text(0.5, 0.5, msg, ha="center", va="center", fontsize=5.5, color=S.GREY, transform=ax.transAxes, wrap=True)
     S.despine(ax, False, False)
@@ -492,12 +512,13 @@ def main_c(ax, d):
 
 def main_d(ax, d):
     real, sim = d["left"]["real"], d["left"]["iscc"]
+    _envelope(ax, "curve_z")
     ax.plot(real["curve_m"], real["curve_z"], color=S.SOURCE["real"], lw=1.2, label=_f2().SCRNA_REF_LABEL)
     ax.plot(sim["curve_m"], sim["curve_z"], color=S.SOURCE["iscc"], lw=0.9, label="iscc")
     ax.set_xlabel("log$_{10}$ mean")
     ax.set_ylabel("Zero fraction")
     ax.set_ylim(0, 1.05)
-    _legend(ax, loc="lower left")
+    _legend(ax, loc="upper right")
     return dict(cv_lib_real=real["cv_lib"], cv_lib_iscc=sim["cv_lib"])
 
 
@@ -509,6 +530,14 @@ def main_e(ax, d):
                        label=f"real {v['moran_real']:.2f}")
     hs, _, _ = ax.hist(ls, bins=bins, density=True, color=S.SOURCE["iscc"], alpha=0.6,
                        label=f"iscc {v['moran_iscc']:.2f}")
+    h = _holdout()
+    if h:
+        secs = h["visium"]["sections"]
+        mi = [x["moran"] for x in secs.values()]
+        for k, x in enumerate(secs.values()):
+            ax.hist(x["loglib"], bins=np.linspace(min(bins[0], min(x["loglib"])), bins[-1], 34), density=True,
+                    histtype="step", color=S.GREY, lw=0.45, zorder=1,
+                    label=f"{len(secs)} sections {min(mi):.2f}-{max(mi):.2f}" if k == 0 else None)
     ax.set_ylim(0, 1.6 * max(hr.max(), hs.max()))
     _legend(ax, loc="upper left", title="Moran's I", alignment="left")
     ax.set_xlabel("log$_{10}$ UMIs per spot")
@@ -541,17 +570,18 @@ def main_panels():
     """Figure 3's panels: (letter, cache part, title, draw, letter x, axes x, axes y, axes width), in mm.
     Row 1 compares each modality with its real reference; row 2 tunes one bias per modality across the
     real value. Row 2 and the mean-variance panel were S11 Fig D, H, J and K before 2026-11-25."""
+    # The sampling panel (clone shares of each sample) moved to S10 Fig on 2026-11-26: it has no real
+    # reference, and the figure compares each modality with one.
     return [
-        ("a", "a", "Sampling", main_a, 1, 14.5, ROW1_Y, 15.5),
-        ("b", "b", "WGS", main_b, 32, 38.5, ROW1_Y, 17.5),
-        ("c", "c", "scDNA", main_c, 58.5, 66, ROW1_Y, 17.5),
-        ("d", "d", "scRNA zeros", main_d, 85.5, 93, ROW1_Y, 17.5),
-        ("e", "d", "scRNA variance", supp_h, 113, 119.5, ROW1_Y, 17.5),
-        ("f", "e", "Visium", main_e, 139.5, 147, ROW1_Y, 16),
-        ("g", "b", "WGS depth", supp_d, 1, 11, ROW2_Y, 24),
-        ("h", "c", "scDNA allelic dropout", main_f, 40, 50, ROW2_Y, 24),
-        ("i", "d", "scRNA dropout", supp_j, 79, 88, ROW2_Y, 24),
-        ("j", "e", "Visium spot swapping", supp_k, 115, 125, ROW2_Y, 19),
+        ("a", "b", "WGS", main_b, 1, 10, ROW1_Y, 21),
+        ("b", "c", "scDNA", main_c, 33, 42, ROW1_Y, 21),
+        ("c", "d", "scRNA zeros", main_d, 65, 74, ROW1_Y, 21),
+        ("d", "d", "scRNA variance", supp_h, 97, 106, ROW1_Y, 21),
+        ("e", "e", "Visium", main_e, 129, 138, ROW1_Y, 21),
+        ("f", "b", "WGS depth", supp_d, 1, 11, ROW2_Y, 24),
+        ("g", "c", "scDNA allelic dropout", main_f, 40, 50, ROW2_Y, 24),
+        ("h", "d", "scRNA dropout", supp_j, 79, 88, ROW2_Y, 24),
+        ("i", "e", "Visium spot swapping", supp_k, 115, 125, ROW2_Y, 19),
     ]
 
 
@@ -692,6 +722,7 @@ def supp_g(ax, d):
 
 def supp_h(ax, d):
     real, sim = d["left"]["real"], d["left"]["iscc"]
+    _envelope(ax, "curve_v")
     ax.plot(real["curve_m"], real["curve_v"], color=S.SOURCE["real"], lw=1.2, label=_f2().SCRNA_REF_LABEL)
     ax.plot(sim["curve_m"], sim["curve_v"], color=S.SOURCE["iscc"], lw=0.9, label="iscc")
     xs = np.linspace(min(real["curve_m"]), max(real["curve_m"]), 10)
@@ -735,7 +766,9 @@ def supp_k(ax, d):
         if not st["off"]:
             continue
         ds, vs, _ = zip(*st["off"])
-        rates += ax.plot(ds, vs, marker="s", ms=1.6, color=SWEEP[k], lw=0.8, label=f"{float(r):g}")
+        fitted = abs(float(r) - float(RG.VISIUM["bleed_rate"])) < 1e-9
+        rates += ax.plot(ds, vs, marker="s", ms=1.6, color=SWEEP[k], lw=0.8,
+                         label=f"{float(r):g}" + (" (fitted)" if fitted else ""))
     ax.set_yscale("symlog", linthresh=1e-2)
     ax.set_ylim(bottom=0)
     ax.set_xlabel("Distance to the tissue (spot pitches)")
@@ -749,6 +782,32 @@ def supp_k(ax, d):
     return dict(real_share=d["real_share"], iscc_share={r: st["share"] for r, st in d["sweep"].items()}, fit=d["fit"])
 
 
+def supp_l(ax, d):
+    """Marker share in the epithelium-richest quarter of spots over the poorest (``fig3_immune.py``): the
+    seven real sections, one dot each, against iscc's tumour with immune cells."""
+    p = os.path.join(CACHE, "immune.json")
+    if not os.path.exists(p):
+        pending(ax)
+        return None
+    r = json.load(open(p))
+    rows = (("T", "T cells"), ("pan_immune", "all immune"), ("fibroblast", "fibroblasts"))
+    for i, (k, _) in enumerate(rows):
+        vals = [v[k] for v in r["real"].values()]
+        ax.scatter(vals, [i] * len(vals), s=9, color=S.SOURCE["real"], zorder=2,
+                   label=f"{len(vals)} real sections" if i == 0 else None)
+        ax.scatter([r["iscc"][k]], [i], s=14, color=S.SOURCE["iscc"], zorder=3, label="iscc" if i == 0 else None)
+    ax.set_yticks(range(len(rows)))
+    ax.set_yticklabels([lab for _, lab in rows])
+    ax.tick_params(axis="y", length=0)
+    ax.set_ylim(len(rows) - 0.4, -0.6)
+    ax.set_xlim(0, 1.0)
+    ax.set_xticks([0, 0.5, 1])
+    ax.set_xticklabels(["0", "0.5", "1"])
+    ax.set_xlabel("Share in tumor-rich spots,\nrelative to tumor-poor spots")
+    _legend(ax, loc="upper center", bbox_to_anchor=(0.5, -0.45), ncol=1)
+    return dict(real=r["real"], iscc=r["iscc"])
+
+
 def render_supp():
     S.setup()
     fig = S.figure(SUPP_W, SUPP_H)
@@ -759,15 +818,17 @@ def render_supp():
     panels = [
         ("a", "Recovery bias", supp_a, (13, y1, 36, h - 6)),
         ("a", "Dissociation stress", supp_b, (63, y1, 38, h)),
-        ("a", "Blocks of Figure 3A", supp_c, (122, y1, h, h)),
+        ("a", "Blocks of the tumor", supp_c, (122, y1, h, h)),
         ("b", "WGS GC bias", supp_e, (10, y2, 35, h)),
         ("c", "scDNA amplification", supp_f, (59, y2, 54, h)),
-        ("d", "scRNA library size", supp_g, (10, y3, 29, h)),
-        ("d", "scRNA protocols", supp_i, (51, y3, 29, h)),
+        ("d", "scRNA library size", supp_g, (10, y3, 26, h)),
+        ("d", "scRNA protocols", supp_i, (46, y3, 26, h)),
+        ("a", "Sampling", main_a, (95, y3, 20, h)),
+        ("e", "Immune cells in tumor", supp_l, (138, y3, 24, h - 8)),
     ]
     out = {}
     for k, (part, title, fn, (x, y, w, hh)) in enumerate(panels):
-        L = "abcdefg"[k]
+        L = "abcdefghij"[k]
         S.panel_letter(fig, L, max(x - 10, 1), y - 6.5)
         ax = S.ax_mm(fig, x, y, w, hh)
         ax.set_title(title)

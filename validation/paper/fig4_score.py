@@ -166,15 +166,21 @@ def collect(out_dir, diag_dir=None):
                                dna_noise=d.get("n_noise"), commit=r.get("commit")))
     for f in sorted(glob.glob(os.path.join(out_dir, "d", "*", "spots.tsv.gz"))):
         tag = os.path.basename(os.path.dirname(f))
-        sc = score_spots(pd.read_csv(f, sep="\t", dtype={c: str for c in
-                                                          ("call:clonalscope", "call:clonalscope_dna", "call:calicost")}),
-                         os.path.join(out_dir, "c", tag))
+        sp = pd.read_csv(f, sep="\t", dtype={c: str for c in ("call:clonalscope", "call:clonalscope_dna",
+                                                              "call:calicost", "call:oracle_cn")})
+        sc = score_spots(sp, os.path.join(out_dir, "c", tag))
         for res, r in sc.items():
             base = dict(tumour=tag, resolution=res, **_tumour(out_dir, tag), n_spots=r["n_spots_scored"],
                         n_true_clones=r["n_true_clones"],
                         mixed_spots=r["mixed_spots"])
             rows_d.append(dict(base, tool="one clone everywhere", **r["one_clone_everywhere"]))
-            for tool, name in TOOLS_D.items():
+            if res == "fine":
+                # the floor of any caller of one clone per spot: the dominant clone of every spot
+                cnt = sp[[c for c in sp.columns if c.startswith("n:")]].to_numpy(float)
+                cnt = cnt[cnt.sum(axis=1) > 0]
+                rows_d.append(dict(base, tool="dominant clone in every spot",
+                                   error=float(np.mean(1.0 - cnt.max(axis=1) / cnt.sum(axis=1)))))
+            for tool, name in list(TOOLS_D.items()) + list(ORACLE_D.items()):
                 if tool in r:
                     rows_d.append(dict(base, tool=name, **r[tool]))
     c = pd.DataFrame(rows_c)
