@@ -194,9 +194,10 @@ class Visium(Assay):
         How the depth of a spot follows the RNA content of its cells, summed over them
         ([`cell_rna_content`][iscc.data.cell_rna_content]). The library of a spot is
         multiplied by that content raised to this power, rescaled so that the mean depth of the
-        tissue spots is kept. Default None -> 1, depth proportional to the content, which gives the
-        relation of depth to composition in a real breast section; 0 leaves the content out (the
-        depth follows the capture field only).
+        tissue spots is kept, as is the spread of their depth: the content takes its share of the
+        spread that ``sigma_counts``, the capture field and the edge falloff set. Default None -> 0.5,
+        fitted to the relation of depth to composition in a real breast section; 0 leaves the content
+        out (the depth follows the capture field only).
     seed : int, default 42
         RNG seed. Fixes the technical signature (per-gene batch factor, spatial capture field,
         per-spot depth) and is reproducible.

@@ -98,3 +98,20 @@ def test_sparse_sections_warn_and_dense_ones_do_not():
     with warnings.catch_warnings():
         warnings.simplefilter("error", SparseSpotWarning)
         Visium(seed=3, spot_pitch=PITCH, spot_radius=1.0).run(dense, grid_side=side)
+
+
+def test_visium_content_keeps_the_fitted_spread_of_depth():
+    """sigma_counts and the capture field are fitted to the whole spread of a real section's depth, so
+    the content takes its share of that spread instead of adding to it."""
+    cd, side = _section()
+    kw = dict(seed=3, spot_pitch=PITCH, spot_radius=1.0)
+    plain = Visium(content_exponent=0.0, **kw).run(cd, grid_side=side)
+    rho = []
+    for a in (0.25, 0.5):
+        v = Visium(content_exponent=a, **kw).run(cd, grid_side=side)
+        on = v.obs.n_cells > 0
+        assert np.log(v.obs.library[on]).std() == pytest.approx(np.log(plain.obs.library[on]).std(), rel=1e-6)
+        assert v.obs.library[on].mean() == pytest.approx(plain.obs.library[on].mean(), rel=1e-6)
+        assert 0.0 <= v.batch.content_shrink
+        rho.append(spearmanr(v.obs.library[on], v.obs.rna_content[on])[0])
+    assert 0.0 < rho[0] < rho[1]                  # the larger the exponent, the more the depth follows the cells

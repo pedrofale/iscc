@@ -986,8 +986,9 @@ class VisiumBatchHyperParams:
     content_exponent : float
         How the library of a spot follows its RNA content
         (summed over its cells, [`cell_rna_content`][iscc.data.cell_rna_content]): the library is multiplied by the
-        content raised to this power, rescaled so that the mean depth of the batch is kept. 1 (the
-        default) makes the depth proportional to it; 0 leaves the content out.
+        content raised to this power, within the spread of depth the other terms set (see
+        ``VisiumBatch.scale_by_content``). 0.5, the default, is fitted to a real breast section; 1 makes
+        the depth proportional to the content, and 0 leaves it out.
     """
     # Defaults CALIBRATED to a real 10x Visium breast-cancer section (estimate_visium on
     # `scanpy.datasets.visium_sge('V1_Breast_Cancer_Block_A_Section_1')`), so out-of-the-box Visium
@@ -1019,9 +1020,12 @@ class VisiumBatchHyperParams:
     count_model: str = "dm"
     kappa: float = 1_400_000.0       # technical noise near multinomial; see the note above
     nb_dispersion: float = 0.30
-    # 1: a spot's depth is proportional to the RNA content of its cells, which gives the real breast
-    # section's relation of depth to composition (vault: decision-library-size-from-rna-content)
-    content_exponent: float = 1.0
+    # 0.5: a spot's depth follows the square root of the RNA content of its cells, within the spread of
+    # depth fitted to a real section (VisiumBatch.scale_by_content), which gives the real breast
+    # section's relation of depth to composition: Spearman of depth with the epithelial, fibroblast and
+    # immune marker shares +0.42, -0.40, -0.56 over five seeds against +0.44, -0.38, -0.57
+    # (vault: decision-library-size-from-rna-content). Below 1, as iscc's spots are purer than real ones.
+    content_exponent: float = 0.5
 
     def to_dict(self):
         return asdict(self)
@@ -1140,6 +1144,39 @@ class VisiumBatch(Batch):
         return 1.0 - float(self.h.edge_sigma) * np.exp(-3.0 * dnorm)
 
     # -- per-spot library size (scaled by the spatial capture field) -------------------
+    def scale_by_content(self, lib, content, mask=None):
+        """Libraries that follow the summed RNA content of the cells of each spot, with the spread of
+        the depth over ``mask`` kept.
+
+        ``sigma_counts``, the capture field and the edge falloff are fitted to the whole spread of the
+        depth of a real section, of which the cells under each spot are a part. So the log-deviations
+        of the library from its mean over ``mask`` are shrunk before the content
+        (``Batch.scale_by_content``) multiplies them, by the factor with which the log-depth of the
+        tissue spots keeps the variance it had without the content; the exponent sets how much of
+        that variance follows the cells. When the content alone varies more, the random part is
+        dropped. The mean depth over ``mask`` is that of ``lib``. The shrink factor is kept as
+        ``content_shrink``.
+        """
+        scaled = super().scale_by_content(lib, content, mask=mask)
+        if not float(getattr(self.h, "content_exponent", 0.0) or 0.0) or content is None or mask is None:
+            return scaled
+        lib = np.asarray(lib, dtype=float)
+        m = np.asarray(mask, bool) & (lib > 0) & (scaled > 0)
+        if m.sum() < 3:
+            return scaled
+        d = np.log(lib[m]) - np.log(lib[m]).mean()
+        c = np.log(scaled[m] / lib[m])
+        c = c - c.mean()
+        # the shrink s that keeps the variance: s^2 var(d) + 2 s cov(d, c) + var(c) = var(d)
+        vd, vc, cv = d.var(), c.var(), float(np.mean(d * c))
+        disc = cv * cv + vd * (vd - vc)
+        shrink = max((-cv + np.sqrt(disc)) / vd, 0.0) if vd > 0 and disc >= 0 else 0.0
+        out = scaled.copy()
+        out[m] = np.exp(np.log(lib[m]).mean() + shrink * d + c)
+        out[m] *= lib[m].mean() / out[m].mean()
+        self.content_shrink = float(shrink)
+        return out
+
     def spot_library(self, occupied=None):
         """Per-spot library size ell_s ~ LogNormal(log mu_counts, sigma_counts^2) x capture_field_s.
 

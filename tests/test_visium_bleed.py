@@ -50,8 +50,9 @@ def _digest(vz):
 # the ambient soup became a share of the library rather than counts on top of it, and the default
 # kappa became 300,000 (visium-depth); re-pinned again (was 9572b2c7e5dcecab) when the default kappa became
 # 1,400,000 (visium-kappa-refit); and again (was 5f7add0ff4f1470c) when the depth of a spot came to follow
-# the RNA content of its cells by default (content_exponent 1, realism).
-DEFAULT_DIGEST = "cfb1b4e3b2a5632b"
+# the RNA content of its cells by default (content_exponent 1, realism); and again (was cfb1b4e3b2a5632b)
+# when the content took its share of the fitted spread of depth and the exponent became 0.5.
+DEFAULT_DIGEST = "fb911aa1e8e7e501"
 
 
 def test_kernel_columns_sum_to_one():

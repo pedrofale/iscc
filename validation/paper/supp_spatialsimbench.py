@@ -99,7 +99,7 @@ def _reference_fit():
                 field_lengthscale=h.field_lengthscale / _pitch(xy) * pitch)
 
 
-def section(tumour, variant="published"):
+def section(tumour, variant="published", content_exponent=None):
     """``published``: the paper regime's Visium as it stands. ``depth``: the same, with the depth
     (``mu_counts``) scaled so that the median count per spot on the reference's genes matches the
     reference's, as the simulators SpatialSimBench scores are fitted to the reference. ``fitted``:
@@ -114,8 +114,11 @@ def section(tumour, variant="published"):
     ref, cols = _reference_genes(layer.genes.set_index("gene_id"))
     found = [c for c in cols if c is not None]
     settings = dict(RG.VISIUM)
+    if content_exponent is not None:
+        settings["content_exponent"] = float(content_exponent)
     if variant in ("depth", "fitted"):
-        published = pd.read_csv(os.path.join(_out(tumour), "section.csv"), index_col=0).iloc[:, 0]
+        base = "published" if content_exponent is None else f"published_ce{content_exponent:g}"
+        published = pd.read_csv(os.path.join(_out(tumour, base), "section.csv"), index_col=0).iloc[:, 0]
         scale = _reference_median() / float(published["median_counts_per_spot"])
         if variant == "fitted":
             fit = _reference_fit()
@@ -145,7 +148,7 @@ def section(tumour, variant="published"):
     pos = {c: i for i, c in enumerate(cols) if c is not None}
     for c in found:
         full[:, pos[c]] = pooled[c].to_numpy()[keep]
-    out = _out(tumour, variant)
+    out = _out(tumour, variant if content_exponent is None else f"{variant}_ce{content_exponent:g}")
     scipy.io.mmwrite(os.path.join(out, "counts.mtx"), sp.csr_matrix(full))
     pd.Series({"spots_pooled": len(pooled), "spots_kept": len(keep), "reference_genes": len(ref),
                "genes_matched": len(found), "genes_all_zero": int((full.sum(axis=0) == 0).sum()),
@@ -153,8 +156,8 @@ def section(tumour, variant="published"):
     print(open(os.path.join(out, "section.csv")).read())
 
 
-def metrics(tumour, variant="published"):
-    out = _out(tumour, variant)
+def metrics(tumour, variant="published", content_exponent=None):
+    out = _out(tumour, variant if content_exponent is None else f"{variant}_ce{content_exponent:g}")
     subprocess.run([RSCRIPT, os.path.join(HERE, "tools", "spatialsimbench_ks.R"),
                     os.path.join(BENCH, "ref", "breast_counts.mtx"), os.path.join(out, "counts.mtx"),
                     os.path.join(out, "ks.csv")], check=True)
@@ -231,8 +234,14 @@ def main():
     ap.add_argument("--variant", choices=["published", "depth", "fitted"], default="published",
                     help="the Visium as published, with its depth matched to the reference, or with its "
                          "depth and its spread fitted to the reference")
+    ap.add_argument("--content-exponent", type=float, default=None,
+                    help="section and metrics only: Visium's content_exponent instead of the default, "
+                         "written to <variant>_ce<exponent> (a sweep for the fit of the exponent)")
     a = ap.parse_args()
-    {"section": section, "metrics": metrics, "figure": figure}[a.cmd](a.tumour, a.variant)
+    if a.cmd == "figure":
+        figure(a.tumour, a.variant)
+    else:
+        {"section": section, "metrics": metrics}[a.cmd](a.tumour, a.variant, a.content_exponent)
 
 
 if __name__ == "__main__":

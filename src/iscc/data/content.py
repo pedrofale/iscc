@@ -12,7 +12,8 @@ both, agree with the table: T cells 0.26, myeloid cells 0.75, fibroblasts 0.51, 
 perivascular cells 0.53. Malignant cells carry 1.71 times the epithelium (0.25 to 0.75 quantiles 1.25
 and 2.53), between the content of a diploid cancer cell here (1) and that of a doubled one (2). ``scRNA`` and ``Visium`` scale the
 library of a cell or a spot by
-this content raised to ``content_exponent`` (1 by default, proportional capture; 0 leaves it out).
+this content raised to ``content_exponent`` (1 for scRNA, proportional capture; 0.5 for Visium, fitted
+to a real section; 0 leaves it out).
 """
 import os
 
