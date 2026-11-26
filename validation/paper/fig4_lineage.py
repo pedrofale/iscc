@@ -5,7 +5,17 @@ confound itself. Per tumour, on 600 of its cancer cells (``iscc.integrations.dec
 the PEtracer-style decomposition of the old fig4_space_lineage.py, max_cells 3000 then 600, seed 0): the
 field's Moran's I under the spatial and under the lineage weights, its lineage share
 ``I_lin / (I_lin + I_sp)``, and a permutation test of the lineage autocorrelation alone (the field's values
-shuffled over the same cells, 999 times; one-sided p).
+shuffled over the same cells, 999 times; one-sided p). The same for a positive control, a trait heritable
+by construction: Brownian motion along the true genotype tree (unit variance per edge, seed fixed per
+tumour), carried by every cell of a genotype, measured with the same weights on the same cells. And the
+Moran's I of both fields over a grid of kernel widths (``LIN_SCALES`` in tree edges, ``SP_SCALES`` in demes,
+the spatial coordinates jittered as the decomposition jitters them, with a seed of their own), since the
+comparison of a lineage with a spatial autocorrelation depends on the two widths. Every statistic is
+also computed with row-standardised weights (``_moran_rs``: each cell's relatives or neighbours averaged,
+so the value is the slope of their mean on the cell's own value, within -1 and 1): with raw weights the
+cells with the most close relatives dominate, which in a territorial tumour are the cells of its largest
+clade, near the mean of any trait, and a trait heritable by construction can then score below an
+environmental field.
 
 Tumours: R1 (the dispersal sweep, ductal field) and R3 (confined and free growth, each selected and
 neutral). Each tumour's result is cached in ``<out>/e/cache/<run>__<task>.json`` with the size and mtime of
@@ -31,6 +41,8 @@ import pandas as pd  # noqa: E402
 import registry as REG  # noqa: E402
 
 N_PERM = 999
+LIN_SCALES = (1.0, 2.0, 5.0, 10.0)      # tree edges; the decomposition's width is 2
+SP_SCALES = (1.0, 2.0, 4.0)             # demes; the decomposition's width is 2
 PANEL_TASK = ("R1", "disp0.1_seed1")
 GROUPS = [("R1", "ductal", None), ("R3", "ductal", "selected"), ("R3", "ductal", "neutral"),
           ("R3", "free", "selected"), ("R3", "free", "neutral")]
@@ -40,6 +52,33 @@ def _moran(W, z):
     z = np.asarray(z, float) - np.mean(z)
     den = float(z @ z)
     return 0.0 if den <= 0 or W.sum() <= 0 else float(len(z) / W.sum() * (z @ (W @ z)) / den)
+
+
+def _brownian(tree, ids, rng):
+    """Brownian motion along ``tree`` (unit variance per parent-child edge), read at the genotypes ``ids``:
+    a trait heritable by construction, each genotype carrying its parent's value plus a step."""
+    parent = {str(k): (None if v is None else str(v)) for k, v in tree.parent.items()}
+    val, out = {}, []
+    for g in ids:
+        path, x = [], str(g)
+        while x is not None and x not in val:
+            path.append(x)
+            x = parent.get(x)
+        base = 0.0 if x is None else val[x]
+        for y in reversed(path):
+            base += float(rng.normal())
+            val[y] = base
+        out.append(val[str(g)])
+    return np.array(out)
+
+
+def _moran_rs(W, z):
+    """Moran's I with row-standardised weights."""
+    rs = W.sum(axis=1, keepdims=True)
+    Wr = np.divide(W, rs, out=np.zeros_like(W), where=rs > 0)
+    z = np.asarray(z, float) - np.mean(z)
+    den = float(z @ z)
+    return 0.0 if den <= 0 else float((z @ (Wr @ z)) / den)
 
 
 def _stamp(run, task):
@@ -54,8 +93,14 @@ def _cache(out, run, task):
 def analyse(job):
     run, task, out = job
     from iscc.integrations import decompose_lineage_spatial
+    from iscc.integrations.lineage import to_lineage_tree
     t = REG.load(run, task)
     t.make_cell_data(max_cells=3000)
+    # the positive control, as one more field of the cells so it takes the decomposition's own weights
+    cd0 = t.cell_data
+    g_all = cd0["cell_type"].iloc[:, 0].astype(str).to_numpy()
+    trait = _brownian(to_lineage_tree(t), g_all, np.random.default_rng([0, 0xB0]))
+    cd0["cell_microenv"] = cd0["cell_microenv"].assign(heritable_control=trait)
     dec = decompose_lineage_spatial(t, max_cells=600, seed=0)
     fl = dec.field_autocorr["hypoxia_level"]["lineage"]
     fs = dec.field_autocorr["hypoxia_level"]["spatial"]
@@ -74,6 +119,34 @@ def analyse(job):
     i_obs = _moran(W, f)
     rng = np.random.default_rng([0, 0xE4])
     null = np.array([_moran(W, rng.permutation(f)) for _ in range(N_PERM)])
+    h = cd["cell_microenv"]["heritable_control"].reindex(dec.cells).to_numpy(float)
+    h_obs = _moran(W, h)
+    h_null = np.array([_moran(W, rng.permutation(h)) for _ in range(N_PERM)])
+    # the two autocorrelations of both fields over the grid of kernel widths
+    Dl = Dg[np.ix_(cg, cg)]
+    crd = cd["cell_crd"].reindex(dec.cells).to_numpy(float)
+    crd = crd + np.random.default_rng([0, 0x5C]).normal(0.0, 0.15, crd.shape)
+    d2 = ((crd[:, None, :] - crd[None, :, :]) ** 2).sum(-1)
+    widths = {}
+    for ls in LIN_SCALES:
+        Wl = np.exp(-Dl / ls)
+        np.fill_diagonal(Wl, 0.0)
+        widths[f"lineage_{ls:g}"] = dict(field=_moran(Wl, f), control=_moran(Wl, h),
+                                         field_rs=_moran_rs(Wl, f), control_rs=_moran_rs(Wl, h))
+    for ls in SP_SCALES:
+        Ws = np.exp(-d2 / (2.0 * ls * ls))
+        np.fill_diagonal(Ws, 0.0)
+        widths[f"spatial_{ls:g}"] = dict(field=_moran(Ws, f), control=_moran(Ws, h),
+                                         field_rs=_moran_rs(Ws, f), control_rs=_moran_rs(Ws, h))
+    # the row-standardised statistics at the decomposition's widths, with their permutation tests
+    Ws2 = np.exp(-d2 / 8.0)
+    np.fill_diagonal(Ws2, 0.0)
+    rs = dict(field_lin=_moran_rs(W, f), field_sp=_moran_rs(Ws2, f),
+              control_lin=_moran_rs(W, h), control_sp=_moran_rs(Ws2, h))
+    for name, z in (("field", f), ("control", h)):
+        obs_rs = rs[f"{name}_lin"]
+        nul = np.array([_moran_rs(W, rng.permutation(z)) for _ in range(N_PERM)])
+        rs[f"{name}_perm_p"] = float((1 + (nul >= obs_rs).sum()) / (N_PERM + 1))
     arch = "free" if task.startswith("free") else "ductal"
     sel = task.split("_")[1] if run == "R3" else None
     rec = dict(run=run, task=task, arch=arch, selection=sel,
@@ -82,6 +155,10 @@ def analyse(job):
                perm_I=i_obs, perm_matches=bool(abs(i_obs - fl) < 1e-6), perm_null_mean=float(null.mean()),
                perm_null_q95=float(np.quantile(null, 0.95)),
                perm_p=float((1 + (null >= i_obs).sum()) / (N_PERM + 1)),
+               control_lin=float(dec.field_autocorr["heritable_control"]["lineage"]),
+               control_sp=float(dec.field_autocorr["heritable_control"]["spatial"]),
+               control_perm_p=float((1 + (h_null >= h_obs).sum()) / (N_PERM + 1)),
+               widths=widths, rs=rs,
                n_cells=int(len(dec.cells)), cancer=int(t.get_cancer_size()), pickle=_stamp(run, task),
                lineage_space_corr=float(dec.lineage_space_corr))
     os.makedirs(os.path.dirname(_cache(out, run, task)), exist_ok=True)
@@ -106,8 +183,9 @@ def todo(out):
             c = _cache(out, run, task)
             if os.path.exists(c):
                 with open(c) as fh:
-                    if json.load(fh).get("pickle") == _stamp(run, task):
-                        continue
+                    rec = json.load(fh)
+                if rec.get("pickle") == _stamp(run, task) and "rs" in rec:   # a cache without the control
+                    continue                                                  # and its statistics is redone
             jobs.append((run, task, out))
     return jobs
 
@@ -161,6 +239,21 @@ def load(out):
     return df
 
 
+def _rs_block(sub):
+    """The row-standardised statistics of a group of tumours (the ``rs`` record of each)."""
+    r = pd.DataFrame([x for x in sub["rs"]]) if "rs" in sub else pd.DataFrame()
+    if not len(r):
+        return {}
+    return dict(field_lin_mean=round(float(r.field_lin.mean()), 3), field_sp_mean=round(float(r.field_sp.mean()), 3),
+                control_lin_mean=round(float(r.control_lin.mean()), 3),
+                control_sp_mean=round(float(r.control_sp.mean()), 3),
+                field_called_heritable=int((r.field_perm_p < 0.05).sum()),
+                control_called_heritable=int((r.control_perm_p < 0.05).sum()),
+                field_lineage_above_spatial=int((r.field_lin > r.field_sp).sum()),
+                control_lineage_above_spatial=int((r.control_lin > r.control_sp).sum()),
+                field_lineage_above_control_lineage=int((r.field_lin > r.control_lin).sum()))
+
+
 def summary(out):
     df = load(out)
     if not len(df):
@@ -179,7 +272,12 @@ def summary(out):
                     spatial_exceeds_lineage_all=bool((sub.field_sp > sub.field_lin).all()),
                     n_spatial_exceeds=int((sub.field_sp > sub.field_lin).sum()),
                     perm_significant_0_05=int((sub.perm_p < 0.05).sum()),
-                    perm_rebuilt_matches=bool(sub.perm_matches.all()))
+                    perm_rebuilt_matches=bool(sub.perm_matches.all()),
+                    control_perm_significant_0_05=int((sub.control_perm_p < 0.05).sum()),
+                    control_lineage_exceeds_spatial=int((sub.control_lin > sub.control_sp).sum()),
+                    control_lineage_mean=round(float(sub.control_lin.mean()), 3),
+                    control_spatial_mean=round(float(sub.control_sp.mean()), 3),
+                    rs=_rs_block(sub))
     s["all"] = block(df)
     s["ductal_R1"] = block(df[df.run == "R1"])
     s["ductal_R1_and_R3_confined"] = block(df[df.arch == "ductal"])
