@@ -288,6 +288,8 @@ def panel_c(fig, ov, c, nums):
         ax.plot([i - 0.32, i + 0.32], [r.chance] * 2, color=S.GREY, lw=0.6, zorder=1)
         ax.plot(i + 0.2, r.bal_corr, marker="D", ms=3.0, mfc="#BDBDBD", mec="white", mew=0.3, ls="none", zorder=2)
         ax.plot(i - 0.14, r.bal_oracle_set, "o", ms=3.4, mfc="white", mec=S.INK, mew=0.6, zorder=2)
+        if np.isfinite(r.get("bal_proportional", np.nan)):     # the true clones, every gene proportional
+            ax.plot(i + 0.12, r.bal_proportional, "s", ms=3.2, mfc="white", mec=S.INK, mew=0.6, zorder=2)
         ax.plot(i, r.bal_true, "o", ms=4, mfc=S.INK, mec="white", mew=0.4, zorder=3)
         ax.plot(i, r.bal_dna, "o", ms=4, mfc=DNA, mec="white", mew=0.4, zorder=3)
         if bool(r.above_chance):
