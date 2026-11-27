@@ -1,6 +1,6 @@
 # Build dependencies for the documentation site (used by CI and for local builds).
 # Pinned to the free, MIT-licensed community editions; capped below mkdocs 2.0 until validated.
-mkdocs>=1.6,<2
-mkdocs-material>=9.5,<10
-mkdocs-jupyter>=0.24
-mkdocstrings[python]>=0.24
+mkdocs>=1.6.1,<2
+mkdocs-material>=9.7.7,<10
+mkdocs-jupyter>=0.26.3
+mkdocstrings[python]>=1.0.6
